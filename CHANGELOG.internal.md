@@ -8,7 +8,7 @@
 
 ### Commit 32: feat(bench): 多仓库 benchmark 对比框架
 
-**Commit Hash**: `(待定)`
+**Commit Hash**: `7fb0bfe`
 
 **核心改动点**：
 - `internal/integration/benchreport.go` — 新增对比报告生成器，定义 BenchResult/BenchComparison 结构体，GenerateComparisonMarkdown 生成 Markdown 表格（含相对性能百分比），GenerateComparisonJSON 生成 JSON 输出，SortBenchResults 排序，pctStr 计算相对性能
