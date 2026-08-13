@@ -6,7 +6,42 @@
 
 ## 提交记录
 
-### Commit 30: feat(deploy): 生产环境部署验证 — Dockerfile 修复 + .dockerignore + chromem-go 源码提交
+### Commit 31: feat(viz): LSP 适配器优化 + chromem-go 向量索引可视化工具
+
+**Commit Hash**: `ebfe4f7`
+
+**核心改动点**：
+- `internal/parser/adapter/lsp/adapter.go` — `readResponses` 方法从 `bufio.Scanner` 逐行读取改为 `bufio.Reader` 按字节读取 Content-Length 头，精确解析 JSON 体，解决 JSON 体换行导致的解析问题
+- `internal/server/viz.go` — 新增向量索引可视化工具 HTTP 处理器（VizHandler），提供概览/文档列表/搜索 API，内嵌 HTML 模板（支持分页、搜索、响应式布局）
+- `internal/server/http.go` — 集成 VizHandler 到 HTTPServer，新增 `SetVizHandler` 方法，条件注册可视化路由
+- `cmd/codeschema/main.go` — 新增 chromemVizStore/chromemVizSearcher 适配器桥接 ChromemStore 到 VizStore/VizSearcher 接口；serveCmd 中根据 config.Storage.Vector.Driver 自动启用可视化工具
+- `internal/vector/chromem.go` — 新增 `Size()` 返回真实文档数（`s.col.Count()`），`ListDocuments()` 和 `QueryText()` 方法支持可视化工具查询
+- `internal/vector/chromem_test.go` — 更新 TestChromemStore_Size 期望值从 -1 改为 0（适配新的 Size 实现）
+
+**新增公共抽象**：
+- `server.VizHandler` / `server.NewVizHandler` / `server.RegisterVizRoutes` — 向量索引可视化工具处理器
+- `server.VizStore` / `server.VizSearcher` — 可视化工具存储和搜索接口
+- `server.VizDocInfo` / `server.VizSearchResult` — 可视化工具数据模型
+- `chromemVizStore` / `chromemVizSearcher` — main.go 中的适配器包装类型
+
+**影响范围**：
+- `internal/server/viz.go` — 新增文件，不修改现有代码
+- `internal/server/http.go` — 新增 VizHandler 字段和 SetVizHandler 方法，Start 中条件注册路由
+- `cmd/codeschema/main.go` — serveCmd 新增织入逻辑，新增 2 个适配器类型
+- `internal/vector/chromem.go` — 新增 3 个方法，非破坏性
+- `internal/vector/chromem_test.go` — 测试期望值更新
+
+**验证数据**：
+- go build 通过 | go test 22 包 0 失败
+- 新增 1 个文件（viz.go），修改 4 个文件（adapter.go/http.go/main.go/chromem.go）
+- LSP readResponses 测试全部通过（13 个测试）
+- vector 包测试全部通过（24 个测试）
+- server 包测试全部通过（30 个测试）
+
+**遗留 TODO / 风险**：
+- 可视化工具当前仅支持 chromem 驱动，PersistentStore/MemoryStore 不支持 ListDocuments
+- ChromemStore 的 embedFn 使用 nil（默认 OpenAI），与 LocalEmbedder 不兼容，文本搜索精度可能不一致
+- LSP readResponses 在 Content-Length 头格式异常时静默跳过，缺少告警日志
 
 **Commit Hash**: `a202cb5`
 

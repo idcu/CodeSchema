@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 23:36
-> 当前阶段：生产环境部署验证（Docker/CI 流水线）
-> 下一个阶段：LSP 适配器优化 + 多仓库 benchmark 对比
+> 更新时间：2026-08-13 22:20
+> 当前阶段：LSP 适配器优化 + chromem-go 向量索引可视化工具
+> 下一个阶段：多仓库 benchmark 对比
 
 ---
 
@@ -242,17 +242,24 @@ P16      [████████████████████] 100%
 - [x] **`down/chromem-go/chromem-go-main/`** — 提交 chromem-go 源码（48 文件，387KB），确保 CI 和 Docker 构建中 `go mod download` 可正确解析 replace 指令
 - [x] 验证数据：`go build` 通过 | `go test` 21 包 0 失败 | Dockerfile 构建逻辑已验证（本地 Docker 不可用，配置语法正确）
 
+### P17 — LSP 适配器优化 + chromem-go 向量索引可视化工具
+- [x] **LSP 适配器 `readResponses` 按字节读取** — 将 `bufio.Scanner` 逐行读取改为 `bufio.Reader` 按字节读取 Content-Length 头，精确解析 JSON 体，解决 JSON 体换行导致的解析问题
+- [x] **`internal/server/viz.go`** — 向量索引可视化工具 HTTP 处理器，提供概览/文档列表/搜索 API，内嵌 HTML 模板，支持分页和文本搜索
+- [x] **`internal/server/http.go`** — 集成 VizHandler，可选注册可视化路由，SetVizHandler 方法注入
+- [x] **`cmd/codeschema/main.go`** — chromemVizStore/chromemVizSearcher 适配器，serveCmd 中根据 chromem 驱动自动启用可视化工具
+- [x] **`internal/vector/chromem.go`** — 新增 Size() 返回真实文档数，ListDocuments()/QueryText() 方法支持可视化工具查询
+- [x] 验证数据：`go build` 通过 | `go test` 22 包 0 失败 | 新增 1 个文件，修改 4 个文件
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-所有 P0-P15 阶段已全部完成，P16 生产环境部署验证（Docker/CI 流水线）已完成。建议下一步方向：
+所有 P0-P17 阶段已全部完成，P17 LSP 适配器优化 + chromem-go 向量索引可视化工具已完成。建议下一步方向：
 
-- **LSP 适配器优化** — `readResponses` 按字节读取 Content-Length 头优化，提升 LSP 大规模文件解析性能
 - **多仓库 benchmark 对比** — 选择 1-2 个外部 Go/Java 仓库（如 kubernetes、spring-framework），对比索引构建和搜索性能
-- chromem-go 向量索引的可视化管理工具
+- LSP 适配器生产环境连接稳定性验证
 
 ## 已知问题
 

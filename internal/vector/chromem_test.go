@@ -194,8 +194,8 @@ func TestChromemStore_Size(t *testing.T) {
 		t.Fatal("expected non-nil store")
 	}
 
-	// chromem-go 不支持 Size 查询
-	if s.Size() != -1 {
-		t.Errorf("expected Size()=-1 for chromem store, got %d", s.Size())
+	// 新创建的集合文档数为 0
+	if s.Size() != 0 {
+		t.Errorf("expected Size()=0 for new chromem store, got %d", s.Size())
 	}
 }

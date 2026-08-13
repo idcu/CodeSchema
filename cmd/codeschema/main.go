@@ -390,6 +390,28 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		httpSrv.SetAuthToken(*authToken)
 	}
 
+	// 向量索引可视化工具（仅 chromem 驱动支持）
+	if cfg.Storage.Vector.Driver == "chromem" {
+		cs, err := vector.NewPersistentChromemStore(
+			"codeschema",
+			cfg.Storage.Vector.DSN,
+			cfg.Storage.Search.VectorDim,
+			nil, // 使用默认 embedding 函数（仅用于文本搜索查询）
+		)
+		if err == nil {
+			vizHandler := server.NewVizHandler(
+				&chromemVizStore{ChromemStore: cs},
+				&chromemVizSearcher{ChromemStore: cs},
+				cfg.Storage.Search.VectorDim,
+				cfg.Storage.Vector.DSN,
+			)
+			httpSrv.SetVizHandler(vizHandler)
+			fmt.Println("vector index visualization enabled at /viz")
+		} else {
+			fmt.Printf("WARN: cannot create chromem store for viz: %v\n", err)
+		}
+	}
+
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
 	return httpSrv.Start(ctx)
 }
@@ -430,4 +452,38 @@ func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 	searcher := search.NewSearcher(fts, adapter, nil)
 	builder := search.NewIndexBuilder(fts, indexer, model)
 	return searcher, builder
+}
+
+// chromemVizStore 适配 *vector.ChromemStore 到 server.VizStore 接口。
+type chromemVizStore struct {
+	*vector.ChromemStore
+}
+
+func (s *chromemVizStore) ListDocuments(ctx context.Context) ([]server.VizDocInfo, error) {
+	docs, err := s.ChromemStore.ListDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]server.VizDocInfo, len(docs))
+	for i, d := range docs {
+		result[i] = server.VizDocInfo{ID: d.ID, Content: d.Content}
+	}
+	return result, nil
+}
+
+// chromemVizSearcher 适配 *vector.ChromemStore 到 server.VizSearcher 接口。
+type chromemVizSearcher struct {
+	*vector.ChromemStore
+}
+
+func (s *chromemVizSearcher) QueryText(ctx context.Context, query string, k int) ([]server.VizSearchResult, error) {
+	results, err := s.ChromemStore.QueryText(ctx, query, k)
+	if err != nil {
+		return nil, err
+	}
+	sr := make([]server.VizSearchResult, len(results))
+	for i, r := range results {
+		sr[i] = server.VizSearchResult{ID: r.ID, Score: r.Score}
+	}
+	return sr, nil
 }

@@ -28,6 +28,7 @@ type HTTPServer struct {
 	addr      string
 	server    *http.Server
 	authToken string
+	viz       *VizHandler // 可选的可视化工具处理器
 	logger    *log.Logger
 }
 
@@ -43,6 +44,11 @@ func NewHTTPServer(svc *service.Service, addr string) *HTTPServer {
 // SetAuthToken 设置 Bearer token 认证。
 func (h *HTTPServer) SetAuthToken(token string) {
 	h.authToken = token
+}
+
+// SetVizHandler 设置向量索引可视化工具处理器。
+func (h *HTTPServer) SetVizHandler(viz *VizHandler) {
+	h.viz = viz
 }
 
 // Start 启动 HTTP 服务器，阻塞直到 Shutdown 被调用。
@@ -68,6 +74,11 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 
 	// 可观测性端点
 	mux.HandleFunc("/metrics", h.handleMetrics)
+
+	// 向量索引可视化工具（可选）
+	if h.viz != nil {
+		RegisterVizRoutes(mux, h.viz)
+	}
 
 	// 中间件链：请求追踪 → 认证 → 路径遍历防护 → 错误恢复 → CORS
 	handler := h.requestMetricsMiddleware(

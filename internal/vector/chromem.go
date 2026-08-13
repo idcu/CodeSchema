@@ -144,11 +144,54 @@ func (s *ChromemStore) Delete(ctx context.Context, id string) error {
 
 // Size 返回当前索引中的向量数量。
 func (s *ChromemStore) Size() int {
-	// chromem-go 的 Collection 没有公开 Size 方法
-	// 我们通过查询文档数量来估算
-	// 实际上 chromem-go 的 Collection 的 documents 字段是私有的
-	// 这里返回 -1 表示不支持
-	return -1
+	return s.col.Count()
+}
+
+// ListDocuments 返回集合中的所有文档。
+func (s *ChromemStore) ListDocuments(ctx context.Context) ([]struct {
+	ID      string
+	Content string
+}, error) {
+	docs, err := s.col.ListDocuments(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("chromem list documents failed: %w", err)
+	}
+
+	result := make([]struct {
+		ID      string
+		Content string
+	}, 0, len(docs))
+	for _, d := range docs {
+		result = append(result, struct {
+			ID      string
+			Content string
+		}{ID: d.ID, Content: d.Content})
+	}
+	return result, nil
+}
+
+// QueryText 使用文本查询 chromem 集合（内置 embedding 函数）。
+func (s *ChromemStore) QueryText(ctx context.Context, query string, k int) ([]SearchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if k <= 0 {
+		k = 10
+	}
+
+	results, err := s.col.Query(ctx, query, k, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("chromem text query failed: %w", err)
+	}
+
+	sr := make([]SearchResult, 0, len(results))
+	for _, r := range results {
+		sr = append(sr, SearchResult{
+			ID:    r.ID,
+			Score: float64(r.Similarity),
+		})
+	}
+	return sr, nil
 }
 
 // Close 释放资源。

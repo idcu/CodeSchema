@@ -14,11 +14,13 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,7 +39,7 @@ type LSPAdapter struct {
 	mu       sync.Mutex
 	cmdObj   *exec.Cmd
 	stdin    io.WriteCloser
-	stdout   *bufio.Scanner
+	stdout   io.ReadCloser
 	msgID    int
 	pending  map[int]chan<- *jsonRPCResponse
 	initOnce sync.Once
@@ -134,7 +136,7 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 
 	a.cmdObj = cmd
 	a.stdin = stdin
-	a.stdout = bufio.NewScanner(stdout)
+	a.stdout = stdout
 
 	// 启动异步响应读取协程
 	go a.readResponses()
@@ -410,21 +412,58 @@ func (a *LSPAdapter) sendNotification(method string, params any) {
 }
 
 // readResponses 异步读取 LSP 标准输出并分发响应。
+//
+// LSP 协议使用 HTTP 风格的头格式：
+//   Content-Length: <N>\r\n\r\n<JSON BODY (N bytes)>
+//
+// JSON 体可能包含换行符（如 pretty-printed JSON），
+// 因此必须按字节读取 Content-Length 指定的长度，而非逐行读取。
 func (a *LSPAdapter) readResponses() {
-	// 简单实现：逐行读取
-	for a.stdout.Scan() {
-		line := a.stdout.Text()
-		if line == "" {
+	reader := bufio.NewReader(a.stdout)
+	buf := bytes.NewBuffer(make([]byte, 0, 4096))
+
+	for {
+		// 1. 读取头直到 \r\n\r\n
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			return // 流关闭或出错，正常退出
+		}
+
+		// 跳过空行（上一个消息后的剩余 \r\n）
+		if header == "\r\n" || header == "\n" {
 			continue
 		}
 
-		// 尝试解析为 JSON-RPC 响应
+		// 解析 Content-Length
+		if !bytes.HasPrefix([]byte(header), []byte("Content-Length: ")) {
+			continue
+		}
+		contentLengthStr := header[len("Content-Length: "):]
+		contentLengthStr = contentLengthStr[:len(contentLengthStr)-2] // 去掉 \r\n
+		contentLength, err := strconv.Atoi(contentLengthStr)
+		if err != nil || contentLength <= 0 {
+			continue
+		}
+
+		// 2. 跳过 \r\n\r\n 后的空行（即 \r\n）
+		_, _ = reader.Discard(2) // 跳过 \r\n
+
+		// 3. 读取精确的 Content-Length 字节
+		buf.Reset()
+		buf.Grow(contentLength)
+		_, err = io.CopyN(buf, reader, int64(contentLength))
+		if err != nil {
+			return
+		}
+
+		// 4. 解析 JSON
+		body := buf.Bytes()
 		var resp jsonRPCResponse
-		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		if err := json.Unmarshal(body, &resp); err != nil {
 			continue
 		}
 
-		// 分发响应
+		// 5. 分发响应
 		if resp.ID > 0 {
 			a.mu.Lock()
 			ch, ok := a.pending[resp.ID]
