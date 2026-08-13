@@ -8,7 +8,7 @@
 
 ### Commit 8: perf(analyzer): P2 BuildAll 单次遍历 + Go 模块路径 import 解析
 
-**Commit Hash**: `[待提交]`
+**Commit Hash**: `e2db441`
 
 **核心改动点**：
 - `internal/analyzer/analyzer.go` — BuildAll 优化为单次遍历：`buildImportIndex` 预构建在循环前，import 解析合并入主循环，消除第二次全量遍历；`resolveImport` 改为 `Analyzer` 方法，新增策略 0（Go 模块路径精确解析，如 `codeschema/internal/store` → `internal/store`），失败时回退到策略 1-3 启发式匹配；`Analyzer` 新增 `modulePath` 字段和 `SetModulePath` 方法
