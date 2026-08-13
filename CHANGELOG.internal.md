@@ -8,7 +8,7 @@
 
 ### Commit 29: test(stress): 真实仓库 benchmark 数据采集 — 扫描/索引/搜索全流水线性能基线
 
-**Commit Hash**: `54726fb`
+**Commit Hash**: `8bed66b`
 
 **核心改动点**：
 - `internal/integration/realrepo_test.go` — 新增 3 个基准测试（ScanAndIndex/Search/FullPipeline）+ 1 个集成测试（CollectMetrics），以 CodeSchema 自身仓库为测试目标
