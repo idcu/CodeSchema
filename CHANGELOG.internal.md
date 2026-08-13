@@ -6,6 +6,35 @@
 
 ## 提交记录
 
+### Commit 34: feat(viz): 向量索引可视化工具增强 — 单文档 API、点击展开详情、刷新按钮
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `internal/server/viz.go` — 新增 `/viz/api/document` 端点，支持按 ID 查询单个文档内容（从 ListDocuments 结果过滤）
+- `internal/server/viz.go` — 前端 HTML/JS 全面增强：
+  - 点击行展开/折叠文档内容详情面板，支持代码格式显示
+  - 搜索结果行点击时异步拉取文档内容并显示
+  - 新增刷新按钮（↻），一键刷新概览和文档列表
+  - 新增搜索按钮（替代仅 Enter 触发）
+  - 新增 Toast 通知提示
+  - 搜索结果头部增加"清除"按钮，分页信息显示总条数
+  - 响应式设计适配移动端
+- `README.md` — 增加向量索引可视化功能说明，更新测试包数量
+
+**影响范围**：
+- 修改 2 个文件（viz.go / README.md）
+- 无 Public API 变更（VizStore/VizSearcher 接口不变）
+- 新增 `/viz/api/document` 端点，不影响现有路由
+
+**验证数据**：
+- `go build ./...` — 通过
+- `go test ./internal/server/` — 35/35 PASS，1.002s
+- 新增端点 `/viz/api/document?id=xxx` 返回 200/404
+
+**遗留 TODO / 风险**：
+- `/viz/api/document` 当前遍历所有文档查找匹配 ID，大集合时性能可能下降，可后续添加索引优化
+
 ### Commit 33: fix(lsp): 修复 Init/Close 锁重入死锁，SendRequest 超时测试改为确定性取消
 
 **Commit Hash**: `37eab95`

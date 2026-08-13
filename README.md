@@ -17,6 +17,7 @@
 - **双路检索**：符号图精确检索 + 向量语义检索（FTS + 向量融合重排）
 - **增量监听**：支持 fsnotify 原生文件监听 + 轮询监听，300ms 防抖合并
 - **标签分类**：六类标签自动推导（layer/biz/tech/risk/test/lang）
+- **向量索引可视化**：Web 可视化仪表盘，支持文档浏览、语义搜索、相似度排名
 - **可观测性**：结构化日志（log/slog）+ 基础指标（Prometheus 格式）+ 链路追踪
 - **配置热重载**：YAML/JSON 配置 + 环境变量覆盖 + 运行时热重载
 - **生产级健壮性**：优雅关闭 / 重试机制 / Panic 恢复 / 安全中间件
@@ -45,6 +46,9 @@ go build -o codeschema ./cmd/codeschema
 
 # 启动 HTTP API
 ./codeschema serve --http :8081
+
+# 向量索引可视化（需先 serve 启动，访问 http://localhost:8081/viz）
+# 支持文档浏览、语义搜索、向量索引状态查看
 
 # 文件监听（增量更新）
 ./codeschema watch --fsnotify ./repo
@@ -164,7 +168,7 @@ make test
 make bench
 ```
 
-当前 18 个包全部通过测试，0 失败。
+当前 24 个包全部通过测试，0 失败。
 
 ## 环境要求
 
