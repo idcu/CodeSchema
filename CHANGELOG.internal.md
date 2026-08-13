@@ -8,7 +8,7 @@
 
 ### Commit 38: docs(onnxruntime): 新增 onnxruntime.dll 运行时依赖获取说明
 
-**Commit Hash**: `6d19b04`
+**Commit Hash**: `未提交`
 
 **核心改动点**：
 - `Makefile` — `build-cgo` 目标新增自动检测并复制 `down/onnxruntime/onnxruntime.dll` 到输出目录

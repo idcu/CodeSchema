@@ -12,6 +12,11 @@
 #
 # 运行容器（扫描指定目录）：
 #   docker run --rm -v /host/path:/repo codeschema:latest scan /repo
+#
+# 如需 ONNX 运行时加速（可选）：
+#   1. 下载 libonnxruntime.so 到 down/onnxruntime/
+#   2. 取消下方 RUN apk add ... onnxruntime 行的注释
+#   3. 重新构建镜像
 
 # === 构建阶段 ===
 FROM golang:1.25-alpine AS builder

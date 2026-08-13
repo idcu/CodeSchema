@@ -31,10 +31,23 @@ build-cgo:
 		-ldflags "$(LDFLAGS) -X main.version=$(VERSION)" \
 		-o $(OUTPUT)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe,) \
 		./cmd/codeschema
-ifneq ($(wildcard down/onnxruntime/onnxruntime.dll),)
-	@echo "==> Copying onnxruntime.dll ..."
-	cp down/onnxruntime/onnxruntime.dll $(OUTPUT)/
-endif
+	@echo "==> Copying onnxruntime library for $(GOOS) ..."
+	@case "$(GOOS)" in \
+		windows) \
+			lib="onnxruntime.dll";; \
+		linux) \
+			lib="libonnxruntime.so";; \
+		darwin) \
+			lib="libonnxruntime.dylib";; \
+		*) \
+			lib="";; \
+	esac; \
+	if [ -n "$$lib" ] && [ -f "down/onnxruntime/$$lib" ]; then \
+		cp "down/onnxruntime/$$lib" $(OUTPUT)/; \
+		echo "  -> copied $$lib"; \
+	else \
+		echo "  -> skipped (not found: down/onnxruntime/$$lib)"; \
+	fi
 	@echo "==> Binary: $(OUTPUT)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe,)"
 
 # 测试
