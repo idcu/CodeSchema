@@ -17,7 +17,8 @@ import (
 //   - 反向引用索引（ReverseIndex）：文件被哪些文件引用
 //   - 文件依赖图（FileGraph）：文件间的依赖关系
 type Analyzer struct {
-	store store.Store
+	store      store.Store
+	modulePath string // Go 模块路径，用于精确 import 解析
 }
 
 // NewAnalyzer 创建分析器实例。
@@ -27,7 +28,13 @@ func NewAnalyzer(st store.Store) *Analyzer {
 	}
 }
 
-// BuildAll 构建所有代码图（一次遍历完成）。
+// SetModulePath 设置 Go 模块路径，用于精确 import 解析。
+// 例如：go.mod 中的 module 声明 "codeschema"。
+func (a *Analyzer) SetModulePath(mp string) {
+	a.modulePath = mp
+}
+
+// BuildAll 构建所有代码图（单次遍历）。
 //
 // 返回所有四种图结构。如果某个图构建失败，返回错误。
 func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *ReverseIndex, *FileGraph, error) {
@@ -42,7 +49,10 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 		return nil, nil, nil, nil, fmt.Errorf("get all files: %w", err)
 	}
 
-	// 2. 遍历每个文件，构建图
+	// 2. 预构建 import 索引（仅依赖文件路径，无需遍历）
+	importIdx := buildImportIndex(files)
+
+	// 3. 单次遍历：构建所有图结构
 	for _, f := range files {
 		// 构建文件图节点
 		fgNode := fileGraph.AddNode(f.AbsolutePath)
@@ -74,31 +84,17 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 			}
 		}
 
-		// 构建反向引用索引（通过 imports 元数据）
+		// 统计方法数
 		fgNode.MethodCount = a.countMethodsByFileID(ctx, f.ID)
 
-		// 基于该文件的 imports 构建反向引用和文件依赖边
+		// 基于 imports 构建反向引用索引和文件依赖边
 		for _, imp := range f.Imports {
 			imp = strings.TrimSpace(imp)
 			if imp == "" {
 				continue
 			}
-			// 构建导入关系
 			reverseIndex.AddImport(f.AbsolutePath, imp)
-			// 尝试解析 import 到目标文件路径（使用预构建的索引）
-			// 注意：此处 innerIndex 在循环外预构建一次
-		}
-	}
-
-	// 第二次遍历：构建文件依赖边和反向引用（需要完整的 import 索引）
-	importIdx := buildImportIndex(files)
-	for _, f := range files {
-		for _, imp := range f.Imports {
-			imp = strings.TrimSpace(imp)
-			if imp == "" {
-				continue
-			}
-			if targets := resolveImport(imp, importIdx); len(targets) > 0 {
+			if targets := a.resolveImport(imp, importIdx); len(targets) > 0 {
 				for _, target := range targets {
 					reverseIndex.AddReference(target, f.AbsolutePath)
 					fileGraph.AddEdge(f.AbsolutePath, target)
@@ -189,7 +185,6 @@ func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error)
 	}
 
 	// 1. 构建 import 路径到文件路径的查找映射
-	// key: import path 的包目录部分（如 "store" 匹配 "/project/store/store.go"）
 	importIndex := buildImportIndex(files)
 
 	// 2. 遍历每个文件，解析其 imports
@@ -198,17 +193,12 @@ func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error)
 			continue
 		}
 		for _, imp := range f.Imports {
-			// 跳过空 import
 			imp = strings.TrimSpace(imp)
 			if imp == "" {
 				continue
 			}
-
-			// 记录该文件的导入
 			ri.AddImport(f.AbsolutePath, imp)
-
-			// 尝试解析 import 路径到具体的文件路径
-			if targets := resolveImport(imp, importIndex); len(targets) > 0 {
+			if targets := a.resolveImport(imp, importIndex); len(targets) > 0 {
 				for _, target := range targets {
 					ri.AddReference(target, f.AbsolutePath)
 				}
@@ -228,13 +218,10 @@ func buildImportIndex(files []*store.FileRecord) map[string][]string {
 	idx := make(map[string][]string)
 	for _, f := range files {
 		path := f.AbsolutePath
-		// 统一用 / 分割，兼容 Windows 和 Unix 路径
 		normalized := strings.ReplaceAll(path, "\\", "/")
 		parts := strings.Split(normalized, "/")
-		// 生成所有可能的包路径后缀（从后向前逐步生长）
 		for i := len(parts) - 1; i >= 0; i-- {
 			suffix := strings.Join(parts[i:], "/")
-			// 去掉文件扩展名
 			dirSuffix := suffix
 			for _, ext := range []string{".go", ".java", ".ts", ".py", ".rs", ".cpp", ".h"} {
 				dirSuffix = strings.TrimSuffix(dirSuffix, ext)
@@ -243,7 +230,6 @@ func buildImportIndex(files []*store.FileRecord) map[string][]string {
 				idx[dirSuffix] = append(idx[dirSuffix], f.AbsolutePath)
 			}
 		}
-		// 额外添加文件名的包名部分（不含扩展名）
 		base := filepath.Base(path)
 		ext := filepath.Ext(base)
 		if ext != "" {
@@ -256,17 +242,32 @@ func buildImportIndex(files []*store.FileRecord) map[string][]string {
 
 // resolveImport 尝试将 import 路径解析为 Store 中已知的文件路径。
 //
-// 返回匹配的文件路径列表。策略：
-// 1. 直接查找 import 路径是否作为索引键存在
-// 2. 提取 import 路径的最后一段（包名）进行匹配
-// 3. 将 import 路径中的 "." 替换为路径分隔符后尝试匹配
-func resolveImport(imp string, importIndex map[string][]string) []string {
-	// 策略 1: 直接匹配（import 路径恰好是某个索引键）
+// 优先级：
+//  0. Go 模块路径精确解析（如 "codeschema/internal/store" → "internal/store"）
+//  1. 直接匹配 import 路径
+//  2. 提取 import 路径的最后一段（包名）进行匹配
+//  3. 将 import 路径中的 "." 替换为路径分隔符后尝试匹配
+func (a *Analyzer) resolveImport(imp string, importIndex map[string][]string) []string {
+	// 策略 0: Go 模块路径精确解析
+	if a.modulePath != "" && strings.HasPrefix(imp, a.modulePath+"/") {
+		pkgDir := strings.TrimPrefix(imp, a.modulePath+"/")
+		if targets, ok := importIndex[pkgDir]; ok {
+			return targets
+		}
+		// 尝试用包目录的最后一段匹配
+		parts := strings.Split(pkgDir, "/")
+		last := parts[len(parts)-1]
+		if targets, ok := importIndex[last]; ok {
+			return targets
+		}
+	}
+
+	// 策略 1: 直接匹配
 	if targets, ok := importIndex[imp]; ok {
 		return targets
 	}
 
-	// 策略 2: 提取 import 路径的最后一段（包名/文件名）
+	// 策略 2: 提取最后一段（包名/文件名）
 	parts := strings.Split(imp, "/")
 	last := parts[len(parts)-1]
 	if targets, ok := importIndex[last]; ok {
@@ -274,14 +275,12 @@ func resolveImport(imp string, importIndex map[string][]string) []string {
 	}
 
 	// 策略 3: 将 "." 替换为路径分隔符后匹配
-	// 例如 "codeschema.internal.store" → "codeschema/internal/store"
-	dotPath := strings.ReplaceAll(imp, ".", string(filepath.Separator))
+	dotPath := strings.ReplaceAll(imp, ".", "/")
 	if dotPath != imp {
 		if targets, ok := importIndex[dotPath]; ok {
 			return targets
 		}
-		// 尝试用最后一段匹配
-		dotParts := strings.Split(dotPath, string(filepath.Separator))
+		dotParts := strings.Split(dotPath, "/")
 		if len(dotParts) > 0 {
 			dotLast := dotParts[len(dotParts)-1]
 			if targets, ok := importIndex[dotLast]; ok {

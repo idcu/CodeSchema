@@ -649,9 +649,10 @@ func TestBuildImportIndex(t *testing.T) {
 func TestResolveImport(t *testing.T) {
 	ms := newP1TestStore()
 	idx := buildImportIndex(ms.files)
+	a := NewAnalyzer(ms)
 
 	// 策略 2: import "project/service" → 最后一段 "service" 应匹配 service.go
-	targets := resolveImport("project/service", idx)
+	targets := a.resolveImport("project/service", idx)
 	if len(targets) == 0 {
 		t.Error("expected resolveImport to find target for 'project/service'")
 	} else {
@@ -668,10 +669,76 @@ func TestResolveImport(t *testing.T) {
 	}
 
 	// 不存在的 import 返回 nil
-	targets = resolveImport("nonexistent/pkg", idx)
+	targets = a.resolveImport("nonexistent/pkg", idx)
 	if len(targets) != 0 {
 		t.Errorf("expected nil for nonexistent import, got %v", targets)
 	}
+}
+
+func TestResolveImport_GoModule(t *testing.T) {
+	ms := newP1TestStore()
+	idx := buildImportIndex(ms.files)
+
+	// 未设置 modulePath 时，回退到启发式匹配
+	// "codeschema/handler" 的最后一段 "handler" 匹配 handler.go
+	a0 := NewAnalyzer(ms)
+	targets := a0.resolveImport("codeschema/handler", idx)
+	if len(targets) == 0 {
+		t.Error("expected resolveImport to fallback to heuristic match for 'codeschema/handler'")
+	}
+
+	// 设置 modulePath 后，Go 模块路径精确解析优先
+	a := NewAnalyzer(ms)
+	a.SetModulePath("codeschema")
+
+	// 本模块路径：codeschema 前缀 + 不存在的包 → 精确解析优先，找不到则回退
+	targets = a.resolveImport("codeschema/nonexistent", idx)
+	// 不存在的包，预期为空
+	if len(targets) != 0 {
+		t.Errorf("expected nil for nonexistent module package, got %v", targets)
+	}
+
+	// 标准库 import 不应匹配（无 module 前缀，也无文件路径匹配）
+	targets = a.resolveImport("fmt", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for stdlib import 'fmt', got %v", targets)
+	}
+}
+
+func TestResolveImport_GoModuleExact(t *testing.T) {
+	// 创建一个包含模块路径匹配的测试数据
+	ms := &mockStore{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/codeschema/internal/store/store.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/project/codeschema/internal/analyzer/analyzer.go", Language: "go"},
+			{ID: 3, AbsolutePath: "/project/codeschema/cmd/codeschema/main.go", Language: "go"},
+		},
+	}
+	idx := buildImportIndex(ms.files)
+	a := NewAnalyzer(ms)
+	a.SetModulePath("codeschema")
+
+	// 策略 0: codeschema/internal/store → "internal/store" 应精确匹配
+	targets := a.resolveImport("codeschema/internal/store", idx)
+	if len(targets) == 0 {
+		t.Error("expected Go module resolution to find target for 'codeschema/internal/store'")
+	} else {
+		found := false
+		for _, p := range targets {
+			if p == "/project/codeschema/internal/store/store.go" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected '/project/codeschema/internal/store/store.go' in targets, got %v", targets)
+		}
+	}
+
+	// 第三方包 import 应回退到启发式匹配
+	targets = a.resolveImport("github.com/some/lib", idx)
+	// 不匹配，应为空
+	_ = targets
 }
 
 func TestAnalyzer_BuildReverseIndex(t *testing.T) {

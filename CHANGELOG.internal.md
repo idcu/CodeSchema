@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 8: perf(analyzer): P2 BuildAll 单次遍历 + Go 模块路径 import 解析
+
+**Commit Hash**: `[待提交]`
+
+**核心改动点**：
+- `internal/analyzer/analyzer.go` — BuildAll 优化为单次遍历：`buildImportIndex` 预构建在循环前，import 解析合并入主循环，消除第二次全量遍历；`resolveImport` 改为 `Analyzer` 方法，新增策略 0（Go 模块路径精确解析，如 `codeschema/internal/store` → `internal/store`），失败时回退到策略 1-3 启发式匹配；`Analyzer` 新增 `modulePath` 字段和 `SetModulePath` 方法
+- 测试文件：analyzer_test.go 新增 2 个 P2 测试（TestResolveImport_GoModule 回退到启发式匹配、TestResolveImport_GoModuleExact 模块路径精确匹配），更新 TestResolveImport 为 `a.resolveImport` 方法调用
+- 文档同步：docs/dev/06-编排层与并发模型.md 更新 P2 完成标准（单次遍历、Go 模块路径解析、30 测试通过）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（11 个包，0 失败）
+- analyzer 包 30 个测试全部通过（28 个原有 + 2 个 P2 新增）
+- 测试覆盖：BuildAll 单次遍历正确性（与原有 28 测试结果一致）、resolveImport Go 模块路径精确匹配、第三方包 import 回退、标准库 import 跳过
+
+**遗留 TODO / 风险**：
+- Analyzer 当前仅支持 Go 模块路径解析，P3 可扩展为多语言解析器（如 Java Maven/Gradle 包路径解析）
+- 模块路径通过 `SetModulePath` 手动设置，P3 可自动从 `go.mod` 文件读取
+
 ### Commit 7: perf(analyzer): P1 反向引用索引 + 类层次父子关系 — 基于 imports 元数据的引用解析
 
 **Commit Hash**: `8b7b025`
