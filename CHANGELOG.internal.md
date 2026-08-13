@@ -6,6 +6,31 @@
 
 ## 提交记录
 
+### Commit 9: feat(analyzer): P3 多语言解析器 — Java Maven/Gradle 包路径解析
+
+**Commit Hash**: `待补充（commit 后写入）`
+
+**核心改动点**：
+- `internal/analyzer/resolver.go` — 新增文件，定义 `ImportResolver` 接口，实现 4 种解析器：
+  - `GoResolver`：模块路径精确解析（`codeschema/internal/store` → `internal/store`）
+  - `JavaResolver`：支持 FQCN 导入（`.` 转 `/`）、通配符导入（`com.example.*` → 前缀匹配）、Java 标准库过滤（`java.*`/`javax.*`/`org.springframework.*`/`lombok.` 等 23 个前缀）、Maven/Gradle 源根目录剥离（默认 `src/main/java`、`src/main/kotlin`、`src/test/java`、`src/test/kotlin`）
+  - `CompositeResolver`：按注册优先级依次尝试，首个非空结果即返回
+  - `heuristicResolver`：最终回退（直接匹配/最后一段匹配/`.` 替换为 `/` 匹配）
+- `internal/analyzer/analyzer.go` — `Analyzer` 结构体新增 `resolver`/`goResolver`/`javaResolver` 字段；`NewAnalyzer` 初始化解析器链（GoResolver → JavaResolver → heuristicResolver）；新增 `SetJavaSourceRoots` 方法；`resolveImport` 方法委托给 `CompositeResolver.Resolve`
+- 测试文件：analyzer_test.go 新增 22 个 P3 测试（JavaResolver 11 个 + CompositeResolver 3 个 + heuristicResolver 5 个 + 集成测试 3 个）
+- 文档同步：docs/dev/06-编排层与并发模型.md 更新 P3 完成标准（多语言解析器体系、JavaResolver 特性、52 测试通过）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（11 个包，0 失败）
+- analyzer 包 52 个测试全部通过（30 个原有 + 22 个 P3 新增）
+- 测试覆盖：Java 标准库过滤（7 个类型）、FQCN 精确匹配/不匹配、通配符匹配/不匹配、源根目录 FQCN 匹配、源根目录通配符匹配、默认源根目录（4 个）、自定义源根目录、空源根目录回退、CompositeResolver 优先级链、全部解析器失败、AddResolver 动态添加、heuristicResolver 四种匹配策略、Analyzer 集成测试（自定义源根目录 + 默认源根目录 + 标准库过滤 + 空索引）
+
+**遗留 TODO / 风险**：
+- JavaResolver 当前基于路径段匹配，若文件 store 中路径不包含源根目录前缀，需手动设置 `SetJavaSourceRoots`
+- 标准库前缀列表当前为硬编码，后续可扩展为配置文件或自动发现
+- 未支持 Gradle 多模块项目（如 `:module:submodule` 路径），P4 可扩展
+
 ### Commit 8: perf(analyzer): P2 BuildAll 单次遍历 + Go 模块路径 import 解析
 
 **Commit Hash**: `e2db441`

@@ -898,3 +898,387 @@ func TestAnalyzer_Analyze_P1(t *testing.T) {
 		t.Errorf("expected TotalMethods 6, got %d", summary.TotalMethods)
 	}
 }
+
+// ---------- P3 多语言解析器测试 ----------
+
+// newJavaTestStore 创建包含 Java 文件路径的测试数据。
+func newJavaTestStore() *mockStore {
+	return &mockStore{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/src/main/java/com/example/service/UserService.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/project/src/main/java/com/example/service/OrderService.java", Language: "java"},
+			{ID: 3, AbsolutePath: "/project/src/main/java/com/example/repo/UserRepository.java", Language: "java"},
+			{ID: 4, AbsolutePath: "/project/src/main/java/com/example/controller/UserController.java", Language: "java"},
+			{ID: 5, AbsolutePath: "/project/src/main/java/com/example/Application.java", Language: "java"},
+		},
+	}
+}
+
+func TestJavaResolver_Stdlib(t *testing.T) {
+	r := NewJavaResolver(nil)
+
+	// 标准库 import 应返回 nil
+	cases := []string{
+		"java.lang.String",
+		"java.util.List",
+		"javax.servlet.http.HttpServlet",
+		"org.springframework.stereotype.Service",
+		"org.slf4j.Logger",
+		"lombok.Data",
+		"com.fasterxml.jackson.databind.ObjectMapper",
+	}
+	for _, imp := range cases {
+		targets := r.Resolve(imp, nil)
+		if targets != nil {
+			t.Errorf("expected nil for stdlib '%s', got %v", imp, targets)
+		}
+	}
+}
+
+func TestJavaResolver_Stdlib_NonStdlibNotFiltered(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/example/service/UserService": {"/project/UserService.java"},
+	}
+
+	// 非标准库应正常解析
+	targets := r.Resolve("com.example.service.UserService", idx)
+	if len(targets) == 0 {
+		t.Error("expected non-stdlib import to resolve")
+	}
+}
+
+func TestJavaResolver_FQCN(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/example/service/UserService": {"/project/UserService.java"},
+		"com/example/repo/UserRepository": {"/project/UserRepository.java"},
+	}
+
+	// FQCN 精确匹配
+	targets := r.Resolve("com.example.service.UserService", idx)
+	if len(targets) != 1 || targets[0] != "/project/UserService.java" {
+		t.Errorf("expected '/project/UserService.java', got %v", targets)
+	}
+
+	// 另一个 FQCN
+	targets = r.Resolve("com.example.repo.UserRepository", idx)
+	if len(targets) != 1 || targets[0] != "/project/UserRepository.java" {
+		t.Errorf("expected '/project/UserRepository.java', got %v", targets)
+	}
+}
+
+func TestJavaResolver_FQCN_NoMatch(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/example/service/UserService": {"/project/UserService.java"},
+	}
+
+	// 不存在的 FQCN
+	targets := r.Resolve("com.example.nonexistent.Foo", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for nonexistent FQCN, got %v", targets)
+	}
+}
+
+func TestJavaResolver_Wildcard(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/example/service/UserService":  {"/project/UserService.java"},
+		"com/example/service/OrderService": {"/project/OrderService.java"},
+		"com/example/repo/UserRepository":  {"/project/UserRepository.java"},
+	}
+
+	// 通配符匹配：com.example.service.* → service 目录下所有文件
+	targets := r.Resolve("com.example.service.*", idx)
+	if len(targets) != 2 {
+		t.Errorf("expected 2 targets for wildcard, got %d: %v", len(targets), targets)
+	}
+
+	// 通配符匹配：com.example.repo.* → repo 目录下 1 个文件
+	targets = r.Resolve("com.example.repo.*", idx)
+	if len(targets) != 1 {
+		t.Errorf("expected 1 target for wildcard, got %d: %v", len(targets), targets)
+	}
+}
+
+func TestJavaResolver_Wildcard_NoMatch(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/example/service/UserService": {"/project/UserService.java"},
+	}
+
+	// 不存在的通配符
+	targets := r.Resolve("com.example.nonexistent.*", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for nonexistent wildcard, got %v", targets)
+	}
+}
+
+func TestJavaResolver_SourceRoot(t *testing.T) {
+	r := NewJavaResolver([]string{"src/main/java"})
+	idx := map[string][]string{
+		"src/main/java/com/example/service/UserService": {"/project/src/main/java/com/example/service/UserService.java"},
+		"src/main/java/com/example/repo/UserRepository": {"/project/src/main/java/com/example/repo/UserRepository.java"},
+	}
+
+	// FQCN 匹配时，源根目录前缀匹配
+	targets := r.Resolve("com.example.service.UserService", idx)
+	if len(targets) != 1 || targets[0] != "/project/src/main/java/com/example/service/UserService.java" {
+		t.Errorf("expected source root match, got %v", targets)
+	}
+}
+
+func TestJavaResolver_SourceRootWithWildcard(t *testing.T) {
+	r := NewJavaResolver([]string{"src/main/java"})
+	idx := map[string][]string{
+		"src/main/java/com/example/service/UserService":  {"/project/src/main/java/com/example/service/UserService.java"},
+		"src/main/java/com/example/service/OrderService": {"/project/src/main/java/com/example/service/OrderService.java"},
+		"src/main/java/com/example/repo/UserRepository":  {"/project/src/main/java/com/example/repo/UserRepository.java"},
+	}
+
+	// 通配符 + 源根目录
+	targets := r.Resolve("com.example.service.*", idx)
+	if len(targets) != 2 {
+		t.Errorf("expected 2 targets for wildcard+source root, got %d: %v", len(targets), targets)
+	}
+
+	// 通配符 + 源根目录匹配 repo
+	targets = r.Resolve("com.example.repo.*", idx)
+	if len(targets) != 1 {
+		t.Errorf("expected 1 target for wildcard+source root repo, got %d: %v", len(targets), targets)
+	}
+}
+
+func TestJavaResolver_DefaultSourceRoots(t *testing.T) {
+	r := NewJavaResolver(nil)
+	if len(r.sourceRoots) != 4 {
+		t.Errorf("expected 4 default source roots, got %d: %v", len(r.sourceRoots), r.sourceRoots)
+	}
+	// 验证默认值
+	expected := []string{"src/main/java", "src/main/kotlin", "src/test/java", "src/test/kotlin"}
+	for i, root := range expected {
+		if r.sourceRoots[i] != root {
+			t.Errorf("sourceRoot[%d]: expected %s, got %s", i, root, r.sourceRoots[i])
+		}
+	}
+}
+
+func TestJavaResolver_CustomSourceRoots(t *testing.T) {
+	r := NewJavaResolver([]string{"custom/src"})
+	if len(r.sourceRoots) != 1 || r.sourceRoots[0] != "custom/src" {
+		t.Errorf("expected custom source roots, got %v", r.sourceRoots)
+	}
+}
+
+func TestJavaResolver_EmptySourceRoots(t *testing.T) {
+	r := NewJavaResolver([]string{})
+	// 空切片应使用默认值
+	if len(r.sourceRoots) != 4 {
+		t.Errorf("expected 4 default source roots for empty input, got %d", len(r.sourceRoots))
+	}
+}
+
+func TestCompositeResolver_Priority(t *testing.T) {
+	// 构建一个模拟的 import 索引
+	idx := map[string][]string{
+		"internal/store": {"/project/store.go"},
+		"store":          {"/project/store.go"},
+		"com/example/Foo": {"/project/Foo.java"},
+	}
+
+	// 注册 GoResolver(module="codeschema") + JavaResolver + heuristicResolver
+	goR := NewGoResolver("codeschema")
+	javaR := NewJavaResolver(nil)
+	heuristic := &heuristicResolver{}
+	c := NewCompositeResolver(goR, javaR, heuristic)
+
+	// 1. GoResolver 精确匹配应优先：codeschema/internal/store → internal/store
+	targets := c.Resolve("codeschema/internal/store", idx)
+	if len(targets) == 0 {
+		t.Error("expected GoResolver to match 'codeschema/internal/store'")
+	}
+	found := false
+	for _, p := range targets {
+		if p == "/project/store.go" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '/project/store.go' in targets, got %v", targets)
+	}
+
+	// 2. JavaResolver 匹配 Java FQCN
+	targets = c.Resolve("com.example.Foo", idx)
+	if len(targets) == 0 || targets[0] != "/project/Foo.java" {
+		t.Errorf("expected JavaResolver to match 'com.example.Foo', got %v", targets)
+	}
+
+	// 3. heuristicResolver 作为回退：最后一段匹配
+	targets = c.Resolve("some/random/store", idx)
+	if len(targets) == 0 {
+		t.Error("expected heuristicResolver to fallback match 'some/random/store'")
+	}
+}
+
+func TestCompositeResolver_AllFail(t *testing.T) {
+	goR := NewGoResolver("codeschema")
+	javaR := NewJavaResolver([]string{"src/main/java"})
+	c := NewCompositeResolver(goR, javaR)
+
+	// 所有解析器都返回空
+	idx := map[string][]string{
+		"some/pkg": {"/project/foo.go"},
+	}
+	targets := c.Resolve("completely.unrelated", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil when all resolvers fail, got %v", targets)
+	}
+}
+
+func TestCompositeResolver_AddResolver(t *testing.T) {
+	c := NewCompositeResolver()
+	if len(c.resolvers) != 0 {
+		t.Errorf("expected 0 resolvers initially, got %d", len(c.resolvers))
+	}
+
+	c.AddResolver(NewGoResolver(""))
+	if len(c.resolvers) != 1 {
+		t.Errorf("expected 1 resolver after Add, got %d", len(c.resolvers))
+	}
+
+	c.AddResolver(NewJavaResolver(nil))
+	if len(c.resolvers) != 2 {
+		t.Errorf("expected 2 resolvers after second Add, got %d", len(c.resolvers))
+	}
+}
+
+func TestHeuristicResolver_DirectMatch(t *testing.T) {
+	h := &heuristicResolver{}
+	idx := map[string][]string{
+		"internal/store": {"/project/store.go"},
+	}
+
+	targets := h.Resolve("internal/store", idx)
+	if len(targets) != 1 || targets[0] != "/project/store.go" {
+		t.Errorf("expected direct match, got %v", targets)
+	}
+}
+
+func TestHeuristicResolver_LastSegment(t *testing.T) {
+	h := &heuristicResolver{}
+	idx := map[string][]string{
+		"store": {"/project/store.go"},
+	}
+
+	// 最后一段 "store" 匹配
+	targets := h.Resolve("some/deep/path/store", idx)
+	if len(targets) != 1 || targets[0] != "/project/store.go" {
+		t.Errorf("expected last segment match, got %v", targets)
+	}
+}
+
+func TestHeuristicResolver_DotToSlash(t *testing.T) {
+	h := &heuristicResolver{}
+	idx := map[string][]string{
+		"com/example/Foo": {"/project/Foo.java"},
+	}
+
+	// "." 替换为 "/" 后匹配
+	targets := h.Resolve("com.example.Foo", idx)
+	if len(targets) != 1 || targets[0] != "/project/Foo.java" {
+		t.Errorf("expected dot-to-slash match, got %v", targets)
+	}
+}
+
+func TestHeuristicResolver_DotToSlashLastSegment(t *testing.T) {
+	h := &heuristicResolver{}
+	idx := map[string][]string{
+		"Foo": {"/project/Foo.java"},
+	}
+
+	// "." 替换为 "/" 后取最后一段
+	targets := h.Resolve("com.example.Foo", idx)
+	if len(targets) != 1 || targets[0] != "/project/Foo.java" {
+		t.Errorf("expected dot-to-slash last segment match, got %v", targets)
+	}
+}
+
+func TestHeuristicResolver_NoMatch(t *testing.T) {
+	h := &heuristicResolver{}
+	idx := map[string][]string{
+		"store": {"/project/store.go"},
+	}
+
+	targets := h.Resolve("completely.unrelated.path", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for no match, got %v", targets)
+	}
+}
+
+func TestJavaResolver_IntegrationWithAnalyzer(t *testing.T) {
+	ms := newJavaTestStore()
+	idx := buildImportIndex(ms.files)
+
+	// 设置 Java 源根目录
+	a := NewAnalyzer(ms)
+	a.SetJavaSourceRoots([]string{"src/main/java"})
+
+	// 解析 FQCN 导入
+	targets := a.resolveImport("com.example.service.UserService", idx)
+	if len(targets) == 0 {
+		t.Error("expected JavaResolver to resolve 'com.example.service.UserService'")
+	}
+	found := false
+	for _, p := range targets {
+		if p == "/project/src/main/java/com/example/service/UserService.java" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '/project/src/main/java/com/example/service/UserService.java' in targets, got %v", targets)
+	}
+
+	// 解析通配符导入
+	targets = a.resolveImport("com.example.service.*", idx)
+	if len(targets) != 2 {
+		t.Errorf("expected 2 targets for wildcard, got %d: %v", len(targets), targets)
+	}
+}
+
+func TestJavaResolver_IntegrationWithAnalyzer_DefaultRoots(t *testing.T) {
+	ms := newJavaTestStore()
+	idx := buildImportIndex(ms.files)
+
+	// 使用默认源根目录（与测试数据路径一致）
+	a := NewAnalyzer(ms)
+
+	// 默认源根目录包含 src/main/java，应能匹配
+	targets := a.resolveImport("com.example.service.UserService", idx)
+	if len(targets) == 0 {
+		t.Error("expected JavaResolver with default source roots to resolve 'com.example.service.UserService'")
+	}
+
+	// 标准库应被过滤
+	targets = a.resolveImport("java.lang.String", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected stdlib 'java.lang.String' to be filtered, got %v", targets)
+	}
+}
+
+func TestJavaResolver_Resolve_EmptyImportIndex(t *testing.T) {
+	r := NewJavaResolver(nil)
+	// 空索引时 FQCN 应返回 nil
+	targets := r.Resolve("com.example.Foo", map[string][]string{})
+	if len(targets) != 0 {
+		t.Errorf("expected nil for empty import index, got %v", targets)
+	}
+
+	// 空索引时通配符应返回 nil
+	targets = r.Resolve("com.example.*", map[string][]string{})
+	if len(targets) != 0 {
+		t.Errorf("expected nil for empty import index wildcard, got %v", targets)
+	}
+}

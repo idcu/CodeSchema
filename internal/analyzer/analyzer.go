@@ -17,21 +17,42 @@ import (
 //   - 反向引用索引（ReverseIndex）：文件被哪些文件引用
 //   - 文件依赖图（FileGraph）：文件间的依赖关系
 type Analyzer struct {
-	store      store.Store
-	modulePath string // Go 模块路径，用于精确 import 解析
+	store    store.Store
+	resolver *CompositeResolver // 多语言 import 解析器
+	goResolver *GoResolver     // Go 模块路径解析器（用于动态更新 modulePath）
+	javaResolver *JavaResolver // Java 包路径解析器（用于动态更新 source roots）
 }
 
 // NewAnalyzer 创建分析器实例。
+//
+// 初始化多语言 import 解析器，默认包含：
+//   - GoResolver（未设置模块路径时始终回退）
+//   - JavaResolver（使用默认源根目录）
+//   - heuristicResolver（最终的启发式回退）
 func NewAnalyzer(st store.Store) *Analyzer {
+	goR := NewGoResolver("")
+	javaR := NewJavaResolver(nil)
+	composite := NewCompositeResolver(goR, javaR, &heuristicResolver{})
 	return &Analyzer{
-		store: st,
+		store:        st,
+		resolver:     composite,
+		goResolver:   goR,
+		javaResolver: javaR,
 	}
 }
 
 // SetModulePath 设置 Go 模块路径，用于精确 import 解析。
 // 例如：go.mod 中的 module 声明 "codeschema"。
 func (a *Analyzer) SetModulePath(mp string) {
-	a.modulePath = mp
+	a.goResolver.modulePath = mp
+}
+
+// SetJavaSourceRoots 设置 Java 源根目录，用于精确 import 解析。
+// 默认值：["src/main/java", "src/main/kotlin", "src/test/java", "src/test/kotlin"]。
+func (a *Analyzer) SetJavaSourceRoots(roots []string) {
+	if len(roots) > 0 {
+		a.javaResolver.sourceRoots = roots
+	}
 }
 
 // BuildAll 构建所有代码图（单次遍历）。
@@ -242,54 +263,12 @@ func buildImportIndex(files []*store.FileRecord) map[string][]string {
 
 // resolveImport 尝试将 import 路径解析为 Store 中已知的文件路径。
 //
-// 优先级：
-//  0. Go 模块路径精确解析（如 "codeschema/internal/store" → "internal/store"）
-//  1. 直接匹配 import 路径
-//  2. 提取 import 路径的最后一段（包名）进行匹配
-//  3. 将 import 路径中的 "." 替换为路径分隔符后尝试匹配
+// 使用多语言解析器链（CompositeResolver）：
+//   - GoResolver: 模块路径精确解析
+//   - JavaResolver: Java FQCN/通配符/源根目录解析
+//   - heuristicResolver: 启发式回退匹配
 func (a *Analyzer) resolveImport(imp string, importIndex map[string][]string) []string {
-	// 策略 0: Go 模块路径精确解析
-	if a.modulePath != "" && strings.HasPrefix(imp, a.modulePath+"/") {
-		pkgDir := strings.TrimPrefix(imp, a.modulePath+"/")
-		if targets, ok := importIndex[pkgDir]; ok {
-			return targets
-		}
-		// 尝试用包目录的最后一段匹配
-		parts := strings.Split(pkgDir, "/")
-		last := parts[len(parts)-1]
-		if targets, ok := importIndex[last]; ok {
-			return targets
-		}
-	}
-
-	// 策略 1: 直接匹配
-	if targets, ok := importIndex[imp]; ok {
-		return targets
-	}
-
-	// 策略 2: 提取最后一段（包名/文件名）
-	parts := strings.Split(imp, "/")
-	last := parts[len(parts)-1]
-	if targets, ok := importIndex[last]; ok {
-		return targets
-	}
-
-	// 策略 3: 将 "." 替换为路径分隔符后匹配
-	dotPath := strings.ReplaceAll(imp, ".", "/")
-	if dotPath != imp {
-		if targets, ok := importIndex[dotPath]; ok {
-			return targets
-		}
-		dotParts := strings.Split(dotPath, "/")
-		if len(dotParts) > 0 {
-			dotLast := dotParts[len(dotParts)-1]
-			if targets, ok := importIndex[dotLast]; ok {
-				return targets
-			}
-		}
-	}
-
-	return nil
+	return a.resolver.Resolve(imp, importIndex)
 }
 
 // BuildFileGraph 构建文件依赖图。
