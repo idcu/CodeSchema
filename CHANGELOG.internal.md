@@ -8,7 +8,7 @@
 
 ### Commit 6: feat(analyzer): P0 代码图分析器 — 四种图结构 + 影响面分析 + 最短路径
 
-**Commit Hash**: `[待提交]`
+**Commit Hash**: `51cf372`
 
 **核心改动点**：
 - `internal/analyzer/graph.go` — 四种图数据结构定义（CallGraph/ClassHierarchy/ReverseIndex/FileGraph），含 AddNode/AddEdge/GetCallers/GetCallees/BFS 遍历方法
