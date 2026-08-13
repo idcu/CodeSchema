@@ -8,7 +8,7 @@
 
 ### Commit 17: perf(search): P8.3 优化 — IDF 持久化 / 异步索引 / 删除同步
 
-**Commit Hash**: `TBD`（待 commit 后填充）
+**Commit Hash**: `3e93fa4`
 
 **核心改动点**：
 - `internal/vector/embedder_local.go` — LocalEmbedder 新增 SaveIDF/LoadIDF 方法，JSON 编码持久化 IDF 词典，重启后无需重新 Observe
