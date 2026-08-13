@@ -4,13 +4,13 @@
       "repo_name": "CodeSchema",
       "repo_path": "E:\\CodeSchema",
       "file_count": 81,
-      "scan_time_ms": 81,
-      "index_time_ms": 13,
-      "heap_mb": 4.609375,
-      "search_p50_ms": 1.019,
-      "search_p95_ms": 1.994,
-      "search_p99_ms": 1.994,
-      "search_avg_ms": 1.1107222222222222
+      "scan_time_ms": 69,
+      "index_time_ms": 11,
+      "heap_mb": 4.96875,
+      "search_p50_ms": 0.996,
+      "search_p95_ms": 1.992,
+      "search_p99_ms": 1.992,
+      "search_avg_ms": 1.0252777777777777
     }
   ],
   "baseline": "CodeSchema",

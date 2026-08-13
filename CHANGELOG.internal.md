@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 35: perf(bench): 多仓库 benchmark 真实运行 + README 同步 P18 进度
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `README.md` — 当前状态从 P0-P13 更新为 P0-P18，新增 P14~P18 阶段说明行
+- `build/bench-compare.json` — 多仓库 benchmark 真实运行结果（CodeSchema 81 文件 + idcu-panel/backend 312 文件），输出对比报告
+- `build/realrepo-bench.json` — 自 Benchmark 性能基线更新
+
+**验证数据**：
+- 多仓库 benchmark: CodeSchema 81 文件 87ms 扫描 / 12ms 索引 / 1.88ms P95; backend 312 文件 190ms 扫描 / 21ms 索引 / 2.99ms P95
+- 自 Benchmark: ScanAndIndex 84ms/op (13次)、Search 1.05ms/op (P95 1.99ms)、FullPipeline 87.6ms/op
+- 基准回归验证: 4x 文件量 → 1.6x 扫描时间 / 1.9x P95 延迟，线性扩展性良好
+- `go build ./...` — 通过
+
+**遗留 TODO / 风险**：
+- 建议在更多外部 Go 仓库（如 kubernetes）上运行 benchmark，以验证更大规模下的性能表现
+
 ### Commit 34: feat(viz): 向量索引可视化工具增强 — 单文档 API、点击展开详情、刷新按钮
 
 **Commit Hash**: `5bdf042`
