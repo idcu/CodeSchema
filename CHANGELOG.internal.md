@@ -8,7 +8,7 @@
 
 ### Commit 31: feat(viz): LSP 适配器优化 + chromem-go 向量索引可视化工具
 
-**Commit Hash**: `ebfe4f7`
+**Commit Hash**: `a9b20e7`
 
 **核心改动点**：
 - `internal/parser/adapter/lsp/adapter.go` — `readResponses` 方法从 `bufio.Scanner` 逐行读取改为 `bufio.Reader` 按字节读取 Content-Length 头，精确解析 JSON 体，解决 JSON 体换行导致的解析问题
