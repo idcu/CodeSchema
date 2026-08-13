@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"codeschema/internal/store"
@@ -16,10 +17,27 @@ import (
 //   - BuildFromStore: 启动时全量构建索引
 //   - IndexDocument: 扫描后增量更新索引
 //   - 构建前自动 Observe 建立 IDF 词典
+//   - 支持异步索引队列，避免阻塞扫描流程
 type IndexBuilder struct {
 	fts      FTSEngine
 	indexer  *vector.Indexer
 	embedder *vector.LocalEmbedder
+
+	// 异步索引队列（可选启用）
+	queue chan asyncJob
+	wg    sync.WaitGroup
+	async bool
+	mu    sync.Mutex
+	started bool
+
+	// 回调钩子，可用于错误通知
+	onError func(id string, err error)
+}
+
+type asyncJob struct {
+	ctx  context.Context
+	id   string
+	text string
 }
 
 // NewIndexBuilder 创建索引构建器。
@@ -196,6 +214,141 @@ func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePa
 	}
 
 	return nil
+}
+
+// StartAsync 启动异步索引队列，在后台上索引文档。
+//
+// queueSize 为队列缓冲区大小，传 0 使用默认值 64。
+// 启动后，EnqueueIndex 将文档放入队列由后台 worker 异步处理。
+func (b *IndexBuilder) StartAsync(ctx context.Context, queueSize int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.started {
+		return
+	}
+	if queueSize <= 0 {
+		queueSize = 64
+	}
+	b.queue = make(chan asyncJob, queueSize)
+	b.started = true
+	b.async = true
+
+	b.wg.Add(1)
+	go b.asyncWorker(ctx)
+}
+
+// StopAsync 停止异步索引队列，等待队列中所有任务完成。
+func (b *IndexBuilder) StopAsync() {
+	b.mu.Lock()
+	if !b.started {
+		b.mu.Unlock()
+		return
+	}
+	b.started = false
+	b.mu.Unlock()
+
+	close(b.queue)
+	b.wg.Wait()
+}
+
+// EnqueueIndex 将文档异步入队索引。
+//
+// 如果异步队列未启动（StartAsync 未调用），则同步执行。
+func (b *IndexBuilder) EnqueueIndex(ctx context.Context, id, text string) {
+	if !b.isAsync() {
+		// 降级为同步
+		if err := b.IndexDocument(ctx, id, text); err != nil {
+			if b.onError != nil {
+				b.onError(id, err)
+			}
+		}
+		return
+	}
+
+	select {
+	case b.queue <- asyncJob{ctx: ctx, id: id, text: text}:
+	case <-ctx.Done():
+	}
+}
+
+// SetOnError 设置异步索引错误回调。
+func (b *IndexBuilder) SetOnError(fn func(id string, err error)) {
+	b.onError = fn
+}
+
+// isAsync 返回是否已启动异步模式。
+func (b *IndexBuilder) isAsync() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.async && b.started
+}
+
+// asyncWorker 后台异步索引 worker。
+func (b *IndexBuilder) asyncWorker(ctx context.Context) {
+	defer b.wg.Done()
+	for job := range b.queue {
+		if err := b.IndexDocument(job.ctx, job.id, job.text); err != nil {
+			if b.onError != nil {
+				b.onError(job.id, err)
+			}
+		}
+	}
+}
+
+// RemoveDocument 从 FTS 和向量索引中删除指定文档。
+//
+// 用于文件被删除时的索引同步清理。
+func (b *IndexBuilder) RemoveDocument(ctx context.Context, docID string) error {
+	if err := b.fts.Remove(ctx, docID); err != nil {
+		return fmt.Errorf("remove fts %s: %w", docID, err)
+	}
+	if err := b.indexer.RemoveDocument(ctx, docID); err != nil {
+		return fmt.Errorf("remove vector %s: %w", docID, err)
+	}
+	return nil
+}
+
+// SaveIDF 持久化 IDF 词典到文件。
+func (b *IndexBuilder) SaveIDF(path string) error {
+	return b.embedder.SaveIDF(path)
+}
+
+// BuildAndRemove 从 Store 读取单个文件信息，删除该文件所有类和方法的索引文档。
+//
+// 用于文件被删除后的增量同步。
+func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, filePath string) error {
+	file, err := st.GetFileByPath(ctx, filePath)
+	if err != nil || file == nil {
+		// 文件不存在，删除文件本身（如果索引过）
+		return b.RemoveDocument(ctx, "file:"+filePath)
+	}
+
+	// 删除所有类和方法
+	classes, err := st.GetClassesByFileID(ctx, file.ID)
+	if err != nil {
+		return fmt.Errorf("get classes for file %d: %w", file.ID, err)
+	}
+
+	for _, c := range classes {
+		classID := "class:" + formatClassID(c.ID)
+		if err := b.RemoveDocument(ctx, classID); err != nil {
+			return err
+		}
+
+		methods, err := st.GetMethodsByClassID(ctx, c.ID)
+		if err != nil {
+			return fmt.Errorf("get methods for class %d: %w", c.ID, err)
+		}
+		for _, m := range methods {
+			methodID := "method:" + formatClassID(m.ID)
+			if err := b.RemoveDocument(ctx, methodID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// 删除文件文档本身（如果存在）
+	return b.RemoveDocument(ctx, "file:"+filePath)
 }
 
 // buildClassIndexText 构建类的索引文本。

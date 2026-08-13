@@ -33,6 +33,7 @@ type Scanner struct {
 	semaphore chan struct{}
 	logger    *log.Logger
 	onIndex   func(ctx context.Context, filePath string) error // P8.3 索引回调
+	onDelete  func(ctx context.Context, filePath string) error // P8.3 删除回调
 }
 
 // NewScanner 创建 Scanner 实例。
@@ -55,21 +56,38 @@ func (s *Scanner) SetOnIndex(fn func(ctx context.Context, filePath string) error
 	s.onIndex = fn
 }
 
+// SetOnDelete 设置删除回调，在文件被删除时自动清理索引。
+func (s *Scanner) SetOnDelete(fn func(ctx context.Context, filePath string) error) {
+	s.onDelete = fn
+}
+
 // ProcessFile 处理单个文件：哈希闸门 → 适配器选择 → 解析 → 入库。
 //
 // 流程：
 //  1. 计算文件 SHA-256 哈希。
-//  2. 查询 store 中是否已有相同哈希的文件 → 跳过。
-//  3. 按语言选择适配器，解析文件得到 IR。
-//  4. 填充元信息（哈希、字节数、行数）。
-//  5. 调用 store.UpsertIR 完成增量入库。
+//  2. 如果文件不存在，触发删除回调并返回。
+//  3. 查询 store 中是否已有相同哈希的文件 → 跳过。
+//  4. 按语言选择适配器，解析文件得到 IR。
+//  5. 填充元信息（哈希、字节数、行数）。
+//  6. 调用 store.UpsertIR 完成增量入库。
+//  7. 增量索引回调（P8.3）。
 func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	span := trace.Start("process_file", "path", path)
 	defer span.End()
 
-	// 1. 计算哈希
+	// 1. 计算哈希，如果文件不存在则触发删除处理
 	h, err := sha256sum(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// 文件已被删除，触发删除回调
+			if s.onDelete != nil {
+				if err := s.onDelete(ctx, path); err != nil {
+					s.logger.Warn("delete callback failed", "path", path, "error", err)
+				}
+			}
+			metrics.IncCounter("scanner_processed_total", "deleted")
+			return nil
+		}
 		metrics.IncCounter("scanner_errors_total", "sha256")
 		return fmt.Errorf("sha256 %s: %w", path, err)
 	}

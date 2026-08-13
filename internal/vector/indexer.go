@@ -80,6 +80,11 @@ func (idx *Indexer) BuildIndex(ctx context.Context, ent TextEmbeddable) error {
 	return idx.store.Add(ctx, ent.ID(), vec)
 }
 
+// RemoveDocument 从向量存储中删除指定 ID 的文档。
+func (idx *Indexer) RemoveDocument(ctx context.Context, id string) error {
+	return idx.store.Delete(ctx, id)
+}
+
 // Enqueue 异步入队一个实体的索引构建任务。
 func (idx *Indexer) Enqueue(ctx context.Context, ent TextEmbeddable) <-chan error {
 	errC := make(chan error, 1)

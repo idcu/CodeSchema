@@ -2,7 +2,10 @@ package vector
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"unicode"
@@ -125,6 +128,66 @@ func (l *LocalEmbedder) Reset() {
 	defer l.mu.Unlock()
 	l.df = make(map[string]int)
 	l.docCnt = 0
+}
+
+// SaveIDF 将 IDF 词典持久化到文件。
+//
+// 使用 JSON 编码，纯标准库实现，不依赖外部包。
+// 用于跨重启保留 IDF 统计，避免每次启动后重新 Observe。
+func (l *LocalEmbedder) SaveIDF(path string) error {
+	l.mu.RLock()
+	dfCopy := make(map[string]int, len(l.df))
+	for k, v := range l.df {
+		dfCopy[k] = v
+	}
+	docCnt := l.docCnt
+	l.mu.RUnlock()
+
+	data := idfSaveData{
+		DocCnt: docCnt,
+		DF:     dfCopy,
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create idf file: %w", err)
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	return enc.Encode(data)
+}
+
+// LoadIDF 从文件加载 IDF 词典。
+//
+// 文件不存在时返回 nil（首次启动），不视为错误。
+func (l *LocalEmbedder) LoadIDF(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("open idf file: %w", err)
+	}
+	defer f.Close()
+
+	var data idfSaveData
+	if err := json.NewDecoder(f).Decode(&data); err != nil {
+		return fmt.Errorf("decode idf: %w", err)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.docCnt = data.DocCnt
+	l.df = data.DF
+	return nil
+}
+
+// idfSaveData IDF 持久化数据结构。
+type idfSaveData struct {
+	DocCnt int            `json:"doc_cnt"`
+	DF     map[string]int `json:"df"`
 }
 
 // hashToken 使用 FNV-1a 哈希将 token 映射到 uint64。

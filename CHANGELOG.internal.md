@@ -6,7 +6,34 @@
 
 ## 提交记录
 
-### Commit 16: feat(search): P8.3 自动索引构建与增量同步
+### Commit 17: perf(search): P8.3 优化 — IDF 持久化 / 异步索引 / 删除同步
+
+**Commit Hash**: `TBD`（待 commit 后填充）
+
+**核心改动点**：
+- `internal/vector/embedder_local.go` — LocalEmbedder 新增 SaveIDF/LoadIDF 方法，JSON 编码持久化 IDF 词典，重启后无需重新 Observe
+- `internal/config/config.go` — SearchConfig 新增 IDFDir 字段，默认 `./data/idf`
+- `internal/search/builder.go` — IndexBuilder 新增 StartAsync/StopAsync/EnqueueIndex 异步队列，支持后台 worker 异步索引（同步降级兼容）；新增 RemoveDocument/BuildAndRemove 方法，支持文件删除时清理 FTS 和向量索引
+- `internal/vector/indexer.go` — Indexer 新增 RemoveDocument 方法，委托 VectorStore.Delete
+- `internal/scanner/scanner.go` — Scanner 新增 onDelete 字段和 SetOnDelete 方法，ProcessFile 检测文件不存在时触发删除回调
+- `cmd/codeschema/main.go` — newSearcher 启动时自动加载 IDF 词典；scanCmd 全量构建后持久化 IDF；watchCmd 启动异步队列 + 全量构建后持久化 IDF + 设置删除回调
+
+**新增公共抽象**：
+- `LocalEmbedder.SaveIDF(path) / LoadIDF(path)` — IDF 词典持久化接口
+- `IndexBuilder.StartAsync/StopAsync/EnqueueIndex` — 异步索引队列
+- `IndexBuilder.RemoveDocument/BuildAndRemove` — 索引删除接口
+- `Indexer.RemoveDocument` — 向量索引删除
+- `Scanner.SetOnDelete` — 删除回调设置
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（19 个包，0 失败）
+- 新增方法：9 个（SaveIDF/LoadIDF/StartAsync/StopAsync/EnqueueIndex/RemoveDocument×2/BuildAndRemove/SetOnDelete）
+
+**遗留 TODO / 风险**：
+- 异步队列当前为单 worker 单 goroutine，高并发场景可扩展为多 worker
+- 删除索引时未反向删除 store 中的文件记录（索引清理仅为文档级，store 层文件记录由 PollWatcher 自动处理）
+- 异步索引错误仅通过 onError 回调通知，未集成全局日志系统
 
 **Commit Hash**: `d0f5f23`
 

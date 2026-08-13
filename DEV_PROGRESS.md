@@ -163,6 +163,7 @@ P8.3     [████████████████████] 100%
 - [x] **`cmd/codeschema/main.go`** — newSearcher 返回 searcher+builder，scanCmd 扫描后自动构建索引，watchCmd 启动时全量构建+增量回调，mcp/serve 命令集成 searcher
 - [x] 新增测试：10 个 builder 测试（New/BuildFromStore 空/有数据/无类文件/多文件/IndexDocument/BuildAndIndex/BuildAndIndex 文件不存在/buildClassIndexText/buildMethodIndexText）
 - [x] 验证数据：go build + go test 19 个包全部通过，0 失败
+- [x] P8.3 遗留 TODO 优化：IDF 词典持久化（SaveIDF/LoadIDF）、异步索引队列（StartAsync/StopAsync/EnqueueIndex）、删除文件同步清理索引（BuildAndRemove/SetOnDelete）
 
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割

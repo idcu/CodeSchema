@@ -160,6 +160,14 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
 	}
 
+	// 持久化 IDF 词典
+	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+	if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+		if err := builder.SaveIDF(idfFile); err != nil {
+			fmt.Printf("WARN: save IDF dictionary: %v\n", err)
+		}
+	}
+
 	return nil
 }
 
@@ -198,16 +206,32 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 
-	// 启动时全量构建索引
+	// 启动异步索引队列
+	builder.StartAsync(ctx, 64)
+	defer builder.StopAsync()
+
+	// 启动时全量构建索引（如果持久化索引存在则跳过）
 	if result, err := svc.BuildIndex(ctx); err != nil {
 		fmt.Printf("WARN: build index: %v\n", err)
 	} else {
 		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+		// 持久化 IDF 词典
+		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+			if err := builder.SaveIDF(idfFile); err != nil {
+				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
+			}
+		}
 	}
 
-	// 设置增量索引回调
+	// 设置增量索引回调（异步，非阻塞）
 	s.SetOnIndex(func(ctx context.Context, filePath string) error {
 		return builder.BuildAndIndex(ctx, st, filePath)
+	})
+
+	// 设置删除回调，文件被删除时自动清理索引
+	s.SetOnDelete(func(ctx context.Context, filePath string) error {
+		return builder.BuildAndRemove(ctx, st, filePath)
 	})
 
 	// 创建监听器
@@ -298,6 +322,12 @@ func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 	}
 
 	model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
+	// 加载持久化的 IDF 词典（如果存在）
+	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+	if err := model.LoadIDF(idfFile); err != nil {
+		log.Printf("WARN: load IDF dictionary (%s): %v, will rebuild on build", idfFile, err)
+	}
+
 	indexer := vector.NewIndexer(store, model, 2)
 	adapter := search.NewVectorAdapter(indexer)
 	searcher := search.NewSearcher(fts, adapter, nil)
