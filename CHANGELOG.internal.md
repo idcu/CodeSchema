@@ -8,7 +8,7 @@
 
 ### Commit 9: feat(analyzer): P3 多语言解析器 — Java Maven/Gradle 包路径解析
 
-**Commit Hash**: `待补充（commit 后写入）`
+**Commit Hash**: `1e8f9f0`
 
 **核心改动点**：
 - `internal/analyzer/resolver.go` — 新增文件，定义 `ImportResolver` 接口，实现 4 种解析器：
