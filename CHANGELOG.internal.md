@@ -8,7 +8,7 @@
 
 ### Commit 35: perf(bench): 多仓库 benchmark 真实运行 + README 同步 P18 进度
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `13661fc`
 
 **核心改动点**：
 - `README.md` — 当前状态从 P0-P13 更新为 P0-P18，新增 P14~P18 阶段说明行
