@@ -8,7 +8,7 @@
 
 ### Commit 20: deps(go): 安装外部依赖包 mattn/go-sqlite3 + yalue/onnxruntime_go
 
-**Commit Hash**: `待生成`
+**Commit Hash**: `a8e465f`
 
 **核心改动点**：
 - `go.mod` / `go.sum` — 新增 `github.com/mattn/go-sqlite3 v1.14.49` 和 `github.com/yalue/onnxruntime_go v1.32.1`（均从本地 Go 模块缓存安装，无需网络下载）
