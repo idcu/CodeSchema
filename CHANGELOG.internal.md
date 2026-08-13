@@ -6,9 +6,26 @@
 
 ## 提交记录
 
+### Commit 38: docs(onnxruntime): 新增 onnxruntime.dll 运行时依赖获取说明
+
+**Commit Hash**: `6d19b04`
+
+**核心改动点**：
+- `Makefile` — `build-cgo` 目标新增自动检测并复制 `down/onnxruntime/onnxruntime.dll` 到输出目录
+- `docs/dev/11-配置部署与路线图.md` — §9.5 环境要求新增 onnxruntime.dll 获取方式说明（下载链接、放置位置、自动复制机制）
+- `DEV_PROGRESS.md` — 已知问题 #4 状态从"部分解决"更新为"已解决"，标注当前使用 LocalEmbedder 无需 DLL
+
+**验证数据**：
+- `make build` — 不变（纯 Go 构建，不需要 DLL）
+- `make build-cgo` — 新增 DLL 自动复制逻辑，有 DLL 时复制，无 DLL 时静默跳过
+
+**遗留 TODO / 风险**：
+- 当前代码未实际使用 `onnxruntime_go`，语义检索走纯 Go `LocalEmbedder`，无需 DLL
+- 未来集成 ONNX 模型时需确保 `onnxruntime.dll` 版本与 `onnxruntime_go` 兼容
+
 ### Commit 37: fix(module): 更正 Go 模块名为 github.com/idcu/codeschema + 新增部署基础设施
 
-**Commit Hash**: `(待提交)`
+**Commit Hash**: `a61d4a5`
 
 **核心改动点**：
 - `go.mod` — 模块名从 `codeschema` 更正为 `github.com/idcu/codeschema`

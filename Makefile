@@ -31,6 +31,10 @@ build-cgo:
 		-ldflags "$(LDFLAGS) -X main.version=$(VERSION)" \
 		-o $(OUTPUT)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe,) \
 		./cmd/codeschema
+ifneq ($(wildcard down/onnxruntime/onnxruntime.dll),)
+	@echo "==> Copying onnxruntime.dll ..."
+	cp down/onnxruntime/onnxruntime.dll $(OUTPUT)/
+endif
 	@echo "==> Binary: $(OUTPUT)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe,)"
 
 # 测试

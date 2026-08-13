@@ -279,7 +279,7 @@ P18      [████████████████████] 100%
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决**：全部外部包已从本地安装（chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。
 2. ~~**轮询监听性能**~~ **已解决**：FsWatcher 已实现。
 3. ~~**tree-sitter C 绑定**~~ **已解决**：go-tree-sitter 已安装，自带 parser.c 源码，CGO 自编译。
-4. ~~**语义检索精度**~~ **部分解决**：onnxruntime_go 已安装，运行时需 onnxruntime.dll。
+4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`onnxruntime.dll` 可从 ONNX Runtime 官方 Releases 下载并放置到 `down/onnxruntime/`，`make build-cgo` 自动复制到输出目录。当前语义检索默认使用纯 Go LocalEmbedder，无需外部 DLL。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
 
 ## 接手说明
