@@ -19,9 +19,11 @@ import (
 	"codeschema/internal/parser"
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
+	"codeschema/internal/search"
 	"codeschema/internal/server"
 	"codeschema/internal/service"
 	"codeschema/internal/store"
+	"codeschema/internal/vector"
 	"codeschema/internal/watcher"
 )
 
@@ -206,6 +208,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
+	svc.WithSearcher(newSearcher())
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
@@ -229,6 +232,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
+	svc.WithSearcher(newSearcher())
 	httpSrv := server.NewHTTPServer(svc, *addr)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
@@ -236,4 +240,21 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
 	return httpSrv.Start(ctx)
+}
+
+// newSearcher 创建 P8.1 双路检索器，使用内存 mock 实现。
+//
+// 组成：
+//   - FTS: MemoryFTS（纯内存全文搜索）
+//   - 向量: MockEmbedder（128 维确定性哈希）+ MemoryStore + Indexer + VectorAdapter
+//   - 融合: 默认权重 Reranker（FTS 0.3 / 向量 0.7）
+//
+// P2 阶段将替换为 chromem-go 和 SQLite FTS5。
+func newSearcher() *search.Searcher {
+	fts := search.NewMemoryFTS()
+	store := vector.NewMemoryStore()
+	model := vector.NewMockEmbedder(128)
+	indexer := vector.NewIndexer(store, model, 2)
+	adapter := search.NewVectorAdapter(indexer)
+	return search.NewSearcher(fts, adapter, nil)
 }

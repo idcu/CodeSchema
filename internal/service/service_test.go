@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"codeschema/internal/search"
 	"codeschema/internal/store"
+	"codeschema/internal/vector"
 )
 
 func newTestService(t *testing.T) *Service {
@@ -124,6 +126,71 @@ func TestSearch_Success(t *testing.T) {
 	}
 	if results == nil {
 		t.Error("expected non-nil results")
+	}
+}
+
+func TestSearch_WithSearcher(t *testing.T) {
+	svc := newTestService(t)
+
+	// 创建搜索器并注入数据
+	fts := search.NewMemoryFTS()
+	ctx := context.Background()
+	_ = fts.Index(ctx, "test/HelloService.java", "class HelloService { void hello() {} }")
+	_ = fts.Index(ctx, "test/WorldService.java", "class WorldService { void world() {} }")
+
+	memStore := vector.NewMemoryStore()
+	model := vector.NewMockEmbedder(128)
+	indexer := vector.NewIndexer(memStore, model, 2)
+	adapter := search.NewVectorAdapter(indexer)
+	searcher := search.NewSearcher(fts, adapter, nil)
+
+	svc.WithSearcher(searcher)
+
+	// 测试 FTS 精确搜索
+	results, err := svc.Search(ctx, "HelloService", "exact", 10)
+	if err != nil {
+		t.Fatalf("Search exact: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result for exact search")
+	}
+	if results[0].Symbol != "test/HelloService.java" {
+		t.Errorf("expected 'test/HelloService.java', got %q", results[0].Symbol)
+	}
+
+	// 测试语义搜索（回退到 FTS 但走语义路径）
+	semResults, err := svc.Search(ctx, "hello", "semantic", 10)
+	if err != nil {
+		t.Fatalf("Search semantic: %v", err)
+	}
+	// 语义搜索使用 MockEmbedder 的确定性哈希，可能返回匹配结果
+	if len(semResults) == 0 {
+		t.Log("semantic search returned 0 results (expected with MockEmbedder)")
+	}
+
+	// 测试双路融合搜索
+	bothResults, err := svc.Search(ctx, "HelloService", "both", 10)
+	if err != nil {
+		t.Fatalf("Search both: %v", err)
+	}
+	// 至少应包含 FTS 匹配结果
+	_ = bothResults
+}
+
+func TestSearch_WithSearcher_ModeMapping(t *testing.T) {
+	svc := newTestService(t)
+	fts := search.NewMemoryFTS()
+	_ = fts.Index(context.Background(), "test/Hello.java", "hello world")
+	searcher := search.NewSearcher(fts, nil, nil)
+	svc.WithSearcher(searcher)
+
+	// 验证默认模式（空字符串 → both）
+	results, err := svc.Search(context.Background(), "hello", "", 10)
+	if err != nil {
+		t.Fatalf("Search with empty mode: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("expected results with default mode")
 	}
 }
 

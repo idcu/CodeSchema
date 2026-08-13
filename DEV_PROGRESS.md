@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 22:30
-> 当前阶段：P7 已完成 — 配置系统（YAML 解析）
-> 下一个阶段：P8 — 语义检索 / 全文搜索（需网络下载 chromem-go）
+> 更新时间：2026-08-13 23:27
+> 当前阶段：P8.1 已完成 — 语义检索 / 全文搜索（P8 骨架）
+> 下一个阶段：P8.2 — 集成 chromem-go 和 SQLite FTS5（需网络下载外部包）
 
 ---
 
@@ -18,6 +18,7 @@ P4       [████████████████████] 100%
 P5       [████████████████████] 100%
 P6       [████████████████████] 100%
 P7       [████████████████████] 100%
+P8.1     [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -129,6 +130,20 @@ P7       [████████████████████] 100%
 - [x] **MCP Server 增强**：添加 `SetAuthToken` 方法 + `authMiddleware` + `corsMiddleware`，支持 Bearer token 认证
 - [x] 测试覆盖：25 个测试（默认值 1 + 加载 6 + 验证 4 + YAML 解析 7 + 值解析 7），15 个包全部通过
 
+### P8.1 — 语义检索 / 全文搜索骨架（内存 mock 实现）
+- [x] **`internal/vector/store.go`** — 向量库接口（VectorStore）定义 + MemoryStore 内存实现（余弦相似度计算）
+- [x] **`internal/vector/indexer.go`** — 异步 embedding 索引构建器（Indexer），支持同步/异步/批量构建，worker pool 并发控制
+- [x] **`internal/vector/model.go`** — Embedder 接口定义 + MockEmbedder 确定性哈希实现（128 维）
+- [x] **`internal/search/fts.go`** — FTSEngine 接口定义 + MemoryFTS 内存实现（精确/前缀/模糊/布尔模式，TF-IDF 简化版评分）
+- [x] **`internal/search/searcher.go`** — 双路检索器（Searcher），整合 FTS 和向量搜索，支持 exact/semantic/both 三种模式
+- [x] **`internal/search/reranker.go`** — 融合重排器（Reranker），归一化 FTS 和向量得分 → 加权融合 → 去重 → 降序排列
+- [x] **`internal/search/adapter.go`** — VectorAdapter 桥接 vector.Indexer → search.VectorSearcher 接口，避免循环依赖
+- [x] **`internal/service/service.go`** — 新增 `WithSearcher` 方法注入搜索器，`Search` 方法接入双路检索逻辑
+- [x] **`cmd/codeschema/main.go`** — 新增 `newSearcher` 工厂函数，`mcp` 和 `serve` 命令均集成搜索器
+- [x] **HTTP 端点**：`GET /search` 支持 `q`/`mode`/`limit` 参数，已接入双路检索
+- [x] **MCP 工具**：`search_symbols` 工具已接入双路检索
+- [x] 测试覆盖：vector 包 13 个 + search 包 17 个 + service 包 3 个新增搜索测试（共 33 个新测试），17 个包全部通过
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -139,14 +154,16 @@ P7       [████████████████████] 100%
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P8 | 语义检索 / 全文搜索 | `docs/dev/09-语义检索与全文搜索.md` | 需网络下载 chromem-go |
+| P8.2 | 集成 chromem-go 和 SQLite FTS5 | `docs/dev/09-语义检索与全文搜索.md` | 需网络下载 chromem-go / go-sqlite3 |
+| P9 | 配置热重载 / 多配置源 | `docs/dev/11-配置部署与路线图.md` | P7 完成 |
 
 ## 已知问题
 
 1. **网络不可用**：无法下载 `mattn/go-sqlite3` 等外部包。当前使用纯 Go 文件存储（FileStore），SQLite 实现作为 DDL 参考保留。待网络恢复后，可切换为 SQLite 存储。
 2. **轮询监听性能**：当前 PollWatcher 基于轮询（1s 间隔），适合开发/小仓库场景。生产环境建议切换为 fsnotify 原生监听（需安装外部包）。
 3. **tree-sitter C 绑定**：tree-sitter 适配器需要 CGO 和 tree-sitter C 运行时，需单独安装。
-4. **语义检索依赖**：chromem-go / bge-small-zh 等需要网络下载，当前无法实现。
+4. **语义检索依赖**：P8.1 使用内存 mock 实现（MockEmbedder + MemoryFTS），P8.2 需网络下载 chromem-go / bge-small-zh 切换为真实引擎。
+5. **向量索引为空**：当前 MemoryStore 和 MemoryFTS 在启动时为空，需 P9 实现从 Store 数据自动构建索引。
 
 ## 接手说明
 
@@ -156,4 +173,4 @@ P7       [████████████████████] 100%
 4. 运行测试：`go test ./...`（15 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：`4f9a64f`（P6 可观测性增强）
+7. 最新提交：P8.1 语义检索骨架（参见 CHANGELOG.internal.md Commit 14）

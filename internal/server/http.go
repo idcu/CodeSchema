@@ -165,11 +165,11 @@ func (h *HTTPServer) handleHealthVector(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
 		return
 	}
-	// P0: 向量库尚未实现，返回占位状态
+	// P8.1: 内存向量索引已实现，支持语义搜索
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
-		"type":   "none",
-		"note":   "Vector index not implemented (P0 placeholder)",
+		"type":   "memory",
+		"note":   "In-memory vector index active (P8.1, P2 for chromem-go)",
 	})
 }
 

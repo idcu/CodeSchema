@@ -9,13 +9,15 @@ import (
 	"fmt"
 	"time"
 
+	"codeschema/internal/search"
 	"codeschema/internal/store"
 )
 
 // Service 是业务逻辑层，封装所有查询操作。
 type Service struct {
-	store  store.Store
+	store    store.Store
 	startTime time.Time
+	searcher *search.Searcher
 }
 
 // NewService 创建 Service 实例。
@@ -24,6 +26,14 @@ func NewService(st store.Store) *Service {
 		store:     st,
 		startTime: time.Now(),
 	}
+}
+
+// WithSearcher 设置双路检索器，启用语义搜索能力。
+//
+// 当 searcher 为 nil 时，Search 方法回退到 P0 占位行为（返回空结果）。
+func (s *Service) WithSearcher(searcher *search.Searcher) *Service {
+	s.searcher = searcher
+	return s
 }
 
 // HealthStatus 健康检查响应。
@@ -145,14 +155,21 @@ func (s *Service) GetTests(ctx context.Context, method string, minConfidence int
 
 // SearchResult 搜索结果项。
 type SearchResult struct {
-	Symbol  string `json:"symbol"`
-	Kind    string `json:"kind"`
-	File    string `json:"file"`
+	Symbol  string  `json:"symbol"`
+	Kind    string  `json:"kind"`
+	File    string  `json:"file"`
 	Score   float64 `json:"score"`
-	Snippet string `json:"snippet,omitempty"`
+	Snippet string  `json:"snippet,omitempty"`
 }
 
-// Search 搜索符号（P0 骨架，返回占位数据）。
+// Search 搜索符号，支持双路检索（FTS 精确匹配 + 向量语义搜索）。
+//
+// mode 参数：
+//   - "exact": 仅 FTS 精确搜索
+//   - "semantic": 仅向量语义搜索
+//   - "both"（默认）: FTS + 向量融合检索
+//
+// 当 searcher 未设置时，回退到 P0 占位行为（返回空结果）。
 func (s *Service) Search(ctx context.Context, query string, mode string, limit int) ([]SearchResult, error) {
 	if query == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "query is required"}
@@ -160,6 +177,37 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 	if limit <= 0 {
 		limit = 20
 	}
+
+	// 如果有搜索器，使用双路检索
+	if s.searcher != nil {
+		searchMode := search.SearchModeBoth
+		switch mode {
+		case "exact":
+			searchMode = search.SearchModeExact
+		case "semantic":
+			searchMode = search.SearchModeSemantic
+		}
+
+		results, err := s.searcher.Search(ctx, query, searchMode, limit)
+		if err != nil {
+			return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search: %v", err)}
+		}
+
+		// 映射为 service.SearchResult
+		svcResults := make([]SearchResult, 0, len(results))
+		for _, r := range results {
+			svcResults = append(svcResults, SearchResult{
+				Symbol:  r.Symbol,
+				Kind:    r.Kind,
+				File:    r.File,
+				Score:   r.Score,
+				Snippet: r.Snippet,
+			})
+		}
+		return svcResults, nil
+	}
+
+	// 回退到 P0 占位行为
 	return []SearchResult{}, nil
 }
 

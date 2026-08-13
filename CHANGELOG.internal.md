@@ -6,9 +6,40 @@
 
 ## 提交记录
 
+### Commit 14: feat(search): P8.1 语义检索骨架 — 双路检索（FTS + 向量）+ 融合重排 + 内存 mock
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `internal/vector/store.go` — 向量库接口（VectorStore）定义，MemoryStore 实现（余弦相似度，线程安全）
+- `internal/vector/indexer.go` — 异步 embedding 索引构建器（Indexer），支持同步/异步/批量构建，worker pool 并发控制
+- `internal/vector/model.go` — Embedder/TextEmbeddable 接口定义，MockEmbedder 确定性哈希实现（128 维）
+- `internal/search/fts.go` — FTSEngine 接口定义，MemoryFTS 内存实现（精确/前缀/模糊/布尔模式，TF-IDF 简化版）
+- `internal/search/searcher.go` — 双路检索器（Searcher），整合 FTS + 向量，支持 exact/semantic/both 三种模式
+- `internal/search/reranker.go` — 融合重排器（Reranker），归一化 → 加权融合 → 去重 → 降序
+- `internal/search/adapter.go` — VectorAdapter 桥接 vector.Indexer → search.VectorSearcher 接口
+- `internal/service/service.go` — 新增 `WithSearcher` 方法，`Search` 方法接入双路检索逻辑
+- `internal/server/http.go` — 更新 `/health/vector` 端点反映向量搜索已实现
+- `cmd/codeschema/main.go` — 新增 `newSearcher` 工厂函数，`mcp`/`serve` 命令均集成搜索器
+- 文档同步：docs/dev/09-语义检索与全文搜索.md（更新 P8.1 完成标准和文件清单）、DEV_PROGRESS.md（新增 P8.1 进度条）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（17 个包，0 失败）
+- vector 包 13 个测试全部通过（MemoryStore CRUD + Indexer 构建/搜索 + MockEmbedder）
+- search 包 17 个测试全部通过（MemoryFTS 7 个 + Reranker 6 个 + Searcher 3 个 + 辅助函数 1 个）
+- service 包 3 个新增搜索测试（WithSearcher + 模式映射 + 精确匹配）
+- 新增测试覆盖：向量存储添加/搜索/批量/删除/余弦相似度、Indexer 构建/批量/异步 worker、全文搜索精确/模糊/前缀/空查询/空索引/删除、Reranker 默认权重/FTS 仅/向量仅/融合/上限/空输入、Searcher 精确模式/空查询/默认上限、Service Search WithSearcher 集成/模式映射
+
+**遗留 TODO / 风险**：
+- 向量索引为空（MemoryStore 和 MemoryFTS 启动时无数据），需 P9 实现从 Store 数据自动构建索引
+- 当前使用内存 mock（MockEmbedder + MemoryFTS），P8.2 需切换为 chromem-go 和 SQLite FTS5
+- 搜索结果中 Kind/File 字段尚未填充（FTS 和向量结果均只填充 Symbol/Score），P2 完善
+- search.SearchResultFromVector 函数使用类型断言，当前未使用，后续可移除或重构为 adapter 模式
+
 ### Commit 13: feat(config): P7 配置系统 — YAML 解析 + CLI 集成 + MCP 认证增强
 
-**Commit Hash**: `TBD`
+**Commit Hash**: `ab2df56`
 
 **核心改动点**：
 - `internal/config/config.go` — 新增配置模块，定义 Config 及 7 个子结构体（Project/Storage/Parser/AI/Server/Watcher/Scanner），含 DefaultConfig 默认值、Load 加载函数（支持 .yaml/.yml/.json）、Validate 校验函数
