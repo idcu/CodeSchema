@@ -43,6 +43,7 @@ vendor/
 # Dependency archives (not needed for build)
 down/*.zip
 down/*.tar.gz
+down/*.tgz
 down/*.gz
 down/go.mod
 down/go.sum
