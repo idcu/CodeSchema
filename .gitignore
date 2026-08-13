@@ -1,0 +1,41 @@
+# Binaries
+codameta
+codameta.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/bin/
+/dist/
+
+# Data files
+*.db
+*.db-wal
+*.db-shm
+vector.db
+scipout/
+
+# Config
+.env
+config.local.yaml
+
+# Dependencies
+node_modules/
+vendor/
