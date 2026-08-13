@@ -6,6 +6,35 @@
 
 ## 提交记录
 
+### Commit 27: build(project): P13 构建脚本 / CI 配置 / 容器化 / 部署文档
+
+**Commit Hash**: `7a4530e`
+
+**核心改动点**：
+- `Makefile` — 构建自动化脚本，支持 10 个目标（build/test/clean/cross/lint/bench/run/help），跨平台交叉编译 linux/darwin/windows × amd64/arm64
+- `Dockerfile` — 多阶段构建，golang:1.25-alpine → alpine:3.20，CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
+- `.github/workflows/ci.yml` — GitHub Actions CI 流水线，4 个 Job：test（3 平台）+ race（竞态检测）+ cross（交叉编译）+ docker（tag 推送镜像）
+- `docs/dev/11-配置部署与路线图.md` — 新增 §9 P13 构建与部署指南（Makefile 目标表/Docker 命令/CI Job 说明/部署形态/环境要求/检查清单）
+- `DEV_PROGRESS.md` — 更新 P13 完成状态，进度条 P13 100%，下一步规划改为按需迭代
+
+**新增公共抽象**：
+- 无（基础设施文件，不涉及公共 API）
+
+**影响范围**：
+- 新增 Makefile/Dockerfile/.github/workflows/ci.yml — 不影响现有 Go 代码
+- `docs/dev/11-配置部署与路线图.md` — 新增 §9，不修改已有内容
+
+**验证数据**：
+- go build — 通过
+- go test ./... — 18 个包全部通过，0 失败
+- 新增 3 个文件 + 2 个文档更新，共 420 行新增
+- 所有 P0-P13 阶段全部完成，项目达到生产级可运行状态
+
+**遗留 TODO / 风险**：
+- 交叉编译（CGO_ENABLED=0）生成的二进制不含 SQLite 和 tree-sitter，需在目标平台使用 CGO 构建或预装运行时
+- Dockerfile 构建依赖 alpine 镜像的 GCC 工具链，若 Go 版本升级需同步更新基础镜像标签
+- GitHub Actions CI 的 Docker 镜像推送未配置 registry 认证，需在仓库 Secrets 中配置 DOCKER_USERNAME/DOCKER_PASSWORD
+
 ### Commit 26: feat(robust): P12 生产级健壮性 — 优雅关闭 / 重试机制 / Panic 恢复
 
 **Commit Hash**: `0e77740`
