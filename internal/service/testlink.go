@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"strings"
 
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // TestLink 测试关联结果。

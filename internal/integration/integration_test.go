@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/scanner"
-	"codeschema/internal/search"
-	"codeschema/internal/service"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // mockParser 实现 ParserPlugin 接口，返回预定义的 IR 数据。

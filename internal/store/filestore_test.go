@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 func TestFileStore_OpenClose(t *testing.T) {

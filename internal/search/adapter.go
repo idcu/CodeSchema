@@ -3,7 +3,7 @@ package search
 import (
 	"context"
 
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // VectorAdapter 适配 vector.Indexer 实现 search.VectorSearcher 接口。

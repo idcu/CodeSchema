@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // mockStoreWithTestData 实现 Store 接口，用于测试关联测试。
@@ -74,17 +74,17 @@ func TestFindTestLinks_Naming(t *testing.T) {
 			{ID: 2, AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
 		},
 		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "codeschema/internal/order.OrderService"}},
-			2: {{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "codeschema/internal/order.OrderServiceTest"}},
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest"}},
 		},
 		methods: map[int64][]store.MethodRecord{
 			10: {
-				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "codeschema/internal/order.OrderService.getOrder"},
-				{ID: 101, ClassID: 10, Name: "createOrder", FullName: "codeschema/internal/order.OrderService.createOrder"},
+				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"},
+				{ID: 101, ClassID: 10, Name: "createOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.createOrder"},
 			},
 			20: {
-				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "codeschema/internal/order.OrderServiceTest.TestGetOrder"},
-				{ID: 201, ClassID: 20, Name: "TestCreateOrder", FullName: "codeschema/internal/order.OrderServiceTest.TestCreateOrder"},
+				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestGetOrder"},
+				{ID: 201, ClassID: 20, Name: "TestCreateOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestCreateOrder"},
 			},
 		},
 	}
@@ -92,7 +92,7 @@ func TestFindTestLinks_Naming(t *testing.T) {
 	svc := NewService(st)
 
 	// 测试 getOrder 的关联单测
-	links, err := svc.FindTestLinks(ctx, "codeschema/internal/order.OrderService.getOrder", 60)
+	links, err := svc.FindTestLinks(ctx, "github.com/idcu/codeschema/internal/order.OrderService.getOrder", 60)
 	if err != nil {
 		t.Fatalf("FindTestLinks: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestFindTestLinks_Naming(t *testing.T) {
 	// 验证命名策略匹配
 	found := false
 	for _, link := range links {
-		if link.TestMethod == "codeschema/internal/order.OrderServiceTest.TestGetOrder" &&
+		if link.TestMethod == "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestGetOrder" &&
 			link.Strategy == "naming" {
 			found = true
 			if link.Confidence != 70 {
@@ -126,15 +126,15 @@ func TestFindTestLinks_SameTag(t *testing.T) {
 			{ID: 2, AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
 		},
 		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "codeschema/internal/order.OrderService"}},
-			2: {{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "codeschema/internal/order.OrderServiceTest"}},
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest"}},
 		},
 		methods: map[int64][]store.MethodRecord{
 			10: {
-				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "codeschema/internal/order.OrderService.getOrder"},
+				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"},
 			},
 			20: {
-				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "codeschema/internal/order.OrderServiceTest.TestGetOrder"},
+				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestGetOrder"},
 			},
 		},
 		classTags: map[int64][]string{
@@ -148,7 +148,7 @@ func TestFindTestLinks_SameTag(t *testing.T) {
 
 	svc := NewService(st)
 
-	links, err := svc.FindTestLinks(ctx, "codeschema/internal/order.OrderService.getOrder", 60)
+	links, err := svc.FindTestLinks(ctx, "github.com/idcu/codeschema/internal/order.OrderService.getOrder", 60)
 	if err != nil {
 		t.Fatalf("FindTestLinks: %v", err)
 	}
@@ -174,24 +174,24 @@ func TestFindTestLinks_Dependency(t *testing.T) {
 	ctx := context.Background()
 	st := &mockStoreWithTestData{
 		files: []*store.FileRecord{
-			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go", Imports: []string{"codeschema/internal/payment"}},
+			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go", Imports: []string{"github.com/idcu/codeschema/internal/payment"}},
 			{ID: 2, AbsolutePath: "/project/internal/payment/service.go", Language: "go"},
 			{ID: 3, AbsolutePath: "/project/internal/payment/service_test.go", Language: "go"},
 		},
 		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "codeschema/internal/order.OrderService"}},
-			2: {{ID: 20, FileID: 2, Name: "PaymentService", FullName: "codeschema/internal/payment.PaymentService"}},
-			3: {{ID: 30, FileID: 3, Name: "PaymentServiceTest", FullName: "codeschema/internal/payment.PaymentServiceTest"}},
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "PaymentService", FullName: "github.com/idcu/codeschema/internal/payment.PaymentService"}},
+			3: {{ID: 30, FileID: 3, Name: "PaymentServiceTest", FullName: "github.com/idcu/codeschema/internal/payment.PaymentServiceTest"}},
 		},
 		methods: map[int64][]store.MethodRecord{
 			10: {
-				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "codeschema/internal/order.OrderService.getOrder"},
+				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"},
 			},
 			20: {
-				{ID: 200, ClassID: 20, Name: "processPayment", FullName: "codeschema/internal/payment.PaymentService.processPayment"},
+				{ID: 200, ClassID: 20, Name: "processPayment", FullName: "github.com/idcu/codeschema/internal/payment.PaymentService.processPayment"},
 			},
 			30: {
-				{ID: 300, ClassID: 30, Name: "TestProcessPayment", FullName: "codeschema/internal/payment.PaymentServiceTest.TestProcessPayment"},
+				{ID: 300, ClassID: 30, Name: "TestProcessPayment", FullName: "github.com/idcu/codeschema/internal/payment.PaymentServiceTest.TestProcessPayment"},
 			},
 		},
 	}
@@ -199,7 +199,7 @@ func TestFindTestLinks_Dependency(t *testing.T) {
 	svc := NewService(st)
 
 	// OrderService 引用了 payment 包，所以 processPayment 应关联到 TestProcessPayment
-	links, err := svc.FindTestLinks(ctx, "codeschema/internal/payment.PaymentService.processPayment", 60)
+	links, err := svc.FindTestLinks(ctx, "github.com/idcu/codeschema/internal/payment.PaymentService.processPayment", 60)
 	if err != nil {
 		t.Fatalf("FindTestLinks: %v", err)
 	}
@@ -233,10 +233,10 @@ func TestFindTestLinks_EmptyMethod(t *testing.T) {
 			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 		},
 		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "codeschema/internal/order.OrderService"}},
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
 		},
 		methods: map[int64][]store.MethodRecord{
-			10: {{ID: 100, ClassID: 10, Name: "getOrder", FullName: "codeschema/internal/order.OrderService.getOrder"}},
+			10: {{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"}},
 		},
 	}
 
@@ -254,15 +254,15 @@ func TestFindTestLinks_NoTestFiles(t *testing.T) {
 			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 		},
 		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "codeschema/internal/order.OrderService"}},
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
 		},
 		methods: map[int64][]store.MethodRecord{
-			10: {{ID: 100, ClassID: 10, Name: "getOrder", FullName: "codeschema/internal/order.OrderService.getOrder"}},
+			10: {{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"}},
 		},
 	}
 
 	svc := NewService(st)
-	links, err := svc.FindTestLinks(ctx, "codeschema/internal/order.OrderService.getOrder", 60)
+	links, err := svc.FindTestLinks(ctx, "github.com/idcu/codeschema/internal/order.OrderService.getOrder", 60)
 	if err != nil {
 		t.Fatalf("FindTestLinks: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestExtractClassFQN(t *testing.T) {
 		expected  string
 	}{
 		{"com.example.OrderService.getOrder", "com.example.OrderService"},
-		{"codeschema/internal/order.OrderService.getOrder", "codeschema/internal/order.OrderService"},
+		{"github.com/idcu/codeschema/internal/order.OrderService.getOrder", "github.com/idcu/codeschema/internal/order.OrderService"},
 		{"OrderService", "OrderService"},
 		{"", ""},
 	}

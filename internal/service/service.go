@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"codeschema/internal/search"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // Service 是业务逻辑层，封装所有查询操作。

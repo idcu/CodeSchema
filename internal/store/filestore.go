@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // FileStore 基于 JSON 文件的轻量存储实现。

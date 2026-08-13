@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeschema/internal/errors"
-	"codeschema/internal/parser/adapter"
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/parser/adapter"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // CodeGraphAdapter 直读 CodeGraph SQLite 数据库的适配器。

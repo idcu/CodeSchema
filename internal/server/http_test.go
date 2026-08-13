@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"codeschema/internal/service"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 func newTestHTTPServer(t *testing.T) *HTTPServer {

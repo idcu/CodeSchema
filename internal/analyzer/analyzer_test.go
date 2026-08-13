@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // mockStore 实现 store.Store 接口，用于分析器测试。
@@ -686,9 +686,9 @@ func TestResolveImport_GoModule(t *testing.T) {
 	idx := buildImportIndex(ms.files)
 
 	// 未设置 modulePath 时，回退到启发式匹配
-	// "codeschema/handler" 的最后一段 "handler" 匹配 handler.go
+	// "github.com/idcu/codeschema/handler" 的最后一段 "handler" 匹配 handler.go
 	a0 := NewAnalyzer(ms)
-	targets := a0.resolveImport("codeschema/handler", idx)
+	targets := a0.resolveImport("github.com/idcu/codeschema/handler", idx)
 	if len(targets) == 0 {
 		t.Error("expected resolveImport to fallback to heuristic match for 'codeschema/handler'")
 	}
@@ -698,7 +698,7 @@ func TestResolveImport_GoModule(t *testing.T) {
 	a.SetModulePath("codeschema")
 
 	// 本模块路径：codeschema 前缀 + 不存在的包 → 精确解析优先，找不到则回退
-	targets = a.resolveImport("codeschema/nonexistent", idx)
+	targets = a.resolveImport("github.com/idcu/codeschema/nonexistent", idx)
 	// 不存在的包，预期为空
 	if len(targets) != 0 {
 		t.Errorf("expected nil for nonexistent module package, got %v", targets)
@@ -725,7 +725,7 @@ func TestResolveImport_GoModuleExact(t *testing.T) {
 	a.SetModulePath("codeschema")
 
 	// 策略 0: codeschema/internal/store → "internal/store" 应精确匹配
-	targets := a.resolveImport("codeschema/internal/store", idx)
+	targets := a.resolveImport("github.com/idcu/codeschema/internal/store", idx)
 	if len(targets) == 0 {
 		t.Error("expected Go module resolution to find target for 'codeschema/internal/store'")
 	} else {
@@ -1100,7 +1100,7 @@ func TestCompositeResolver_Priority(t *testing.T) {
 	c := NewCompositeResolver(goR, javaR, heuristic)
 
 	// 1. GoResolver 精确匹配应优先：codeschema/internal/store → internal/store
-	targets := c.Resolve("codeschema/internal/store", idx)
+	targets := c.Resolve("github.com/idcu/codeschema/internal/store", idx)
 	if len(targets) == 0 {
 		t.Error("expected GoResolver to match 'codeschema/internal/store'")
 	}

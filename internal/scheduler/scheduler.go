@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"codeschema/internal/robust"
+	"github.com/idcu/codeschema/internal/robust"
 )
 
 // Scheduler 是事件调度器，负责防抖合并与排队。

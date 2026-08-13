@@ -17,9 +17,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeschema/internal/errors"
-	"codeschema/internal/parser"
-	"codeschema/internal/parser/adapter"
+	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser/adapter"
 )
 
 // SCIPIndex 表示 SCIP index 文件的结构。

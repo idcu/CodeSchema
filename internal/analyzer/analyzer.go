@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeschema/internal/ai"
-	"codeschema/internal/log"
-	"codeschema/internal/metrics"
-	"codeschema/internal/store"
-	"codeschema/internal/trace"
+	"github.com/idcu/codeschema/internal/ai"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/metrics"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/trace"
 )
 
 // init 注册分析器模块的监控指标。
@@ -348,7 +348,7 @@ func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error)
 //
 // 对于每个文件，提取其路径中的关键路径段作为索引键。
 // 例如："/project/internal/store/store.go" 会生成
-// "store"、"internal/store"、"codeschema/internal/store" 等索引键。
+// "store"、"internal/store"、"github.com/idcu/codeschema/internal/store" 等索引键。
 func buildImportIndex(files []*store.FileRecord) map[string][]string {
 	idx := make(map[string][]string)
 	for _, f := range files {

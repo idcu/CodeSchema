@@ -14,8 +14,8 @@ import (
 	"regexp"
 	"strings"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/parser/adapter"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser/adapter"
 )
 
 // langPatterns 每种语言的解析模式。

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/search"
 )
 
 // TestMultiRepo_CollectMetrics 多仓库基准测试：采集每个仓库的 scan→index→search 指标并输出对比报告。

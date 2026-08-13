@@ -13,9 +13,9 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"codeschema/internal/robust"
-	"codeschema/internal/scheduler"
-	"codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/robust"
+	"github.com/idcu/codeschema/internal/scheduler"
+	"github.com/idcu/codeschema/internal/scanner"
 )
 
 // Watcher 是文件监听器的统一接口。

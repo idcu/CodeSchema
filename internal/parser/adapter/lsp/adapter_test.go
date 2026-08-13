@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // TestMain 支持 mock LSP 服务器子进程模式。

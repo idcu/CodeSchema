@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/search"
 )
 
 // BenchmarkRealRepo_ScanAndIndex 基准测试：扫描真实仓库并构建索引。

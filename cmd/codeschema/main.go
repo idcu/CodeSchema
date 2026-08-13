@@ -16,17 +16,17 @@ import (
 	"syscall"
 	"time"
 
-	"codeschema/internal/config"
-	"codeschema/internal/parser"
-	"codeschema/internal/robust"
-	"codeschema/internal/scheduler"
-	"codeschema/internal/scanner"
-	"codeschema/internal/search"
-	"codeschema/internal/server"
-	"codeschema/internal/service"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
-	"codeschema/internal/watcher"
+	"github.com/idcu/codeschema/internal/config"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/robust"
+	"github.com/idcu/codeschema/internal/scheduler"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/server"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/watcher"
 )
 
 var (

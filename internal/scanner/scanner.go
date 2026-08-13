@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeschema/internal/log"
-	"codeschema/internal/metrics"
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
-	"codeschema/internal/trace"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/metrics"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/trace"
 )
 
 // init 注册扫描器模块的监控指标。

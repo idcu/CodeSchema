@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 func TestIndexBuilder_New(t *testing.T) {
@@ -76,7 +76,7 @@ func TestIndexBuilder_BuildFromStore_WithData(t *testing.T) {
 	classes := []parser.ClassIR{
 		{
 			Name:     "IndexBuilder",
-			FullName: "codeschema/internal/search.IndexBuilder",
+			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Type:     "CLASS",
 			Doc:      "IndexBuilder 自动索引构建器，从 Store 读取数据构建 FTS 和向量索引",
 		},
@@ -94,14 +94,14 @@ func TestIndexBuilder_BuildFromStore_WithData(t *testing.T) {
 			Name:        "BuildFromStore",
 			Signature:   "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
 			ReturnType:  "(*BuildResult, error)",
-			ClassFQN:    "codeschema/internal/search.IndexBuilder",
+			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Doc:         "从 Store 读取所有数据，构建 FTS 和向量索引",
 		},
 		{
 			Name:        "BuildAndIndex",
 			Signature:   "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
 			ReturnType:  "error",
-			ClassFQN:    "codeschema/internal/search.IndexBuilder",
+			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Doc:         "从 Store 读取单个文件的类和方法，构建索引文档并入库",
 		},
 	}
@@ -199,7 +199,7 @@ func TestIndexBuilder_BuildFromStore_MultipleFiles(t *testing.T) {
 	classes1 := []parser.ClassIR{
 		{
 			Name:     "Service",
-			FullName: "codeschema/internal/service.Service",
+			FullName: "github.com/idcu/codeschema/internal/service.Service",
 			Doc:      "Service 业务逻辑层",
 		},
 	}
@@ -208,12 +208,12 @@ func TestIndexBuilder_BuildFromStore_MultipleFiles(t *testing.T) {
 		{
 			Name:        "Health",
 			Signature:   "Health(ctx context.Context) *HealthStatus",
-			ClassFQN:    "codeschema/internal/service.Service",
+			ClassFQN:    "github.com/idcu/codeschema/internal/service.Service",
 		},
 		{
 			Name:        "Search",
 			Signature:   "Search(ctx context.Context, q string, mode string, limit int) ([]SearchResult, error)",
-			ClassFQN:    "codeschema/internal/service.Service",
+			ClassFQN:    "github.com/idcu/codeschema/internal/service.Service",
 		},
 	}
 	st.UpsertMethods(ctx, 2, methods1)
@@ -226,7 +226,7 @@ func TestIndexBuilder_BuildFromStore_MultipleFiles(t *testing.T) {
 	classes2 := []parser.ClassIR{
 		{
 			Name:     "Store",
-			FullName: "codeschema/internal/store.Store",
+			FullName: "github.com/idcu/codeschema/internal/store.Store",
 			Type:     "INTERFACE",
 			Doc:      "Store 存储层统一接口",
 		},
@@ -258,7 +258,7 @@ func TestIndexBuilder_IndexDocument(t *testing.T) {
 	b := NewIndexBuilder(fts, idx, em)
 
 	ctx := context.Background()
-	err := b.IndexDocument(ctx, "class:1", "codeschema/internal/search.IndexBuilder 自动索引构建器")
+	err := b.IndexDocument(ctx, "class:1", "github.com/idcu/codeschema/internal/search.IndexBuilder 自动索引构建器")
 	if err != nil {
 		t.Fatalf("IndexDocument: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestIndexBuilder_BuildAndIndex(t *testing.T) {
 	classes := []parser.ClassIR{
 		{
 			Name:     "IndexBuilder",
-			FullName: "codeschema/internal/search.IndexBuilder",
+			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Doc:      "自动索引构建器",
 		},
 	}
@@ -306,7 +306,7 @@ func TestIndexBuilder_BuildAndIndex(t *testing.T) {
 			Name:        "BuildAndIndex",
 			Signature:   "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
 			ReturnType:  "error",
-			ClassFQN:    "codeschema/internal/search.IndexBuilder",
+			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
 		},
 	}
 	st.UpsertMethods(ctx, 2, methods)
@@ -349,7 +349,7 @@ func TestIndexBuilder_BuildAndIndex_FileNotFound(t *testing.T) {
 
 func TestBuildClassIndexText(t *testing.T) {
 	c := store.ClassRecord{
-		FullName: "codeschema/internal/search.IndexBuilder",
+		FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 		Doc:      "IndexBuilder 自动索引构建器",
 		Source:   "type IndexBuilder struct { ... }",
 	}
@@ -359,7 +359,7 @@ func TestBuildClassIndexText(t *testing.T) {
 		t.Fatal("expected non-empty text")
 	}
 	// 应该包含 FullName
-	if !contains(text, "codeschema/internal/search.IndexBuilder") {
+	if !contains(text, "github.com/idcu/codeschema/internal/search.IndexBuilder") {
 		t.Error("text should contain full name")
 	}
 	// 应该包含文件路径
@@ -374,7 +374,7 @@ func TestBuildClassIndexText(t *testing.T) {
 
 func TestBuildMethodIndexText(t *testing.T) {
 	c := store.ClassRecord{
-		FullName: "codeschema/internal/search.IndexBuilder",
+		FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 	}
 	m := store.MethodRecord{
 		Name:        "BuildFromStore",
@@ -388,7 +388,7 @@ func TestBuildMethodIndexText(t *testing.T) {
 		t.Fatal("expected non-empty text")
 	}
 	// 应该包含完整方法名
-	if !contains(text, "codeschema/internal/search.IndexBuilder.BuildFromStore") {
+	if !contains(text, "github.com/idcu/codeschema/internal/search.IndexBuilder.BuildFromStore") {
 		t.Error("text should contain full method name")
 	}
 	// 应该包含签名

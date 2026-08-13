@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // ---------- DeriveClassTags 测试 ----------

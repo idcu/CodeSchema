@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"codeschema/internal/robust"
-	"codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/robust"
+	"github.com/idcu/codeschema/internal/service"
 )
 
 // MCP 工具定义

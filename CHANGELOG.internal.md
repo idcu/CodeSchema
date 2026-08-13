@@ -6,6 +6,49 @@
 
 ## 提交记录
 
+### Commit 37: fix(module): 更正 Go 模块名为 github.com/idcu/codeschema + 新增部署基础设施
+
+**Commit Hash**: `(待提交)`
+
+**核心改动点**：
+- `go.mod` — 模块名从 `codeschema` 更正为 `github.com/idcu/codeschema`
+- 39 个 Go 源文件的 import 路径同步更新：`"codeschema/` → `"github.com/idcu/codeschema/`
+- `docs/DEPLOYMENT_AND_USAGE.md` — 新增部署与使用指南，约 750 行，覆盖：
+  - 项目概述与工作流程（三种启动模式：scan/watch/mcp）
+  - 快速部署（源码构建、Docker 部署、配置说明、快速启动脚本）
+  - 核心工作流（扫描仓库 → 启动服务 → 增量监听）
+  - AI 开发工具集成（Trae/Cursor/VS Code/MCP 自定义客户端）
+  - HTTP API 参考 + MCP 工具详情
+  - 生产部署（Docker Compose、性能调优、监控）
+  - 运维指南（生产部署清单、备份恢复、监控告警、性能调优）
+  - 常见问题与排查（Windows 构建、端口占用、数据重置等）
+- `config.yaml.example` — 完整的配置示例，包含所有配置项及注释
+- `docker-compose.yml` — 生产就绪的 Docker Compose 部署，含健康检查/资源限制/认证/持久化/扫描任务 profile
+- `scripts/quick-start.sh` — Linux/macOS 一键启动脚本（local/docker 两种模式）
+- `scripts/quick-start.ps1` — Windows PowerShell 一键启动脚本（local/docker 两种模式）
+- `docs/ops/01-生产部署清单.md` — 生产环境 10 项检查清单
+- `docs/ops/02-备份与恢复.md` — 索引数据备份与恢复操作指南
+- `docs/ops/03-监控与告警.md` — Prometheus 指标、日志采集、Grafana 仪表盘、告警规则
+- `docs/ops/04-性能调优.md` — 不同规模仓库的配置建议与优化策略
+
+**新增公共抽象**：
+- `scripts/` — 自动化脚本目录，提供一键启动能力
+- `docs/ops/` — 运维文档目录，生产环境运维参考
+
+**影响范围**：
+- `go.mod` — 模块名变更
+- 39 个 Go 文件 — import 路径前缀更新
+- 新增 9 个文件（config.yaml.example, docker-compose.yml, 2 个脚本, 4 个运维文档, 1 个部署指南更新）
+
+**验证数据**：
+- `go build ./cmd/codeschema` — 通过
+- `codeschema scan .` — 166 文件 68ms 扫描完成，166 docs 14ms 索引构建
+- `codeschema mcp --addr :8080` — 启动成功，`tools/list` 返回 11 个工具
+- `codeschema serve --http :8081` — 启动成功，`/health` 返回 `{"status":"ok"}`
+
+**遗留 TODO / 风险**：
+- 无
+
 ### Commit 36: perf(log): 日志模块 data race 修复 — sync.Mutex 保护全局 defaultLogger
 
 **Commit Hash**: `94f5047`

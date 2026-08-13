@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/log"
 )
 
 // ShutdownHook 是关闭钩子接口，在优雅关闭时被调用。

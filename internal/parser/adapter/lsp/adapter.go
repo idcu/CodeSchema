@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"codeschema/internal/errors"
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // LSPAdapter 通用 LSP 适配器，通过 JSON-RPC 2.0 与 LSP 服务器通信。

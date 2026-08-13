@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	"codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/log"
 )
 
 // RecoveryHandler 处理 panic 恢复。

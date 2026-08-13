@@ -26,7 +26,7 @@ var javaStdlibPrefixes = []string{
 // GoResolver 解析 Go 模块 import 路径。
 //
 // 策略：匹配 modulePath 前缀后，去掉前缀得到包目录路径，在索引中查找。
-// 例如：module="codeschema", imp="codeschema/internal/store" → "internal/store"
+// 例如：module="codeschema", imp="github.com/idcu/codeschema/internal/store" → "internal/store"
 type GoResolver struct {
 	modulePath string
 }

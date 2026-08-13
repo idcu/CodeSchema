@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"codeschema/internal/parser"
-	adapter "codeschema/internal/parser/adapter/treesitter"
-	"codeschema/internal/scanner"
-	"codeschema/internal/search"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/parser"
+	adapter "github.com/idcu/codeschema/internal/parser/adapter/treesitter"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // BenchSetup 包含 benchmark 所需的全部组件。

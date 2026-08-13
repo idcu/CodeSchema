@@ -1,0 +1,108 @@
+# =============================================================================
+# CodeSchema Docker Compose — 生产部署
+# =============================================================================
+# 使用方式：
+#   1. 修改环境变量中的 CODESCHEMA_PROJECT_ROOT 指向你的仓库
+#   2. 启动：docker compose up -d
+#   3. 查看日志：docker compose logs -f
+#   4. 停止：docker compose down
+# =============================================================================
+
+version: "3.8"
+
+services:
+  # =========================================================================
+  # CodeSchema 主服务
+  # =========================================================================
+  codeschema:
+    build:
+      context: .
+      args:
+        VERSION: ${CODESCHEMA_VERSION:-latest}
+    image: codeschema:${CODESCHEMA_VERSION:-latest}
+    container_name: codeschema
+    restart: unless-stopped
+
+    # 暴露端口
+    #   8080: MCP Server（AI 工具连接）
+    #   8081: HTTP API（浏览器/REST 调用）
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+
+    # 数据持久化
+    volumes:
+      # 索引数据持久化（必须保留）
+      - codeschema-data:/app/data
+      # 挂载被扫描的仓库（只读）
+      - ${CODESCHEMA_REPO_PATH:-./repo}:/repo:ro
+      # 可选：挂载配置文件
+      - ${CODESCHEMA_CONFIG_PATH:-./config.yaml}:/app/config.yaml:ro
+
+    # 环境变量配置（优先级高于配置文件）
+    environment:
+      # 项目配置
+      - CODESCHEMA_PROJECT_ROOT=/repo
+      - CODESCHEMA_PROJECT_NAME=${CODESCHEMA_PROJECT_NAME:-my-project}
+
+      # 存储配置
+      - CODESCHEMA_STORAGE_DSN=/app/data
+      - CODESCHEMA_STORAGE_SEARCH_FTS_DIR=/app/data/fts
+      - CODESCHEMA_STORAGE_SEARCH_VECTOR_DIR=/app/data/vector
+      - CODESCHEMA_STORAGE_SEARCH_IDF_DIR=/app/data/idf
+
+      # 服务器配置
+      - CODESCHEMA_SERVER_MCP_ADDR=:8080
+      - CODESCHEMA_SERVER_HTTP_ADDR=:8081
+      - CODESCHEMA_SERVER_AUTH_TOKEN=${CODESCHEMA_AUTH_TOKEN:-}
+
+      # 扫描器配置
+      - CODESCHEMA_SCANNER_WORKERS=${CODESCHEMA_WORKERS:-4}
+
+      # 监听器配置
+      - CODESCHEMA_WATCHER_DEBOUNCE_MS=300
+      - CODESCHEMA_WATCHER_IGNORE_DIRS=.git,node_modules,target,build,vendor
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "/app/codeschema", "version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    # 默认启动 HTTP API
+    command: ["serve", "--http", ":8081"]
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: ${CODESCHEMA_MEM_LIMIT:-512M}
+        reservations:
+          memory: 128M
+
+  # =========================================================================
+  # 一次性扫描任务（可选）
+  # 在启动主服务前，先执行一次全量扫描
+  # =========================================================================
+  codeschema-scan:
+    profiles:
+      - "scan"  # 仅当指定 --profile scan 时运行
+    build:
+      context: .
+      args:
+        VERSION: ${CODESCHEMA_VERSION:-latest}
+    image: codeschema:${CODESCHEMA_VERSION:-latest}
+    container_name: codeschema-scan
+    volumes:
+      - codeschema-data:/app/data
+      - ${CODESCHEMA_REPO_PATH:-./repo}:/repo:ro
+    environment:
+      - CODESCHEMA_STORAGE_DSN=/app/data
+    command: ["scan", "/repo"]
+    restart: "no"
+
+volumes:
+  codeschema-data:
+    name: codeschema-data

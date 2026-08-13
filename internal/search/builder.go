@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"codeschema/internal/log"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // IndexBuilder 自动索引构建器，从 Store 读取数据构建 FTS 和向量索引。

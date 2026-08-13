@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/search"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 func newTestService(t *testing.T) *Service {
@@ -274,7 +274,7 @@ func TestResolveSymbol_Class(t *testing.T) {
 	classes := []parser.ClassIR{
 		{
 			Name: "IndexBuilder",
-			FullName: "codeschema/internal/search.IndexBuilder",
+			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Type: "CLASS",
 		},
 	}
@@ -302,7 +302,7 @@ func TestResolveSymbol_ClassWithInterfaceType(t *testing.T) {
 	classes := []parser.ClassIR{
 		{
 			Name: "FTSEngine",
-			FullName: "codeschema/internal/search.FTSEngine",
+			FullName: "github.com/idcu/codeschema/internal/search.FTSEngine",
 			Type: "INTERFACE",
 		},
 	}
@@ -327,7 +327,7 @@ func TestResolveSymbol_Method(t *testing.T) {
 	classes := []parser.ClassIR{
 		{
 			Name: "IndexBuilder",
-			FullName: "codeschema/internal/search.IndexBuilder",
+			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 			Type: "CLASS",
 		},
 	}

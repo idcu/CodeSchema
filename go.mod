@@ -1,4 +1,4 @@
-module codeschema
+module github.com/idcu/codeschema
 
 go 1.25.2
 

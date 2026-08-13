@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/log"
 )
 
 // Span 表示一个追踪跨度。

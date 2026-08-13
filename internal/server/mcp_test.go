@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"codeschema/internal/service"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 func newTestMCPServer(t *testing.T) *MCPServer {

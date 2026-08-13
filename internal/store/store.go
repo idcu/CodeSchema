@@ -10,7 +10,7 @@ package store
 
 import (
 	"context"
-	"codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // Store 是存储层统一接口。

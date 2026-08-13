@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/scheduler"
-	"codeschema/internal/scanner"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/scheduler"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // mockParser 用于测试的简单适配器。

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // mockAdapter 实现 ParserPlugin 接口的测试适配器。

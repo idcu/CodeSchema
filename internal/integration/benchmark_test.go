@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"codeschema/internal/parser"
-	"codeschema/internal/scanner"
-	"codeschema/internal/search"
-	"codeschema/internal/service"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
+	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // ---------------------------------------------------------------------------

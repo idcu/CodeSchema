@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/errors"
 )
 
 func TestCodeGraphAdapter_Name(t *testing.T) {

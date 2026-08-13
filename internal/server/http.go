@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"codeschema/internal/log"
-	"codeschema/internal/metrics"
-	"codeschema/internal/service"
-	"codeschema/internal/trace"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/metrics"
+	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/trace"
 )
 
 // init 注册 HTTP 服务器模块的监控指标。

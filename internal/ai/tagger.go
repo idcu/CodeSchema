@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"codeschema/internal/log"
-	"codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // Tagger 负责基于规则自动推导实体标签。
