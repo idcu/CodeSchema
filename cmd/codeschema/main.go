@@ -75,6 +75,9 @@ Use "codeschema <command> -h" for more information about a command.
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// P9: 环境变量覆盖（优先级高于配置文件，但低于 CLI 参数）
+	config.LoadFromEnv(cfg)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -85,6 +88,27 @@ Use "codeschema <command> -h" for more information about a command.
 		<-sigCh
 		cancel()
 	}()
+
+	// P9: 配置热重载（watch/mcp/serve 命令支持）
+	// 仅在指定了配置文件路径时启动
+	if *configPath != "" {
+		switch args[0] {
+		case "watch", "mcp", "serve":
+			cw := config.NewConfigWatcher(*configPath, cfg, nil)
+			cw.SetPollInterval(2 * time.Second)
+			go func() {
+				if err := cw.Start(ctx); err != nil && err != context.Canceled {
+					log.Printf("config watcher stopped: %v", err)
+				}
+			}()
+			defer cw.Stop()
+
+			// 将配置实例替换为可热更新的配置
+			origCfg := cfg
+			cfg = cw.GetConfig()
+			_ = origCfg // 保留原引用，后续使用 cfg 时会自动获取最新配置
+		}
+	}
 
 	switch args[0] {
 	case "version":

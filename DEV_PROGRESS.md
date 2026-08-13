@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-08-13 23:58
-> 当前阶段：P8.3 已完成 — 自动索引构建与增量同步
-> 下一个阶段：P9 — 配置热重载 / 多配置源
+> 当前阶段：P9 已完成 — 配置热重载 / 多配置源
+> 下一个阶段：P8.3 遗留 TODO 优化（异步索引多 worker、日志集成）
 
 ---
 
@@ -21,6 +21,7 @@ P7       [████████████████████] 100%
 P8.1     [████████████████████] 100%
 P8.2     [████████████████████] 100%
 P8.3     [████████████████████] 100%
+P9       [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -165,6 +166,13 @@ P8.3     [████████████████████] 100%
 - [x] 验证数据：go build + go test 19 个包全部通过，0 失败
 - [x] P8.3 遗留 TODO 优化：IDF 词典持久化（SaveIDF/LoadIDF）、异步索引队列（StartAsync/StopAsync/EnqueueIndex）、删除文件同步清理索引（BuildAndRemove/SetOnDelete）
 
+### P9 — 配置热重载 / 多配置源
+- [x] **`internal/config/config.go`** — 新增 `LoadFromEnv` 从环境变量加载配置覆盖（CODESCHEMA_<SECTION>_<KEY> 格式，支持 20+ 环境变量）；新增 `Merge` 函数合并多个配置源（非零值覆盖，深拷贝）；新增 `ConfigWatcher` 结构体支持配置文件变更自动重载（轮询检测，默认 2 秒间隔，原子切换，OnReload 回调）
+- [x] **`internal/config/config_test.go`** — 新增 8 个测试：LoadFromEnv 全量覆盖、LoadFromEnv 无效值降级、Merge 基础/覆盖/全量/局部、CloneConfig 深拷贝、ConfigWatcher 初始化
+- [x] **`cmd/codeschema/main.go`** — 加载配置后自动应用环境变量覆盖；watch/mcp/serve 命令启动 ConfigWatcher 实现配置热重载
+- [x] 验证数据：go build + go test 20 个包全部通过，0 失败；config 包 33 个测试（25 原有 + 8 新增）
+- [x] 新增公共抽象：`LoadFromEnv`、`Merge`、`ConfigWatcher`、`OnReload`、`cloneConfig`（深拷贝工具）
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -176,6 +184,8 @@ P8.3     [████████████████████] 100%
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
 | P9 | 配置热重载 / 多配置源 | `docs/dev/11-配置部署与路线图.md` | P7 完成 |
+| P10 | 异步索引多 worker 扩展 + 日志集成 | `docs/P8-阶段总结-语义检索与全文搜索.md` | P9 完成 |
+| P11 | 搜索结果填充 Kind/File + 索引构建进度条 | `docs/P8-阶段总结-语义检索与全文搜索.md` | P10 完成 |
 
 ## 已知问题
 

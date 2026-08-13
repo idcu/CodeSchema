@@ -2,13 +2,22 @@
 //
 // 使用 gopkg.in/yaml.v3 解析 YAML 配置文件，支持全部 YAML 语法。
 // JSON 配置文件通过 encoding/json 解析。
+//
+// P9 新增特性：
+//   - LoadFromEnv: 从环境变量加载配置覆盖（CODESCHEMA_<SECTION>_<KEY> 格式）
+//   - Merge: 合并多个配置源（默认值 < 配置文件 < 环境变量 < CLI 参数）
+//   - ConfigWatcher: 配置文件变更自动重载，无需重启进程
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -266,4 +275,474 @@ func Validate(cfg *Config) []error {
 	}
 
 	return errs
+}
+
+// ---------------------------------------------------------------------------
+// P9: 多配置源支持
+// ---------------------------------------------------------------------------
+
+// LoadFromEnv 从环境变量加载配置覆盖。
+//
+// 环境变量命名规则：CODESCHEMA_<SECTION>_<KEY>（全大写，下划线分隔）
+// 例如：
+//   CODESCHEMA_PROJECT_ROOT="/home/user/repo"
+//   CODESCHEMA_STORAGE_DRIVER="sqlite"
+//   CODESCHEMA_SERVER_MCP_ADDR=":9090"
+//   CODESCHEMA_SCANNER_WORKERS="8"
+//   CODESCHEMA_WATCHER_DEBOUNCE_MS="500"
+//   CODESCHEMA_AI_BUDGET_PER_SCAN="200"
+//
+// LoadFromEnv 会直接修改传入的 cfg 实例，优先级高于配置文件但低于 CLI 参数。
+func LoadFromEnv(cfg *Config) {
+	// project
+	if v := os.Getenv("CODESCHEMA_PROJECT_ROOT"); v != "" {
+		cfg.Project.Root = v
+	}
+	if v := os.Getenv("CODESCHEMA_PROJECT_NAME"); v != "" {
+		cfg.Project.Name = v
+	}
+
+	// storage
+	if v := os.Getenv("CODESCHEMA_STORAGE_DRIVER"); v != "" {
+		cfg.Storage.Driver = v
+	}
+	if v := os.Getenv("CODESCHEMA_STORAGE_DSN"); v != "" {
+		cfg.Storage.DSN = v
+	}
+	if v := os.Getenv("CODESCHEMA_STORAGE_KV"); v != "" {
+		cfg.Storage.KV = v
+	}
+
+	// server
+	if v := os.Getenv("CODESCHEMA_SERVER_MCP_ADDR"); v != "" {
+		cfg.Server.MCPAddr = v
+	}
+	if v := os.Getenv("CODESCHEMA_SERVER_HTTP_ADDR"); v != "" {
+		cfg.Server.HTTPAddr = v
+	}
+	if v := os.Getenv("CODESCHEMA_SERVER_AUTH_TOKEN"); v != "" {
+		cfg.Server.AuthToken = v
+	}
+
+	// scanner
+	if v := os.Getenv("CODESCHEMA_SCANNER_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Scanner.Workers = n
+		}
+	}
+	if v := os.Getenv("CODESCHEMA_SCANNER_FILE_SIZE_LIMIT_MB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Scanner.FileSizeLimitMB = n
+		}
+	}
+	if v := os.Getenv("CODESCHEMA_SCANNER_LINE_COUNT_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Scanner.LineCountLimit = n
+		}
+	}
+
+	// watcher
+	if v := os.Getenv("CODESCHEMA_WATCHER_ENABLED"); v != "" {
+		cfg.Watcher.Enabled = v == "true" || v == "1" || v == "yes"
+	}
+	if v := os.Getenv("CODESCHEMA_WATCHER_DEBOUNCE_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Watcher.DebounceMs = n
+		}
+	}
+	if v := os.Getenv("CODESCHEMA_WATCHER_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Watcher.BatchSize = n
+		}
+	}
+
+	// ai
+	if v := os.Getenv("CODESCHEMA_AI_PROVIDER"); v != "" {
+		cfg.AI.Provider = v
+	}
+	if v := os.Getenv("CODESCHEMA_AI_MODEL"); v != "" {
+		cfg.AI.Model = v
+	}
+	if v := os.Getenv("CODESCHEMA_AI_BUDGET_PER_SCAN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.AI.BudgetPerScan = n
+		}
+	}
+	if v := os.Getenv("CODESCHEMA_AI_BUDGET_PER_QUERY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.AI.BudgetPerQuery = n
+		}
+	}
+
+	// parser
+	if v := os.Getenv("CODESCHEMA_PARSER_SCIP_INDEX_DIR"); v != "" {
+		cfg.Parser.SCIP.IndexDir = v
+	}
+	if v := os.Getenv("CODESCHEMA_PARSER_CODEGRAPH_DB"); v != "" {
+		cfg.Parser.CodeGraph.DB = v
+	}
+}
+
+// Merge 合并两个配置实例，overlay 中的非零值字段会覆盖 base 的对应字段。
+// 返回一个新的 Config 实例，不修改原始实例。
+//
+// 合并策略：
+//   - 字符串：overlay 非空则覆盖
+//   - 整型：overlay 值 > 0 则覆盖
+//   - 布尔型：overlay 为 true 则覆盖（零值 false 不覆盖）
+//   - 切片：overlay 非空则覆盖
+//   - map：overlay 非空则覆盖
+func Merge(base, overlay *Config) *Config {
+	if base == nil {
+		base = DefaultConfig()
+	}
+	if overlay == nil {
+		return cloneConfig(base)
+	}
+
+	merged := cloneConfig(base)
+
+	// Project
+	if overlay.Project.Name != "" {
+		merged.Project.Name = overlay.Project.Name
+	}
+	if overlay.Project.Root != "" {
+		merged.Project.Root = overlay.Project.Root
+	}
+	if len(overlay.Project.Languages) > 0 {
+		merged.Project.Languages = cloneStringSlice(overlay.Project.Languages)
+	}
+
+	// Storage
+	if overlay.Storage.Driver != "" {
+		merged.Storage.Driver = overlay.Storage.Driver
+	}
+	if overlay.Storage.DSN != "" {
+		merged.Storage.DSN = overlay.Storage.DSN
+	}
+	if overlay.Storage.KV != "" {
+		merged.Storage.KV = overlay.Storage.KV
+	}
+	// Vector sub
+	if overlay.Storage.Vector.Driver != "" {
+		merged.Storage.Vector.Driver = overlay.Storage.Vector.Driver
+	}
+	if overlay.Storage.Vector.DSN != "" {
+		merged.Storage.Vector.DSN = overlay.Storage.Vector.DSN
+	}
+	if overlay.Storage.Vector.EmbeddingModel != "" {
+		merged.Storage.Vector.EmbeddingModel = overlay.Storage.Vector.EmbeddingModel
+	}
+	// Search sub
+	mergeSearch(&merged.Storage.Search, &overlay.Storage.Search)
+
+	// Parser
+	if len(overlay.Parser.Adapters) > 0 {
+		merged.Parser.Adapters = cloneStringSlice(overlay.Parser.Adapters)
+	}
+	if overlay.Parser.SCIP.IndexDir != "" {
+		merged.Parser.SCIP.IndexDir = overlay.Parser.SCIP.IndexDir
+	}
+	if overlay.Parser.CodeGraph.DB != "" {
+		merged.Parser.CodeGraph.DB = overlay.Parser.CodeGraph.DB
+	}
+	if overlay.Parser.JCodeIndexer.DB != "" {
+		merged.Parser.JCodeIndexer.DB = overlay.Parser.JCodeIndexer.DB
+	}
+	if overlay.Parser.JCodeIndexer.ConfigFile != "" {
+		merged.Parser.JCodeIndexer.ConfigFile = overlay.Parser.JCodeIndexer.ConfigFile
+	}
+	if len(overlay.Parser.JCodeIndexer.Env) > 0 {
+		merged.Parser.JCodeIndexer.Env = cloneStringMap(overlay.Parser.JCodeIndexer.Env)
+	}
+
+	// AI
+	if overlay.AI.Provider != "" {
+		merged.AI.Provider = overlay.AI.Provider
+	}
+	if overlay.AI.Model != "" {
+		merged.AI.Model = overlay.AI.Model
+	}
+	if overlay.AI.BudgetPerScan > 0 {
+		merged.AI.BudgetPerScan = overlay.AI.BudgetPerScan
+	}
+	if overlay.AI.BudgetPerQuery > 0 {
+		merged.AI.BudgetPerQuery = overlay.AI.BudgetPerQuery
+	}
+
+	// Server
+	if overlay.Server.MCPAddr != "" {
+		merged.Server.MCPAddr = overlay.Server.MCPAddr
+	}
+	if overlay.Server.HTTPAddr != "" {
+		merged.Server.HTTPAddr = overlay.Server.HTTPAddr
+	}
+	if overlay.Server.AuthToken != "" {
+		merged.Server.AuthToken = overlay.Server.AuthToken
+	}
+
+	// Watcher
+	if overlay.Watcher.Enabled {
+		merged.Watcher.Enabled = true
+	}
+	if overlay.Watcher.DebounceMs > 0 {
+		merged.Watcher.DebounceMs = overlay.Watcher.DebounceMs
+	}
+	if len(overlay.Watcher.IgnoreDirs) > 0 {
+		merged.Watcher.IgnoreDirs = cloneStringSlice(overlay.Watcher.IgnoreDirs)
+	}
+	if overlay.Watcher.BatchSize > 0 {
+		merged.Watcher.BatchSize = overlay.Watcher.BatchSize
+	}
+
+	// Scanner
+	if overlay.Scanner.Workers > 0 {
+		merged.Scanner.Workers = overlay.Scanner.Workers
+	}
+	if overlay.Scanner.FileSizeLimitMB > 0 {
+		merged.Scanner.FileSizeLimitMB = overlay.Scanner.FileSizeLimitMB
+	}
+	if overlay.Scanner.LineCountLimit > 0 {
+		merged.Scanner.LineCountLimit = overlay.Scanner.LineCountLimit
+	}
+
+	return merged
+}
+
+func mergeSearch(base, overlay *SearchConfig) {
+	if overlay.FTS {
+		base.FTS = true
+	}
+	if overlay.Semantic {
+		base.Semantic = true
+	}
+	if overlay.FTSDir != "" {
+		base.FTSDir = overlay.FTSDir
+	}
+	if overlay.VectorDir != "" {
+		base.VectorDir = overlay.VectorDir
+	}
+	if overlay.VectorDim > 0 {
+		base.VectorDim = overlay.VectorDim
+	}
+	if overlay.IDFDir != "" {
+		base.IDFDir = overlay.IDFDir
+	}
+}
+
+// cloneConfig 深拷贝一个 Config 实例。
+func cloneConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	return &Config{
+		Project: ProjectConfig{
+			Name:      cfg.Project.Name,
+			Root:      cfg.Project.Root,
+			Languages: cloneStringSlice(cfg.Project.Languages),
+		},
+		Storage: StorageConfig{
+			Driver: cfg.Storage.Driver,
+			DSN:    cfg.Storage.DSN,
+			KV:     cfg.Storage.KV,
+			Vector: VectorConfig{
+				Driver:         cfg.Storage.Vector.Driver,
+				DSN:            cfg.Storage.Vector.DSN,
+				EmbeddingModel: cfg.Storage.Vector.EmbeddingModel,
+			},
+			Search: SearchConfig{
+				FTS:       cfg.Storage.Search.FTS,
+				Semantic:  cfg.Storage.Search.Semantic,
+				FTSDir:    cfg.Storage.Search.FTSDir,
+				VectorDir: cfg.Storage.Search.VectorDir,
+				VectorDim: cfg.Storage.Search.VectorDim,
+				IDFDir:    cfg.Storage.Search.IDFDir,
+			},
+		},
+		Parser: ParserConfig{
+			Adapters: cloneStringSlice(cfg.Parser.Adapters),
+			SCIP: SCIPConfig{
+				IndexDir: cfg.Parser.SCIP.IndexDir,
+			},
+			CodeGraph: CodeGraphConfig{
+				DB: cfg.Parser.CodeGraph.DB,
+			},
+			JCodeIndexer: JCodeIndexerConfig{
+				DB:         cfg.Parser.JCodeIndexer.DB,
+				ConfigFile: cfg.Parser.JCodeIndexer.ConfigFile,
+				Env:        cloneStringMap(cfg.Parser.JCodeIndexer.Env),
+			},
+		},
+		AI: AIConfig{
+			Provider:       cfg.AI.Provider,
+			Model:          cfg.AI.Model,
+			BudgetPerScan:  cfg.AI.BudgetPerScan,
+			BudgetPerQuery: cfg.AI.BudgetPerQuery,
+		},
+		Server: ServerConfig{
+			MCPAddr:   cfg.Server.MCPAddr,
+			HTTPAddr:  cfg.Server.HTTPAddr,
+			AuthToken: cfg.Server.AuthToken,
+		},
+		Watcher: WatcherConfig{
+			Enabled:    cfg.Watcher.Enabled,
+			DebounceMs: cfg.Watcher.DebounceMs,
+			IgnoreDirs: cloneStringSlice(cfg.Watcher.IgnoreDirs),
+			BatchSize:  cfg.Watcher.BatchSize,
+		},
+		Scanner: ScannerConfig{
+			Workers:         cfg.Scanner.Workers,
+			FileSizeLimitMB: cfg.Scanner.FileSizeLimitMB,
+			LineCountLimit:  cfg.Scanner.LineCountLimit,
+		},
+	}
+}
+
+func cloneStringSlice(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
+
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// P9: 配置热重载
+// ---------------------------------------------------------------------------
+
+// OnReload 是配置重载完成后的回调函数类型。
+// 参数为旧的配置和新的配置，回调中可以安全地读取新配置。
+type OnReload func(oldCfg, newCfg *Config)
+
+// ConfigWatcher 监听配置文件变更并自动重载。
+//
+// 使用轮询方式检测文件变更（因为 fsnotify 需要外部依赖），
+// 默认轮询间隔为 2 秒。当检测到文件内容变更时，自动重新加载配置
+// 并通过 OnReload 回调通知应用层。
+//
+// 线程安全：reloadCfg 和 cfgMu 保护配置的原子切换。
+type ConfigWatcher struct {
+	path    string
+	cfg     *Config
+	cfgMu   sync.RWMutex
+	onReload OnReload
+	pollInterval time.Duration
+	lastModTime  time.Time
+	lastSize     int64
+	stopCh       chan struct{}
+	stopped      bool
+	stopMu       sync.Mutex
+}
+
+// NewConfigWatcher 创建一个新的配置监听器。
+//
+//   - path: 配置文件路径
+//   - cfg: 初始配置（加载后的 Config 实例）
+//   - onReload: 重载完成后的回调，可以为 nil
+func NewConfigWatcher(path string, cfg *Config, onReload OnReload) *ConfigWatcher {
+	fi, _ := os.Stat(path)
+	var modTime time.Time
+	var size int64
+	if fi != nil {
+		modTime = fi.ModTime()
+		size = fi.Size()
+	}
+	return &ConfigWatcher{
+		path:         path,
+		cfg:          cfg,
+		onReload:     onReload,
+		pollInterval: 2 * time.Second,
+		lastModTime:  modTime,
+		lastSize:     size,
+		stopCh:       make(chan struct{}),
+	}
+}
+
+// SetPollInterval 设置轮询间隔。默认 2 秒。
+func (cw *ConfigWatcher) SetPollInterval(d time.Duration) {
+	if d > 0 {
+		cw.pollInterval = d
+	}
+}
+
+// GetConfig 返回当前配置（线程安全，原子切换）。
+func (cw *ConfigWatcher) GetConfig() *Config {
+	cw.cfgMu.RLock()
+	defer cw.cfgMu.RUnlock()
+	return cw.cfg
+}
+
+// Start 启动配置文件监听。阻塞直到 context 取消或 Stop 被调用。
+func (cw *ConfigWatcher) Start(ctx context.Context) error {
+	ticker := time.NewTicker(cw.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-cw.stopCh:
+			return nil
+		case <-ticker.C:
+			cw.checkAndReload(ctx)
+		}
+	}
+}
+
+// Stop 停止配置文件监听。
+func (cw *ConfigWatcher) Stop() {
+	cw.stopMu.Lock()
+	defer cw.stopMu.Unlock()
+	if !cw.stopped {
+		close(cw.stopCh)
+		cw.stopped = true
+	}
+}
+
+// checkAndReload 检查文件是否变更，若变更则重新加载配置。
+func (cw *ConfigWatcher) checkAndReload(ctx context.Context) {
+	fi, err := os.Stat(cw.path)
+	if err != nil {
+		return // 文件不存在或无法访问，跳过
+	}
+
+	if fi.ModTime() == cw.lastModTime && fi.Size() == cw.lastSize {
+		return // 文件未变更
+	}
+
+	// 文件已变更，重新加载
+	newCfg, err := Load(cw.path)
+	if err != nil {
+		// 加载失败时保留旧配置，不中断
+		return
+	}
+
+	// 应用环境变量覆盖
+	LoadFromEnv(newCfg)
+
+	oldCfg := cw.GetConfig()
+
+	// 原子切换配置
+	cw.cfgMu.Lock()
+	cw.cfg = newCfg
+	cw.lastModTime = fi.ModTime()
+	cw.lastSize = fi.Size()
+	cw.cfgMu.Unlock()
+
+	// 通知回调
+	if cw.onReload != nil {
+		cw.onReload(oldCfg, newCfg)
+	}
 }

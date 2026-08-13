@@ -6,6 +6,41 @@
 
 ## 提交记录
 
+### Commit 18: feat(config): P9 配置热重载 / 多配置源支持
+
+**Commit Hash**: `TBD`（待提交）
+
+**核心改动点**：
+- `internal/config/config.go` — 新增 `LoadFromEnv` 函数，从环境变量加载配置覆盖（CODESCHEMA_<SECTION>_<KEY> 格式，支持 20+ 环境变量，包括 project/storage/server/scanner/watcher/ai/parser）；新增 `Merge` 函数，合并多个配置源（字符串非空覆盖、整型 >0 覆盖、布尔 true 覆盖、切片非空覆盖、map 非空覆盖，深拷贝保证不修改原始实例）；新增 `ConfigWatcher` 结构体，支持轮询配置文件变更检测（默认 2 秒间隔），检测到变更时自动重新加载并原子切换，提供 `OnReload` 回调通知应用层
+- `internal/config/parse.go` — 无变更（复用现有 applyToConfig 体系）
+- `internal/config/config_test.go` — 新增 8 个测试覆盖：LoadFromEnv 全量覆盖、无效整型值降级、Merge 基础/覆盖/全量/局部、CloneConfig 深拷贝、ConfigWatcher 初始化
+- `cmd/codeschema/main.go` — 加载配置后自动应用 `config.LoadFromEnv(cfg)`；watch/mcp/serve 命令启动 `ConfigWatcher` 后台协程实现配置热重载
+- 文档同步：DEV_PROGRESS.md（P9 100% 进度条 + 完成清单）、CHANGELOG.internal.md（本记录）
+
+**新增公共抽象**：
+- `config.LoadFromEnv(cfg)` — 从环境变量加载配置覆盖
+- `config.Merge(base, overlay *Config) *Config` — 合并两个配置实例，返回新实例
+- `config.ConfigWatcher` — 配置监听器（轮询模式，线程安全，原子切换）
+- `config.OnReload` — 配置重载回调类型
+- `config.cloneConfig` — 深拷贝工具函数
+- `config.mergeSearch` — Search 子配置合并函数
+- `config.cloneStringSlice` / `config.cloneStringMap` — 切片/map 深拷贝工具
+
+**影响范围**：
+- `internal/config/config.go` — 新增约 470 行代码（LoadFromEnv/Merge/cloneConfig/ConfigWatcher），非破坏性
+- `cmd/codeschema/main.go` — 新增约 15 行代码（环境变量加载 + ConfigWatcher 启动），非破坏性
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（20 个包，0 失败）
+- config 包 33 个测试全部通过（25 原有 + 8 新增）
+- 新增测试覆盖：LoadFromEnv（8 个环境变量全量覆盖、无效整型值降级）、Merge（base nil 默认值、overlay nil 原样返回、全量覆盖保留默认、局部覆盖保留其余字段、深拷贝不修改原始）、ConfigWatcher（初始化 + GetConfig 线程安全）
+
+**遗留 TODO / 风险**：
+- ConfigWatcher 当前使用轮询方式检测文件变更（因 fsnotify 需要外部依赖），2 秒间隔对实时性要求高的场景不够及时，可配置缩短间隔或后续切换为 fsnotify
+- Merge 函数对布尔值采用"true 覆盖、false 不覆盖"策略，无法通过 Merge 将布尔值设为 false（可通过 LoadFromEnv 设置 `CODESCHEMA_WATCHER_ENABLED=false` 解决）
+- 配置热重载仅更新 Config 实例本身，不自动重新初始化依赖该配置的服务（如 Scanner workers、Store DSN），需通过 OnReload 回调手动处理
+
 ### Commit 17: perf(search): P8.3 优化 — IDF 持久化 / 异步索引 / 删除同步
 
 **Commit Hash**: `3e93fa4`

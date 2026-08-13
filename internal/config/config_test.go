@@ -415,3 +415,210 @@ func TestScannerConfig_DefaultsPreserved(t *testing.T) {
 		t.Errorf("line_count_limit should be default 50000, got %d", cfg.Scanner.LineCountLimit)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// P9: 多配置源支持测试
+// ---------------------------------------------------------------------------
+
+func TestLoadFromEnv(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// 设置环境变量
+	os.Setenv("CODESCHEMA_PROJECT_ROOT", "/test/root")
+	os.Setenv("CODESCHEMA_PROJECT_NAME", "test-repo")
+	os.Setenv("CODESCHEMA_STORAGE_DRIVER", "sqlite")
+	os.Setenv("CODESCHEMA_SERVER_MCP_ADDR", ":9090")
+	os.Setenv("CODESCHEMA_SCANNER_WORKERS", "8")
+	os.Setenv("CODESCHEMA_WATCHER_DEBOUNCE_MS", "500")
+	os.Setenv("CODESCHEMA_AI_BUDGET_PER_SCAN", "200")
+	os.Setenv("CODESCHEMA_WATCHER_ENABLED", "false")
+	defer func() {
+		os.Unsetenv("CODESCHEMA_PROJECT_ROOT")
+		os.Unsetenv("CODESCHEMA_PROJECT_NAME")
+		os.Unsetenv("CODESCHEMA_STORAGE_DRIVER")
+		os.Unsetenv("CODESCHEMA_SERVER_MCP_ADDR")
+		os.Unsetenv("CODESCHEMA_SCANNER_WORKERS")
+		os.Unsetenv("CODESCHEMA_WATCHER_DEBOUNCE_MS")
+		os.Unsetenv("CODESCHEMA_AI_BUDGET_PER_SCAN")
+		os.Unsetenv("CODESCHEMA_WATCHER_ENABLED")
+	}()
+
+	LoadFromEnv(cfg)
+
+	if cfg.Project.Root != "/test/root" {
+		t.Errorf("project.root = %q, want %q", cfg.Project.Root, "/test/root")
+	}
+	if cfg.Project.Name != "test-repo" {
+		t.Errorf("project.name = %q, want %q", cfg.Project.Name, "test-repo")
+	}
+	if cfg.Storage.Driver != "sqlite" {
+		t.Errorf("storage.driver = %q, want %q", cfg.Storage.Driver, "sqlite")
+	}
+	if cfg.Server.MCPAddr != ":9090" {
+		t.Errorf("server.mcp_addr = %q, want %q", cfg.Server.MCPAddr, ":9090")
+	}
+	if cfg.Scanner.Workers != 8 {
+		t.Errorf("scanner.workers = %d, want %d", cfg.Scanner.Workers, 8)
+	}
+	if cfg.Watcher.DebounceMs != 500 {
+		t.Errorf("watcher.debounce_ms = %d, want %d", cfg.Watcher.DebounceMs, 500)
+	}
+	if cfg.AI.BudgetPerScan != 200 {
+		t.Errorf("ai.budget_per_scan = %d, want %d", cfg.AI.BudgetPerScan, 200)
+	}
+	if cfg.Watcher.Enabled != false {
+		t.Errorf("watcher.enabled = %v, want %v", cfg.Watcher.Enabled, false)
+	}
+}
+
+func TestLoadFromEnv_InvalidInt(t *testing.T) {
+	cfg := DefaultConfig()
+	origWorkers := cfg.Scanner.Workers
+
+	os.Setenv("CODESCHEMA_SCANNER_WORKERS", "not-a-number")
+	defer os.Unsetenv("CODESCHEMA_SCANNER_WORKERS")
+
+	LoadFromEnv(cfg)
+
+	// Should keep original value
+	if cfg.Scanner.Workers != origWorkers {
+		t.Errorf("scanner.workers should remain %d, got %d", origWorkers, cfg.Scanner.Workers)
+	}
+}
+
+func TestMerge_BaseNil(t *testing.T) {
+	overlay := &Config{
+		Project: ProjectConfig{
+			Name: "test",
+			Root:  "/test",
+		},
+	}
+	merged := Merge(nil, overlay)
+	if merged.Project.Name != "test" {
+		t.Errorf("merged.project.name = %q, want %q", merged.Project.Name, "test")
+	}
+	if merged.Project.Root != "/test" {
+		t.Errorf("merged.project.root = %q, want %q", merged.Project.Root, "/test")
+	}
+	// Defaults should be preserved for other fields
+	if merged.Scanner.Workers != 4 {
+		t.Errorf("merged.scanner.workers should be default 4, got %d", merged.Scanner.Workers)
+	}
+}
+
+func TestMerge_OverlayNil(t *testing.T) {
+	base := DefaultConfig()
+	merged := Merge(base, nil)
+	if merged.Scanner.Workers != base.Scanner.Workers {
+		t.Errorf("merged.scanner.workers = %d, want %d", merged.Scanner.Workers, base.Scanner.Workers)
+	}
+}
+
+func TestMerge_FullOverlay(t *testing.T) {
+	base := DefaultConfig()
+	overlay := &Config{
+		Project: ProjectConfig{
+			Name:      "overlaid",
+			Root:      "/overlaid/root",
+			Languages: []string{"go", "java"},
+		},
+		Storage: StorageConfig{
+			Driver: "sqlite",
+			DSN:    "/data/db.sqlite",
+			Search: SearchConfig{
+				FTS:    false,
+				IDFDir: "/custom/idf",
+			},
+		},
+		Server: ServerConfig{
+			MCPAddr:  ":9090",
+			HTTPAddr: ":9091",
+		},
+		Scanner: ScannerConfig{
+			Workers: 16,
+		},
+	}
+
+	merged := Merge(base, overlay)
+
+	if merged.Project.Name != "overlaid" {
+		t.Errorf("project.name = %q, want %q", merged.Project.Name, "overlaid")
+	}
+	if merged.Project.Root != "/overlaid/root" {
+		t.Errorf("project.root = %q, want %q", merged.Project.Root, "/overlaid/root")
+	}
+	if len(merged.Project.Languages) != 2 {
+		t.Errorf("project.languages length = %d, want 2", len(merged.Project.Languages))
+	}
+	if merged.Storage.Driver != "sqlite" {
+		t.Errorf("storage.driver = %q, want %q", merged.Storage.Driver, "sqlite")
+	}
+	if merged.Storage.DSN != "/data/db.sqlite" {
+		t.Errorf("storage.dsn = %q, want %q", merged.Storage.DSN, "/data/db.sqlite")
+	}
+	// FTS 为 false 是零值，Merge 策略不覆盖（零值 false 不覆盖），保留默认值 true
+	if merged.Storage.Search.FTS != true {
+		t.Errorf("storage.search.fts = %v, want %v (default preserved, zero-value false not overridden)", merged.Storage.Search.FTS, true)
+	}
+	if merged.Storage.Search.IDFDir != "/custom/idf" {
+		t.Errorf("storage.search.idf_dir = %q, want %q", merged.Storage.Search.IDFDir, "/custom/idf")
+	}
+	if merged.Server.MCPAddr != ":9090" {
+		t.Errorf("server.mcp_addr = %q, want %q", merged.Server.MCPAddr, ":9090")
+	}
+	if merged.Server.HTTPAddr != ":9091" {
+		t.Errorf("server.http_addr = %q, want %q", merged.Server.HTTPAddr, ":9091")
+	}
+	if merged.Scanner.Workers != 16 {
+		t.Errorf("scanner.workers = %d, want %d", merged.Scanner.Workers, 16)
+	}
+	// Defaults preserved
+	if merged.Watcher.DebounceMs != 300 {
+		t.Errorf("watcher.debounce_ms should be default 300, got %d", merged.Watcher.DebounceMs)
+	}
+}
+
+func TestMerge_PartialOverlay(t *testing.T) {
+	base := DefaultConfig()
+	overlay := &Config{
+		Scanner: ScannerConfig{
+			Workers: 8,
+		},
+	}
+
+	merged := Merge(base, overlay)
+
+	if merged.Scanner.Workers != 8 {
+		t.Errorf("scanner.workers = %d, want %d", merged.Scanner.Workers, 8)
+	}
+	if merged.Scanner.FileSizeLimitMB != base.Scanner.FileSizeLimitMB {
+		t.Errorf("scanner.file_size_limit_mb should preserve default %d, got %d", base.Scanner.FileSizeLimitMB, merged.Scanner.FileSizeLimitMB)
+	}
+	if merged.Scanner.LineCountLimit != base.Scanner.LineCountLimit {
+		t.Errorf("scanner.line_count_limit should preserve default %d, got %d", base.Scanner.LineCountLimit, merged.Scanner.LineCountLimit)
+	}
+}
+
+func TestCloneConfig_DeepCopy(t *testing.T) {
+	original := DefaultConfig()
+	clone := cloneConfig(original)
+
+	if clone == original {
+		t.Fatal("clone should be a different pointer")
+	}
+
+	// Modify clone, original should not change
+	clone.Project.Name = "modified"
+	if original.Project.Name == "modified" {
+		t.Error("original should not be modified when clone changes")
+	}
+}
+
+func TestConfigWatcher_New(t *testing.T) {
+	cfg := DefaultConfig()
+	cw := NewConfigWatcher("/tmp/nonexistent.yaml", cfg, nil)
+
+	if cw.GetConfig() != cfg {
+		t.Error("GetConfig should return the initial config")
+	}
+}
