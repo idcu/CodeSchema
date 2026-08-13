@@ -8,7 +8,7 @@
 
 ### Commit 21: deps(go): 安装 chromem-go 向量数据库
 
-**Commit Hash**: `待生成`
+**Commit Hash**: `1ff4e3e`
 
 **核心改动点**：
 - `go.mod` — 新增 `replace github.com/philippgille/chromem-go => ./down/chromem-go/chromem-go-main`，从本地源码安装（纯 Go，零依赖，无需 CGO）
