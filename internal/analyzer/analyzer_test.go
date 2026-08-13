@@ -1282,3 +1282,300 @@ func TestJavaResolver_Resolve_EmptyImportIndex(t *testing.T) {
 		t.Errorf("expected nil for empty import index wildcard, got %v", targets)
 	}
 }
+
+// ---------- P4 可配置标准库前缀 + Gradle 多模块解析测试 ----------
+
+func TestJavaResolver_SetStdlibPrefixes(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/custom/lib/Foo": {"/project/Foo.java"},
+	}
+
+	// 自定义前缀：只过滤 custom 前缀
+	r.SetStdlibPrefixes([]string{"custom."})
+
+	// "custom.lib.Foo" 应被过滤
+	targets := r.Resolve("custom.lib.Foo", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected 'custom.lib.Foo' to be filtered, got %v", targets)
+	}
+
+	// 非自定义前缀不应过滤（即使它在默认列表中）
+	r.SetStdlibPrefixes([]string{"custom."})
+	targets = r.Resolve("java.lang.String", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected 'java.lang.String' to be filtered when custom prefix is set, got %v", targets)
+	}
+}
+
+func TestJavaResolver_EmptyPrefixes_NoFilter(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"java/lang/String": {"/project/String.java"},
+	}
+
+	// 空前缀列表 = 不过滤任何 import
+	r.SetStdlibPrefixes([]string{})
+
+	targets := r.Resolve("java.lang.String", idx)
+	if len(targets) == 0 {
+		t.Error("expected 'java.lang.String' to resolve when no prefixes are set")
+	}
+}
+
+func TestJavaResolver_AddStdlibPrefix(t *testing.T) {
+	r := NewJavaResolver(nil)
+	idx := map[string][]string{
+		"com/mycompany/Foo": {"/project/Foo.java"},
+	}
+
+	// 追加自定义前缀
+	r.AddStdlibPrefix("com.mycompany.")
+
+	// 应被过滤
+	targets := r.Resolve("com.mycompany.Foo", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected 'com.mycompany.Foo' to be filtered after AddStdlibPrefix, got %v", targets)
+	}
+
+	// 默认前缀仍应生效
+	targets = r.Resolve("java.lang.String", nil)
+	if targets != nil {
+		t.Error("expected 'java.lang.String' to still be filtered with default prefixes")
+	}
+}
+
+// ---------- P4 Gradle 多模块解析测试 ----------
+
+// newGradleTestStore 创建包含 Gradle 多模块项目文件路径的测试数据。
+//
+// 文件路径结构：/project/{module}/{sourceRoot}/{internalPath}
+// 对应 Gradle 路径：:{module}:{internalPathSegments}
+func newGradleTestStore() *mockStore {
+	return &mockStore{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/app/src/main/java/controller/UserController.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/project/app/src/main/java/service/UserService.java", Language: "java"},
+			{ID: 3, AbsolutePath: "/project/core/src/main/java/domain/User.java", Language: "java"},
+			{ID: 4, AbsolutePath: "/project/core/src/main/java/domain/Order.java", Language: "java"},
+			{ID: 5, AbsolutePath: "/project/lib/src/main/java/util/StringUtils.java", Language: "java"},
+		},
+	}
+}
+
+func TestGradleResolver_ModulePath(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+	idx := map[string][]string{
+		"app/controller/UserController": {"/project/app/UserController.java"},
+		"core/domain/User":              {"/project/core/domain/User.java"},
+	}
+
+	// :app:controller:UserController → app/controller/UserController
+	targets := r.Resolve(":app:controller:UserController", idx)
+	if len(targets) != 1 || targets[0] != "/project/app/UserController.java" {
+		t.Errorf("expected '/project/app/UserController.java', got %v", targets)
+	}
+
+	// :core:domain:User → core/domain/User
+	targets = r.Resolve(":core:domain:User", idx)
+	if len(targets) != 1 || targets[0] != "/project/core/domain/User.java" {
+		t.Errorf("expected '/project/core/domain/User.java', got %v", targets)
+	}
+}
+
+func TestGradleResolver_NonGradlePath(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+
+	// 非 : 开头的路径应返回 nil（直接跳过）
+	targets := r.Resolve("com.example.Foo", nil)
+	if targets != nil {
+		t.Errorf("expected nil for non-Gradle path, got %v", targets)
+	}
+}
+
+func TestGradleResolver_ModulePathWithSourceRoot(t *testing.T) {
+	r := NewGradleResolver([]string{"src/main/java"}, nil)
+	idx := map[string][]string{
+		"src/main/java/app/controller/UserController": {"/project/app/src/main/java/com/example/controller/UserController.java"},
+		"src/main/java/core/domain/User":              {"/project/core/src/main/java/com/example/domain/User.java"},
+	}
+
+	// 源根目录匹配
+	targets := r.Resolve(":app:controller:UserController", idx)
+	if len(targets) == 0 {
+		t.Error("expected GradleResolver to match with source root")
+	}
+
+	// 更精确的匹配
+	targets = r.Resolve(":core:domain:User", idx)
+	if len(targets) == 0 {
+		t.Error("expected GradleResolver to match core module with source root")
+	}
+}
+
+func TestGradleResolver_Wildcard(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+	idx := map[string][]string{
+		"app/controller/UserController": {"/project/app/UserController.java"},
+		"app/service/UserService":       {"/project/app/UserService.java"},
+		"core/domain/User":              {"/project/core/domain/User.java"},
+	}
+
+	// :app:* → app 目录下所有文件
+	targets := r.Resolve(":app:*", idx)
+	if len(targets) != 2 {
+		t.Errorf("expected 2 targets for ':app:*', got %d: %v", len(targets), targets)
+	}
+
+	// :core:* → core 目录下 1 个文件
+	targets = r.Resolve(":core:*", idx)
+	if len(targets) != 1 {
+		t.Errorf("expected 1 target for ':core:*', got %d: %v", len(targets), targets)
+	}
+}
+
+func TestGradleResolver_WildcardNoMatch(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+	idx := map[string][]string{
+		"app/controller/UserController": {"/project/app/UserController.java"},
+	}
+
+	// 不存在的模块
+	targets := r.Resolve(":nonexistent:*", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for nonexistent module wildcard, got %v", targets)
+	}
+}
+
+func TestGradleResolver_ModuleWhitelist(t *testing.T) {
+	r := NewGradleResolver(nil, []string{"app", "core"})
+	idx := map[string][]string{
+		"app/controller/UserController": {"/project/app/UserController.java"},
+		"lib/util/StringUtils":          {"/project/lib/StringUtils.java"},
+	}
+
+	// app 在白名单中 → 应匹配
+	targets := r.Resolve(":app:controller:UserController", idx)
+	if len(targets) == 0 {
+		t.Error("expected match for whitelisted module 'app'")
+	}
+
+	// lib 不在白名单中 → 应返回 nil
+	targets = r.Resolve(":lib:util:StringUtils", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for non-whitelisted module 'lib', got %v", targets)
+	}
+}
+
+func TestGradleResolver_EmptyModuleWhitelist(t *testing.T) {
+	// 空白名单 = 不限制
+	r := NewGradleResolver(nil, []string{})
+	idx := map[string][]string{
+		"any/module/Foo": {"/project/any/Foo.java"},
+	}
+
+	targets := r.Resolve(":any:module:Foo", idx)
+	if len(targets) == 0 {
+		t.Error("expected empty whitelist to allow all modules")
+	}
+}
+
+func TestGradleResolver_StdlibFilter(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+
+	// 标准库路径应被过滤（即使以 : 开头）
+	targets := r.Resolve(":java:lang:String", nil)
+	if targets != nil {
+		t.Errorf("expected stdlib ':java:lang:String' to be filtered, got %v", targets)
+	}
+}
+
+func TestGradleResolver_IntegrationWithAnalyzer(t *testing.T) {
+	ms := newGradleTestStore()
+	idx := buildImportIndex(ms.files)
+	a := NewAnalyzer(ms)
+
+	// 解析 Gradle 多模块路径
+	targets := a.resolveImport(":app:controller:UserController", idx)
+	if len(targets) == 0 {
+		t.Error("expected GradleResolver to resolve ':app:controller:UserController'")
+	}
+
+	// 通配符匹配
+	targets = a.resolveImport(":core:*", idx)
+	if len(targets) != 2 {
+		t.Errorf("expected 2 targets for ':core:*', got %d: %v", len(targets), targets)
+	}
+}
+
+func TestGradleResolver_IntegrationWithAnalyzer_ModuleNames(t *testing.T) {
+	ms := newGradleTestStore()
+	idx := buildImportIndex(ms.files)
+	a := NewAnalyzer(ms)
+
+	// 设置模块名白名单
+	a.SetGradleModuleNames([]string{"app", "core"})
+
+	// app 模块应匹配
+	targets := a.resolveImport(":app:controller:UserController", idx)
+	if len(targets) == 0 {
+		t.Error("expected match for whitelisted module 'app'")
+	}
+
+	// lib 模块不在白名单中 → 应返回 nil
+	targets = a.resolveImport(":lib:util:StringUtils", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for non-whitelisted module 'lib', got %v", targets)
+	}
+}
+
+func TestGradleResolver_DefaultSourceRoots(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+	if len(r.sourceRoots) != 4 {
+		t.Errorf("expected 4 default source roots, got %d", len(r.sourceRoots))
+	}
+}
+
+func TestGradleResolver_CustomSourceRoots(t *testing.T) {
+	r := NewGradleResolver([]string{"custom/src"}, nil)
+	if len(r.sourceRoots) != 1 || r.sourceRoots[0] != "custom/src" {
+		t.Errorf("expected custom source roots, got %v", r.sourceRoots)
+	}
+}
+
+func TestGradleResolver_SetStdlibPrefixes(t *testing.T) {
+	r := NewGradleResolver(nil, nil)
+	idx := map[string][]string{
+		"my/custom/Foo": {"/project/Foo.java"},
+	}
+
+	// 设置自定义前缀
+	r.SetStdlibPrefixes([]string{"my."})
+
+	// 应被过滤
+	targets := r.Resolve(":my:custom:Foo", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected ':my:custom:Foo' to be filtered, got %v", targets)
+	}
+}
+
+func TestJavaResolver_SetStdlibPrefixesViaAnalyzer(t *testing.T) {
+	ms := newJavaTestStore()
+	idx := buildImportIndex(ms.files)
+	a := NewAnalyzer(ms)
+
+	// 通过 Analyzer 设置自定义前缀，仅过滤 java.*
+	a.SetJavaStdlibPrefixes([]string{"java."})
+
+	// java.lang.String 应被过滤
+	targets := a.resolveImport("java.lang.String", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected 'java.lang.String' to be filtered, got %v", targets)
+	}
+
+	// 非 java.* 前缀应正常解析（即使默认列表中包含）
+	targets = a.resolveImport("com.example.service.UserService", idx)
+	if len(targets) == 0 {
+		t.Error("expected 'com.example.service.UserService' to resolve")
+	}
+}

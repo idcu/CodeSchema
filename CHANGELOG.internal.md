@@ -6,6 +6,27 @@
 
 ## 提交记录
 
+### Commit 10: feat(analyzer): P4 Gradle 多模块路径解析 + 标准库前缀可配置化
+
+**Commit Hash**: `待补充（commit 后写入）`
+
+**核心改动点**：
+- `internal/analyzer/resolver.go` — 新增 `GradleResolver` 实现，支持 `:module:path:to:Class` 格式路径解析、4 种匹配策略、通配符/模块白名单/标准库过滤；`javaStdlibPrefixes` 从全局变量改为 `JavaResolver` 实例字段，新增 `SetStdlibPrefixes`/`AddStdlibPrefix` 方法
+- `internal/analyzer/analyzer.go` — `Analyzer` 新增 `gradleResolver` 字段；`NewAnalyzer` 初始化解析器链（GoResolver → JavaResolver → GradleResolver → heuristicResolver）；新增 `SetJavaStdlibPrefixes`/`SetGradleModuleNames` 方法
+- `internal/analyzer/analyzer_test.go` — 新增 25 个 P4 测试（GradleResolver 15 个 + 可配置前缀 4 个 + 集成测试 6 个）
+- `docs/dev/06-编排层与并发模型.md` — 新增 §9 架构总结（架构图、解析器链、数据结构、扩展性设计、当前状态），更新 P4 完成标准（77 测试通过）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（11 个包，0 失败）
+- analyzer 包 77 个测试全部通过（52 个原有 + 25 个 P4 新增）
+- 新增测试覆盖：Gradle 模块路径精确匹配、非 Gradle 路径跳过、源根目录匹配、通配符匹配/不匹配、模块名白名单/空白名单、标准库过滤、Analyzer 集成（含模块名白名单集成）、默认/自定义源根目录、自定义前缀过滤、SetStdlibPrefixes/AddStdlibPrefix/EmptyPrefixes/通过 Analyzer 设置
+
+**遗留 TODO / 风险**：
+- Gradle 路径匹配依赖源根目录约定（`{module}/{sourceRoot}/{internalPath}`），若实际项目结构不符需调整默认源根目录
+- Python/TypeScript 等多语言解析器尚未实现，可作后续 P5 扩展
+- 模块名白名单当前为精确匹配，后续可支持前缀匹配或正则
+
 ### Commit 9: feat(analyzer): P3 多语言解析器 — Java Maven/Gradle 包路径解析
 
 **Commit Hash**: `1e8f9f0`

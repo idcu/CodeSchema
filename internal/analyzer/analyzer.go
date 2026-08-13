@@ -18,26 +18,30 @@ import (
 //   - 文件依赖图（FileGraph）：文件间的依赖关系
 type Analyzer struct {
 	store    store.Store
-	resolver *CompositeResolver // 多语言 import 解析器
-	goResolver *GoResolver     // Go 模块路径解析器（用于动态更新 modulePath）
-	javaResolver *JavaResolver // Java 包路径解析器（用于动态更新 source roots）
+	resolver *CompositeResolver  // 多语言 import 解析器
+	goResolver *GoResolver      // Go 模块路径解析器
+	javaResolver *JavaResolver  // Java 包路径解析器
+	gradleResolver *GradleResolver // Gradle 多模块路径解析器
 }
 
 // NewAnalyzer 创建分析器实例。
 //
 // 初始化多语言 import 解析器，默认包含：
 //   - GoResolver（未设置模块路径时始终回退）
-//   - JavaResolver（使用默认源根目录）
+//   - JavaResolver（使用默认源根目录，标准库过滤）
+//   - GradleResolver（多模块 : 路径解析）
 //   - heuristicResolver（最终的启发式回退）
 func NewAnalyzer(st store.Store) *Analyzer {
 	goR := NewGoResolver("")
 	javaR := NewJavaResolver(nil)
-	composite := NewCompositeResolver(goR, javaR, &heuristicResolver{})
+	gradleR := NewGradleResolver(nil, nil)
+	composite := NewCompositeResolver(goR, javaR, gradleR, &heuristicResolver{})
 	return &Analyzer{
-		store:        st,
-		resolver:     composite,
-		goResolver:   goR,
-		javaResolver: javaR,
+		store:          st,
+		resolver:       composite,
+		goResolver:     goR,
+		javaResolver:   javaR,
+		gradleResolver: gradleR,
 	}
 }
 
@@ -53,6 +57,22 @@ func (a *Analyzer) SetJavaSourceRoots(roots []string) {
 	if len(roots) > 0 {
 		a.javaResolver.sourceRoots = roots
 	}
+}
+
+// SetJavaStdlibPrefixes 设置 Java 标准库/框架前缀列表。
+//
+// 覆盖默认的 23 个前缀。传入 nil 或空切片表示不过滤任何 import。
+func (a *Analyzer) SetJavaStdlibPrefixes(prefixes []string) {
+	a.javaResolver.SetStdlibPrefixes(prefixes)
+}
+
+// SetGradleModuleNames 设置 Gradle 模块名白名单。
+//
+// 当设置了白名单后，只有白名单中的模块会被解析。
+// 例如：a.SetGradleModuleNames([]string{"app", "core", "lib"})
+// 传入 nil 表示不限制模块名。
+func (a *Analyzer) SetGradleModuleNames(names []string) {
+	a.gradleResolver.moduleNames = names
 }
 
 // BuildAll 构建所有代码图（单次遍历）。
