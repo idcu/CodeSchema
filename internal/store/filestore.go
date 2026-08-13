@@ -261,6 +261,44 @@ func (fs *FileStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error 
 	if err := fs.UpsertClasses(ctx, fileID, ir.Classes); err != nil {
 		return fmt.Errorf("upsert classes: %w", err)
 	}
+
+	// 为每个类 Upsert 对应的方法：按 ClassFQN 匹配
+	fs.mu.RLock()
+	classRecords := fs.classes[fileID]
+	fs.mu.RUnlock()
+
+	if len(ir.Methods) > 0 && len(classRecords) > 0 {
+		// 建立 FullName → ClassID 的映射
+		classMap := make(map[string]int64, len(classRecords))
+		for _, cr := range classRecords {
+			classMap[cr.FullName] = cr.ID
+		}
+
+		// 按 ClassFQN 分组方法
+		type methodGroup struct {
+			classID int64
+			methods []parser.MethodIR
+		}
+		groupMap := make(map[int64]*methodGroup)
+		for _, m := range ir.Methods {
+			cid, ok := classMap[m.ClassFQN]
+			if !ok {
+				// 方法没有匹配的类（如文件级函数），关联到文件级别
+				continue
+			}
+			if _, exists := groupMap[cid]; !exists {
+				groupMap[cid] = &methodGroup{classID: cid}
+			}
+			groupMap[cid].methods = append(groupMap[cid].methods, m)
+		}
+
+		for _, g := range groupMap {
+			if err := fs.UpsertMethods(ctx, g.classID, g.methods); err != nil {
+				return fmt.Errorf("upsert methods for class %d: %w", g.classID, err)
+			}
+		}
+	}
+
 	if err := fs.UpsertCalls(ctx, fileID, ir.Calls); err != nil {
 		return fmt.Errorf("upsert calls: %w", err)
 	}

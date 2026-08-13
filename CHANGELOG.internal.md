@@ -6,6 +6,43 @@
 
 ## 提交记录
 
+### Commit 25: test(stress): P11 集成测试与性能压测 — 端到端全流程验证 / 9 项性能基准
+
+**Commit Hash**: TBD（待提交）
+
+**核心改动点**：
+- `internal/integration/integration_test.go` — 新建 7 个端到端集成测试，覆盖 scan → store → index → search 全流程、空查询、搜索限制、文件搜索、结果富化、重复扫描幂等性、索引一致性
+- `internal/integration/benchmark_test.go` — 新建 9 个性能基准测试，覆盖 MemoryFTS 索引/搜索（100/1000/5000 文档）、LocalEmbedder Embed（3 维度 × 3 文本长度）、LocalEmbedder Observe（100/1000/5000 文档）、IndexBuilder 全量构建（10/50/200 文件）、Searcher 双路检索（100/1000 文档 × 3 模式）、完整流水线（10/50/100 文件）、异步索引队列（1/2/4/8 worker × 1000 文档）、融合重排器（100/500/1000 结果）
+- `internal/store/filestore.go` — 修复 `UpsertIR` 未存储方法数据的 Bug，按 ClassFQN 匹配类和方法，新增方法分组逻辑
+
+**新增公共抽象**：
+- 无（新增测试文件，不涉及公共 API 变更）
+
+**影响范围**：
+- `internal/integration/` — 新增目录和文件，不影响现有代码
+- `internal/store/filestore.go` — `UpsertIR` 新增方法存储逻辑，向后兼容（原有代码路径不变）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（17 个包，0 失败）
+- 集成测试：7 个全部通过
+- Benchmark 关键数据（100ms 跑分）：
+  - MemoryFTS Index 100 文档：~497µs/op, 331KB/op, 11.7K allocs/op
+  - MemoryFTS Index 5000 文档：~25ms/op, 16.7MB/op, 586K allocs/op
+  - MemoryFTS Search 5000 文档：~8ms/op, 8.7MB/op, 13K allocs/op
+  - LocalEmbedder Embed dim=128/words=10：~2.2µs/op, 2.7KB/op, 31 allocs/op
+  - LocalEmbedder Embed dim=1024/words=200：~30µs/op, 32KB/op, 453 allocs/op
+  - LocalEmbedder Observe 5000 文档：~42ms/op, 31.9MB/op, 616K allocs/op
+  - Searcher Search both 模式 1000 文档：~2.7ms/op, 1.7MB/op, 2.7K allocs/op
+  - 异步索引 8 worker × 1000 文档：~18ms/op, 18.3MB/op, 368K allocs/op
+  - 重排器 1000 结果：~614µs/op, 739KB/op, 2K allocs/op
+
+**遗留 TODO / 风险**：
+- 集成测试使用 mock parser，不覆盖真实 tree-sitter 解析器路径，需在 P1 阶段补充真实解析器的集成测试
+- 性能基准测试未覆盖磁盘持久化（PersistentFTS/PersistentStore/LocalEmbedder 序列化），需在后续补充
+- BenchmarkFullPipeline 和 BenchmarkIndexBuilder_BuildFromStore 由于包含 store 操作和数据准备，跑分可能受磁盘 I/O 影响
+- Benchmark 数据为开发环境（Windows 笔记本）单次跑分，非生产环境，仅作为相对性能参考
+
 ### Commit 24: perf(index): IDF 跳过 Observe + 自动持久化 — 全量构建加速 / 增量 IDF 保全
 
 **Commit Hash**: `babea23`
