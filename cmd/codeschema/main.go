@@ -18,6 +18,7 @@ import (
 
 	"codeschema/internal/config"
 	"codeschema/internal/parser"
+	"codeschema/internal/robust"
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
 	"codeschema/internal/search"
@@ -78,15 +79,28 @@ Use "codeschema <command> -h" for more information about a command.
 	// P9: 环境变量覆盖（优先级高于配置文件，但低于 CLI 参数）
 	config.LoadFromEnv(cfg)
 
+	// 优雅关闭管理器（30s 全局超时）
+	graceful := robust.NewGracefulManager(30 * time.Second)
+	robust.ForceExitOnSecondSignal(graceful)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 捕获退出信号
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
+	// 注册优雅关闭钩子：先取消 context
+	graceful.RegisterFunc("context_cancel", func(ctx context.Context) error {
 		cancel()
+		return nil
+	})
+
+	// 捕获退出信号并启动优雅关闭
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		select {
+		case <-sigCh:
+			_ = graceful.Shutdown(context.Background())
+		case <-ctx.Done():
+		}
 	}()
 
 	// P9: 配置热重载（watch/mcp/serve 命令支持）
@@ -101,7 +115,10 @@ Use "codeschema <command> -h" for more information about a command.
 					log.Printf("config watcher stopped: %v", err)
 				}
 			}()
-			defer cw.Stop()
+			graceful.RegisterFunc("config_watcher", func(ctx context.Context) error {
+				cw.Stop()
+				return nil
+			})
 
 			// 将配置实例替换为可热更新的配置
 			origCfg := cfg

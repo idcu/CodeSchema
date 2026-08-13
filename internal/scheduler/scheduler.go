@@ -10,6 +10,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"codeschema/internal/robust"
 )
 
 // Scheduler 是事件调度器，负责防抖合并与排队。
@@ -114,7 +116,9 @@ func (s *Scheduler) Start(ctx context.Context, processFn func(context.Context, s
 				case <-ctx.Done():
 					return
 				default:
-					_ = processFn(ctx, path) // 错误已由 processFn 内部处理
+					robust.SafeCall(func() {
+						_ = processFn(ctx, path) // 错误已由 processFn 内部处理
+					})
 				}
 			}
 		}

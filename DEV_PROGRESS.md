@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 00:00
-> 当前阶段：全部外部依赖已安装 — chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go
-> 下一个阶段：P11 — 集成测试与性能压测（已完成）
+> 更新时间：2026-08-14 05:20
+> 当前阶段：生产级健壮性 — 优雅关闭 / 重试机制 / Panic 恢复（已完成）
+> 下一个阶段：P13 — 项目交付与生产部署准备
 
 ---
 
@@ -24,6 +24,7 @@ P8.3     [████████████████████] 100%
 P9       [████████████████████] 100%
 P10      [████████████████████] 100%
 P11      [████████████████████] 100%
+P12      [████████████████████] 100%
 ```
 
 ---
@@ -200,6 +201,17 @@ P11      [████████████████████] 100%
 - [x] **`internal/store/filestore.go`** — 修复 `UpsertIR` 未存储方法数据的 Bug，按 ClassFQN 匹配类和方法
 - [x] 验证数据：go build + go test 17 个包全部通过，0 失败；Benchmark 全部可运行
 
+### P12 — 生产级健壮性（错误处理/重试/优雅关闭/Panic 恢复）
+- [x] **`internal/robust/graceful.go`** — 优雅关闭管理器（GracefulManager），支持多钩子注册、逆序执行、信号监听、超时控制、第二次信号强制退出逃生舱口
+- [x] **`internal/robust/retry.go`** — 重试机制（Retry），支持指数退避 + 抖动、可配置最大尝试次数/基础延迟/最大延迟、可重试谓词；等效 AWS SDK StandardRetryMode
+- [x] **`internal/robust/recovery.go`** — Panic 恢复工具（RecoveryHandler），支持 SafeCall/SafeCallWithResult/Go/GoWithContext/Recover/RecoverWithCallback，全局便捷函数
+- [x] **`internal/robust/*_test.go`** — 28 个测试，覆盖优雅关闭（注册/顺序/超时/重入/错误收集）、重试（成功/重试后成功/耗尽/取消/不可重试/退避计算/抖动/配置选项）、Panic 恢复（SafeCall/SafeCallWithResult/Recover/RecoverWithCallback/Go/GoWithPanic）
+- [x] **`internal/server/mcp.go`** — 添加 panic 恢复中间件（recoveryMiddleware），使用 robust.Recover 捕获 panic
+- [x] **`internal/watcher/watcher.go`** — PollWatcher 和 FsWatcher 的 Start 方法添加 robost.SafeCall 保护，防止 poll/handleEvent panic 导致监听器崩溃
+- [x] **`internal/scheduler/scheduler.go`** — Scheduler.Start 的 processFn 调用添加 robost.SafeCall 保护
+- [x] **`cmd/codeschema/main.go`** — 使用 GracefulManager 统一管理优雅关闭，注册 context_cancel 和 config_watcher 钩子，ForceExitOnSecondSignal 逃生舱口
+- [x] 验证数据：go build + go test 18 个包全部通过，0 失败；robust 包 28 个测试全部通过
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -210,7 +222,7 @@ P11      [████████████████████] 100%
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P12 | 生产级健壮性（错误处理/重试/优雅关闭） | `docs/dev/11-配置部署与路线图.md` | P11 完成 |
+| P13 | 项目交付与生产部署准备：构建脚本/CI 配置/容器化/部署文档/最终验证 | `docs/dev/11-配置部署与路线图.md` | P12 完成 |
 
 ## 已知问题
 
@@ -225,8 +237,9 @@ P11      [████████████████████] 100%
 1. 阅读 `docs/dev/00-项目概述与架构概览.md` 了解整体架构
 2. 按 `docs/dev/` 编号顺序阅读对应开发文档
 3. 当前所有模块可编译运行：`go build ./cmd/codeschema`
-4. 运行测试：`go test ./...`（15 个包，全部通过）
+4. 运行测试：`go test ./...`（18 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：FsWatcher 原生文件监听（参见 CHANGELOG.internal.md Commit 19）
+7. 最新提交：P12 生产级健壮性（参见 CHANGELOG.internal.md Commit 26）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
+9. 当前 18 个包全部测试通过：`go test ./...`（0 失败）

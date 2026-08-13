@@ -6,6 +6,45 @@
 
 ## 提交记录
 
+### Commit 26: feat(robust): P12 生产级健壮性 — 优雅关闭 / 重试机制 / Panic 恢复
+
+**Commit Hash**: TBD（待提交）
+
+**核心改动点**：
+- `internal/robust/graceful.go` — 新增优雅关闭管理器（GracefulManager），支持多钩子注册、逆序执行、超时控制、信号监听、二次信号强制退出
+- `internal/robust/retry.go` — 新增重试机制（Retry），指数退避 + 抖动，等效 AWS SDK StandardRetryMode
+- `internal/robust/recovery.go` — 新增 Panic 恢复工具（RecoveryHandler），SafeCall/SafeCallWithResult/Go/Recover 等
+- `internal/server/mcp.go` — 添加 panic 恢复中间件
+- `internal/watcher/watcher.go` — PollWatcher/FsWatcher 添加 SafeCall 保护
+- `internal/scheduler/scheduler.go` — Scheduler.Start 添加 SafeCall 保护
+- `cmd/codeschema/main.go` — 使用 GracefulManager 统一优雅关闭
+
+**新增公共抽象**：
+- `robust.NewGracefulManager` / `Register` / `RegisterFunc` / `Shutdown` / `WaitForSignal` / `ForceExitOnSecondSignal`
+- `robust.Retry` + `WithMaxAttempts` / `WithBaseDelay` / `WithMaxDelay` / `WithJitter` / `WithRetryable`
+- `robust.NewRecoveryHandler` / `SafeCall` / `SafeCallWithResult` / `Go` / `Recover` / `RecoverWithCallback` + 全局便捷函数
+
+**影响范围**：
+- `internal/robust/` — 新增目录，不破环现有代码
+- `internal/server/mcp.go` — 新增 recoveryMiddleware，对内层 handler 无影响
+- `internal/watcher/watcher.go` — poll/handleEvent 调用 SafeCall 包裹，不影响返回值
+- `internal/scheduler/scheduler.go` — processFn 调用 SafeCall 包裹，不影响返回值
+- `cmd/codeschema/main.go` — 信号处理重构为 GracefulManager，功能等价
+
+**验证数据**：
+- go build ./cmd/codeschema — 通过
+- go test ./... — 全部通过（18 个包，0 失败）
+- robust 包 28 个测试全部通过
+- 优雅关闭：逆序执行 / 超时 100ms 钩子正常关闭 / 重入保护 / 信号监听
+- 重试：3 次耗尽 / 第 3 次成功 / context 取消立即返回 / 不可重试错误不重试 / 指数退避 + 抖动验证
+- Panic 恢复：SafeCall 捕获 panic 返回 error / Recover 不 panic / Go 启动 goroutine 安全
+
+**遗留 TODO / 风险**：
+- GracefulManager 的 Shutdown 逆序执行策略在极端场景下可能不够灵活（如依赖关系非线性的组件），需按需调整
+- Retry 暂不支持指数退避的随机种子配置，每次运行随机数相同
+- 重试机制暂未集成到现有 Store/Watcher 等 I/O 操作中，需在 P13 阶段按需应用
+- robust 包日志依赖 internal/log，如果 internal/log 本身发生 panic 会造成递归恢复
+
 ### Commit 25: test(stress): P11 集成测试与性能压测 — 端到端全流程验证 / 9 项性能基准
 
 **Commit Hash**: `37ac435`

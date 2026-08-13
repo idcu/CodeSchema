@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"codeschema/internal/robust"
 	"codeschema/internal/service"
 )
 
@@ -212,9 +213,11 @@ func (m *MCPServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/sse", m.handleSSE)
 	mux.HandleFunc("/message", m.handleMessage)
 
-	// 中间件链：认证 → CORS
+	// 中间件链：认证 → CORS → Panic 恢复
 	handler := m.authMiddleware(
-		corsMiddleware(mux),
+		recoveryMiddleware(
+			corsMiddleware(mux),
+		),
 	)
 
 	m.server = &http.Server{
@@ -526,6 +529,14 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recoveryMiddleware 捕获 panic 并返回 500 错误。
+func recoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer robust.Recover()
 		next.ServeHTTP(w, r)
 	})
 }

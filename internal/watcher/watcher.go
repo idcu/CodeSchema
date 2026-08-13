@@ -13,6 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"codeschema/internal/robust"
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
 )
@@ -86,7 +87,9 @@ func (pw *PollWatcher) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			pw.poll(ctx)
+			robust.SafeCall(func() {
+				pw.poll(ctx)
+			})
 		}
 	}
 }
@@ -213,7 +216,9 @@ func (fw *FsWatcher) Start(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			fw.handleEvent(ctx, event)
+			robust.SafeCall(func() {
+				fw.handleEvent(ctx, event)
+			})
 		case err, ok := <-fw.watcher.Errors:
 			if !ok {
 				return nil
