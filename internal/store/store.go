@@ -69,6 +69,7 @@ type FileRecord struct {
 	LineCount        int      `json:"line_count"`
 	ByteSize         int64    `json:"byte_size"`
 	ReferencedByFiles []string `json:"referenced_by_files,omitempty"`
+	Imports          []string `json:"imports,omitempty"`
 	Language         string   `json:"language,omitempty"`
 	ParseStatus      string   `json:"parse_status"`
 }

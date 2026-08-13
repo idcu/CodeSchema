@@ -92,6 +92,66 @@ func newTestStore() *mockStore {
 	}
 }
 
+// newP1TestStore 创建包含 imports 和父子关系的测试数据。
+func newP1TestStore() *mockStore {
+	return &mockStore{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/service.go", Language: "go", ContentHash: "h1", LineCount: 100, ByteSize: 2048,
+				Imports: []string{"project/repo", "project/handler"}},
+			{ID: 2, AbsolutePath: "/project/repo.go", Language: "go", ContentHash: "h2", LineCount: 80, ByteSize: 1600,
+				Imports: []string{"project/base"}},
+			{ID: 3, AbsolutePath: "/project/handler.go", Language: "go", ContentHash: "h3", LineCount: 50, ByteSize: 1024,
+				Imports: []string{"project/service"}},
+			{ID: 4, AbsolutePath: "/project/base.go", Language: "go", ContentHash: "h4", LineCount: 30, ByteSize: 512,
+				Imports: nil},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {
+				{ID: 1, FileID: 1, Name: "Service", FullName: "com.example.Service", Type: "CLASS", StartLine: 1, EndLine: 50},
+				{ID: 2, FileID: 1, Name: "ServiceImpl", FullName: "com.example.ServiceImpl", Type: "CLASS",
+					StartLine: 52, EndLine: 100, ParentFQNs: []string{"com.example.Service", "com.example.BaseService"}},
+			},
+			2: {
+				{ID: 3, FileID: 2, Name: "Repository", FullName: "com.example.Repository", Type: "INTERFACE", StartLine: 1, EndLine: 10},
+			},
+			3: {
+				{ID: 4, FileID: 3, Name: "Handler", FullName: "com.example.Handler", Type: "CLASS", StartLine: 1, EndLine: 30},
+			},
+			4: {
+				{ID: 5, FileID: 4, Name: "BaseService", FullName: "com.example.BaseService", Type: "CLASS", StartLine: 1, EndLine: 30},
+			},
+		},
+		methods: map[int64][]store.MethodRecord{
+			1: {
+				{ID: 1, ClassID: 1, Name: "GetUser", FullName: "com.example.Service.GetUser", StartLine: 5, EndLine: 20},
+				{ID: 2, ClassID: 1, Name: "SaveUser", FullName: "com.example.Service.SaveUser", StartLine: 22, EndLine: 35},
+			},
+			2: {
+				{ID: 3, ClassID: 2, Name: "Process", FullName: "com.example.ServiceImpl.Process", StartLine: 55, EndLine: 70},
+			},
+			3: {
+				{ID: 4, ClassID: 3, Name: "FindByID", FullName: "com.example.Repository.FindByID", StartLine: 3, EndLine: 8},
+			},
+			4: {
+				{ID: 5, ClassID: 4, Name: "Handle", FullName: "com.example.Handler.Handle", StartLine: 5, EndLine: 25},
+			},
+			5: {
+				{ID: 6, ClassID: 5, Name: "Init", FullName: "com.example.BaseService.Init", StartLine: 5, EndLine: 15},
+			},
+		},
+		calls: map[int64][]store.CallRecord{
+			1: {
+				{CallerFQN: "com.example.Service.GetUser", CalleeFQN: "com.example.Repository.FindByID", CallType: "direct", LineNumber: 10},
+				{CallerFQN: "com.example.Service.SaveUser", CalleeFQN: "com.example.Repository.FindByID", CallType: "direct", LineNumber: 25},
+				{CallerFQN: "com.example.ServiceImpl.Process", CalleeFQN: "com.example.Service.GetUser", CallType: "direct", LineNumber: 60},
+			},
+			3: {
+				{CallerFQN: "com.example.Handler.Handle", CalleeFQN: "com.example.Service.GetUser", CallType: "direct", LineNumber: 10},
+			},
+		},
+	}
+}
+
 // ---------- 图数据结构测试 ----------
 
 func TestCallGraph_AddNode(t *testing.T) {
@@ -563,5 +623,211 @@ func TestReconstructPath_NoPath(t *testing.T) {
 	path := reconstructPath(prev, "A", "C")
 	if path != nil {
 		t.Errorf("expected nil for incomplete path, got %v", path)
+	}
+}
+
+// ---------- P1 功能测试 ----------
+
+func TestBuildImportIndex(t *testing.T) {
+	ms := newP1TestStore()
+	idx := buildImportIndex(ms.files)
+
+	// 文件路径包含 "service.go" → 应生成 "service" 键
+	if _, ok := idx["service"]; !ok {
+		t.Error("expected 'service' key in import index")
+	}
+	// 文件路径包含 "repo.go" → 应生成 "repo" 键
+	if _, ok := idx["repo"]; !ok {
+		t.Error("expected 'repo' key in import index")
+	}
+	// 文件路径包含 "project/service" → 应生成 "project/service" 键
+	if _, ok := idx["project/service"]; !ok {
+		t.Error("expected 'project/service' key in import index")
+	}
+}
+
+func TestResolveImport(t *testing.T) {
+	ms := newP1TestStore()
+	idx := buildImportIndex(ms.files)
+
+	// 策略 2: import "project/service" → 最后一段 "service" 应匹配 service.go
+	targets := resolveImport("project/service", idx)
+	if len(targets) == 0 {
+		t.Error("expected resolveImport to find target for 'project/service'")
+	} else {
+		found := false
+		for _, p := range targets {
+			if p == "/project/service.go" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected '/project/service.go' in targets, got %v", targets)
+		}
+	}
+
+	// 不存在的 import 返回 nil
+	targets = resolveImport("nonexistent/pkg", idx)
+	if len(targets) != 0 {
+		t.Errorf("expected nil for nonexistent import, got %v", targets)
+	}
+}
+
+func TestAnalyzer_BuildReverseIndex(t *testing.T) {
+	ms := newP1TestStore()
+	a := NewAnalyzer(ms)
+
+	ri, err := a.BuildReverseIndex(context.Background())
+	if err != nil {
+		t.Fatalf("BuildReverseIndex: %v", err)
+	}
+
+	// service.go 导入了 project/repo 和 project/handler
+	imports := ri.GetImports("/project/service.go")
+	if len(imports) != 2 {
+		t.Errorf("expected 2 imports for service.go, got %d: %v", len(imports), imports)
+	}
+
+	// handler.go 导入了 project/service → service.go 应被 handler.go 引用
+	refs := ri.GetReferencedBy("/project/service.go")
+	if len(refs) == 0 {
+		t.Error("expected service.go to be referenced by at least 1 file")
+	}
+	found := false
+	for _, r := range refs {
+		if r == "/project/handler.go" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '/project/handler.go' to reference service.go, got %v", refs)
+	}
+}
+
+func TestAnalyzer_BuildReverseIndex_EmptyImports(t *testing.T) {
+	ms := newTestStore() // 原始测试数据没有 imports
+	a := NewAnalyzer(ms)
+
+	ri, err := a.BuildReverseIndex(context.Background())
+	if err != nil {
+		t.Fatalf("BuildReverseIndex: %v", err)
+	}
+
+	// 没有 imports 时，索引应为空
+	if len(ri.Imports) != 0 {
+		t.Errorf("expected empty Imports, got %d entries", len(ri.Imports))
+	}
+	if len(ri.References) != 0 {
+		t.Errorf("expected empty References, got %d entries", len(ri.References))
+	}
+}
+
+func TestAnalyzer_BuildClassHierarchy_WithParents(t *testing.T) {
+	ms := newP1TestStore()
+	a := NewAnalyzer(ms)
+
+	ch, err := a.BuildClassHierarchy(context.Background())
+	if err != nil {
+		t.Fatalf("BuildClassHierarchy: %v", err)
+	}
+
+	// 5 个类节点
+	if ch.NodeCount() != 5 {
+		t.Errorf("expected 5 class nodes, got %d", ch.NodeCount())
+	}
+
+	// ServiceImpl 有 2 个父类
+	impl := ch.Nodes["com.example.ServiceImpl"]
+	if impl == nil {
+		t.Fatal("node 'com.example.ServiceImpl' not found")
+	}
+	if len(impl.Parents) != 2 {
+		t.Errorf("expected 2 parents for ServiceImpl, got %d: %v", len(impl.Parents), impl.Parents)
+	}
+
+	// Service 应有一个子类 (ServiceImpl)
+	service := ch.Nodes["com.example.Service"]
+	if service == nil {
+		t.Fatal("node 'com.example.Service' not found")
+	}
+	if len(service.Children) != 1 || service.Children[0] != "com.example.ServiceImpl" {
+		t.Errorf("expected 1 child 'com.example.ServiceImpl', got %v", service.Children)
+	}
+
+	// BaseService 也应有一个子类 (ServiceImpl)
+	base := ch.Nodes["com.example.BaseService"]
+	if base == nil {
+		t.Fatal("node 'com.example.BaseService' not found")
+	}
+	if len(base.Children) != 1 || base.Children[0] != "com.example.ServiceImpl" {
+		t.Errorf("expected 1 child 'com.example.ServiceImpl', got %v", base.Children)
+	}
+}
+
+func TestAnalyzer_BuildAll_P1(t *testing.T) {
+	ms := newP1TestStore()
+	a := NewAnalyzer(ms)
+
+	cg, ch, ri, fg, err := a.BuildAll(context.Background())
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+
+	// 调用图
+	if cg.NodeCount() != 5 {
+		t.Errorf("CallGraph: expected 5 nodes, got %d", cg.NodeCount())
+	}
+
+	// 类层次：5 个节点 + ServiceImpl 的 2 个父类边
+	if ch.NodeCount() != 5 {
+		t.Errorf("ClassHierarchy: expected 5 nodes, got %d", ch.NodeCount())
+	}
+	impl := ch.Nodes["com.example.ServiceImpl"]
+	if impl == nil || len(impl.Parents) != 2 {
+		t.Errorf("ServiceImpl should have 2 parents, got %d", len(impl.Parents))
+	}
+
+	// 反向索引：非空
+	if ri == nil {
+		t.Fatal("ReverseIndex should not be nil")
+	}
+	if len(ri.Imports) == 0 {
+		t.Error("ReverseIndex.Imports should not be empty with P1 data")
+	}
+
+	// 文件依赖图：4 个文件
+	if fg.NodeCount() != 4 {
+		t.Errorf("FileGraph: expected 4 nodes, got %d", fg.NodeCount())
+	}
+
+	// 验证文件依赖边：service.go → repo.go, handler.go
+	svc := fg.Nodes["/project/service.go"]
+	if svc == nil {
+		t.Fatal("node '/project/service.go' not found")
+	}
+	if len(svc.Imports) == 0 {
+		t.Error("expected service.go to have imports")
+	}
+}
+
+func TestAnalyzer_Analyze_P1(t *testing.T) {
+	ms := newP1TestStore()
+	a := NewAnalyzer(ms)
+
+	summary, err := a.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	if summary.TotalFiles != 4 {
+		t.Errorf("expected TotalFiles 4, got %d", summary.TotalFiles)
+	}
+	if summary.TotalClasses != 5 {
+		t.Errorf("expected TotalClasses 5, got %d", summary.TotalClasses)
+	}
+	if summary.TotalMethods != 6 {
+		t.Errorf("expected TotalMethods 6, got %d", summary.TotalMethods)
 	}
 }

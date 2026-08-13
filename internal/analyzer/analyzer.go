@@ -3,6 +3,8 @@ package analyzer
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"codeschema/internal/store"
 )
@@ -72,9 +74,37 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 			}
 		}
 
-		// 构建反向引用索引（P0 骨架，依赖 imports 元数据）
-		// P1 接入真实 import 解析后完善
+		// 构建反向引用索引（通过 imports 元数据）
 		fgNode.MethodCount = a.countMethodsByFileID(ctx, f.ID)
+
+		// 基于该文件的 imports 构建反向引用和文件依赖边
+		for _, imp := range f.Imports {
+			imp = strings.TrimSpace(imp)
+			if imp == "" {
+				continue
+			}
+			// 构建导入关系
+			reverseIndex.AddImport(f.AbsolutePath, imp)
+			// 尝试解析 import 到目标文件路径（使用预构建的索引）
+			// 注意：此处 innerIndex 在循环外预构建一次
+		}
+	}
+
+	// 第二次遍历：构建文件依赖边和反向引用（需要完整的 import 索引）
+	importIdx := buildImportIndex(files)
+	for _, f := range files {
+		for _, imp := range f.Imports {
+			imp = strings.TrimSpace(imp)
+			if imp == "" {
+				continue
+			}
+			if targets := resolveImport(imp, importIdx); len(targets) > 0 {
+				for _, target := range targets {
+					reverseIndex.AddReference(target, f.AbsolutePath)
+					fileGraph.AddEdge(f.AbsolutePath, target)
+				}
+			}
+		}
 	}
 
 	return callGraph, classHierarchy, reverseIndex, fileGraph, nil
@@ -138,24 +168,129 @@ func (a *Analyzer) buildClassHierarchyNode(ch *ClassHierarchy, cls store.ClassRe
 	node.Type = cls.Type
 	node.FileID = fileID
 
-	// P1 接入 ParentFQNs 解析后建立父子关系
-	// for _, parent := range cls.ParentFQNs { ch.AddParent(cls.FullName, parent) }
+	// 通过 ParentFQNs 建立父子关系
+	for _, parent := range cls.ParentFQNs {
+		if parent != "" {
+			ch.AddParent(cls.FullName, parent)
+		}
+	}
 }
 
-// BuildReverseIndex 构建反向引用索引（P0 骨架）。
+// BuildReverseIndex 构建反向引用索引。
 //
-// P0 返回空索引。P1 接入 import 解析后，通过分析每个文件的 import 语句，
-// 建立文件间的引用关系。
+// 通过分析每个文件存储的 Imports 元数据，建立文件间的引用关系。
+// 对于每个文件的 import 路径，尝试匹配到 Store 中已知的文件路径。
 func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error) {
 	ri := NewReverseIndex()
 
-	// P0 骨架：返回空索引
-	// P1 实现：
-	//   1. 读取所有文件及其 imports
-	//   2. 对每个 import，解析目标文件路径
-	//   3. 建立 referenced_by 映射
+	files, err := a.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get all files: %w", err)
+	}
+
+	// 1. 构建 import 路径到文件路径的查找映射
+	// key: import path 的包目录部分（如 "store" 匹配 "/project/store/store.go"）
+	importIndex := buildImportIndex(files)
+
+	// 2. 遍历每个文件，解析其 imports
+	for _, f := range files {
+		if len(f.Imports) == 0 {
+			continue
+		}
+		for _, imp := range f.Imports {
+			// 跳过空 import
+			imp = strings.TrimSpace(imp)
+			if imp == "" {
+				continue
+			}
+
+			// 记录该文件的导入
+			ri.AddImport(f.AbsolutePath, imp)
+
+			// 尝试解析 import 路径到具体的文件路径
+			if targets := resolveImport(imp, importIndex); len(targets) > 0 {
+				for _, target := range targets {
+					ri.AddReference(target, f.AbsolutePath)
+				}
+			}
+		}
+	}
 
 	return ri, nil
+}
+
+// buildImportIndex 构建 import 路径到文件路径的快速查找索引。
+//
+// 对于每个文件，提取其路径中的关键路径段作为索引键。
+// 例如："/project/internal/store/store.go" 会生成
+// "store"、"internal/store"、"codeschema/internal/store" 等索引键。
+func buildImportIndex(files []*store.FileRecord) map[string][]string {
+	idx := make(map[string][]string)
+	for _, f := range files {
+		path := f.AbsolutePath
+		// 统一用 / 分割，兼容 Windows 和 Unix 路径
+		normalized := strings.ReplaceAll(path, "\\", "/")
+		parts := strings.Split(normalized, "/")
+		// 生成所有可能的包路径后缀（从后向前逐步生长）
+		for i := len(parts) - 1; i >= 0; i-- {
+			suffix := strings.Join(parts[i:], "/")
+			// 去掉文件扩展名
+			dirSuffix := suffix
+			for _, ext := range []string{".go", ".java", ".ts", ".py", ".rs", ".cpp", ".h"} {
+				dirSuffix = strings.TrimSuffix(dirSuffix, ext)
+			}
+			if dirSuffix != "" && !strings.HasSuffix(dirSuffix, "/") {
+				idx[dirSuffix] = append(idx[dirSuffix], f.AbsolutePath)
+			}
+		}
+		// 额外添加文件名的包名部分（不含扩展名）
+		base := filepath.Base(path)
+		ext := filepath.Ext(base)
+		if ext != "" {
+			pkgName := strings.TrimSuffix(base, ext)
+			idx[pkgName] = append(idx[pkgName], f.AbsolutePath)
+		}
+	}
+	return idx
+}
+
+// resolveImport 尝试将 import 路径解析为 Store 中已知的文件路径。
+//
+// 返回匹配的文件路径列表。策略：
+// 1. 直接查找 import 路径是否作为索引键存在
+// 2. 提取 import 路径的最后一段（包名）进行匹配
+// 3. 将 import 路径中的 "." 替换为路径分隔符后尝试匹配
+func resolveImport(imp string, importIndex map[string][]string) []string {
+	// 策略 1: 直接匹配（import 路径恰好是某个索引键）
+	if targets, ok := importIndex[imp]; ok {
+		return targets
+	}
+
+	// 策略 2: 提取 import 路径的最后一段（包名/文件名）
+	parts := strings.Split(imp, "/")
+	last := parts[len(parts)-1]
+	if targets, ok := importIndex[last]; ok {
+		return targets
+	}
+
+	// 策略 3: 将 "." 替换为路径分隔符后匹配
+	// 例如 "codeschema.internal.store" → "codeschema/internal/store"
+	dotPath := strings.ReplaceAll(imp, ".", string(filepath.Separator))
+	if dotPath != imp {
+		if targets, ok := importIndex[dotPath]; ok {
+			return targets
+		}
+		// 尝试用最后一段匹配
+		dotParts := strings.Split(dotPath, string(filepath.Separator))
+		if len(dotParts) > 0 {
+			dotLast := dotParts[len(dotParts)-1]
+			if targets, ok := importIndex[dotLast]; ok {
+				return targets
+			}
+		}
+	}
+
+	return nil
 }
 
 // BuildFileGraph 构建文件依赖图。

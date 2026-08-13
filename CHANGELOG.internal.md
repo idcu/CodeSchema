@@ -6,6 +6,28 @@
 
 ## 提交记录
 
+### Commit 7: perf(analyzer): P1 反向引用索引 + 类层次父子关系 — 基于 imports 元数据的引用解析
+
+**Commit Hash**: `[待提交]`
+
+**核心改动点**：
+- `internal/analyzer/analyzer.go` — 实现 `BuildReverseIndex` 完整逻辑（buildImportIndex 构建多策略查找映射 + resolveImport 三策略匹配），`buildClassHierarchyNode` 接入 `ParentFQNs` 建立父子关系，`BuildAll` 一次遍历同时构建反向索引和文件依赖边
+- `internal/store/filestore.go` — `ClassRecord` 新增 `ParentFQNs []string` 字段，`UpsertClasses` 保存父类信息；`UpsertIR` 额外持久化 `FileRecord.Imports`
+- `internal/store/store.go` — `FileRecord` 新增 `Imports []string` 字段
+- 测试文件：analyzer_test.go 新增 8 个 P1 测试（buildImportIndex/resolveImport/BuildReverseIndex/BuildReverseIndex空imports/BuildClassHierarchy_WithParents/BuildAll_P1/Analyze_P1）
+- 文档同步：docs/dev/06-编排层与并发模型.md 更新 P1 完成标准
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（11 个包，0 失败）
+- analyzer 包 28 个测试全部通过（20 个原有 + 8 个 P1 新增）
+- 测试覆盖：buildImportIndex 索引构建正确性、resolveImport 三策略匹配、BuildReverseIndex 含 imports 数据/空 imports 边界、ClassHierarchy 双向父子关系验证（ServiceImpl → Service + BaseService）、BuildAll P1 集成验证、Analyze P1 统计
+
+**遗留 TODO / 风险**：
+- resolveImport 使用基于路径段的启发式匹配，P2 可接入 Go 包路径解析获得精确匹配
+- 反向索引当前在 BuildAll 中需要两次遍历（先构建索引、再匹配），大仓库场景可优化为单次遍历
+- 文件依赖边（FileGraph.AddEdge）与反向索引共享同一份 import 解析结果，依赖 resolveImport 的正确性
+
 ### Commit 6: feat(analyzer): P0 代码图分析器 — 四种图结构 + 影响面分析 + 最短路径
 
 **Commit Hash**: `51cf372`

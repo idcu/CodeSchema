@@ -26,18 +26,19 @@ type FileStore struct {
 
 // ClassRecord 对应解析后的类信息。
 type ClassRecord struct {
-	ID       int64  `json:"id"`
-	FileID   int64  `json:"file_id"`
-	Name     string `json:"name"`
-	FullName string `json:"full_name"`
-	Type     string `json:"type"`
-	StartLine int   `json:"start_line"`
-	StartCol  int   `json:"start_col"`
-	EndLine   int   `json:"end_line"`
-	EndCol    int   `json:"end_col"`
-	Modifier  string `json:"modifier,omitempty"`
-	Doc      string `json:"doc,omitempty"`
-	Source   string `json:"source,omitempty"`
+	ID       int64    `json:"id"`
+	FileID   int64    `json:"file_id"`
+	Name     string   `json:"name"`
+	FullName string   `json:"full_name"`
+	Type     string   `json:"type"`
+	ParentFQNs []string `json:"parent_fqns,omitempty"`
+	StartLine int     `json:"start_line"`
+	StartCol  int     `json:"start_col"`
+	EndLine   int     `json:"end_line"`
+	EndCol    int     `json:"end_col"`
+	Modifier  string  `json:"modifier,omitempty"`
+	Doc      string   `json:"doc,omitempty"`
+	Source   string   `json:"source,omitempty"`
 }
 
 // MethodRecord 对应解析后的方法信息。
@@ -187,6 +188,7 @@ func (fs *FileStore) UpsertClasses(ctx context.Context, fileID int64, classes []
 			Name:     c.Name,
 			FullName: c.FullName,
 			Type:     c.Type,
+			ParentFQNs: c.ParentFQNs,
 			StartLine: c.StartLine,
 			StartCol:  c.StartCol,
 			EndLine:   c.EndLine,
@@ -256,6 +258,14 @@ func (fs *FileStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error 
 	if err := fs.UpsertCalls(ctx, fileID, ir.Calls); err != nil {
 		return fmt.Errorf("upsert calls: %w", err)
 	}
+
+	// 保存文件级 imports 元数据
+	fs.mu.Lock()
+	if f, ok := fs.files[ir.FilePath]; ok && len(ir.Imports) > 0 {
+		f.Imports = ir.Imports
+	}
+	fs.mu.Unlock()
+
 	return nil
 }
 
