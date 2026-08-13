@@ -8,7 +8,7 @@
 
 ### Commit 26: feat(robust): P12 生产级健壮性 — 优雅关闭 / 重试机制 / Panic 恢复
 
-**Commit Hash**: TBD（待提交）
+**Commit Hash**: `0e77740`
 
 **核心改动点**：
 - `internal/robust/graceful.go` — 新增优雅关闭管理器（GracefulManager），支持多钩子注册、逆序执行、超时控制、信号监听、二次信号强制退出
