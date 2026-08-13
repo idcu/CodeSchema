@@ -6,21 +6,25 @@
 
 ## 提交记录
 
-### Commit 20: deps(go): 安装外部依赖包 mattn/go-sqlite3 + yalue/onnxruntime_go
+### Commit 20: deps(go): 安装全部外部依赖包
 
 **Commit Hash**: `a8e465f`
 
 **核心改动点**：
-- `go.mod` / `go.sum` — 新增 `github.com/mattn/go-sqlite3 v1.14.49` 和 `github.com/yalue/onnxruntime_go v1.32.1`（均从本地 Go 模块缓存安装，无需网络下载）
-- 两个包均支持 CGO（GCC 16.1.0 已可用），为后续 SQLite 存储和本地 ONNX 嵌入模型做好准备
+- `go.mod` / `go.sum` — 从本地 Go 模块缓存安装全部外部包：
+  - `github.com/mattn/go-sqlite3 v1.14.49` — SQLite 数据库驱动（CGO，自带 C 源码，无需外部 DLL）
+  - `github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82` — tree-sitter 多语言语法解析 Go 绑定（CGO，自带各语言 parser.c 源码，无需外部 tree-sitter 库）
+  - `github.com/yalue/onnxruntime_go v1.32.1` — ONNX 运行时 Go 绑定（CGO，需外部 onnxruntime.dll）
+- 所有包均基于 CGO（GCC 16.1.0 已可用），为后续 SQLite 存储、精确语法树解析、本地 ONNX 嵌入模型做好准备
 
 **验证数据**：
 - go build ./... — 通过
 - go test ./... -count=1 — 18 个包全部通过，0 失败
 
 **遗留 TODO**：
-- 实际集成 SQLite 存储（替换当前 PersistentStore）和 ONNX 嵌入器（替换当前 LocalEmbedder）留待后续 P8.3/P10 实现
-- `smacker/go-tree-sitter` 因需要 tree-sitter C 运行时且当前正则实现已够用，暂不安装
+- 实际集成 SQLite 存储（替换当前 PersistentStore）、ONNX 嵌入器（替换当前 LocalEmbedder）、tree-sitter 精确解析（替换当前正则）留待后续 P8.3/P10/P11 实现
+- `chromem-go` 未在缓存中，当前使用纯 Go 替代方案（MemoryStore + PersistentFTS）
+- `onnxruntime_go` 编译通过，但运行时需要 `onnxruntime.dll`（可从 onnxruntime releases 下载）
 
 ### Commit 19: feat(watcher): FsWatcher — 基于 fsnotify 的原生文件系统监听
 
