@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 05:25
-> 当前阶段：构建脚本 / CI 配置 / 容器化 / 部署文档（已完成）
-> 下一个阶段：项目已达到生产级可运行状态，后续按需迭代
+> 更新时间：2026-08-14 05:30
+> 当前阶段：多语言适配器扩展（SCIP/LSP）+ 语义检索精度提升（chromem-go 集成）
+> 下一个阶段：真实仓库 benchmark 数据采集
 
 ---
 
@@ -220,18 +220,25 @@ P13      [████████████████████] 100%
 - [x] **`docs/dev/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
 - [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新
 
+### P14 — 多语言适配器扩展（SCIP/LSP）+ 语义检索精度提升（chromem-go）
+- [x] **`internal/parser/adapter/scip/`** — SCIP index 直读适配器，支持 .scip 文件 JSON 解析，类/方法/引用关系提取，实现 BatchParser 接口（18 测试）
+- [x] **`internal/parser/adapter/lsp/`** — 通用 LSP 适配器框架，JSON-RPC 2.0 通信，gopls/jdtls/clangd 工厂方法，documentSymbol 递归解析（13 测试）
+- [x] **`internal/vector/chromem.go`** — ChromemStore 实现 VectorStore 接口，基于 chromem-go 嵌入式向量库，支持内存和持久化模式（12 测试）
+- [x] `go.mod` — 添加 chromem-go 依赖
+- [x] 验证数据：go build 通过 | go test 21 包 0 失败 | 新增 7 个文件，43 个测试用例
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-所有 P0-P13 阶段已全部完成，项目已达到生产级可运行状态。后续按需迭代，建议方向：
+所有 P0-P13 阶段已全部完成，P14 多语言适配器扩展（SCIP/LSP）和语义检索精度提升（chromem-go 集成）已完成。建议下一步方向：
 
+- **真实仓库 benchmark 数据采集** — 选择 1-2 个真实 Go/Java 仓库，运行完整 scan→index→search 流水线，采集构建耗时、内存峰值、检索 P95 延迟等关键指标
 - 生产环境部署验证（Docker/CI 流水线）
-- 真实仓库 benchmark 数据采集
-- 多语言适配器扩展（SCIP/LSP）
-- 语义检索精度提升（chromem-go 集成）
+- LSP 适配器 `readResponses` 按字节读取 Content-Length 头优化
+- chromem-go 向量索引的可视化管理工具
 
 ## 已知问题
 
@@ -249,6 +256,6 @@ P13      [████████████████████] 100%
 4. 运行测试：`go test ./...`（18 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：P13 构建脚本/CI 配置/容器化（参见 CHANGELOG.internal.md Commit 27）
+7. 最新提交：P14 多语言适配器扩展（SCIP/LSP） + 语义检索精度提升（chromem-go）（参见 CHANGELOG.internal.md Commit 28）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
-9. 当前 18 个包全部测试通过：`go test ./...`（0 失败）
+9. 当前 21 个包全部测试通过：`go test ./...`（0 失败）
