@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -36,68 +37,57 @@ type Logger struct {
 
 var (
 	defaultLogger *Logger
+	mu            sync.Mutex
 )
+
+// newHandler 创建 slog.Handler，带自定义时间格式和 ReplaceAttr。
+func newHandler(w io.Writer, level Level, jsonOutput bool) slog.Handler {
+	opts := &slog.HandlerOptions{
+		Level: slog.Level(level),
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == "time" {
+				if t, ok := a.Value.Any().(time.Time); ok {
+					return slog.String("timestamp", t.Format("2006-01-02T15:04:05.000Z07:00"))
+				}
+			}
+			return a
+		},
+	}
+	if jsonOutput {
+		return slog.NewJSONHandler(w, opts)
+	}
+	return slog.NewTextHandler(w, opts)
+}
 
 // Init 初始化全局日志。
 //
 //	level: 日志级别（LevelDebug/LevelInfo/LevelWarn/LevelError）
 //	jsonOutput: true 输出 JSON 格式，false 输出文本格式
 func Init(level Level, jsonOutput bool) {
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{
-		Level: slog.Level(level),
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// 替换 time 字段为自定义格式
-			if a.Key == "time" {
-				if t, ok := a.Value.Any().(time.Time); ok {
-					return slog.String("timestamp", t.Format("2006-01-02T15:04:05.000Z07:00"))
-				}
-			}
-			return a
-		},
-	}
-
-	if jsonOutput {
-		handler = slog.NewJSONHandler(os.Stderr, opts)
-	} else {
-		handler = slog.NewTextHandler(os.Stderr, opts)
-	}
-
+	mu.Lock()
+	defer mu.Unlock()
 	defaultLogger = &Logger{
-		inner: slog.New(handler),
+		inner: slog.New(newHandler(os.Stderr, level, jsonOutput)),
 	}
 }
 
 // InitWriter 使用自定义 writer 初始化日志（用于测试）。
 func InitWriter(w io.Writer, level Level, jsonOutput bool) {
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{
-		Level: slog.Level(level),
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == "time" {
-				if t, ok := a.Value.Any().(time.Time); ok {
-					return slog.String("timestamp", t.Format("2006-01-02T15:04:05.000Z07:00"))
-				}
-			}
-			return a
-		},
-	}
-
-	if jsonOutput {
-		handler = slog.NewJSONHandler(w, opts)
-	} else {
-		handler = slog.NewTextHandler(w, opts)
-	}
-
+	mu.Lock()
+	defer mu.Unlock()
 	defaultLogger = &Logger{
-		inner: slog.New(handler),
+		inner: slog.New(newHandler(w, level, jsonOutput)),
 	}
 }
 
-// L 返回全局默认 Logger。
+// L 返回全局默认 Logger（线程安全）。
 func L() *Logger {
+	mu.Lock()
+	defer mu.Unlock()
 	if defaultLogger == nil {
-		Init(LevelInfo, true)
+		defaultLogger = &Logger{
+			inner: slog.New(newHandler(os.Stderr, LevelInfo, true)),
+		}
 	}
 	return defaultLogger
 }

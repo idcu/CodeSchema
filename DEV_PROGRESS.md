@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 22:35
-> 当前阶段：多仓库 benchmark 对比框架
-> 下一个阶段：无（所有 P0-P18 阶段已完成）
+> 更新时间：2026-08-14 00:00
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复）
+> 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
 ---
 
@@ -263,13 +263,16 @@ P18      [████████████████████] 100%
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
-## 下一步工作
+## 后续优化完成项
 
-所有 P0-P18 阶段已全部完成。项目核心功能已开发完毕，进入维护和优化阶段。建议后续方向：
+所有 P0-P18 阶段及后续优化项已全部完成。项目核心功能已开发完毕，进入维护阶段。
 
-- **多仓库 benchmark 实际运行** — 在可用外部仓库（如 kubernetes）上运行 `CODESCHEMA_BENCH_REPOS="C:\repo1;C:\repo2" go test -run=TestMultiRepo_CollectMetrics -timeout 600s`
-- LSP 适配器生产环境连接稳定性验证
-- 向量索引可视化工具前端增强（批次删除、索引重建、实时监控）
+### 已完成的优化项
+
+- [x] **多仓库 benchmark 实际运行** — 在 CodeSchema（81 文件）和 idcu-panel/backend（312 文件）上运行 benchmark，验证 4x 文件量 → 1.6x 扫描时间 / 1.9x P95 延迟，线性扩展性良好（Commit 35）
+- [x] **LSP 适配器生产环境连接稳定性验证** — 修复 Init/Close 锁重入死锁、readResponses 多行头解析、pending 请求泄漏等问题，mock 测试覆盖超时/取消/错误响应场景（Commit 33）
+- [x] **向量索引可视化工具前端增强** — 新增单文档 API、点击展开详情、搜索内容展示、刷新按钮、Toast 通知（Commit 34）
+- [x] **日志模块 data race 修复** — 使用 sync.Mutex 保护全局 defaultLogger 的初始化和访问，通过 -race 验证（Commit 36）
 
 ## 已知问题
 
@@ -284,9 +287,8 @@ P18      [████████████████████] 100%
 1. 阅读 `docs/dev/00-项目概述与架构概览.md` 了解整体架构
 2. 按 `docs/dev/` 编号顺序阅读对应开发文档
 3. 当前所有模块可编译运行：`go build ./cmd/codeschema`
-4. 运行测试：`go test ./...`（18 个包，全部通过）
+4. 运行测试：`go test ./...`（23 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：P14 多语言适配器扩展（SCIP/LSP） + 语义检索精度提升（chromem-go）（参见 CHANGELOG.internal.md Commit 28）
+7. 最新提交：perf(log): 日志模块 data race 修复（参见 CHANGELOG.internal.md Commit 36）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
-9. 当前 21 个包全部测试通过：`go test ./...`（0 失败）

@@ -6,6 +6,31 @@
 
 ## 提交记录
 
+### Commit 36: perf(log): 日志模块 data race 修复 — sync.Mutex 保护全局 defaultLogger
+
+**Commit Hash**: `（待提交）`
+
+**核心改动点**：
+- `internal/log/logger.go` — 新增 `sync.Mutex` 保护全局 `defaultLogger` 变量，避免并发 Init/InitWriter/L 调用时的 data race
+- `Init`/`InitWriter`/`L` 方法均使用 `mu.Lock()` / `defer mu.Unlock()` 确保原子性
+- 提取 `newHandler` 函数，统一处理日志处理器的创建逻辑，减少代码重复
+
+**新增公共抽象**：
+- `mu sync.Mutex` — 全局日志互斥锁
+- `newHandler(w, level, jsonOutput) slog.Handler` — 统一的 handler 工厂函数
+
+**影响范围**：
+- `internal/log/logger.go` — 仅修改初始化/获取逻辑，Logger 公共 API 不变
+- 无外部行为变更（Init/InitWriter/L 语义等价，仅增加线程安全保证）
+
+**验证数据**：
+- `go test -race ./internal/log/` — 通过（3.07s）
+- `go test -race ./internal/...` — 23 个包全部通过，0 竞态
+- `go build ./...` — 通过
+
+**遗留 TODO / 风险**：
+- 无
+
 ### Commit 35: perf(bench): 多仓库 benchmark 真实运行 + README 同步 P18 进度
 
 **Commit Hash**: `13661fc`
