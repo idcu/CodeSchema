@@ -321,3 +321,79 @@ func cosineSimilarity(a, b []float32) float64 {
 	}
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
+
+func TestPersistentFTS_SaveLoad(t *testing.T) {
+	dir := t.TempDir()
+	filePath := dir + "/fts_test.json"
+
+	pf, err := NewPersistentFTS(filePath)
+	if err != nil {
+		t.Fatalf("NewPersistentFTS: %v", err)
+	}
+	ctx := context.Background()
+	_ = pf.Index(ctx, "test/a", "hello world")
+	_ = pf.Index(ctx, "test/b", "foo bar")
+	_ = pf.Save()
+
+	// reload
+	pf2, err := NewPersistentFTS(filePath)
+	if err != nil {
+		t.Fatalf("NewPersistentFTS reload: %v", err)
+	}
+	if pf2.Size() != 2 {
+		t.Errorf("expected size 2 after reload, got %d", pf2.Size())
+	}
+}
+
+func TestPersistentFTS_Search(t *testing.T) {
+	dir := t.TempDir()
+	pf, err := NewPersistentFTS(dir + "/search_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentFTS: %v", err)
+	}
+	ctx := context.Background()
+	_ = pf.Index(ctx, "test/Hello.java", "class HelloService { void hello() {} }")
+	_ = pf.Index(ctx, "test/World.java", "class WorldService { void world() {} }")
+
+	results, err := pf.Search(ctx, "Hello", FTSModeExact, 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Symbol != "test/Hello.java" {
+		t.Errorf("expected 'test/Hello.java', got %q", results[0].Symbol)
+	}
+}
+
+func TestPersistentFTS_Remove(t *testing.T) {
+	dir := t.TempDir()
+	pf, err := NewPersistentFTS(dir + "/remove_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentFTS: %v", err)
+	}
+	ctx := context.Background()
+	_ = pf.Index(ctx, "id1", "content")
+	_ = pf.Remove(ctx, "id1")
+
+	if pf.Size() != 0 {
+		t.Errorf("expected size 0 after remove, got %d", pf.Size())
+	}
+}
+
+func TestPersistentFTS_EmptySearch(t *testing.T) {
+	dir := t.TempDir()
+	pf, err := NewPersistentFTS(dir + "/empty_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentFTS: %v", err)
+	}
+	ctx := context.Background()
+	results, err := pf.Search(ctx, "query", FTSModeExact, 10)
+	if err != nil {
+		t.Fatalf("Search empty: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}

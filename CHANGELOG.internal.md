@@ -6,9 +6,39 @@
 
 ## 提交记录
 
-### Commit 14: feat(search): P8.1 语义检索骨架 — 双路检索（FTS + 向量）+ 融合重排 + 内存 mock
+### Commit 15: feat(search): P8.2 向量库集成 — 磁盘持久化 + 本地 Embedder
 
 **Commit Hash**: `待提交`
+
+**核心改动点**：
+- `internal/vector/persistent.go` — PersistentStore 磁盘持久化向量存储，JSON 序列化，自动保存（每 10 次变更触发落盘），支持 Save/Load/Close
+- `internal/vector/embedder_local.go` — LocalEmbedder 纯 Go Embedder，词袋模型 + 哈希技巧 + TF-IDF 权重，1024 维可配置，支持 Observe 建立 IDF 词典，FNV-1a 哈希映射，L2 归一化
+- `internal/search/fts_persistent.go` — PersistentFTS 磁盘持久化全文搜索，JSON 序列化，复用 MemoryFTS 搜索逻辑，自动保存
+- `internal/config/config.go` — SearchConfig 新增 FTSDir / VectorDir / VectorDim 三个字段，默认启用了语义搜索（Semantic: true → 从 false 改为 true）
+- `cmd/codeschema/main.go` — newSearcher 工厂函数切换为 PersistentFTS + PersistentStore + LocalEmbedder，失败时自动降级到 MemoryFTS/MemoryStore
+
+**新增公共抽象**：
+- `vector.PersistentStore` — 实现 VectorStore + Close/Save，磁盘持久化
+- `vector.LocalEmbedder` — 实现 Embedder，纯 Go 统计 Embedder
+- `search.PersistentFTS` — 实现 FTSEngine + Save，磁盘持久化
+
+**影响范围**：
+- `internal/config/config.go` — SearchConfig 新增 3 个字段，默认值变更
+- `cmd/codeschema/main.go` — newSearcher 签名变更（接受 config.Config 参数），调用方已同步更新
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（18 个包，0 失败）
+- 新增测试：15 个（PersistentStore 4 + LocalEmbedder 7 + PersistentFTS 4）
+- 向量包测试：13(旧) + 4(PersistentStore) + 7(LocalEmbedder) = 24 个
+- 搜索包测试：17(旧) + 4(PersistentFTS) = 21 个
+
+**遗留 TODO / 风险**：
+- LocalEmbedder 的 IDF 词典仅在 Observe 调用时更新，未持久化（重启后需重新 Observe）
+- 向量索引为空需 P8.3 实现从 Store 数据自动构建
+- 精度低于真实语义模型，P8.3 网络恢复后可切换为 chromem-go
+
+**Commit Hash**: `5f2f84e`
 
 **核心改动点**：
 - `internal/vector/store.go` — 向量库接口（VectorStore）定义，MemoryStore 实现（余弦相似度，线程安全）

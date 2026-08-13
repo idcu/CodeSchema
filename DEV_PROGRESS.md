@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 23:27
-> 当前阶段：P8.1 已完成 — 语义检索 / 全文搜索（P8 骨架）
-> 下一个阶段：P8.2 — 集成 chromem-go 和 SQLite FTS5（需网络下载外部包）
+> 更新时间：2026-08-13 23:48
+> 当前阶段：P8.2 已完成 — 向量库集成（磁盘持久化 + 本地 Embedder）
+> 下一个阶段：P8.3 — 自动索引构建与增量同步（需网络下载 chromem-go 实现真实引擎）
 
 ---
 
@@ -19,6 +19,7 @@ P5       [████████████████████] 100%
 P6       [████████████████████] 100%
 P7       [████████████████████] 100%
 P8.1     [████████████████████] 100%
+P8.2     [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -144,6 +145,15 @@ P8.1     [████████████████████] 100%
 - [x] **MCP 工具**：`search_symbols` 工具已接入双路检索
 - [x] 测试覆盖：vector 包 13 个 + search 包 17 个 + service 包 3 个新增搜索测试（共 33 个新测试），17 个包全部通过
 
+### P8.2 — 向量库集成（磁盘持久化 + 本地 Embedder）
+- [x] **`internal/vector/persistent.go`** — PersistentStore 磁盘持久化向量存储，基于 JSON 序列化，支持 Save/Load，每次 Add/BatchAdd/Delete 后自动保存（每 10 次变更触发落盘）
+- [x] **`internal/vector/embedder_local.go`** — LocalEmbedder 纯 Go Embedder，使用词袋模型 + 哈希技巧 + TF-IDF 权重，128-1024 维可配置，支持 Observe 建立 IDF 词典，FNV-1a 哈希映射，L2 归一化
+- [x] **`internal/search/fts_persistent.go`** — PersistentFTS 磁盘持久化全文搜索，基于 JSON 序列化，复用 MemoryFTS 搜索逻辑，自动保存
+- [x] **`internal/config/config.go`** — SearchConfig 新增 FTSDir / VectorDir / VectorDim 三个字段，默认启用语义搜索（Semantic: true）
+- [x] **`cmd/codeschema/main.go`** — newSearcher 工厂函数切换为 PersistentFTS + PersistentStore + LocalEmbedder，失败时自动降级到 MemoryFTS/MemoryStore
+- [x] 新增测试：PersistentStore 4 个（SaveLoad/Search/EmptySearch/Delete）+ LocalEmbedder 7 个（Deterministic/DifferentTexts/EmptyText/Observe/Dim/ZeroDim/Reset）+ PersistentFTS 4 个（SaveLoad/Search/Remove/EmptySearch）= 15 个新测试
+- [x] 验证数据：go build + go test 18 个包全部通过，0 失败
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -154,16 +164,16 @@ P8.1     [████████████████████] 100%
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P8.2 | 集成 chromem-go 和 SQLite FTS5 | `docs/dev/09-语义检索与全文搜索.md` | 需网络下载 chromem-go / go-sqlite3 |
+| P8.3 | 自动索引构建与增量同步（从 Store 数据自动构建 FTS 和向量索引） | `docs/dev/09-语义检索与全文搜索.md` | P8.2 完成 |
 | P9 | 配置热重载 / 多配置源 | `docs/dev/11-配置部署与路线图.md` | P7 完成 |
 
 ## 已知问题
 
-1. **网络不可用**：无法下载 `mattn/go-sqlite3` 等外部包。当前使用纯 Go 文件存储（FileStore），SQLite 实现作为 DDL 参考保留。待网络恢复后，可切换为 SQLite 存储。
+1. **网络不可用**：无法下载 `mattn/go-sqlite3`、`chromem-go` 等外部包。P8.2 使用纯 Go 持久化替代（PersistentStore + LocalEmbedder + PersistentFTS），待网络恢复后可切换为 chromem-go + SQLite FTS5。
 2. **轮询监听性能**：当前 PollWatcher 基于轮询（1s 间隔），适合开发/小仓库场景。生产环境建议切换为 fsnotify 原生监听（需安装外部包）。
 3. **tree-sitter C 绑定**：tree-sitter 适配器需要 CGO 和 tree-sitter C 运行时，需单独安装。
-4. **语义检索依赖**：P8.1 使用内存 mock 实现（MockEmbedder + MemoryFTS），P8.2 需网络下载 chromem-go / bge-small-zh 切换为真实引擎。
-5. **向量索引为空**：当前 MemoryStore 和 MemoryFTS 在启动时为空，需 P9 实现从 Store 数据自动构建索引。
+4. **语义检索精度**：LocalEmbedder 基于 TF-IDF 哈希，精度低于真实语义模型（bge-small-zh）。P8.3 当网络恢复后可切换。
+5. **向量索引为空**：当前 MemoryStore 和 PersistentFTS 在启动时为空，需 P8.3 实现从 Store 数据自动构建索引。
 
 ## 接手说明
 

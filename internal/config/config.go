@@ -49,8 +49,11 @@ type VectorConfig struct {
 
 // SearchConfig 搜索配置。
 type SearchConfig struct {
-	FTS      bool `yaml:"fts" json:"fts"`
-	Semantic bool `yaml:"semantic" json:"semantic"`
+	FTS      bool   `yaml:"fts" json:"fts"`
+	Semantic bool   `yaml:"semantic" json:"semantic"`
+	FTSDir   string `yaml:"fts_dir" json:"fts_dir"`         // 全文搜索索引持久化目录
+	VectorDir string `yaml:"vector_dir" json:"vector_dir"` // 向量索引持久化目录
+	VectorDim int    `yaml:"vector_dim" json:"vector_dim"` // 向量维度（LocalEmbedder 用）
 }
 
 // ParserConfig 解析器配置。
@@ -127,7 +130,10 @@ func DefaultConfig() *Config {
 			},
 			Search: SearchConfig{
 				FTS:      true,
-				Semantic: false,
+				Semantic: true,
+				FTSDir:   "./data/fts",
+				VectorDir: "./data/vector",
+				VectorDim: 1024,
 			},
 		},
 		Parser: ParserConfig{

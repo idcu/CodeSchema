@@ -265,3 +265,182 @@ func TestMemoryStore_Close(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestPersistentStore_SaveLoad(t *testing.T) {
+	dir := t.TempDir()
+	filePath := dir + "/vector_test.json"
+
+	// 创建并写入数据
+	ps, err := NewPersistentStore(filePath)
+	if err != nil {
+		t.Fatalf("NewPersistentStore: %v", err)
+	}
+	ctx := context.Background()
+	_ = ps.Add(ctx, "id1", []float32{1, 0, 0})
+	_ = ps.Add(ctx, "id2", []float32{0, 1, 0})
+	_ = ps.Close()
+
+	// 重新加载并验证
+	ps2, err := NewPersistentStore(filePath)
+	if err != nil {
+		t.Fatalf("NewPersistentStore reload: %v", err)
+	}
+	defer ps2.Close()
+
+	if ps2.Size() != 2 {
+		t.Errorf("expected size 2 after reload, got %d", ps2.Size())
+	}
+}
+
+func TestPersistentStore_Search(t *testing.T) {
+	dir := t.TempDir()
+	ps, err := NewPersistentStore(dir + "/search_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentStore: %v", err)
+	}
+	defer ps.Close()
+
+	ctx := context.Background()
+	_ = ps.Add(ctx, "a", []float32{1, 0, 0})
+	_ = ps.Add(ctx, "b", []float32{0, 1, 0})
+
+	results, err := ps.Search(ctx, []float32{1, 0, 0}, 1)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "a" {
+		t.Errorf("expected 'a', got %q", results[0].ID)
+	}
+}
+
+func TestPersistentStore_EmptySearch(t *testing.T) {
+	dir := t.TempDir()
+	ps, err := NewPersistentStore(dir + "/empty_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentStore: %v", err)
+	}
+	defer ps.Close()
+
+	ctx := context.Background()
+	results, err := ps.Search(ctx, []float32{1, 0, 0}, 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestPersistentStore_Delete(t *testing.T) {
+	dir := t.TempDir()
+	ps, err := NewPersistentStore(dir + "/delete_test.json")
+	if err != nil {
+		t.Fatalf("NewPersistentStore: %v", err)
+	}
+	defer ps.Close()
+
+	ctx := context.Background()
+	_ = ps.Add(ctx, "id1", []float32{1, 0, 0})
+	_ = ps.Delete(ctx, "id1")
+
+	if ps.Size() != 0 {
+		t.Errorf("expected size 0 after delete, got %d", ps.Size())
+	}
+}
+
+func TestLocalEmbedder_Deterministic(t *testing.T) {
+	em := NewLocalEmbedder(8)
+	ctx := context.Background()
+
+	v1, _ := em.Embed(ctx, "hello world")
+	v2, _ := em.Embed(ctx, "hello world")
+
+	if len(v1) != 8 {
+		t.Errorf("expected dim 8, got %d", len(v1))
+	}
+	for i := range v1 {
+		if v1[i] != v2[i] {
+			t.Errorf("mismatch at %d: %f vs %f", i, v1[i], v2[i])
+			break
+		}
+	}
+}
+
+func TestLocalEmbedder_DifferentTexts(t *testing.T) {
+	em := NewLocalEmbedder(8)
+	ctx := context.Background()
+
+	v1, _ := em.Embed(ctx, "hello world")
+	v2, _ := em.Embed(ctx, "foo bar")
+
+	// 不同文本产生的向量应该不同
+	same := true
+	for i := range v1 {
+		if v1[i] != v2[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Error("expected different texts to produce different vectors")
+	}
+}
+
+func TestLocalEmbedder_EmptyText(t *testing.T) {
+	em := NewLocalEmbedder(8)
+	ctx := context.Background()
+
+	vec, err := em.Embed(ctx, "")
+	if err != nil {
+		t.Fatalf("Embed empty: %v", err)
+	}
+	if len(vec) != 8 {
+		t.Errorf("expected dim 8, got %d", len(vec))
+	}
+}
+
+func TestLocalEmbedder_Observe(t *testing.T) {
+	em := NewLocalEmbedder(8)
+	em.Observe("hello world")
+	em.Observe("hello foo")
+	// Observe 后 Embed 应该能利用 IDF 统计
+	ctx := context.Background()
+	vec, err := em.Embed(ctx, "hello")
+	if err != nil {
+		t.Fatalf("Embed after observe: %v", err)
+	}
+	if len(vec) != 8 {
+		t.Errorf("expected dim 8, got %d", len(vec))
+	}
+}
+
+func TestLocalEmbedder_Dim(t *testing.T) {
+	em := NewLocalEmbedder(256)
+	if em.Dim() != 256 {
+		t.Errorf("expected dim 256, got %d", em.Dim())
+	}
+}
+
+func TestLocalEmbedder_ZeroDim(t *testing.T) {
+	em := NewLocalEmbedder(0)
+	if em.Dim() != 1024 {
+		t.Errorf("expected default dim 1024, got %d", em.Dim())
+	}
+}
+
+func TestLocalEmbedder_Reset(t *testing.T) {
+	em := NewLocalEmbedder(8)
+	em.Observe("hello")
+	em.Reset()
+	ctx := context.Background()
+	vec, err := em.Embed(ctx, "hello")
+	if err != nil {
+		t.Fatalf("Embed after reset: %v", err)
+	}
+	if len(vec) != 8 {
+		t.Errorf("expected dim 8, got %d", len(vec))
+	}
+}

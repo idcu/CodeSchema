@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -208,7 +209,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	svc.WithSearcher(newSearcher())
+	svc.WithSearcher(newSearcher(cfg))
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
@@ -232,7 +233,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	svc.WithSearcher(newSearcher())
+	svc.WithSearcher(newSearcher(cfg))
 	httpSrv := server.NewHTTPServer(svc, *addr)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
@@ -242,18 +243,36 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	return httpSrv.Start(ctx)
 }
 
-// newSearcher 创建 P8.1 双路检索器，使用内存 mock 实现。
+// newSearcher 创建 P8.2 双路检索器，使用持久化存储 + 本地 Embedder。
 //
 // 组成：
-//   - FTS: MemoryFTS（纯内存全文搜索）
-//   - 向量: MockEmbedder（128 维确定性哈希）+ MemoryStore + Indexer + VectorAdapter
+//   - FTS: PersistentFTS（磁盘持久化全文搜索，路径由 cfg.Storage.Search.FTSDir 决定）
+//   - 向量: LocalEmbedder（1024 维 TF-IDF 哈希）+ PersistentStore + Indexer + VectorAdapter
 //   - 融合: 默认权重 Reranker（FTS 0.3 / 向量 0.7）
 //
-// P2 阶段将替换为 chromem-go 和 SQLite FTS5。
-func newSearcher() *search.Searcher {
-	fts := search.NewMemoryFTS()
-	store := vector.NewMemoryStore()
-	model := vector.NewMockEmbedder(128)
+// 当网络恢复后，可切换为 chromem-go + SQLite FTS5。
+func newSearcher(cfg *config.Config) *search.Searcher {
+	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
+	var fts search.FTSEngine
+	pfts, err := search.NewPersistentFTS(ftsFile)
+	if err != nil {
+		log.Printf("WARN: new persistent FTS (%s): %v, fallback to memory", ftsFile, err)
+		fts = search.NewMemoryFTS()
+	} else {
+		fts = pfts
+	}
+
+	vecFile := filepath.Join(cfg.Storage.Search.VectorDir, "vector.json")
+	var store vector.VectorStore
+	pstore, err := vector.NewPersistentStore(vecFile)
+	if err != nil {
+		log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory", vecFile, err)
+		store = vector.NewMemoryStore()
+	} else {
+		store = pstore
+	}
+
+	model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
 	indexer := vector.NewIndexer(store, model, 2)
 	adapter := search.NewVectorAdapter(indexer)
 	return search.NewSearcher(fts, adapter, nil)
