@@ -6,6 +6,27 @@
 
 ## 提交记录
 
+### Commit 33: fix(lsp): 修复 Init/Close 锁重入死锁，SendRequest 超时测试改为确定性取消
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `internal/parser/adapter/lsp/adapter.go` — `Init` 方法将锁粒度从函数级缩小为仅保护子进程启动段，`sendRequest`/`sendNotification` 调用时已释放锁，消除 `sync.Mutex` 不可重入导致的死锁；`Close` 方法同样释放锁后再调用 `sendNotification`，避免关闭时死锁
+- `internal/parser/adapter/lsp/adapter_test.go` — `TestLSPAdapter_SendRequest_Timeout` 从依赖时序的 `context.WithTimeout` 改为确定性的 `context.WithCancel`（立即取消），消除测试对 mock 服务器响应速度的时序依赖
+
+**影响范围**：
+- 修改 2 个文件（adapter.go / adapter_test.go）
+- 无 Public API 变更（`Init`、`Close`、`Parse` 签名不变）
+- 所有依赖 LSP 适配器的上层模块无需修改
+
+**验证数据**：
+- `go test ./internal/parser/adapter/lsp/` — 24/24 PASS，0.892s
+- 原死锁场景：`TestLSPAdapter_Init_WithMockServer` 30s 超时 → 修复后 0.02s 通过
+- 原时序依赖测试：`TestLSPAdapter_SendRequest_Timeout` 因 mock 响应过快（<5ms）偶发失败 → 修复后确定性通过
+
+**遗留 TODO / 风险**：
+- 无
+
 ### Commit 32: feat(bench): 多仓库 benchmark 对比框架
 
 **Commit Hash**: `7fb0bfe`

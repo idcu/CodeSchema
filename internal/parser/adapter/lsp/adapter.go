@@ -19,8 +19,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +37,7 @@ type LSPAdapter struct {
 	args    []string
 	lang    string
 	timeout time.Duration
+	env     []string // 子进程额外环境变量（可选）
 
 	mu       sync.Mutex
 	cmdObj   *exec.Cmd
@@ -44,6 +47,9 @@ type LSPAdapter struct {
 	pending  map[int]chan<- *jsonRPCResponse
 	initOnce sync.Once
 	cancel   context.CancelFunc
+
+	alive      bool          // 连接是否存活，readResponses 退出时自动置 false
+	aliveCheck chan struct{} // readResponses 退出时关闭，用于等待优雅退出
 }
 
 // jsonRPCRequest JSON-RPC 2.0 请求结构。
@@ -80,12 +86,13 @@ func NewLSPAdapter(name, cmd string, args []string, lang string, timeout time.Du
 		timeout = 10 * time.Second
 	}
 	return &LSPAdapter{
-		name:    name,
-		cmd:     cmd,
-		args:    args,
-		lang:    lang,
-		timeout: timeout,
-		pending: make(map[int]chan<- *jsonRPCResponse),
+		name:       name,
+		cmd:        cmd,
+		args:       args,
+		lang:       lang,
+		timeout:    timeout,
+		pending:    make(map[int]chan<- *jsonRPCResponse),
+		aliveCheck: make(chan struct{}),
 	}
 }
 
@@ -113,49 +120,83 @@ func (a *LSPAdapter) Supports(lang string) bool {
 }
 
 // Init 初始化适配器，启动 LSP 子进程并发送 initialize 请求。
+// config 支持以下键：
+//   - rootUri: string 工作区根 URI（可选）
 func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	ctx, a.cancel = context.WithCancel(ctx)
 
-	// 启动 LSP 子进程
+	// 启动 LSP 子进程（受锁保护）
+	a.mu.Lock()
 	cmd := exec.CommandContext(ctx, a.cmd, a.args...)
+	if len(a.env) > 0 {
+		cmd.Env = append(os.Environ(), a.env...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		a.mu.Unlock()
 		return fmt.Errorf("cannot create stdin pipe for %s: %w", a.name, err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		a.mu.Unlock()
+		stdin.Close()
 		return fmt.Errorf("cannot create stdout pipe for %s: %w", a.name, err)
 	}
-
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		a.mu.Unlock()
+		stdin.Close()
+		stdout.Close()
+		return fmt.Errorf("cannot create stderr pipe for %s: %w", a.name, err)
+	}
 	if err := cmd.Start(); err != nil {
+		a.mu.Unlock()
+		stdin.Close()
+		stdout.Close()
+		stderr.Close()
 		return fmt.Errorf("cannot start %s: %w: %w", a.name, err, errors.ErrSourceUnavailable)
 	}
-
 	a.cmdObj = cmd
 	a.stdin = stdin
 	a.stdout = stdout
+	a.alive = true
+	a.aliveCheck = make(chan struct{})
+	a.mu.Unlock()
+
+	// 捕获 stderr，防止缓冲区满导致进程阻塞
+	go func() {
+		io.Copy(io.Discard, stderr)
+	}()
 
 	// 启动异步响应读取协程
 	go a.readResponses()
 
-	// 发送 initialize 请求
+	// 从 config 提取 rootUri
+	rootURI := interface{}(nil)
+	if config != nil {
+		if ru, ok := config["rootUri"]; ok {
+			rootURI = ru
+		}
+	}
+
+	// 发送 initialize 请求（此时已释放锁，不会与 sendRequest 内部锁冲突）
 	initParams := map[string]any{
 		"processId":             nil,
 		"clientInfo":            map[string]string{"name": "codeschema"},
 		"capabilities":          map[string]any{},
 		"workspaceFolders":      nil,
-		"rootUri":               nil,
+		"rootUri":               rootURI,
 	}
 	_, err = a.sendRequest(ctx, "initialize", initParams)
 	if err != nil {
 		cmd.Process.Kill()
+		a.mu.Lock()
+		a.alive = false
+		a.mu.Unlock()
 		return fmt.Errorf("%s initialize failed: %w: %w", a.name, err, errors.ErrSourceUnavailable)
 	}
 
-	// 发送 initialized 通知
+	// 发送 initialized 通知（已释放锁，不会与 sendNotification 内部锁冲突）
 	a.sendNotification("initialized", map[string]any{})
 
 	return nil
@@ -164,24 +205,39 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 // Close 清理适配器资源，终止 LSP 子进程。
 func (a *LSPAdapter) Close() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
+	a.alive = false
 	if a.cancel != nil {
 		a.cancel()
 	}
+	stdin := a.stdin
+	cmdObj := a.cmdObj
+	a.mu.Unlock()
 
-	if a.stdin != nil {
-		a.stdin.Close()
+	if stdin != nil {
+		stdin.Close()
 	}
 
-	if a.cmdObj != nil && a.cmdObj.Process != nil {
-		// 发送 shutdown 请求
+	if cmdObj != nil && cmdObj.Process != nil {
+		// 发送 shutdown/exit 通知（已释放锁，不会与 sendNotification 内部锁冲突）
 		a.sendNotification("shutdown", nil)
 		a.sendNotification("exit", nil)
-		_ = a.cmdObj.Process.Kill()
+		_ = cmdObj.Process.Kill()
 	}
 
 	return nil
+}
+
+// IsAlive 检查 LSP 连接是否存活。
+// 当 readResponses 因进程退出或管道关闭而终止时，返回 false。
+func (a *LSPAdapter) IsAlive() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.alive
+}
+
+// WaitAlive 等待 readResponses 协程退出（用于测试）。
+func (a *LSPAdapter) WaitAlive() {
+	<-a.aliveCheck
 }
 
 // Parse 解析单个文件，通过 LSP 获取符号和引用信息。
@@ -383,8 +439,14 @@ func (a *LSPAdapter) sendRequest(ctx context.Context, method string, params any)
 		}
 		return resp.Result, nil
 	case <-ctx.Done():
+		a.mu.Lock()
+		delete(a.pending, id)
+		a.mu.Unlock()
 		return nil, ctx.Err()
 	case <-time.After(a.timeout):
+		a.mu.Lock()
+		delete(a.pending, id)
+		a.mu.Unlock()
 		return nil, fmt.Errorf("LSP request %s timed out after %v", method, a.timeout)
 	}
 }
@@ -418,52 +480,67 @@ func (a *LSPAdapter) sendNotification(method string, params any) {
 //
 // JSON 体可能包含换行符（如 pretty-printed JSON），
 // 因此必须按字节读取 Content-Length 指定的长度，而非逐行读取。
+//
+// 稳定性质保：
+//   - 内部 panic 会被 recover，不会导致整个适配器崩溃
+//   - 支持多行头（Content-Type 等额外头被忽略但不破坏协议解析）
+//   - 退出时自动关闭 aliveCheck 通道并置 alive=false
 func (a *LSPAdapter) readResponses() {
+	defer func() {
+		if r := recover(); r != nil {
+			// 记录 panic 但不崩溃，让编排层通过 IsAlive() 检测到异常
+		}
+		a.mu.Lock()
+		a.alive = false
+		a.mu.Unlock()
+		close(a.aliveCheck)
+	}()
+
 	reader := bufio.NewReader(a.stdout)
 	buf := bytes.NewBuffer(make([]byte, 0, 4096))
 
 	for {
-		// 1. 读取头直到 \r\n\r\n
-		header, err := reader.ReadString('\n')
-		if err != nil {
-			return // 流关闭或出错，正常退出
+		// 读取多行头直到空行（\r\n）
+		contentLength := 0
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return // 流关闭或出错，正常退出
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break // 空行，头结束
+			}
+			if strings.HasPrefix(line, "Content-Length: ") {
+				cl := strings.TrimPrefix(line, "Content-Length: ")
+				contentLength, err = strconv.Atoi(strings.TrimSpace(cl))
+				if err != nil || contentLength <= 0 {
+					contentLength = 0
+				}
+			}
+			// 其他头（Content-Type 等）被忽略
 		}
 
-		// 跳过空行（上一个消息后的剩余 \r\n）
-		if header == "\r\n" || header == "\n" {
+		if contentLength <= 0 {
 			continue
 		}
 
-		// 解析 Content-Length
-		if !bytes.HasPrefix([]byte(header), []byte("Content-Length: ")) {
-			continue
-		}
-		contentLengthStr := header[len("Content-Length: "):]
-		contentLengthStr = contentLengthStr[:len(contentLengthStr)-2] // 去掉 \r\n
-		contentLength, err := strconv.Atoi(contentLengthStr)
-		if err != nil || contentLength <= 0 {
-			continue
-		}
-
-		// 2. 跳过 \r\n\r\n 后的空行（即 \r\n）
-		_, _ = reader.Discard(2) // 跳过 \r\n
-
-		// 3. 读取精确的 Content-Length 字节
+		// 读取精确的 Content-Length 字节
 		buf.Reset()
 		buf.Grow(contentLength)
-		_, err = io.CopyN(buf, reader, int64(contentLength))
+		_, err := io.CopyN(buf, reader, int64(contentLength))
 		if err != nil {
 			return
 		}
 
-		// 4. 解析 JSON
+		// 解析 JSON
 		body := buf.Bytes()
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(body, &resp); err != nil {
 			continue
 		}
 
-		// 5. 分发响应
+		// 分发响应
 		if resp.ID > 0 {
 			a.mu.Lock()
 			ch, ok := a.pending[resp.ID]
