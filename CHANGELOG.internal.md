@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 22: fix(index): 解决 #5 向量索引为空 — mcp/serve 启动时自动构建索引
+
+**Commit Hash**: (待提交)
+
+**核心改动点**：
+- `cmd/codeschema/main.go` — `mcpCmd` 和 `serveCmd` 启动时自动调用 `svc.BuildIndex(ctx)` 从 Store 全量构建 FTS 和向量索引
+- 构建完成后自动持久化 IDF 词典到 `{search.idf_dir}/idf.json`
+- `newSearcher` 的返回值从 `(searcher, _)` 改为 `(searcher, builder)`，将 IndexBuilder 注入 Service 层
+
+**解决 Issue**：**#5** — 向量索引为空（启动时 MemoryStore 和 PersistentFTS 里没有数据）
+
+**之前**：mcp/serve 命令创建了 searcher 但不构建索引，搜索时索引为空，返回 0 条结果。
+**之后**：mcp/serve 启动时自动从 Store 读取所有文件/类/方法数据，构建 FTS 和向量索引，搜索立即可用。
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过
+- 改动量：`cmd/codeschema/main.go` +32/-4 行
+
+**遗留 TODO**：
+- 大仓库启动时全量构建索引可能耗时较长，后续可考虑持久化索引快照，启动时直接加载
+- 增量索引的异步 worker 队列（StartAsync）已在 watchCmd 中启用，mcp/serve 暂未启用异步队列
+
 ### Commit 21: deps(go): 安装 chromem-go 向量数据库
 
 **Commit Hash**: `1ff4e3e`

@@ -299,8 +299,22 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	s, _ := newSearcher(cfg)
-	svc.WithSearcher(s)
+	s, builder := newSearcher(cfg)
+	svc.WithSearcher(s).WithIndexBuilder(builder)
+
+	// 启动时全量构建索引
+	if result, err := svc.BuildIndex(ctx); err != nil {
+		fmt.Printf("WARN: build index: %v\n", err)
+	} else {
+		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+			if err := builder.SaveIDF(idfFile); err != nil {
+				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
+			}
+		}
+	}
+
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
@@ -324,8 +338,22 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	s, _ := newSearcher(cfg)
-	svc.WithSearcher(s)
+	s, builder := newSearcher(cfg)
+	svc.WithSearcher(s).WithIndexBuilder(builder)
+
+	// 启动时全量构建索引
+	if result, err := svc.BuildIndex(ctx); err != nil {
+		fmt.Printf("WARN: build index: %v\n", err)
+	} else {
+		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+			if err := builder.SaveIDF(idfFile); err != nil {
+				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
+			}
+		}
+	}
+
 	httpSrv := server.NewHTTPServer(svc, *addr)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
