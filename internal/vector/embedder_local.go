@@ -130,6 +130,15 @@ func (l *LocalEmbedder) Reset() {
 	l.docCnt = 0
 }
 
+// HasIDF 返回是否已加载持久化 IDF 词典。
+//
+// 如果 docCnt > 0，说明已通过 LoadIDF 加载或通过 Observe 添加了数据。
+func (l *LocalEmbedder) HasIDF() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.docCnt > 0
+}
+
 // SaveIDF 将 IDF 词典持久化到文件。
 //
 // 使用 JSON 编码，纯标准库实现，不依赖外部包。

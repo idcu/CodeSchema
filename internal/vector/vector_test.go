@@ -187,6 +187,48 @@ func TestIndexer_BuildIndex(t *testing.T) {
 	}
 }
 
+func TestLocalEmbedder_HasIDF_Initial(t *testing.T) {
+	em := NewLocalEmbedder(128)
+	if em.HasIDF() {
+		t.Error("expected HasIDF() = false for new embedder")
+	}
+}
+
+func TestLocalEmbedder_HasIDF_AfterObserve(t *testing.T) {
+	em := NewLocalEmbedder(128)
+	em.Observe("test document")
+	if !em.HasIDF() {
+		t.Error("expected HasIDF() = true after Observe")
+	}
+}
+
+func TestLocalEmbedder_HasIDF_AfterLoad(t *testing.T) {
+	em := NewLocalEmbedder(128)
+	em.Observe("test document")
+	dir := t.TempDir()
+	path := dir + "/idf.json"
+	if err := em.SaveIDF(path); err != nil {
+		t.Fatalf("SaveIDF: %v", err)
+	}
+
+	em2 := NewLocalEmbedder(128)
+	if err := em2.LoadIDF(path); err != nil {
+		t.Fatalf("LoadIDF: %v", err)
+	}
+	if !em2.HasIDF() {
+		t.Error("expected HasIDF() = true after LoadIDF")
+	}
+}
+
+func TestLocalEmbedder_HasIDF_AfterReset(t *testing.T) {
+	em := NewLocalEmbedder(128)
+	em.Observe("test document")
+	em.Reset()
+	if em.HasIDF() {
+		t.Error("expected HasIDF() = false after Reset")
+	}
+}
+
 func TestIndexer_BatchBuild(t *testing.T) {
 	store := NewMemoryStore()
 	em := NewMockEmbedder(4)

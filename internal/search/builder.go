@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,20 +21,25 @@ import (
 //   - IndexDocument: 扫描后增量更新索引
 //   - 构建前自动 Observe 建立 IDF 词典
 //   - 支持异步索引队列，避免阻塞扫描流程
+//   - 支持 IDF 自动持久化，避免重启后 IDF 统计丢失
 type IndexBuilder struct {
 	fts      FTSEngine
 	indexer  *vector.Indexer
 	embedder *vector.LocalEmbedder
 
 	// 异步索引队列（可选启用）
-	queue chan asyncJob
-	wg    sync.WaitGroup
-	async bool
-	mu    sync.Mutex
+	queue   chan asyncJob
+	wg      sync.WaitGroup
+	async   bool
+	mu      sync.Mutex
 	started bool
 
 	// 回调钩子，可用于错误通知
 	onError func(id string, err error)
+
+	// IDF 自动持久化
+	autoSaveIDFPath string
+	autoSaveStopCh  chan struct{}
 }
 
 type asyncJob struct {
@@ -134,16 +141,20 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 	fmt.Printf("  collected %d docs for indexing\n", len(docs))
 
-	// 第二阶段：Observe 建立 IDF 词典（带进度）
-	totalDocs := len(docs)
-	for i, d := range docs {
-		b.embedder.Observe(d.text)
-		if (i+1)%100 == 0 || i == totalDocs-1 {
-			pct := float64(i+1) / float64(totalDocs) * 100
-			fmt.Printf("\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
+	// 第二阶段：Observe 建立 IDF 词典（如果已加载持久化 IDF 则跳过）
+	if b.embedder.HasIDF() {
+		fmt.Println("  skipping IDF build (loaded from persistence)")
+	} else {
+		totalDocs := len(docs)
+		for i, d := range docs {
+			b.embedder.Observe(d.text)
+			if (i+1)%100 == 0 || i == totalDocs-1 {
+				pct := float64(i+1) / float64(totalDocs) * 100
+				fmt.Printf("\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
+			}
 		}
+		fmt.Println() // 换行结束 IDF 进度
 	}
-	fmt.Println() // 换行结束 IDF 进度
 
 	// 第三阶段：批量写入 FTS 和向量索引
 	ids := make([]string, 0, len(docs))
@@ -342,6 +353,68 @@ func (b *IndexBuilder) RemoveDocument(ctx context.Context, docID string) error {
 // SaveIDF 持久化 IDF 词典到文件。
 func (b *IndexBuilder) SaveIDF(path string) error {
 	return b.embedder.SaveIDF(path)
+}
+
+// AutoSaveIDF 启动 IDF 自动持久化，定期将 IDF 词典保存到文件。
+//
+// interval 为保存间隔，不小于 10 秒。当 interval <= 0 时使用默认值 60 秒。
+// 首次保存会在启动时立即执行一次。
+// 返回的 stop 函数用于停止自动保存，可多次调用，幂等。
+func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
+	b.autoSaveIDFPath = path
+	if interval <= 0 {
+		interval = 60 * time.Second
+	} else if interval < 10*time.Second {
+		interval = 10 * time.Second
+	}
+
+	ch := make(chan struct{})
+	b.autoSaveStopCh = ch
+
+	// 保存一次（立即执行）
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err == nil {
+		b.embedder.SaveIDF(path) // 忽略错误，后续定时保存会重试
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger := log.WithModule("search.index_builder")
+		for {
+			select {
+			case <-ticker.C:
+				dir := filepath.Dir(path)
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					logger.Warn("auto save IDF: mkdir", "dir", dir, "error", err)
+					continue
+				}
+				if err := b.embedder.SaveIDF(path); err != nil {
+					logger.Warn("auto save IDF failed", "path", path, "error", err)
+				} else {
+					logger.Debug("auto saved IDF", "path", path)
+				}
+			case <-ch:
+				return
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(ch)
+			b.autoSaveStopCh = nil
+		})
+	}
+}
+
+// StopAutoSaveIDF 停止 IDF 自动持久化。幂等操作，可多次调用。
+func (b *IndexBuilder) StopAutoSaveIDF() {
+	if b.autoSaveStopCh != nil {
+		close(b.autoSaveStopCh)
+		b.autoSaveStopCh = nil
+	}
 }
 
 // BuildAndRemove 从 Store 读取单个文件信息，删除该文件所有类和方法的索引文档。

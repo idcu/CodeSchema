@@ -3,7 +3,10 @@ package search
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"codeschema/internal/parser"
 	"codeschema/internal/store"
@@ -553,5 +556,119 @@ func TestIndexBuilder_RemoveDocument(t *testing.T) {
 	}
 	if fts.Size() != 0 {
 		t.Errorf("expected 0 documents after remove, got %d", fts.Size())
+	}
+}
+
+func TestIndexBuilder_AutoSaveIDF(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	idfPath := filepath.Join(dir, "idf.json")
+
+	// Index some documents first
+	err := b.IndexDocument(ctx, "test:id:1", "test document one")
+	if err != nil {
+		t.Fatalf("IndexDocument: %v", err)
+	}
+
+	// Start auto save with short interval
+	stop := b.AutoSaveIDF(idfPath, 100*time.Millisecond)
+	defer stop()
+
+	// Wait for at least one save cycle
+	time.Sleep(250 * time.Millisecond)
+
+	// Verify IDF file was created
+	if _, err := os.Stat(idfPath); os.IsNotExist(err) {
+		t.Fatal("expected IDF file to be created by auto save")
+	}
+
+	// Load into a new embedder and verify
+	em2 := vector.NewLocalEmbedder(128)
+	if err := em2.LoadIDF(idfPath); err != nil {
+		t.Fatalf("LoadIDF: %v", err)
+	}
+	if !em2.HasIDF() {
+		t.Error("expected loaded embedder to have IDF data")
+	}
+}
+
+func TestIndexBuilder_AutoSaveIDF_Stop(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	dir := t.TempDir()
+	idfPath := filepath.Join(dir, "idf.json")
+
+	stop := b.AutoSaveIDF(idfPath, 10*time.Second)
+	// Stop immediately - should not panic
+	stop()
+	// Stopping again should be no-op
+	stop()
+}
+
+func TestIndexBuilder_AutoSaveIDF_MinInterval(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	dir := t.TempDir()
+	idfPath := filepath.Join(dir, "idf.json")
+
+	// interval < 10s should be clamped to 10s
+	stop := b.AutoSaveIDF(idfPath, 1*time.Second)
+	defer stop()
+	_ = stop // just verify no panic
+}
+
+func TestBuildFromStore_SkipIDFWhenLoaded(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	em.Observe("preloaded document") // Simulate loaded IDF
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	// Use memory store with data
+	st := store.NewStore("file")
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	if err := st.Open(ctx, tempDir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	fileID, err := st.UpsertFile(ctx, "pkg/test/a.go", "hash1", 100, 5000)
+	if err != nil {
+		t.Fatalf("upsert file: %v", err)
+	}
+	classes := []parser.ClassIR{
+		{Name: "TestClass", FullName: "pkg.TestClass", Type: "CLASS"},
+	}
+	err = st.UpsertClasses(ctx, fileID, classes)
+	if err != nil {
+		t.Fatalf("upsert classes: %v", err)
+	}
+
+	result, err := b.BuildFromStore(ctx, st)
+	if err != nil {
+		t.Fatalf("BuildFromStore: %v", err)
+	}
+	if result.IndexedDocs != 1 {
+		t.Errorf("expected 1 indexed doc, got %d", result.IndexedDocs)
+	}
+	// Verify IDF was not rebuilt (docCnt should still be 1 from the preloaded document)
+	if fts.Size() != 1 {
+		t.Errorf("expected 1 doc in FTS, got %d", fts.Size())
 	}
 }

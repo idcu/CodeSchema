@@ -239,13 +239,17 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	builder.StartAsync(ctx, 64, 2)
 	defer builder.StopAsync()
 
+	// 启动 IDF 自动持久化（60 秒间隔，仅 watch/mcp/serve 长时运行命令）
+	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
+	defer stopAutoSave()
+
 	// 启动时全量构建索引（如果持久化索引存在则跳过）
 	if result, err := svc.BuildIndex(ctx); err != nil {
 		fmt.Printf("WARN: build index: %v\n", err)
 	} else {
 		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
-		// 持久化 IDF 词典
-		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+		// 持久化 IDF 词典（全量构建后立即保存一次）
 		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
 			if err := builder.SaveIDF(idfFile); err != nil {
 				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
@@ -315,6 +319,11 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		}
 	}
 
+	// 启动 IDF 自动持久化（60 秒间隔）
+	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
+	defer stopAutoSave()
+
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
@@ -353,6 +362,11 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 			}
 		}
 	}
+
+	// 启动 IDF 自动持久化（60 秒间隔）
+	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
+	defer stopAutoSave()
 
 	httpSrv := server.NewHTTPServer(svc, *addr)
 	if *authToken != "" {

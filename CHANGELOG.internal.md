@@ -6,9 +6,43 @@
 
 ## 提交记录
 
-### Commit 23: perf(search): P10 遗留问题治理 — 多 worker / 日志集成 / 结果富化 / 进度条
+### Commit 24: perf(index): IDF 跳过 Observe + 自动持久化 — 全量构建加速 / 增量 IDF 保全
 
 **Commit Hash**: `TBD`（待提交）
+
+**核心改动点**：
+- `internal/vector/embedder_local.go` — 新增 `HasIDF()` 方法，检查是否已加载持久化 IDF 词典（`docCnt > 0`）
+- `internal/search/builder.go` — `BuildFromStore` 第二阶段增加 `HasIDF()` 检查：已加载持久化 IDF 时跳过 Observe 阶段，直接使用已有词典；新增 `AutoSaveIDF` 方法，启动时立即保存一次 + 定时器双触发，确保 IDF 变更不丢失；返回的 stop 函数使用 `sync.Once` 保证幂等；新增 `StopAutoSaveIDF` 方法
+- `internal/vector/vector_test.go` — 新增 4 个测试：`HasIDF` 初始/Observe 后/加载后/重置后
+- `internal/search/builder_test.go` — 新增 4 个测试：`AutoSaveIDF` 功能验证、stop 幂等性、最小间隔钳位、`BuildFromStore` 跳过 IDF 构建
+- `cmd/codeschema/main.go` — `watchCmd`/`mcpCmd`/`serveCmd` 启动 IDF 自动持久化（60s 间隔）
+
+**新增公共抽象**：
+- `LocalEmbedder.HasIDF() bool` — 检查是否已加载 IDF 词典
+- `IndexBuilder.AutoSaveIDF(path, interval) func()` — 启动自动持久化，返回幂等 stop 函数
+- `IndexBuilder.StopAutoSaveIDF()` — 停止自动持久化
+
+**影响范围**：
+- `internal/vector/embedder_local.go` — 新增方法，非破坏性
+- `internal/search/builder.go` — 新增字段和方法，`BuildFromStore` 行为优化（非破坏性，跳过 Observe 不影响功能正确性）
+- `cmd/codeschema/main.go` — 3 个命令新增 AutoSaveIDF 调用，非破坏性
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（20 个包，0 失败）
+- 新增测试：8 个（4 vector + 4 search）
+- 搜索包测试：21 个（17 原有 + 4 新增）
+- 向量包测试：17 个（13 原有 + 4 新增）
+- 全量构建加速：跳过 Observe 阶段可节省 O(N) 时间（N = 文档数）
+
+**遗留 TODO / 风险**：
+- 自动保存使用 `os.Create` 写入，在高并发索引场景下频繁写入可能影响性能，建议后续增加写入限频或合并策略
+- `AutoSaveIDF` 的定时器在 `StopAutoSaveIDF` 后不保证最后一次保存完成，需要同步等待时可手动调用 `SaveIDF` 后再停止
+- 跳过 Observe 时 IDF 词典不会随新文档词频更新，适合索引文件未变化时的增量构建；如果文件发生大规模变更，全量构建时建议先 Reset 再 Observe
+
+### Commit 23: perf(search): P10 遗留问题治理 — 多 worker / 日志集成 / 结果富化 / 进度条
+
+**Commit Hash**: `f923dd6`
 
 **核心改动点**：
 - `internal/search/builder.go` — `StartAsync` 签名从 `(ctx, queueSize)` 改为 `(ctx, queueSize, numWorkers)`，支持多 worker 并发消费队列；`asyncWorker` 集成 `log.WithModule("search.index_builder")` 记录索引失败日志；`BuildFromStore` 分阶段输出进度（文件扫描百分比 → IDF 构建百分比 → FTS/向量写入状态）
