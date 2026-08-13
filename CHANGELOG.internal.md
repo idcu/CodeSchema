@@ -6,9 +6,36 @@
 
 ## 提交记录
 
-### Commit 38: docs(onnxruntime): 新增 onnxruntime.dll 运行时依赖获取说明
+### Commit 39: docs(deploy): 补充 onnxruntime 跨平台部署说明 + Dockerfile 注释
 
 **Commit Hash**: `未提交`
+
+**核心改动点**：
+- `Makefile` — `build-cgo` 目标从仅复制 `onnxruntime.dll` 改为跨平台智能复制：
+  - Windows: `onnxruntime.dll`
+  - Linux: `libonnxruntime.so`
+  - macOS: `libonnxruntime.dylib`
+- `Dockerfile` — 头部注释新增 ONNX 运行时可选加速的启用说明
+- `docs/dev/11-配置部署与路线图.md` — §9.5 从单行 Windows 说明扩展为完整跨平台表格：
+  - 4 平台下载包名（Windows/Linux/macOS Intel/macOS ARM）
+  - 各平台推荐放置路径
+  - 系统库搜索路径说明（LD_LIBRARY_PATH/DYLD_LIBRARY_PATH/PATH）
+
+**新增公共抽象**：
+- 无（仅增强已有构建逻辑的跨平台兼容性）
+
+**验证数据**：
+- `CGO_ENABLED=1 go build` — 通过
+- Windows 本地部署验证：`codeschema scan .` — 181 文件 295ms 扫描 + 15ms 索引构建
+- 推送远程：`git push` — 成功
+
+**遗留 TODO / 风险**：
+- 当前代码未使用 `onnxruntime_go`，实际部署无需任何 onnxruntime 动态库
+- Dockerfile 中 ONNX 注释为可选加速预留，当前不影响构建
+
+### Commit 38: docs(onnxruntime): 新增 onnxruntime.dll 运行时依赖获取说明
+
+**Commit Hash**: `14dec65`
 
 **核心改动点**：
 - `Makefile` — `build-cgo` 目标新增自动检测并复制 `down/onnxruntime/onnxruntime.dll` 到输出目录
