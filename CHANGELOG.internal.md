@@ -8,7 +8,7 @@
 
 ### Commit 25: test(stress): P11 集成测试与性能压测 — 端到端全流程验证 / 9 项性能基准
 
-**Commit Hash**: TBD（待提交）
+**Commit Hash**: `37ac435`
 
 **核心改动点**：
 - `internal/integration/integration_test.go` — 新建 7 个端到端集成测试，覆盖 scan → store → index → search 全流程、空查询、搜索限制、文件搜索、结果富化、重复扫描幂等性、索引一致性
