@@ -6,6 +6,37 @@
 
 ## 提交记录
 
+### Commit 28: feat(adapter): 多语言适配器扩展（SCIP/LSP） + 语义检索精度提升（chromem-go）
+
+**Commit Hash**: `2038c3c`
+
+**核心改动点**：
+- `internal/parser/adapter/scip/` — 新增 SCIP index 直读适配器，支持 .scip 文件 JSON 解析，类/方法/引用关系提取，实现 BatchParser 接口
+- `internal/parser/adapter/lsp/` — 新增通用 LSP 适配器框架，JSON-RPC 2.0 通信（Content-Length 头格式），支持 gopls/jdtls/clangd，documentSymbol 递归解析类/方法/嵌套符号
+- `internal/vector/chromem.go` — 新增 ChromemStore 实现 VectorStore 接口，基于 chromem-go 嵌入式向量库，支持 NewChromemStore（内存）和 NewPersistentChromemStore（持久化）两种模式
+- `go.mod` — 添加 `github.com/philippgille/chromem-go` 依赖
+
+**新增公共抽象**：
+- `adapter/scip.NewSCIPAdapter` / `SCIPAdapter.ParseAll` — SCIP 批量解析
+- `adapter/lsp.NewLSPAdapter` / `NewGoplsAdapter` / `NewJDTLSAdapter` / `NewClangdAdapter` — LSP 适配器工厂方法
+- `vector.NewChromemStore` / `NewPersistentChromemStore` / `ChromemStore` — chromem 向量存储实现
+
+**影响范围**：
+- 新增 6 个文件，不修改现有代码
+- `go.mod` 新增一条依赖，通过 replace 指向本地路径
+
+**验证数据**：
+- go build 通过 | go test 全部通过（21 包，0 失败）
+- scip 适配器 18 测试（加载索引 / 转换文档 / 类方法提取 / 多文件加载 / 非 .scip 跳过）
+- lsp 适配器 13 测试（工厂方法 / 初始化失败 / 未初始化解析 / 符号转换 / 嵌套符号）
+- chromem store 12 测试（Add/Search/BatchAdd/持久化/自定义embedFn/错误处理）
+
+**遗留 TODO / 风险**：
+- SCIP 适配器当前加载所有 .scip 文件到内存，大项目需流式加载优化
+- LSP 适配器 readResponses 实现仅按行解析，实际 LSP 响应是 Content-Length 头格式，需按字节读取
+- ChromemStore 不支持 Delete 操作，生产环境需配合定期重建集合
+- chromem-go 的 QueryEmbedding 要求 nResults ≤ 文档数，Search 方法未自动处理越界
+
 ### Commit 27: build(project): P13 构建脚本 / CI 配置 / 容器化 / 部署文档
 
 **Commit Hash**: `7a4530e`
