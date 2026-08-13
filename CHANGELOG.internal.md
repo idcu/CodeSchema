@@ -6,6 +6,43 @@
 
 ## 提交记录
 
+### Commit 29: test(stress): 真实仓库 benchmark 数据采集 — 扫描/索引/搜索全流水线性能基线
+
+**Commit Hash**: `54726fb`
+
+**核心改动点**：
+- `internal/integration/realrepo_test.go` — 新增 3 个基准测试（ScanAndIndex/Search/FullPipeline）+ 1 个集成测试（CollectMetrics），以 CodeSchema 自身仓库为测试目标
+- 采用`setupRealRepo`工厂函数统一初始化，注册 tree-sitter 适配器、MemoryFTS/MemoryStore/LocalEmbedder 搜索组件
+- `findRepoRoot` / `discoverGoFiles` 工具函数复用
+- 基准测试结果格式化输出到 `build/realrepo-bench.json`
+
+**新增公共抽象**：
+- `setupRealRepo(tb, repoRoot) (Store, *Scanner, *IndexBuilder, *Searcher)` — 真实仓库基准测试环境初始化
+- `RealRepoBenchResult` — 基准测试结果结构体
+- `findRepoRoot` / `discoverGoFiles` — 仓库根目录定位和 Go 文件发现工具
+
+**影响范围**：
+- `internal/integration/realrepo_test.go` — 新增文件，不修改现有代码
+- 不涉及现有 API 变更
+
+**验证数据**：
+- go build 通过 | go test 21 包 0 失败
+- 集成测试 `TestRealRepo_CollectMetrics`（CodeSchema 自身仓库，77 个 .go 文件）：
+  - 扫描耗时：157ms（160 个文件，含非 Go 文件）
+  - 索引构建：12ms（1017 docs）
+  - 内存增量：3.16MB
+  - 搜索延迟：P50=0.996ms, P95=1.538ms, P99=2.082ms, Avg=0.972ms
+  - 阈值验证：扫描 < 5min（OK），索引 < 5min（OK），P95 < 500ms（OK）
+- Benchmark 关键数据（CodeSchema 自身仓库）：
+  - `BenchmarkRealRepo_Search`（1026 次迭代）：avg=0.999ms, p50=0.996ms, p95=1.698ms, p99=1.999ms, 373KB/op, 1322 allocs/op
+  - `BenchmarkRealRepo_FullPipeline`（14 次迭代）：search_avg=1.327ms, 104MB/op, 223580 allocs/op（含完整扫描+索引+搜索）
+
+**遗留 TODO / 风险**：
+- 当前仅测试了 CodeSchema 自身仓库，未覆盖外部大仓库（如 kubernetes、spring-framework）
+- 使用 tree-sitter 正则解析器，实际解析精度可能影响索引质量
+- 本地 Embedder（LocalEmbedder）精度有限，P95 搜索延迟 1.5ms 为内存级性能，真实场景（chromem-go + ONNX）可能更高
+- 每次 benchmark 迭代创建独立的 FileStore（临时目录），磁盘 I/O 可能影响扫描/索引耗时
+
 ### Commit 28: feat(adapter): 多语言适配器扩展（SCIP/LSP） + 语义检索精度提升（chromem-go）
 
 **Commit Hash**: `2038c3c`

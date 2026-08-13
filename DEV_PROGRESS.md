@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 05:30
-> 当前阶段：多语言适配器扩展（SCIP/LSP）+ 语义检索精度提升（chromem-go 集成）
-> 下一个阶段：真实仓库 benchmark 数据采集
+> 更新时间：2026-08-13 21:49
+> 当前阶段：真实仓库 benchmark 数据采集
+> 下一个阶段：生产环境部署验证（Docker/CI 流水线）
 
 ---
 
@@ -26,6 +26,8 @@ P10      [████████████████████] 100%
 P11      [████████████████████] 100%
 P12      [████████████████████] 100%
 P13      [████████████████████] 100%
+P14      [████████████████████] 100%
+P15      [████████████████████] 100%
 ```
 
 ---
@@ -227,18 +229,23 @@ P13      [████████████████████] 100%
 - [x] `go.mod` — 添加 chromem-go 依赖
 - [x] 验证数据：go build 通过 | go test 21 包 0 失败 | 新增 7 个文件，43 个测试用例
 
+### P15 — 真实仓库 benchmark 数据采集
+- [x] **`internal/integration/realrepo_test.go`** — 3 个基准测试（ScanAndIndex/Search/FullPipeline）+ 1 个集成测试（CollectMetrics），以 CodeSchema 自身仓库为目标
+- [x] 验证数据：采集到关键性能指标并输出 JSON 到 `build/realrepo-bench.json`
+- [x] 阈值验证：扫描耗时 < 5min（实际 157ms），索引构建 < 5min（实际 12ms），P95 搜索延迟 < 500ms（实际 1.5ms）
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-所有 P0-P13 阶段已全部完成，P14 多语言适配器扩展（SCIP/LSP）和语义检索精度提升（chromem-go 集成）已完成。建议下一步方向：
+所有 P0-P14 阶段已全部完成，P15 真实仓库 benchmark 数据采集已完成。建议下一步方向：
 
-- **真实仓库 benchmark 数据采集** — 选择 1-2 个真实 Go/Java 仓库，运行完整 scan→index→search 流水线，采集构建耗时、内存峰值、检索 P95 延迟等关键指标
-- 生产环境部署验证（Docker/CI 流水线）
+- **生产环境部署验证（Docker/CI 流水线）** — 在 Docker 或 CI 环境中运行完整流水线，验证跨平台部署的正确性
 - LSP 适配器 `readResponses` 按字节读取 Content-Length 头优化
 - chromem-go 向量索引的可视化管理工具
+- 多仓库 benchmark 对比（选择 1-2 个外部 Go/Java 仓库，对比索引构建和搜索性能）
 
 ## 已知问题
 
