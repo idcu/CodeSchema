@@ -8,7 +8,7 @@
 
 ### Commit 19: feat(watcher): FsWatcher — 基于 fsnotify 的原生文件系统监听
 
-**Commit Hash**: `待生成`
+**Commit Hash**: `78b19c5`
 
 **核心改动点**：
 - `internal/watcher/watcher.go` — 新增 `FsWatcher` 结构体，实现 `Watcher` 接口，基于 fsnotify 原生文件系统事件监听；`addRecursive` 递归添加所有子目录（自动跳过 ignoreDirs 目录）；`handleEvent` 处理 Create/Write/Remove/Rename 事件，新目录创建时自动加入递归监听；`isIgnored` 检查路径是否在忽略目录下；`Stop()` 并发安全关闭
