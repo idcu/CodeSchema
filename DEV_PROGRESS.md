@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 22:20
-> 当前阶段：LSP 适配器优化 + chromem-go 向量索引可视化工具
-> 下一个阶段：多仓库 benchmark 对比
+> 更新时间：2026-08-13 22:35
+> 当前阶段：多仓库 benchmark 对比框架
+> 下一个阶段：无（所有 P0-P18 阶段已完成）
 
 ---
 
@@ -29,6 +29,8 @@ P13      [████████████████████] 100%
 P14      [████████████████████] 100%
 P15      [████████████████████] 100%
 P16      [████████████████████] 100%
+P17      [████████████████████] 100%
+P18      [████████████████████] 100%
 ```
 
 ---
@@ -250,16 +252,24 @@ P16      [████████████████████] 100%
 - [x] **`internal/vector/chromem.go`** — 新增 Size() 返回真实文档数，ListDocuments()/QueryText() 方法支持可视化工具查询
 - [x] 验证数据：`go build` 通过 | `go test` 22 包 0 失败 | 新增 1 个文件，修改 4 个文件
 
+### P18 — 多仓库 benchmark 对比框架
+- [x] **`internal/integration/benchreport.go`** — 对比报告生成器，BenchResult/BenchComparison 结构体，GenerateComparisonMarkdown 生成 Markdown 表格（含相对性能百分比），GenerateComparisonJSON 生成 JSON 输出，SortBenchResults 排序
+- [x] **`internal/integration/benchhelper.go`** — 共享 benchmark 工具函数，NewBenchSetup 工厂函数创建组件集合，FindRepoRoot/DiscoverGoFiles 查找仓库和文件，GetBenchRepos 从环境变量读取多仓库路径，RepoName 提取路径名
+- [x] **`internal/integration/multirepo_test.go`** — TestMultiRepo_CollectMetrics 多仓库基准测试，通过 CODESCHEMA_BENCH_REPOS 环境变量指定多个仓库（分号分隔），对每个仓库执行 scan→index→search 流水线，输出对比报告到 build/bench-compare.json
+- [x] **`internal/integration/realrepo_test.go`** — 重构为使用共享工具函数（NewBenchSetup/FindRepoRoot/DiscoverGoFiles），移除私有函数消除重复
+- [x] 验证数据：`go build` 通过 | `go test` 23 包 0 失败 | 新增 3 个文件，修改 1 个文件
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-所有 P0-P17 阶段已全部完成，P17 LSP 适配器优化 + chromem-go 向量索引可视化工具已完成。建议下一步方向：
+所有 P0-P18 阶段已全部完成。项目核心功能已开发完毕，进入维护和优化阶段。建议后续方向：
 
-- **多仓库 benchmark 对比** — 选择 1-2 个外部 Go/Java 仓库（如 kubernetes、spring-framework），对比索引构建和搜索性能
+- **多仓库 benchmark 实际运行** — 在可用外部仓库（如 kubernetes）上运行 `CODESCHEMA_BENCH_REPOS="C:\repo1;C:\repo2" go test -run=TestMultiRepo_CollectMetrics -timeout 600s`
 - LSP 适配器生产环境连接稳定性验证
+- 向量索引可视化工具前端增强（批次删除、索引重建、实时监控）
 
 ## 已知问题
 

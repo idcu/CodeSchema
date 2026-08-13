@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "repo_name": "CodeSchema",
+      "repo_path": "E:\\CodeSchema",
+      "file_count": 81,
+      "scan_time_ms": 81,
+      "index_time_ms": 13,
+      "heap_mb": 4.609375,
+      "search_p50_ms": 1.019,
+      "search_p95_ms": 1.994,
+      "search_p99_ms": 1.994,
+      "search_avg_ms": 1.1107222222222222
+    }
+  ],
+  "baseline": "CodeSchema",
+  "config_desc": "default config (workers=2, dim=128, memory store)"
+}

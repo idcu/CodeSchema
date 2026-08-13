@@ -16,69 +16,22 @@ import (
 	"testing"
 	"time"
 
-	"codeschema/internal/parser"
-	adapter "codeschema/internal/parser/adapter/treesitter"
-	"codeschema/internal/scanner"
 	"codeschema/internal/search"
-	"codeschema/internal/store"
-	"codeschema/internal/vector"
 )
-
-// RealRepoBenchResult 记录真实仓库基准测试结果。
-type RealRepoBenchResult struct {
-	RepoPath     string  `json:"repo_path"`
-	FileCount    int     `json:"file_count"`
-	ScanTimeMs   int64   `json:"scan_time_ms"`
-	IndexTimeMs  int64   `json:"index_time_ms"`
-	HeapMB       float64 `json:"heap_mb"`
-	SearchP50Ms  float64 `json:"search_p50_ms"`
-	SearchP95Ms  float64 `json:"search_p95_ms"`
-	SearchP99Ms  float64 `json:"search_p99_ms"`
-	SearchAvgMs  float64 `json:"search_avg_ms"`
-}
-
-// setupRealRepo 初始化真实仓库基准测试环境，返回清理函数。
-func setupRealRepo(tb testing.TB, repoRoot string) (store.Store, *scanner.Scanner, *search.IndexBuilder, *search.Searcher) {
-	tb.Helper()
-
-	// 存储（使用临时目录）
-	st := store.NewStore("file")
-	storeDir := tb.TempDir()
-	if err := st.Open(context.Background(), storeDir); err != nil {
-		tb.Fatalf("open store: %v", err)
-	}
-
-	// 注册 tree-sitter 适配器
-	reg := parser.NewRegistry()
-	reg.Register(adapter.NewTreeSitterAdapter())
-
-	// 扫描器
-	sc := scanner.NewScanner(st, reg, 2)
-
-	// 搜索组件
-	fts := search.NewMemoryFTS()
-	vs := vector.NewMemoryStore()
-	em := vector.NewLocalEmbedder(128)
-	idx := vector.NewIndexer(vs, em, 2)
-	builder := search.NewIndexBuilder(fts, idx, em)
-	searcher := search.NewSearcher(fts, search.NewVectorAdapter(idx), nil)
-
-	return st, sc, builder, searcher
-}
 
 // BenchmarkRealRepo_ScanAndIndex 基准测试：扫描真实仓库并构建索引。
 func BenchmarkRealRepo_ScanAndIndex(b *testing.B) {
-	repoRoot := findRepoRoot(b)
+	repoRoot := FindRepoRoot(b)
 	b.Logf("Repo root: %s", repoRoot)
 
-	goFiles := discoverGoFiles(b, repoRoot)
+	goFiles := DiscoverGoFiles(b, repoRoot)
 	b.Logf("Go source files: %d", len(goFiles))
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		st, sc, builder, _ := setupRealRepo(b, repoRoot)
+		setup, cleanup := NewBenchSetup(b, repoRoot)
 
 		var m0 runtime.MemStats
 		runtime.ReadMemStats(&m0)
@@ -87,14 +40,14 @@ func BenchmarkRealRepo_ScanAndIndex(b *testing.B) {
 
 		// 扫描
 		scanStart := time.Now()
-		if err := sc.ScanAll(context.Background(), repoRoot); err != nil {
+		if err := setup.Scanner.ScanAll(context.Background(), repoRoot); err != nil {
 			b.Fatalf("ScanAll failed: %v", err)
 		}
 		scanTime := time.Since(scanStart)
 
 		// 构建索引
 		idxStart := time.Now()
-		if _, err := builder.BuildFromStore(context.Background(), st); err != nil {
+		if _, err := setup.Builder.BuildFromStore(context.Background(), setup.Store); err != nil {
 			b.Fatalf("BuildFromStore failed: %v", err)
 		}
 		idxTime := time.Since(idxStart)
@@ -107,19 +60,22 @@ func BenchmarkRealRepo_ScanAndIndex(b *testing.B) {
 		b.ReportMetric(float64(scanTime.Milliseconds()), "scan_ms")
 		b.ReportMetric(float64(idxTime.Milliseconds()), "index_ms")
 		b.ReportMetric(heapMB, "heap_MB")
+
+		cleanup()
 	}
 }
 
 // BenchmarkRealRepo_Search 基准测试：对真实仓库索引执行搜索。
 func BenchmarkRealRepo_Search(b *testing.B) {
-	repoRoot := findRepoRoot(b)
-	st, sc, builder, searcher := setupRealRepo(b, repoRoot)
+	repoRoot := FindRepoRoot(b)
+	setup, cleanup := NewBenchSetup(b, repoRoot)
+	defer cleanup()
 
 	// 一次性扫描并构建索引
-	if err := sc.ScanAll(context.Background(), repoRoot); err != nil {
+	if err := setup.Scanner.ScanAll(context.Background(), repoRoot); err != nil {
 		b.Fatalf("ScanAll failed: %v", err)
 	}
-	if _, err := builder.BuildFromStore(context.Background(), st); err != nil {
+	if _, err := setup.Builder.BuildFromStore(context.Background(), setup.Store); err != nil {
 		b.Fatalf("BuildFromStore failed: %v", err)
 	}
 
@@ -136,7 +92,7 @@ func BenchmarkRealRepo_Search(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		query := queries[i%len(queries)]
 		start := time.Now()
-		_, err := searcher.Search(context.Background(), query, search.SearchModeBoth, 10)
+		_, err := setup.Searcher.Search(context.Background(), query, search.SearchModeBoth, 10)
 		latency := time.Since(start)
 		if err != nil {
 			b.Fatalf("Search failed: %v", err)
@@ -163,22 +119,22 @@ func BenchmarkRealRepo_Search(b *testing.B) {
 
 // BenchmarkRealRepo_FullPipeline 基准测试：完整流水线（扫描+索引+搜索）。
 func BenchmarkRealRepo_FullPipeline(b *testing.B) {
-	repoRoot := findRepoRoot(b)
+	repoRoot := FindRepoRoot(b)
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		st, sc, builder, searcher := setupRealRepo(b, repoRoot)
+		setup, cleanup := NewBenchSetup(b, repoRoot)
 		b.StartTimer()
 
 		// 扫描
-		if err := sc.ScanAll(context.Background(), repoRoot); err != nil {
+		if err := setup.Scanner.ScanAll(context.Background(), repoRoot); err != nil {
 			b.Fatalf("ScanAll failed: %v", err)
 		}
 
 		// 构建索引
-		if _, err := builder.BuildFromStore(context.Background(), st); err != nil {
+		if _, err := setup.Builder.BuildFromStore(context.Background(), setup.Store); err != nil {
 			b.Fatalf("BuildFromStore failed: %v", err)
 		}
 
@@ -187,7 +143,7 @@ func BenchmarkRealRepo_FullPipeline(b *testing.B) {
 		var totalLatency float64
 		for _, q := range queries {
 			start := time.Now()
-			_, err := searcher.Search(context.Background(), q, search.SearchModeBoth, 10)
+			_, err := setup.Searcher.Search(context.Background(), q, search.SearchModeBoth, 10)
 			totalLatency += float64(time.Since(start).Microseconds())
 			if err != nil {
 				b.Fatalf("Search(%q) failed: %v", q, err)
@@ -196,6 +152,8 @@ func BenchmarkRealRepo_FullPipeline(b *testing.B) {
 		avgLatency := totalLatency / float64(len(queries)) / 1000
 
 		b.ReportMetric(avgLatency, "search_avg_ms")
+
+		cleanup()
 	}
 }
 
@@ -205,14 +163,15 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 		t.Skip("skipping real-repo benchmark in short mode")
 	}
 
-	repoRoot := findRepoRoot(t)
+	repoRoot := FindRepoRoot(t)
 	t.Logf("Target repo: %s", repoRoot)
 
-	goFiles := discoverGoFiles(t, repoRoot)
+	goFiles := DiscoverGoFiles(t, repoRoot)
 	t.Logf("Go source files: %d", len(goFiles))
 
 	// 初始化组件
-	st, sc, builder, searcher := setupRealRepo(t, repoRoot)
+	setup, cleanup := NewBenchSetup(t, repoRoot)
+	defer cleanup()
 	ctx := context.Background()
 
 	// 记录内存基准
@@ -221,14 +180,14 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 
 	// 扫描
 	scanStart := time.Now()
-	if err := sc.ScanAll(ctx, repoRoot); err != nil {
+	if err := setup.Scanner.ScanAll(ctx, repoRoot); err != nil {
 		t.Fatalf("ScanAll failed: %v", err)
 	}
 	scanTime := time.Since(scanStart)
 
 	// 构建索引
 	idxStart := time.Now()
-	if _, err := builder.BuildFromStore(ctx, st); err != nil {
+	if _, err := setup.Builder.BuildFromStore(ctx, setup.Store); err != nil {
 		t.Fatalf("BuildFromStore failed: %v", err)
 	}
 	idxTime := time.Since(idxStart)
@@ -250,7 +209,7 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 	var latencies []float64
 	for _, q := range queries {
 		start := time.Now()
-		_, err := searcher.Search(ctx, q, search.SearchModeBoth, 10)
+		_, err := setup.Searcher.Search(ctx, q, search.SearchModeBoth, 10)
 		latency := time.Since(start)
 		if err != nil {
 			t.Logf("Search(%q) failed: %v (skipped)", q, err)
@@ -274,7 +233,8 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 	}
 	avg = avg / float64(n) / 1000
 
-	result := RealRepoBenchResult{
+	result := BenchResult{
+		RepoName:    "codeschema",
 		RepoPath:    repoRoot,
 		FileCount:   len(goFiles),
 		ScanTimeMs:  scanTime.Milliseconds(),
@@ -309,46 +269,4 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 	if p95 > 500 {
 		t.Logf("Warning: P95 search latency %.1fms exceeds 500ms threshold", p95)
 	}
-}
-
-// findRepoRoot 从测试文件所在目录向上查找，直到找到 go.mod。
-func findRepoRoot(tb testing.TB) string {
-	tb.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		tb.Fatalf("Getwd failed: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			tb.Fatal("go.mod not found in parent directories")
-		}
-		dir = parent
-	}
-}
-
-// discoverGoFiles 递归查找目录下的所有 .go 文件。
-func discoverGoFiles(tb testing.TB, root string) []string {
-	tb.Helper()
-	var files []string
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // 跳过无法访问的目录
-		}
-		if info.IsDir() {
-			base := info.Name()
-			if base == "vendor" || base == ".git" || base == "node_modules" || base == "down" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if filepath.Ext(path) == ".go" {
-			files = append(files, path)
-		}
-		return nil
-	})
-	return files
 }

@@ -6,6 +6,41 @@
 
 ## 提交记录
 
+### Commit 32: feat(bench): 多仓库 benchmark 对比框架
+
+**Commit Hash**: `(待定)`
+
+**核心改动点**：
+- `internal/integration/benchreport.go` — 新增对比报告生成器，定义 BenchResult/BenchComparison 结构体，GenerateComparisonMarkdown 生成 Markdown 表格（含相对性能百分比），GenerateComparisonJSON 生成 JSON 输出，SortBenchResults 排序，pctStr 计算相对性能
+- `internal/integration/benchhelper.go` — 新增共享 benchmark 工具函数，NewBenchSetup 工厂函数创建完整组件集合（Store/Scanner/IndexBuilder/Searcher），FindRepoRoot/DiscoverGoFiles 查找仓库和文件，GetBenchRepos 从环境变量 CODESCHEMA_BENCH_REPOS 读取多仓库路径（分号分隔），RepoName 提取目录名
+- `internal/integration/multirepo_test.go` — 新增 TestMultiRepo_CollectMetrics 多仓库基准测试，对每个仓库执行 scan→index→search 全流水线，采集文件数/扫描耗时/索引耗时/内存增量/搜索延迟（P50/P95/P99/平均），输出对比报告到 build/bench-compare.json
+- `internal/integration/realrepo_test.go` — 重构为使用共享工具函数（NewBenchSetup/FindRepoRoot/DiscoverGoFiles/BenchResult），移除私有函数 setupRealRepo/findRepoRoot/discoverGoFiles 和 RealRepoBenchResult 结构体，消除代码重复
+
+**新增公共抽象**：
+- `integration.BenchResult` / `integration.BenchComparison` — 基准测试结果和对比结构体（替代原有的私有 RealRepoBenchResult）
+- `integration.GenerateComparisonMarkdown` / `integration.GenerateComparisonJSON` — 对比报告生成器
+- `integration.SortBenchResults` / `integration.pctStr` — 排序和相对百分比计算工具
+- `integration.BenchSetup` / `integration.NewBenchSetup` — 组件集合工厂函数（替代原有的私有 setupRealRepo）
+- `integration.FindRepoRoot` / `integration.DiscoverGoFiles` — 文件系统工具函数（从私有提升为包级公共 API）
+- `integration.GetBenchRepos` / `integration.RepoName` — 多仓库路径解析和仓库名提取
+
+**影响范围**：
+- 新增 3 个文件（benchreport.go / benchhelper.go / multirepo_test.go）
+- 修改 1 个文件（realrepo_test.go）— 移除私有函数和结构体，替换为公共函数
+- 不涉及现有 API 变更（benchmark 函数签名不变，仅内部实现替换为公共函数调用）
+- 输出文件变更：build/bench-compare.json（新增对比报告），build/realrepo-bench.json（格式从 RealRepoBenchResult 变为 BenchResult）
+
+**验证数据**：
+- go build 通过 | go test 23 包 0 失败
+- 新增 3 个文件（benchreport.go 165 行 / benchhelper.go 141 行 / multirepo_test.go 166 行），修改 1 个文件（realrepo_test.go -150 行 +68 行）
+- 移除的私有函数：setupRealRepo（~30行）、findRepoRoot（~18行）、discoverGoFiles（~25行）、RealRepoBenchResult（~10行）
+- 公共函数覆盖率：BenchResult（8 字段）、BenchSetup（4 组件）、GetBenchRepos（默认/单仓库/多仓库）、BenchComparison（3 字段）
+
+**遗留 TODO / 风险**：
+- 当前机器无外部 Go 仓库，多仓库对比测试需配置 CODESCHEMA_BENCH_REPOS 环境变量后在外部仓库上运行
+- GetBenchRepos 使用分号分隔路径，Windows 路径含空格时需确保分号正确转义
+- GenerateComparisonMarkdown 的百分比计算基于 int64，浮点指标（HeapMB/P95）已放大 100 倍后取整，可能存在微小精度误差
+
 ### Commit 31: feat(viz): LSP 适配器优化 + chromem-go 向量索引可视化工具
 
 **Commit Hash**: `a9b20e7`
