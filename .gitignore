@@ -39,4 +39,10 @@ config.local.yaml
 # Dependencies
 node_modules/
 vendor/
-down/
+
+# Dependency archives (not needed for build)
+down/*.zip
+down/*.tar.gz
+down/*.gz
+down/go.mod
+down/go.sum

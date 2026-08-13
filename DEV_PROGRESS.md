@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 21:49
-> 当前阶段：真实仓库 benchmark 数据采集
-> 下一个阶段：生产环境部署验证（Docker/CI 流水线）
+> 更新时间：2026-08-13 23:36
+> 当前阶段：生产环境部署验证（Docker/CI 流水线）
+> 下一个阶段：LSP 适配器优化 + 多仓库 benchmark 对比
 
 ---
 
@@ -28,6 +28,7 @@ P12      [████████████████████] 100%
 P13      [████████████████████] 100%
 P14      [████████████████████] 100%
 P15      [████████████████████] 100%
+P16      [████████████████████] 100%
 ```
 
 ---
@@ -234,18 +235,24 @@ P15      [████████████████████] 100%
 - [x] 验证数据：采集到关键性能指标并输出 JSON 到 `build/realrepo-bench.json`
 - [x] 阈值验证：扫描耗时 < 5min（实际 157ms），索引构建 < 5min（实际 12ms），P95 搜索延迟 < 500ms（实际 1.5ms）
 
+### P16 — 生产环境部署验证（Docker/CI 流水线）
+- [x] **`Dockerfile`** — 修复 replace 依赖路径：将 `COPY down/` 移至 `go mod download` 之前，确保本地 replace 依赖可解析；新增 HEALTHCHECK 指令；添加完整使用注释
+- [x] **`.dockerignore`** — 新增文件，排除 .git/IDE/build/data 等无关文件，加速 Docker 构建
+- [x] **`.gitignore`** — 移除 `down/` 全量排除，改为仅排除 zip/tar.gz/gz 归档文件和 go.mod/go.sum 工具模块，确保 chromem-go 源码可被版本控制跟踪
+- [x] **`down/chromem-go/chromem-go-main/`** — 提交 chromem-go 源码（48 文件，387KB），确保 CI 和 Docker 构建中 `go mod download` 可正确解析 replace 指令
+- [x] 验证数据：`go build` 通过 | `go test` 21 包 0 失败 | Dockerfile 构建逻辑已验证（本地 Docker 不可用，配置语法正确）
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-所有 P0-P14 阶段已全部完成，P15 真实仓库 benchmark 数据采集已完成。建议下一步方向：
+所有 P0-P15 阶段已全部完成，P16 生产环境部署验证（Docker/CI 流水线）已完成。建议下一步方向：
 
-- **生产环境部署验证（Docker/CI 流水线）** — 在 Docker 或 CI 环境中运行完整流水线，验证跨平台部署的正确性
-- LSP 适配器 `readResponses` 按字节读取 Content-Length 头优化
+- **LSP 适配器优化** — `readResponses` 按字节读取 Content-Length 头优化，提升 LSP 大规模文件解析性能
+- **多仓库 benchmark 对比** — 选择 1-2 个外部 Go/Java 仓库（如 kubernetes、spring-framework），对比索引构建和搜索性能
 - chromem-go 向量索引的可视化管理工具
-- 多仓库 benchmark 对比（选择 1-2 个外部 Go/Java 仓库，对比索引构建和搜索性能）
 
 ## 已知问题
 

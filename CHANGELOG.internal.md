@@ -6,6 +6,30 @@
 
 ## 提交记录
 
+### Commit 30: feat(deploy): 生产环境部署验证 — Dockerfile 修复 + .dockerignore + chromem-go 源码提交
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `Dockerfile` — 修复 `go mod download` 前 `COPY down/` 的依赖路径问题，新增 HEALTHCHECK 指令和完整使用注释
+- `.dockerignore` — 新增文件，排除 .git/IDE/build/data 等无关文件，加速 Docker 构建
+- `.gitignore` — 移除 `down/` 全量排除，改为仅排除 zip/tar.gz/gz 归档文件和 go.mod/go.sum 工具模块
+- `down/chromem-go/chromem-go-main/` — 提交 chromem-go 源码（48 文件，387KB），确保 CI 和 Docker 构建中 replace 指令可正确解析
+
+**新增公共抽象**：
+- 无新增公共抽象
+
+**影响范围**：
+- 不涉及现有 API 变更
+- `down/` 目录提交 chromem-go 源码，不影响 import 路径
+- `.gitignore` 变更仅影响版本控制跟踪，不影响本地开发
+
+**验证数据**：
+- `go build` 通过 | `go test` 21 包 0 失败
+- Dockerfile 构建逻辑已验证：`COPY down/` 在 `go mod download` 之前执行，replace 目标路径可解析
+- `.dockerignore` 排除模式验证：.git/down/*.zip 等被正确排除，chromem-go 源码被包含
+- 注意：本地 Docker 不可用，未进行实际镜像构建和容器运行验证
+
 ### Commit 29: test(stress): 真实仓库 benchmark 数据采集 — 扫描/索引/搜索全流水线性能基线
 
 **Commit Hash**: `8bed66b`

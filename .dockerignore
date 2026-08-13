@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+*.test
+*.out
+coverage.out
+
+# Data files
+*.db
+*.db-wal
+*.db-shm
+vector.db
+scipout/
+
+# Config
+.env
+config.local.yaml
+config.yaml
+
+# Dependencies (node_modules excluded; vendor NOT excluded for vendored builds)
+node_modules/
+# down/ is NOT excluded — it contains local replace dependencies for go mod
