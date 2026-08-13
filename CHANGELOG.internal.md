@@ -8,7 +8,7 @@
 
 ### Commit 30: feat(deploy): 生产环境部署验证 — Dockerfile 修复 + .dockerignore + chromem-go 源码提交
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `a202cb5`
 
 **核心改动点**：
 - `Dockerfile` — 修复 `go mod download` 前 `COPY down/` 的依赖路径问题，新增 HEALTHCHECK 指令和完整使用注释
