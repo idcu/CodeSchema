@@ -8,7 +8,7 @@
 
 ### Commit 34: feat(viz): 向量索引可视化工具增强 — 单文档 API、点击展开详情、刷新按钮
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `5bdf042`
 
 **核心改动点**：
 - `internal/server/viz.go` — 新增 `/viz/api/document` 端点，支持按 ID 查询单个文档内容（从 ListDocuments 结果过滤）
