@@ -7,6 +7,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"codeschema/internal/search"
@@ -210,6 +211,9 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 			return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search: %v", err)}
 		}
 
+		// 富化搜索结果：从 Store 查询 Kind 和 File 信息
+		s.enrichResults(ctx, results)
+
 		// 映射为 service.SearchResult
 		svcResults := make([]SearchResult, 0, len(results))
 		for _, r := range results {
@@ -226,6 +230,114 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 
 	// 回退到 P0 占位行为
 	return []SearchResult{}, nil
+}
+
+// enrichResults 从 Store 查询搜索结果中每个符号的 Kind 和 File 信息。
+//
+// 符号 ID 格式：
+//   - "file:/path/to/file.go" → 直接提取文件路径
+//   - "class:123" → 从 Store 查询类记录
+//   - "method:456" → 从 Store 查询方法记录
+//
+// 对于找不到的符号，留空（不阻断搜索流程）。
+func (s *Service) enrichResults(ctx context.Context, results []search.SearchResult) {
+	for i, r := range results {
+		if r.Kind != "" && r.File != "" {
+			continue // 已经填充过
+		}
+		kind, file := s.resolveSymbol(ctx, r.Symbol)
+		if kind != "" {
+			results[i].Kind = kind
+		}
+		if file != "" {
+			results[i].File = file
+		}
+	}
+}
+
+// resolveSymbol 解析符号 ID 为 Kind 和 File 路径。
+func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file string) {
+	const (
+		filePrefix   = "file:"
+		classPrefix  = "class:"
+		methodPrefix = "method:"
+	)
+
+	switch {
+	case strings.HasPrefix(symbol, filePrefix):
+		return "file", symbol[len(filePrefix):]
+
+	case strings.HasPrefix(symbol, classPrefix):
+		id := parseInt64(symbol[len(classPrefix):])
+		if id <= 0 {
+			return "", ""
+		}
+		// 遍历所有文件查找类
+		files, err := s.store.GetAllFiles(ctx)
+		if err != nil {
+			return "", ""
+		}
+		for _, f := range files {
+			classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+			if err != nil {
+				continue
+			}
+			for _, c := range classes {
+				if c.ID == id {
+					kind := "class"
+					if c.Type != "" {
+						kind = strings.ToLower(c.Type)
+					}
+					return kind, f.AbsolutePath
+				}
+			}
+		}
+
+	case strings.HasPrefix(symbol, methodPrefix):
+		id := parseInt64(symbol[len(methodPrefix):])
+		if id <= 0 {
+			return "", ""
+		}
+		// 遍历所有文件查找方法
+		files, err := s.store.GetAllFiles(ctx)
+		if err != nil {
+			return "", ""
+		}
+		for _, f := range files {
+			classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+			if err != nil {
+				continue
+			}
+			for _, c := range classes {
+				methods, err := s.store.GetMethodsByClassID(ctx, c.ID)
+				if err != nil {
+					continue
+				}
+				for _, m := range methods {
+					if m.ID == id {
+						return "method", f.AbsolutePath
+					}
+				}
+			}
+		}
+	}
+
+	return "", ""
+}
+
+// parseInt64 简单解析 int64，解析失败返回 0。
+func parseInt64(s string) int64 {
+	if len(s) == 0 {
+		return 0
+	}
+	var n int64
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int64(r-'0')
+	}
+	return n
 }
 
 // FindDependencies 查找依赖关系（P0 骨架）。

@@ -2,7 +2,7 @@
 
 > 更新时间：2026-08-14 00:40
 > 当前阶段：全部外部依赖已安装 — chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go
-> 下一个阶段：P10 — 异步索引多 worker 扩展 + 日志集成 + 集成测试
+> 下一个阶段：P11 — 集成测试与性能压测
 
 ---
 
@@ -22,6 +22,7 @@ P8.1     [████████████████████] 100%
 P8.2     [████████████████████] 100%
 P8.3     [████████████████████] 100%
 P9       [████████████████████] 100%
+P10      [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -173,6 +174,15 @@ P9       [████████████████████] 100%
 - [x] 验证数据：go build + go test 20 个包全部通过，0 失败；config 包 33 个测试（25 原有 + 8 新增）
 - [x] 新增公共抽象：`LoadFromEnv`、`Merge`、`ConfigWatcher`、`OnReload`、`cloneConfig`（深拷贝工具）
 
+### P10 — 遗留问题治理（多 worker / 日志集成 / 结果富化 / 进度条）
+- [x] **异步索引队列多 worker 扩展**：`StartAsync(ctx, queueSize, numWorkers)` 接受 `numWorkers` 参数，启动多个 worker goroutine 消费队列，提升高并发场景吞吐
+- [x] **异步索引错误集成日志系统**：`asyncWorker` 调用 `log.WithModule("search.index_builder")` 记录索引失败日志
+- [x] **搜索结果填充 Kind/File**：`Service.enrichResults` 从 Store 查询符号的 Kind 和 File 信息，在 `Service.Search` 返回前自动富化
+- [x] **索引构建进度条**：`BuildFromStore` 分阶段输出进度（文件扫描 → IDF 构建 → FTS 写入 → 向量写入），含百分比和耗时统计
+- [x] **新增 11 个测试**：多 worker 并发（3 worker × 10 文档）、默认 worker 数（0→2）、幂等性、错误回调、同步降级、删除文档、符号解析（file/class/interface/method/无效）、富化逻辑、`parseInt64` 工具函数
+- [x] 验证数据：go build + go test 20 个包全部通过，0 失败
+- [x] 新增公共抽象：`Service.resolveSymbol`、`Service.enrichResults`、`parseInt64`
+
 ### FsWatcher — 基于 fsnotify 的原生文件系统监听（已知问题 #2 解决）
 - [x] **`internal/watcher/watcher.go`** — 新增 `FsWatcher` 结构体，基于 fsnotify 原生文件系统事件监听；递归监听所有子目录（`addRecursive`），自动跳过忽略目录；新目录创建时自动加入递归监听；`Stop()` 并发安全关闭
 - [x] **`internal/watcher/watcher_test.go`** — 新增 6 个 FsWatcher 测试（新文件创建/忽略目录/嵌套忽略路径/Stop 安全/文件修改/子目录递归）
@@ -191,9 +201,7 @@ P9       [████████████████████] 100%
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P9 | 配置热重载 / 多配置源 | `docs/dev/11-配置部署与路线图.md` | P7 完成 |
-| P10 | 异步索引多 worker 扩展 + 日志集成 | `docs/P8-阶段总结-语义检索与全文搜索.md` | P9 完成 |
-| P11 | 搜索结果填充 Kind/File + 索引构建进度条 | `docs/P8-阶段总结-语义检索与全文搜索.md` | P10 完成 |
+| P11 | 集成测试与性能压测 | `docs/dev/11-配置部署与路线图.md` | P10 完成 |
 
 ## 已知问题
 

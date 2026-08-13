@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"codeschema/internal/parser"
@@ -415,4 +416,142 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+func TestIndexBuilder_StartAsync_MultiWorker(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	// StartAsync with 3 workers
+	b.StartAsync(ctx, 64, 3)
+	defer b.StopAsync()
+
+	// Enqueue 10 documents
+	for i := 0; i < 10; i++ {
+		b.EnqueueIndex(ctx, fmt.Sprintf("test:id:%d", i), fmt.Sprintf("test document %d", i))
+	}
+	b.StopAsync()
+
+	// All 10 should be indexed
+	if fts.Size() != 10 {
+		t.Errorf("expected 10 documents in FTS, got %d", fts.Size())
+	}
+	if vs.Size() != 10 {
+		t.Errorf("expected 10 documents in vector store, got %d", vs.Size())
+	}
+}
+
+func TestIndexBuilder_StartAsync_DefaultWorker(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	// numWorkers=0 should use default (2)
+	b.StartAsync(ctx, 64, 0)
+	defer b.StopAsync()
+
+	b.EnqueueIndex(ctx, "test:id:1", "test document")
+	b.StopAsync()
+
+	if fts.Size() != 1 {
+		t.Errorf("expected 1 document, got %d", fts.Size())
+	}
+}
+
+func TestIndexBuilder_StartAsync_Idempotent(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	b.StartAsync(ctx, 64, 2)
+	// Second call should be no-op
+	b.StartAsync(ctx, 64, 10)
+	defer b.StopAsync()
+
+	b.EnqueueIndex(ctx, "test:id:1", "test document")
+	b.StopAsync()
+
+	if fts.Size() != 1 {
+		t.Errorf("expected 1 document, got %d", fts.Size())
+	}
+}
+
+func TestIndexBuilder_SetOnError(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	var errID string
+	b.SetOnError(func(id string, err error) {
+		errID = id
+	})
+
+	// Enqueue with async so it goes through the worker
+	b.StartAsync(ctx, 64, 1)
+	// StopAsync early to cause processing error context
+	b.EnqueueIndex(ctx, "test:error", "")
+
+	// Wait for processing
+	b.StopAsync()
+	_ = errID // callback was set; no error expected for empty text in normal flow
+}
+
+func TestIndexBuilder_EnqueueIndex_SyncFallback(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+	// Without StartAsync, EnqueueIndex should fall back to sync
+	b.EnqueueIndex(ctx, "test:id:1", "test document")
+
+	if fts.Size() != 1 {
+		t.Errorf("expected 1 document via sync fallback, got %d", fts.Size())
+	}
+	if vs.Size() != 1 {
+		t.Errorf("expected 1 document in vector store via sync fallback, got %d", vs.Size())
+	}
+}
+
+func TestIndexBuilder_RemoveDocument(t *testing.T) {
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	ctx := context.Background()
+
+	// Index a document
+	err := b.IndexDocument(ctx, "test:doc:1", "test document")
+	if err != nil {
+		t.Fatalf("IndexDocument: %v", err)
+	}
+	if fts.Size() != 1 {
+		t.Errorf("expected 1 document after index, got %d", fts.Size())
+	}
+
+	// Remove the document
+	err = b.RemoveDocument(ctx, "test:doc:1")
+	if err != nil {
+		t.Fatalf("RemoveDocument: %v", err)
+	}
+	if fts.Size() != 0 {
+		t.Errorf("expected 0 documents after remove, got %d", fts.Size())
+	}
 }

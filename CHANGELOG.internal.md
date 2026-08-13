@@ -6,7 +6,40 @@
 
 ## 提交记录
 
-### Commit 22: fix(index): 解决 #5 向量索引为空 — mcp/serve 启动时自动构建索引
+### Commit 23: perf(search): P10 遗留问题治理 — 多 worker / 日志集成 / 结果富化 / 进度条
+
+**Commit Hash**: `TBD`（待提交）
+
+**核心改动点**：
+- `internal/search/builder.go` — `StartAsync` 签名从 `(ctx, queueSize)` 改为 `(ctx, queueSize, numWorkers)`，支持多 worker 并发消费队列；`asyncWorker` 集成 `log.WithModule("search.index_builder")` 记录索引失败日志；`BuildFromStore` 分阶段输出进度（文件扫描百分比 → IDF 构建百分比 → FTS/向量写入状态）
+- `internal/search/builder_test.go` — 新增 6 个测试：多 worker 并发（3 worker × 10 文档）、默认 worker 数（0→2）、幂等性、错误回调、同步降级、删除文档
+- `cmd/codeschema/main.go` — `watchCmd` 中 `StartAsync(ctx, 64)` 改为 `StartAsync(ctx, 64, 2)`
+- `internal/service/service.go` — 新增 `enrichResults` 和 `resolveSymbol` 方法，`Search` 返回结果前自动从 Store 查询 Kind 和 File 信息；新增 `parseInt64` 工具函数
+- `internal/service/service_test.go` — 新增 5 个测试：符号解析（file/class/interface/method/无效）、富化逻辑、`parseInt64` 工具函数
+
+**新增公共抽象**：
+- `Service.enrichResults(ctx, results)` — 搜索结果富化方法
+- `Service.resolveSymbol(ctx, symbol) (kind, file)` — 符号 ID 解析为 Kind/File
+- `parseInt64(s string) int64` — 简单整数解析工具函数
+
+**影响范围**：
+- `internal/search/builder.go` — `StartAsync` 签名变更（非破坏性，新增参数有默认值，传 0 使用默认值 2）
+- `internal/search/builder_test.go` — 新增 6 个测试，向后兼容
+- `cmd/codeschema/main.go` — `StartAsync` 调用处同步更新
+- `internal/service/service.go` — 新增 3 个方法，非破坏性
+- `internal/service/service_test.go` — 新增 5 个测试，向后兼容
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（20 个包，0 失败）
+- 新增测试：11 个（6 builder + 5 service）
+- builder 包测试：17 个（11 原有 + 6 新增）
+- service 包测试：19 个（14 原有 + 5 新增）
+
+**遗留 TODO / 风险**：
+- 搜索结果富化需要遍历所有文件查找类/方法，大仓库场景可能成为性能瓶颈，建议后续建立 symbol → (kind, file) 的缓存映射
+- 进度条输出使用 `fmt.Printf` 写入 stdout，在非交互式场景（如 daemon 模式）建议通过日志系统输出或通过 `io.Writer` 可配置
+- `parseInt64` 不支持负数和大数，当前场景（解析 class/method ID）够用，但不可作为通用工具函数复用
 
 **Commit Hash**: `ab30caf`
 

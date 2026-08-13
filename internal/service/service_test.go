@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"codeschema/internal/parser"
 	"codeschema/internal/search"
 	"codeschema/internal/store"
 	"codeschema/internal/vector"
@@ -244,5 +245,209 @@ func TestGetAffected_EmptySymbol(t *testing.T) {
 	_, err := svc.GetAffected(context.Background(), "", false)
 	if err == nil {
 		t.Fatal("expected error for empty symbol")
+	}
+}
+
+func TestResolveSymbol_File(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	kind, file := svc.resolveSymbol(ctx, "file:/path/to/my/file.go")
+	if kind != "file" {
+		t.Errorf("expected kind 'file', got %q", kind)
+	}
+	if file != "/path/to/my/file.go" {
+		t.Errorf("expected file '/path/to/my/file.go', got %q", file)
+	}
+}
+
+func TestResolveSymbol_Class(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Insert test data
+	st := svc.store
+	fileID, err := st.UpsertFile(ctx, "pkg/search/builder.go", "hash123", 250, 12345)
+	if err != nil {
+		t.Fatalf("upsert file: %v", err)
+	}
+	classes := []parser.ClassIR{
+		{
+			Name: "IndexBuilder",
+			FullName: "codeschema/internal/search.IndexBuilder",
+			Type: "CLASS",
+		},
+	}
+	err = st.UpsertClasses(ctx, fileID, classes)
+	if err != nil {
+		t.Fatalf("upsert classes: %v", err)
+	}
+
+	// Resolve the class (IDs: file=1, class=2)
+	kind, file := svc.resolveSymbol(ctx, "class:2")
+	if kind != "class" {
+		t.Errorf("expected kind 'class', got %q", kind)
+	}
+	if file != "pkg/search/builder.go" {
+		t.Errorf("expected file 'pkg/search/builder.go', got %q", file)
+	}
+}
+
+func TestResolveSymbol_ClassWithInterfaceType(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	st := svc.store
+	fileID, _ := st.UpsertFile(ctx, "pkg/search/fts.go", "hashabc", 180, 8000)
+	classes := []parser.ClassIR{
+		{
+			Name: "FTSEngine",
+			FullName: "codeschema/internal/search.FTSEngine",
+			Type: "INTERFACE",
+		},
+	}
+	st.UpsertClasses(ctx, fileID, classes)
+
+	// IDs: file=1, class=2
+	kind, _ := svc.resolveSymbol(ctx, "class:2")
+	if kind != "interface" {
+		t.Errorf("expected kind 'interface', got %q (should lower-case type)", kind)
+	}
+}
+
+func TestResolveSymbol_Method(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	st := svc.store
+	fileID, err := st.UpsertFile(ctx, "pkg/search/builder.go", "hash123", 250, 12345)
+	if err != nil {
+		t.Fatalf("upsert file: %v", err)
+	}
+	classes := []parser.ClassIR{
+		{
+			Name: "IndexBuilder",
+			FullName: "codeschema/internal/search.IndexBuilder",
+			Type: "CLASS",
+		},
+	}
+	err = st.UpsertClasses(ctx, fileID, classes)
+	if err != nil {
+		t.Fatalf("upsert classes: %v", err)
+	}
+	methods := []parser.MethodIR{
+		{
+			Name: "BuildFromStore",
+			Signature: "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
+		},
+	}
+	err = st.UpsertMethods(ctx, 2, methods)
+	if err != nil {
+		t.Fatalf("upsert methods: %v", err)
+	}
+
+	// IDs: file=1, class=2, method=3
+	kind, file := svc.resolveSymbol(ctx, "method:3")
+	if kind != "method" {
+		t.Errorf("expected kind 'method', got %q", kind)
+	}
+	if file != "pkg/search/builder.go" {
+		t.Errorf("expected file 'pkg/search/builder.go', got %q", file)
+	}
+}
+
+func TestResolveSymbol_Invalid(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// No prefix
+	kind, file := svc.resolveSymbol(ctx, "invalid-id")
+	if kind != "" || file != "" {
+		t.Errorf("expected empty for invalid id, got (%q, %q)", kind, file)
+	}
+
+	// Invalid number
+	kind, file = svc.resolveSymbol(ctx, "class:abc")
+	if kind != "" || file != "" {
+		t.Errorf("expected empty for invalid number, got (%q, %q)", kind, file)
+	}
+
+	// Not found
+	kind, file = svc.resolveSymbol(ctx, "class:999")
+	if kind != "" || file != "" {
+		t.Errorf("expected empty for not found, got (%q, %q)", kind, file)
+	}
+}
+
+func TestParseInt64(t *testing.T) {
+	tests := []struct {
+		s    string
+		want int64
+	}{
+		{"", 0},
+		{"0", 0},
+		{"1", 1},
+		{"123", 123},
+		{"123456", 123456},
+		{"12a3", 0},
+		{"abc", 0},
+	}
+	for _, tt := range tests {
+		got := parseInt64(tt.s)
+		if got != tt.want {
+			t.Errorf("parseInt64(%q) = %d, want %d", tt.s, got, tt.want)
+		}
+	}
+}
+
+func TestEnrichResults_FillsKindAndFile(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	st := svc.store
+	fileID, _ := st.UpsertFile(ctx, "pkg/search/builder.go", "hash123", 250, 12345)
+	classes := []parser.ClassIR{
+		{
+			Name: "IndexBuilder",
+			Type: "CLASS",
+		},
+	}
+	st.UpsertClasses(ctx, fileID, classes)
+
+	// Prepare search results with empty Kind/File
+	results := []search.SearchResult{
+		{Symbol: "class:2", Score: 0.8},
+		{Symbol: "file:pkg/search/builder.go", Score: 0.5},
+	}
+
+	svc.enrichResults(ctx, results)
+
+	if results[0].Kind != "class" {
+		t.Errorf("expected kind 'class', got %q", results[0].Kind)
+	}
+	if results[0].File != "pkg/search/builder.go" {
+		t.Errorf("expected file 'pkg/search/builder.go', got %q", results[0].File)
+	}
+	if results[1].Kind != "file" {
+		t.Errorf("expected kind 'file', got %q", results[1].Kind)
+	}
+	if results[1].File != "pkg/search/builder.go" {
+		t.Errorf("expected file 'pkg/search/builder.go', got %q", results[1].File)
+	}
+}
+
+func TestEnrichResults_AlreadyFilled(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// Already filled, should not change (no extra lookup)
+	results := []search.SearchResult{
+		{Symbol: "symbol", Kind: "method", File: "test.go", Score: 0.9},
+	}
+
+	svc.enrichResults(ctx, results)
+
+	if results[0].Kind != "method" || results[0].File != "test.go" {
+		t.Errorf("should keep existing values, got kind=%q file=%q", results[0].Kind, results[0].File)
 	}
 }

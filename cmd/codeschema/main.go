@@ -235,8 +235,8 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 
-	// 启动异步索引队列
-	builder.StartAsync(ctx, 64)
+	// 启动异步索引队列（2 个 worker，64 缓冲区）
+	builder.StartAsync(ctx, 64, 2)
 	defer builder.StopAsync()
 
 	// 启动时全量构建索引（如果持久化索引存在则跳过）
