@@ -6,6 +6,64 @@
 
 ## 提交记录
 
+### Commit 13: feat(config): P7 配置系统 — YAML 解析 + CLI 集成 + MCP 认证增强
+
+**Commit Hash**: `TBD`
+
+**核心改动点**：
+- `internal/config/config.go` — 新增配置模块，定义 Config 及 7 个子结构体（Project/Storage/Parser/AI/Server/Watcher/Scanner），含 DefaultConfig 默认值、Load 加载函数（支持 .yaml/.yml/.json）、Validate 校验函数
+- `internal/config/parse.go` — 最小 YAML 子集解析器（零外部依赖），支持嵌套映射、行内列表、注释、布尔/数字/字符串类型；JSON 解析通过 encoding/json
+- `internal/config/config_test.go` — 25 个测试覆盖默认值、YAML/JSON 加载、Partial 合并、验证、YAML 解析子功能、值解析边界
+- `cmd/codeschema/main.go` — 全局 `--config` 参数，所有命令从 Config 读取默认值（workers/store/dsn/addr/auth-token/debounce/ignore_dirs），命令签名改为 `func(ctx, cfg, args)`
+- `internal/server/mcp.go` — 新增 `SetAuthToken` 方法、`authMiddleware`（Bearer token 认证）、`corsMiddleware`（CORS 支持）
+- 文档同步：DEV_PROGRESS.md 更新 P7 为 100%
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（15 个包，0 失败）
+- config 包 25 个测试全部通过
+- server 包测试全部通过（含 MCP 新增中间件）
+- 新增测试覆盖：默认值完整性、YAML 全量/Partial/JSON 加载、文件不存在/空路径/不支持格式、验证（空 root/空 DSN/workers 0/无地址）、YAML 行内列表/嵌套映射/注释/布尔/数字/空文件/纯注释、值解析（行内列表/空列表/引号字符串/数字/布尔/null）
+
+**遗留 TODO / 风险**：
+- 当前 YAML 解析器为最小子集实现，不支持多行字符串、锚点/别名、复杂流式语法，后续可切换为 gopkg.in/yaml.v3
+- MCP 认证中间件当前为 Bearer token 静态配置，后续可支持 OAuth2/JWT 动态验证
+- 配置热重载尚未实现，修改配置需重启进程
+
+### Commit 12: feat(observability): P6 可观测性增强 — 结构化日志/基础指标/链路追踪/健康检查/安全中间件
+
+**Commit Hash**: `4f9a64f`
+
+**核心改动点**：
+- `internal/log/logger.go` — 新增结构化日志模块，基于 Go 标准库 `log/slog`，支持 JSON/文本格式输出、日志级别控制、模块化 Logger（WithModule）、自动 caller 信息
+- `internal/log/logger_test.go` — 13 个测试覆盖日志初始化、级别过滤、JSON 格式、模块化 Logger、Info/Debug/Warn/Error 方法
+- `internal/metrics/metrics.go` — 新增基础指标模块，纯 Go 实现 Prometheus 文本格式，支持 Counter/Gauge 类型、标签维度、线程安全（sync.RWMutex）
+- `internal/metrics/metrics_test.go` — 13 个测试覆盖指标注册、增量/减量、渲染、标签、并发安全、重置
+- `internal/trace/trace.go` — 新增链路追踪模块，简单 span 模型，支持嵌套 span、耗时记录、标签附加、通过日志输出追踪信息
+- `internal/trace/trace_test.go` — 17 个测试覆盖 span 创建/结束、嵌套、标签、重复结束、空标签、事件记录
+- `internal/server/http.go` — 增强健康检查端点（新增 `/health/db`/`/health/kv`/`/health/vector`）、新增 `/metrics` 端点暴露 Prometheus 指标、新增安全中间件（authMiddleware Bearer token 认证 + pathTraversalMiddleware 路径遍历防护 + corsMiddleware + errorRecoveryMiddleware）、新增 requestMetricsMiddleware 自动记录请求指标和追踪 span
+- `internal/server/http_test.go` — 22 个测试覆盖健康检查、指标端点、认证中间件（有效/无效/缺失 token）、路径遍历防护、CORS、panic recovery
+- `internal/analyzer/analyzer.go` — 集成日志/指标/追踪：init 注册 4 个指标，BuildAll/BuildCallGraph/BuildClassHierarchy/BuildFileGraph/BuildReverseIndex/FindImpactNodes/ShortestPath/Analyze/TagAll 添加 trace span、指标打点、日志记录
+- `internal/scanner/scanner.go` — 集成日志/指标/追踪：init 注册 4 个指标，ProcessFile/ScanAll 添加 trace span、指标打点（processed_total/files_total/errors_total/active_workers）、日志记录
+- `internal/ai/tagger.go` — 添加模块化 Logger，DeriveAllTags 前后记录关键指标（classes_tagged/methods_tagged）
+- `internal/service/service.go` — 新增 StoreHealthCheck 方法支持健康检查
+- 文档同步：docs/dev/10-可观测性与安全设计.md（更新 P6 实现细节）、DEV_PROGRESS.md（更新 P6 状态为 100%）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（14 个包，0 失败）
+- log 包 13 个测试全部通过
+- metrics 包 13 个测试全部通过
+- trace 包 17 个测试全部通过
+- server 包 22 个测试全部通过（原有 11 个 + 新增 11 个）
+- 新增测试覆盖：日志初始化/级别过滤/JSON 格式/模块化 Logger、Counter/Gauge 指标注册/更新/渲染/标签/并发安全、span 创建/嵌套/结束/事件记录、健康检查端点（整体/DB/KV/Vector）、metrics 端点、Bearer token 认证（有效/无效/缺失/空）、路径遍历防护、Analyzer 8 个方法的 trace/指标/日志集成、Scanner 2 个方法的 trace/指标/日志集成、Tagger 模块化 Logger
+
+**遗留 TODO / 风险**：
+- 指标端点当前为纯内存实现，重启后指标清零，P1 可考虑持久化
+- 链路追踪当前为简单实现（日志输出），P1 可对接 OpenTelemetry 标准导出
+- 健康检查的 DB/KV/Vector 端点当前为占位实现（返回 mock 数据），接入真实存储后需更新
+- 安全中间件当前仅支持 Bearer token 静态配置，P1 可支持 OAuth2/JWT 动态验证
+
 ### Commit 11: feat(ai, server, service): P5 标签分类体系（Tag）与测试关联
 
 **Commit Hash**: `d76e050`

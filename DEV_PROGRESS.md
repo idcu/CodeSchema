@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 21:50
-> 当前阶段：P6 已完成 — 可观测性增强（日志/指标/链路追踪）
-> 下一个阶段：P7 — 配置系统（YAML 解析）
+> 更新时间：2026-08-13 22:30
+> 当前阶段：P7 已完成 — 配置系统（YAML 解析）
+> 下一个阶段：P8 — 语义检索 / 全文搜索（需网络下载 chromem-go）
 
 ---
 
@@ -17,6 +17,7 @@ P3       [████████████████████] 100%
 P4       [████████████████████] 100%
 P5       [████████████████████] 100%
 P6       [████████████████████] 100%
+P7       [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -118,23 +119,26 @@ P6       [████████████████████] 100%
 - [x] **Tagger 集成**：添加模块化 Logger，DeriveAllTags 前后记录关键指标（classes_tagged/methods_tagged）
 - [x] 测试覆盖：log 13 个 + metrics 13 个 + trace 17 个 + server 22 个（共 65 个新测试，14 个包全部通过）
 
+### P7 — 配置系统（YAML 解析）
+- [x] **`internal/config` 包**：配置结构体（Config/ProjectConfig/StorageConfig/ParserConfig/AIConfig/ServerConfig/WatcherConfig/ScannerConfig），支持 JSON 标签
+- [x] **最小 YAML 子集解析器**：`parse.go` 实现 parseYAML 函数，支持嵌套映射、行内列表 `[a,b]`、注释、布尔/数字/字符串类型（零外部依赖）
+- [x] **JSON 配置支持**：`parseJSON` 函数，通过 `encoding/json` 解析 `.json` 配置文件
+- [x] **默认值系统**：`DefaultConfig()` 返回完整默认配置，Partial YAML/JSON 合并时保留未覆盖字段的默认值
+- [x] **配置验证**：`Validate()` 函数检查必填字段（project.root/storage.dsn/server 地址 > 0/scanner.workers > 0 等）
+- [x] **CLI 集成**：`cmd/codeschema/main.go` — 全局 `--config` 参数，所有命令从 Config 读取默认值（workers/store/dsn/addr/auth-token/debounce/ignore_dirs）
+- [x] **MCP Server 增强**：添加 `SetAuthToken` 方法 + `authMiddleware` + `corsMiddleware`，支持 Bearer token 认证
+- [x] 测试覆盖：25 个测试（默认值 1 + 加载 6 + 验证 4 + YAML 解析 7 + 值解析 7），15 个包全部通过
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-### P7 — 配置系统（YAML 解析）
-
-| 优先级 | 任务 | 模块 | 依赖 | 估计工时 |
-|--------|------|------|------|---------|
-| P7 | 配置系统（YAML 解析） | `internal/config` | 无 | 2h |
-
 ### 后续规划
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P7 | 配置系统（YAML 解析） | `docs/dev/11-配置部署与路线图.md` | 无外部依赖 |
 | P8 | 语义检索 / 全文搜索 | `docs/dev/09-语义检索与全文搜索.md` | 需网络下载 chromem-go |
 
 ## 已知问题
@@ -149,7 +153,7 @@ P6       [████████████████████] 100%
 1. 阅读 `docs/dev/00-项目概述与架构概览.md` 了解整体架构
 2. 按 `docs/dev/` 编号顺序阅读对应开发文档
 3. 当前所有模块可编译运行：`go build ./cmd/codeschema`
-4. 运行测试：`go test ./...`（12 个包，全部通过）
-5. 启动 HTTP API：`codeschema serve --http :8081`
-6. 启动 MCP Server：`codeschema mcp --addr :8080`
-7. 最新提交：`d76e050`（P5 标签分类体系 + 测试关联）
+4. 运行测试：`go test ./...`（15 个包，全部通过）
+5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
+6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
+7. 最新提交：`4f9a64f`（P6 可观测性增强）

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"codeschema/internal/config"
 	"codeschema/internal/parser"
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
@@ -35,11 +36,13 @@ func main() {
 }
 
 func run() error {
+	// 全局配置标志
+	configPath := flag.String("config", "", "配置文件路径（.yaml/.yml/.json）")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `CodeSchema v%s — 代码元数据 KV/DB 系统
 
 Usage:
-  codeschema <command> [options]
+  codeschema [--config=<path>] <command> [options]
 
 Commands:
   scan <path>       扫描仓库并入库
@@ -48,6 +51,9 @@ Commands:
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
   version           显示版本信息
+
+Global Options:
+  --config <path>   配置文件路径（支持 .yaml/.yml/.json）
 
 Use "codeschema <command> -h" for more information about a command.
 `, version)
@@ -58,6 +64,12 @@ Use "codeschema <command> -h" for more information about a command.
 	if len(args) == 0 {
 		flag.Usage()
 		return nil
+	}
+
+	// 加载配置
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,37 +89,37 @@ Use "codeschema <command> -h" for more information about a command.
 		return nil
 
 	case "scan":
-		return scanCmd(ctx, args[1:])
+		return scanCmd(ctx, cfg, args[1:])
 
 	case "watch":
-		return watchCmd(ctx, args[1:])
+		return watchCmd(ctx, cfg, args[1:])
 
 	case "mcp":
-		return mcpCmd(ctx, args[1:])
+		return mcpCmd(ctx, cfg, args[1:])
 
 	case "serve":
-		return serveCmd(ctx, args[1:])
+		return serveCmd(ctx, cfg, args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
 }
 
-func scanCmd(ctx context.Context, args []string) error {
+func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
-	workers := fs.Int("workers", 4, "并发解析 worker 数")
-	storeDir := fs.String("store", "./data", "存储目录")
+	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
+	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
 	fs.Parse(args)
 
 	repoPath := fs.Arg(0)
 	if repoPath == "" {
-		return fmt.Errorf("usage: codeschema scan [--workers=4] [--store=./data] <path>")
+		return fmt.Errorf("usage: codeschema scan [--workers=%d] [--store=%s] <path>", cfg.Scanner.Workers, cfg.Storage.DSN)
 	}
 
 	fmt.Printf("scanning repository: %s (workers=%d)\n", repoPath, *workers)
 
 	// 初始化存储
-	st := store.NewStore("file")
+	st := store.NewStore(cfg.Storage.Driver)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -118,7 +130,7 @@ func scanCmd(ctx context.Context, args []string) error {
 		return fmt.Errorf("health check: %w", err)
 	}
 
-	// 初始化注册中心（P0 暂无实际适配器，仅扫描能识别语言的文件）
+	// 初始化注册中心
 	reg := parser.NewRegistry()
 
 	// 创建 Scanner
@@ -137,22 +149,22 @@ func scanCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-func watchCmd(ctx context.Context, args []string) error {
+func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	workers := fs.Int("workers", 4, "并发解析 worker 数")
-	storeDir := fs.String("store", "./data", "存储目录")
-	debounceMs := fs.Int("debounce", 300, "防抖窗口（毫秒）")
+	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
+	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
+	debounceMs := fs.Int("debounce", cfg.Watcher.DebounceMs, "防抖窗口（毫秒）")
 	fs.Parse(args)
 
 	repoPath := fs.Arg(0)
 	if repoPath == "" {
-		return fmt.Errorf("usage: codeschema watch [--workers=4] [--store=./data] [--debounce=300] <path>")
+		return fmt.Errorf("usage: codeschema watch [--workers=%d] [--store=%s] [--debounce=%d] <path>", cfg.Scanner.Workers, cfg.Storage.DSN, cfg.Watcher.DebounceMs)
 	}
 
 	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms)\n", repoPath, *workers, *debounceMs)
 
 	// 初始化存储
-	st := store.NewStore("file")
+	st := store.NewStore(cfg.Storage.Driver)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -168,7 +180,7 @@ func watchCmd(ctx context.Context, args []string) error {
 	sched := scheduler.NewScheduler(*debounceMs, 1000)
 
 	// 创建监听器
-	pw := watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, nil)
+	pw := watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, cfg.Watcher.IgnoreDirs)
 
 	// 启动调度器
 	go sched.Start(ctx, func(ctx context.Context, path string) error {
@@ -180,13 +192,14 @@ func watchCmd(ctx context.Context, args []string) error {
 	return pw.Start(ctx)
 }
 
-func mcpCmd(ctx context.Context, args []string) error {
+func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "监听地址")
-	storeDir := fs.String("store", "./data", "存储目录")
+	addr := fs.String("addr", cfg.Server.MCPAddr, "监听地址")
+	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
+	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := store.NewStore("file")
+	st := store.NewStore(cfg.Storage.Driver)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -194,18 +207,22 @@ func mcpCmd(ctx context.Context, args []string) error {
 
 	svc := service.NewService(st)
 	mcpSrv := server.NewMCPServer(svc, *addr)
+	if *authToken != "" {
+		mcpSrv.SetAuthToken(*authToken)
+	}
 
 	fmt.Printf("MCP Server listening on %s\n", *addr)
 	return mcpSrv.Start(ctx)
 }
 
-func serveCmd(ctx context.Context, args []string) error {
+func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("http", ":8081", "监听地址")
-	storeDir := fs.String("store", "./data", "存储目录")
+	addr := fs.String("http", cfg.Server.HTTPAddr, "监听地址")
+	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
+	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := store.NewStore("file")
+	st := store.NewStore(cfg.Storage.Driver)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -213,6 +230,9 @@ func serveCmd(ctx context.Context, args []string) error {
 
 	svc := service.NewService(st)
 	httpSrv := server.NewHTTPServer(svc, *addr)
+	if *authToken != "" {
+		httpSrv.SetAuthToken(*authToken)
+	}
 
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
 	return httpSrv.Start(ctx)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"codeschema/internal/service"
@@ -53,10 +54,11 @@ type rpcError struct {
 
 // MCPServer MCP 协议服务器，使用 SSE（Server-Sent Events）传输。
 type MCPServer struct {
-	service *service.Service
-	addr    string
-	server  *http.Server
-	tools   []mcpTool
+	service   *service.Service
+	addr      string
+	server    *http.Server
+	tools     []mcpTool
+	authToken string
 }
 
 // NewMCPServer 创建 MCP Server 实例。
@@ -66,6 +68,11 @@ func NewMCPServer(svc *service.Service, addr string) *MCPServer {
 		addr:    addr,
 		tools:   defineTools(),
 	}
+}
+
+// SetAuthToken 设置 Bearer token 认证。
+func (m *MCPServer) SetAuthToken(token string) {
+	m.authToken = token
 }
 
 // defineTools 定义 MCP 工具列表。
@@ -205,9 +212,14 @@ func (m *MCPServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/sse", m.handleSSE)
 	mux.HandleFunc("/message", m.handleMessage)
 
+	// 中间件链：认证 → CORS
+	handler := m.authMiddleware(
+		corsMiddleware(mux),
+	)
+
 	m.server = &http.Server{
 		Addr:         m.addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0, // SSE 需要长连接
 		IdleTimeout:  30 * time.Second,
@@ -486,5 +498,35 @@ func toInt(v any) (int, bool) {
 		_, err := fmt.Sscanf(s, "%d", &n)
 		return n, err == nil
 	}
+}
+
+// ---- MCP 中间件 ----
+
+// authMiddleware Bearer token 认证中间件。
+func (m *MCPServer) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.authToken != "" {
+			token := r.Header.Get("Authorization")
+			if !strings.HasPrefix(token, "Bearer ") || strings.TrimPrefix(token, "Bearer ") != m.authToken {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// corsMiddleware 添加 CORS 头，用于 MCP SSE 连接。
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
