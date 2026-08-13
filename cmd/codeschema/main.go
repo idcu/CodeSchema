@@ -49,7 +49,7 @@ Usage:
 
 Commands:
   scan <path>       扫描仓库并入库
-  watch <path>      文件监听增量（P0，轮询模式）
+  watch <path>      文件监听增量（P0，轮询模式；--fsnotify 切换为原生监听）
   rebuild-kv        重建 KV 缓存（P2）
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
@@ -200,14 +200,19 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
 	debounceMs := fs.Int("debounce", cfg.Watcher.DebounceMs, "防抖窗口（毫秒）")
+	useFsnotify := fs.Bool("fsnotify", cfg.Watcher.UseFsnotify, "使用 fsnotify 原生监听（替代轮询）")
 	fs.Parse(args)
 
 	repoPath := fs.Arg(0)
 	if repoPath == "" {
-		return fmt.Errorf("usage: codeschema watch [--workers=%d] [--store=%s] [--debounce=%d] <path>", cfg.Scanner.Workers, cfg.Storage.DSN, cfg.Watcher.DebounceMs)
+		return fmt.Errorf("usage: codeschema watch [--workers=%d] [--store=%s] [--debounce=%d] [--fsnotify] <path>", cfg.Scanner.Workers, cfg.Storage.DSN, cfg.Watcher.DebounceMs)
 	}
 
-	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms)\n", repoPath, *workers, *debounceMs)
+	mode := "polling"
+	if *useFsnotify {
+		mode = "fsnotify"
+	}
+	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms, mode=%s)\n", repoPath, *workers, *debounceMs, mode)
 
 	// 初始化存储
 	st := store.NewStore(cfg.Storage.Driver)
@@ -259,7 +264,16 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	})
 
 	// 创建监听器
-	pw := watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, cfg.Watcher.IgnoreDirs)
+	var w watcher.Watcher
+	if *useFsnotify {
+		fw, err := watcher.NewFsWatcher(repoPath, s, sched, cfg.Watcher.IgnoreDirs)
+		if err != nil {
+			return fmt.Errorf("new fsnotify watcher: %w", err)
+		}
+		w = fw
+	} else {
+		w = watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, cfg.Watcher.IgnoreDirs)
+	}
 
 	// 启动调度器
 	go sched.Start(ctx, func(ctx context.Context, path string) error {
@@ -268,7 +282,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	// 启动监听器（阻塞）
 	fmt.Println("watcher started, press Ctrl+C to stop")
-	return pw.Start(ctx)
+	return w.Start(ctx)
 }
 
 func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {

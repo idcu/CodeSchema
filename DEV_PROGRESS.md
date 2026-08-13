@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 23:58
-> 当前阶段：P9 已完成 — 配置热重载 / 多配置源
-> 下一个阶段：P8.3 遗留 TODO 优化（异步索引多 worker、日志集成）
+> 更新时间：2026-08-14 00:15
+> 当前阶段：FsWatcher 已完成 — 基于 fsnotify 的原生文件系统监听（已知问题 #2 已解决）
+> 下一个阶段：P10 — 异步索引多 worker 扩展 + 日志集成
 
 ---
 
@@ -173,6 +173,14 @@ P9       [████████████████████] 100%
 - [x] 验证数据：go build + go test 20 个包全部通过，0 失败；config 包 33 个测试（25 原有 + 8 新增）
 - [x] 新增公共抽象：`LoadFromEnv`、`Merge`、`ConfigWatcher`、`OnReload`、`cloneConfig`（深拷贝工具）
 
+### FsWatcher — 基于 fsnotify 的原生文件系统监听（已知问题 #2 解决）
+- [x] **`internal/watcher/watcher.go`** — 新增 `FsWatcher` 结构体，基于 fsnotify 原生文件系统事件监听；递归监听所有子目录（`addRecursive`），自动跳过忽略目录；新目录创建时自动加入递归监听；`Stop()` 并发安全关闭
+- [x] **`internal/watcher/watcher_test.go`** — 新增 6 个 FsWatcher 测试（新文件创建/忽略目录/嵌套忽略路径/Stop 安全/文件修改/子目录递归）
+- [x] **`internal/config/config.go`** — WatcherConfig 新增 `UseFsnotify bool` 字段（默认 false），DefaultConfig/cloneConfig/Merge/LoadFromEnv 全部同步更新
+- [x] **`cmd/codeschema/main.go`** — watch 命令新增 `--fsnotify` 标志，根据配置选择 FsWatcher 或 PollWatcher
+- [x] **`.gitignore`** — 新增 `down/` 条目
+- [x] 验证数据：go build + go test 18 个包全部通过，0 失败；watcher 包 8 个测试全部通过
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -190,7 +198,7 @@ P9       [████████████████████] 100%
 ## 已知问题
 
 1. **网络不可用**：无法下载 `mattn/go-sqlite3`、`chromem-go` 等外部包。P8.2 使用纯 Go 持久化替代（PersistentStore + LocalEmbedder + PersistentFTS），待网络恢复后可切换为 chromem-go + SQLite FTS5。
-2. **轮询监听性能**：当前 PollWatcher 基于轮询（1s 间隔），适合开发/小仓库场景。生产环境建议切换为 fsnotify 原生监听（需安装外部包）。
+2. ~~**轮询监听性能**：当前 PollWatcher 基于轮询（1s 间隔），适合开发/小仓库场景。生产环境建议切换为 fsnotify 原生监听。~~ **已解决**：`FsWatcher` 已实现，使用 `codeschema watch --fsnotify <path>` 或配置文件 `watcher.use_fsnotify: true` 启用。
 3. **tree-sitter C 绑定**：tree-sitter 适配器需要 CGO 和 tree-sitter C 运行时，需单独安装。
 4. **语义检索精度**：LocalEmbedder 基于 TF-IDF 哈希，精度低于真实语义模型（bge-small-zh）。P8.3 当网络恢复后可切换。
 
@@ -202,4 +210,5 @@ P9       [████████████████████] 100%
 4. 运行测试：`go test ./...`（15 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：P8.3 自动索引构建与增量同步（参见 CHANGELOG.internal.md Commit 16）
+7. 最新提交：FsWatcher 原生文件监听（参见 CHANGELOG.internal.md Commit 19）
+8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
+
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
 )
@@ -145,4 +147,148 @@ func (pw *PollWatcher) poll(ctx context.Context) {
 	}
 
 	pw.fileStates = current
+}
+
+// ---------------------------------------------------------------------------
+// FsWatcher — 基于 fsnotify 的原生文件系统监听器
+// ---------------------------------------------------------------------------
+
+// FsWatcher 使用 fsnotify 实现原生文件系统事件监听。
+// 自动递归监听所有子目录，当新目录创建时自动加入监听。
+// 适合生产环境，比 PollWatcher 有更低的延迟和 CPU 开销。
+type FsWatcher struct {
+	root       string
+	scanner    *scanner.Scanner
+	scheduler  *scheduler.Scheduler
+	ignoreDirs map[string]bool
+	watcher    *fsnotify.Watcher
+	done       chan struct{}
+}
+
+// NewFsWatcher 创建 fsnotify 原生监听器。
+// root: 监听根目录。
+// scan: Scanner 实例，用于处理变更文件。
+// sched: Scheduler 实例，用于防抖排队。
+// ignoreDirs: 忽略的目录名列表。
+func NewFsWatcher(root string, scan *scanner.Scanner, sched *scheduler.Scheduler, ignoreDirs []string) (*FsWatcher, error) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+
+	ign := make(map[string]bool)
+	for _, d := range ignoreDirs {
+		ign[d] = true
+	}
+	// 默认忽略目录
+	defaultIgnores := []string{".git", "node_modules", "target", "build", "vendor", ".idea", ".vscode", "__pycache__"}
+	for _, d := range defaultIgnores {
+		ign[d] = true
+	}
+
+	return &FsWatcher{
+		root:       root,
+		scanner:    scan,
+		scheduler:  sched,
+		ignoreDirs: ign,
+		watcher:    w,
+		done:       make(chan struct{}),
+	}, nil
+}
+
+// Start 启动 fsnotify 原生监听，阻塞直到 context 取消。
+func (fw *FsWatcher) Start(ctx context.Context) error {
+	// 递归添加所有子目录到监听列表
+	if err := fw.addRecursive(fw.root); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-fw.done:
+			return nil
+		case event, ok := <-fw.watcher.Events:
+			if !ok {
+				return nil
+			}
+			fw.handleEvent(ctx, event)
+		case err, ok := <-fw.watcher.Errors:
+			if !ok {
+				return nil
+			}
+			// 非致命错误，继续监听
+			_ = err
+		}
+	}
+}
+
+// Stop 停止 fsnotify 监听。
+func (fw *FsWatcher) Stop() error {
+	select {
+	case <-fw.done:
+		// 已经关闭
+	default:
+		close(fw.done)
+	}
+	return fw.watcher.Close()
+}
+
+// addRecursive 递归添加目录及其子目录到 fsnotify 监听。
+func (fw *FsWatcher) addRecursive(root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 跳过无法访问的路径
+		}
+		if info.IsDir() {
+			// 检查是否应该忽略此目录
+			if fw.ignoreDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			// 添加目录到 fsnotify 监听
+			if err := fw.watcher.Add(path); err != nil {
+				// 非致命错误，跳过此目录
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// handleEvent 处理 fsnotify 事件。
+func (fw *FsWatcher) handleEvent(ctx context.Context, event fsnotify.Event) {
+	// 检查文件是否在忽略目录下
+	if fw.isIgnored(event.Name) {
+		return
+	}
+
+	// 如果是新创建的目录，递归添加到监听
+	if event.Has(fsnotify.Create) {
+		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+			if !fw.ignoreDirs[info.Name()] {
+				// 非阻塞添加子目录监听
+				fw.addRecursive(event.Name)
+			}
+		}
+	}
+
+	// 将所有变更事件推入调度器
+	fw.scheduler.Enqueue(event.Name)
+}
+
+// isIgnored 检查路径是否在忽略目录下。
+func (fw *FsWatcher) isIgnored(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if fw.ignoreDirs[filepath.Base(dir)] {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "." || parent == string(filepath.Separator) {
+			break
+		}
+		dir = parent
+	}
+	return false
 }

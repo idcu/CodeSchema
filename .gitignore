@@ -39,3 +39,4 @@ config.local.yaml
 # Dependencies
 node_modules/
 vendor/
+down/

@@ -112,6 +112,7 @@ type WatcherConfig struct {
 	DebounceMs int      `yaml:"debounce_ms" json:"debounce_ms"`
 	IgnoreDirs []string `yaml:"ignore_dirs" json:"ignore_dirs"`
 	BatchSize  int      `yaml:"batch_size" json:"batch_size"`
+	UseFsnotify bool   `yaml:"use_fsnotify" json:"use_fsnotify"` // 是否使用 fsnotify 原生监听（默认 false，使用 PollWatcher）
 }
 
 // ScannerConfig 扫描器配置。
@@ -173,10 +174,11 @@ func DefaultConfig() *Config {
 			AuthToken: "",
 		},
 		Watcher: WatcherConfig{
-			Enabled:    true,
-			DebounceMs: 300,
-			IgnoreDirs: []string{".git", "node_modules", "target", "build"},
-			BatchSize:  50,
+			Enabled:     true,
+			DebounceMs:  300,
+			IgnoreDirs:  []string{".git", "node_modules", "target", "build"},
+			BatchSize:   50,
+			UseFsnotify: false, // 默认使用 PollWatcher（零外部依赖）
 		},
 		Scanner: ScannerConfig{
 			Workers:          4,
@@ -355,6 +357,9 @@ func LoadFromEnv(cfg *Config) {
 			cfg.Watcher.BatchSize = n
 		}
 	}
+	if v := os.Getenv("CODESCHEMA_WATCHER_USE_FSNOTIFY"); v != "" {
+		cfg.Watcher.UseFsnotify = v == "true" || v == "1" || v == "yes"
+	}
 
 	// ai
 	if v := os.Getenv("CODESCHEMA_AI_PROVIDER"); v != "" {
@@ -494,6 +499,9 @@ func Merge(base, overlay *Config) *Config {
 	if overlay.Watcher.BatchSize > 0 {
 		merged.Watcher.BatchSize = overlay.Watcher.BatchSize
 	}
+	if overlay.Watcher.UseFsnotify {
+		merged.Watcher.UseFsnotify = true
+	}
 
 	// Scanner
 	if overlay.Scanner.Workers > 0 {
@@ -585,10 +593,11 @@ func cloneConfig(cfg *Config) *Config {
 			AuthToken: cfg.Server.AuthToken,
 		},
 		Watcher: WatcherConfig{
-			Enabled:    cfg.Watcher.Enabled,
-			DebounceMs: cfg.Watcher.DebounceMs,
-			IgnoreDirs: cloneStringSlice(cfg.Watcher.IgnoreDirs),
-			BatchSize:  cfg.Watcher.BatchSize,
+			Enabled:     cfg.Watcher.Enabled,
+			DebounceMs:  cfg.Watcher.DebounceMs,
+			IgnoreDirs:  cloneStringSlice(cfg.Watcher.IgnoreDirs),
+			BatchSize:   cfg.Watcher.BatchSize,
+			UseFsnotify: cfg.Watcher.UseFsnotify,
 		},
 		Scanner: ScannerConfig{
 			Workers:         cfg.Scanner.Workers,

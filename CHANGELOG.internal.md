@@ -6,7 +6,37 @@
 
 ## 提交记录
 
-### Commit 18: feat(config): P9 配置热重载 / 多配置源支持
+### Commit 19: feat(watcher): FsWatcher — 基于 fsnotify 的原生文件系统监听
+
+**Commit Hash**: `待生成`
+
+**核心改动点**：
+- `internal/watcher/watcher.go` — 新增 `FsWatcher` 结构体，实现 `Watcher` 接口，基于 fsnotify 原生文件系统事件监听；`addRecursive` 递归添加所有子目录（自动跳过 ignoreDirs 目录）；`handleEvent` 处理 Create/Write/Remove/Rename 事件，新目录创建时自动加入递归监听；`isIgnored` 检查路径是否在忽略目录下；`Stop()` 并发安全关闭
+- `internal/config/config.go` — WatcherConfig 新增 `UseFsnotify bool` 字段（默认 false）；DefaultConfig 默认值、cloneConfig 深拷贝、Merge 合并策略、LoadFromEnv 环境变量覆盖全部同步更新
+- `cmd/codeschema/main.go` — watch 命令新增 `--fsnotify` 标志；`watchCmd` 根据 `UseFsnotify` 配置或 `--fsnotify` 标志选择 FsWatcher 或 PollWatcher；帮助文本更新
+- `.gitignore` — 新增 `down/` 条目
+- 测试文件：watcher_test.go 新增 6 个 FsWatcher 测试（DetectsNewFile/IgnoresGitDir/IgnoresNestedIgnoredDir/StopWithoutStart/DetectsFileModification/RecursiveDirectoryWatch）
+
+**新增公共抽象**：
+- `watcher.FsWatcher` — 实现 Watcher 接口，基于 fsnotify 的原生文件系统监听器
+- `watcher.NewFsWatcher(root, scan, sched, ignoreDirs) (*FsWatcher, error)` — 构造函数
+- `config.WatcherConfig.UseFsnotify` — 配置字段，控制是否启用 fsnotify 监听
+
+**影响范围**：
+- `internal/watcher/watcher.go` — 新增约 150 行代码（FsWatcher 实现），非破坏性（PollWatcher 保持不变）
+- `internal/config/config.go` — WatcherConfig 新增一个字段，非破坏性
+- `cmd/codeschema/main.go` — watchCmd 新增 watcher 选择逻辑，非破坏性（默认行为不变）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（18 个包，0 失败）
+- watcher 包 8 个测试全部通过（2 个原有 PollWatcher + 6 个新增 FsWatcher）
+- 新增测试覆盖：FsWatcher 新文件创建检测、忽略目录（.git/node_modules）、嵌套忽略目录路径识别、Stop 并发安全（未 Start 时调用）、文件修改检测、子目录递归监听
+
+**遗留 TODO / 风险**：
+- fsnotify 的 `AddWith` 选项（WithBufferSize/WithOps）尚未使用，大仓库场景可通过配置文件调整
+- 当前 fsnotify 版本 v1.10.1 的 Windows 后端（ReadDirectoryChangesW）在 SMB 网络文件系统上可能因缓冲区溢出丢失事件，可通过 WithBufferSize 调整
+- 递归监听在文件数量极大（>10 万）的仓库中，inotify 可能达到 `max_user_watches` 限制（Linux 特有，Windows 无此限制）
 
 **Commit Hash**: `de99262`
 
