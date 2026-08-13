@@ -8,7 +8,7 @@
 
 ### Commit 5: feat(adapter): P0 适配器模块 — tree-sitter 文本解析 + CodeGraph 直读骨架
 
-**Commit Hash**: `[待提交]`
+**Commit Hash**: `31e4797`
 
 **核心改动点**：
 - `internal/parser/adapter/adapter.go` — 适配器公共工具函数（ExtToLang/IsSourceFile/LangToExtensions/FileExists/SupportedLanguages）
