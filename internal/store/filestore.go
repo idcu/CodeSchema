@@ -269,6 +269,54 @@ func (fs *FileStore) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
+// GetAllFiles 返回所有文件记录。
+func (fs *FileStore) GetAllFiles(ctx context.Context) ([]*FileRecord, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	result := make([]*FileRecord, 0, len(fs.files))
+	for _, f := range fs.files {
+		result = append(result, f)
+	}
+	return result, nil
+}
+
+// GetClassesByFileID 按文件 ID 查询类记录。
+func (fs *FileStore) GetClassesByFileID(ctx context.Context, fileID int64) ([]ClassRecord, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	classes, ok := fs.classes[fileID]
+	if !ok {
+		return []ClassRecord{}, nil
+	}
+	return classes, nil
+}
+
+// GetMethodsByClassID 按类 ID 查询方法记录。
+func (fs *FileStore) GetMethodsByClassID(ctx context.Context, classID int64) ([]MethodRecord, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	methods, ok := fs.methods[classID]
+	if !ok {
+		return []MethodRecord{}, nil
+	}
+	return methods, nil
+}
+
+// GetCallsByFileID 按文件 ID 查询调用关系。
+func (fs *FileStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]CallRecord, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	calls, ok := fs.calls[fileID]
+	if !ok {
+		return []CallRecord{}, nil
+	}
+	return calls, nil
+}
+
 // saveToDisk 将内存数据持久化到磁盘。
 func (fs *FileStore) saveToDisk() error {
 	data := struct {

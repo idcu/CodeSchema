@@ -45,6 +45,18 @@ type Store interface {
 	// UpsertIR 对一个文件的 IR 执行增量入库。
 	UpsertIR(ctx context.Context, ir *parser.IRDocument) error
 
+	// GetAllFiles 返回所有文件记录。
+	GetAllFiles(ctx context.Context) ([]*FileRecord, error)
+
+	// GetClassesByFileID 按文件 ID 查询类记录。
+	GetClassesByFileID(ctx context.Context, fileID int64) ([]ClassRecord, error)
+
+	// GetMethodsByClassID 按类 ID 查询方法记录。
+	GetMethodsByClassID(ctx context.Context, classID int64) ([]MethodRecord, error)
+
+	// GetCallsByFileID 按文件 ID 查询调用关系。
+	GetCallsByFileID(ctx context.Context, fileID int64) ([]CallRecord, error)
+
 	// HealthCheck 返回存储层健康状态。
 	HealthCheck(ctx context.Context) error
 }

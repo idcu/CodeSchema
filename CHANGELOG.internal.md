@@ -6,6 +6,28 @@
 
 ## 提交记录
 
+### Commit 6: feat(analyzer): P0 代码图分析器 — 四种图结构 + 影响面分析 + 最短路径
+
+**Commit Hash**: `[待提交]`
+
+**核心改动点**：
+- `internal/analyzer/graph.go` — 四种图数据结构定义（CallGraph/ClassHierarchy/ReverseIndex/FileGraph），含 AddNode/AddEdge/GetCallers/GetCallees/BFS 遍历方法
+- `internal/analyzer/analyzer.go` — 核心分析器，实现 BuildAll/BuildCallGraph/BuildClassHierarchy/BuildFileGraph/BuildReverseIndex，以及 FindImpactNodes（影响面分析）、ShortestPath（BFS 最短路径）、Analyze（模块概要统计）
+- `internal/store/store.go` — Store 接口扩展：新增 GetAllFiles、GetClassesByFileID、GetMethodsByClassID、GetCallsByFileID 四个批量查询方法
+- `internal/store/filestore.go` — FileStore 实现上述四个查询方法
+- 测试文件：analyzer_test.go（20 个测试，覆盖图数据结构 10 个 + 分析器方法 10 个）
+- 文档同步：docs/dev/03-存储层实现.md（补充分析器查询接口描述）、docs/dev/06-编排层与并发模型.md（新增第 8 章 Analyzer 分析器，含核心接口/实现步骤/完成标准）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./internal/analyzer/... -v -count=1 — 全部通过（20 个测试，0 失败）
+- 测试覆盖：CallGraph 节点/边/去重/空图/深度遍历、ClassHierarchy 父子关系、ReverseIndex 引用/导入、FileGraph 依赖边、BuildCallGraph（5 节点 4 边）、BuildClassHierarchy（4 类节点）、BuildFileGraph（3 文件 2 类 3 方法）、BuildAll 一次遍历、FindImpactNodes（2 个调用者）、ShortestPath BFS 路径重建、Analyze 模块概要统计、空存储边界情况
+
+**遗留 TODO / 风险**：
+- BuildReverseIndex 当前为 P0 骨架（返回空索引），P1 接入 import 解析后完善
+- buildClassHierarchyNode 尚未接入 ParentFQNs 解析，P1 完善父子关系建立
+- 热点方法排序中并列场景（相同调用者数）的排序顺序依赖 map 迭代，非确定性（不影响功能正确性）
+
 ### Commit 5: feat(adapter): P0 适配器模块 — tree-sitter 文本解析 + CodeGraph 直读骨架
 
 **Commit Hash**: `31e4797`
