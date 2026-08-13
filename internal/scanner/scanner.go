@@ -1,0 +1,228 @@
+package scanner
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"codeschema/internal/parser"
+	"codeschema/internal/store"
+)
+
+// Scanner 是编排层的核心模块，负责协调全量扫描与增量更新。
+//
+// 全量扫描使用 worker pool 并发处理文件。
+// 增量更新通过哈希闸门跳过未变更文件。
+type Scanner struct {
+	store     store.Store
+	registry  *parser.Registry
+	workers   int
+	semaphore chan struct{}
+}
+
+// NewScanner 创建 Scanner 实例。
+// workers 指定并发 worker 数，默认为 4。
+func NewScanner(st store.Store, reg *parser.Registry, workers int) *Scanner {
+	if workers <= 0 {
+		workers = 4
+	}
+	return &Scanner{
+		store:     st,
+		registry:  reg,
+		workers:   workers,
+		semaphore: make(chan struct{}, workers),
+	}
+}
+
+// ProcessFile 处理单个文件：哈希闸门 → 适配器选择 → 解析 → 入库。
+//
+// 流程：
+//  1. 计算文件 SHA-256 哈希。
+//  2. 查询 store 中是否已有相同哈希的文件 → 跳过。
+//  3. 按语言选择适配器，解析文件得到 IR。
+//  4. 填充元信息（哈希、字节数、行数）。
+//  5. 调用 store.UpsertIR 完成增量入库。
+func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
+	// 1. 计算哈希
+	h, err := sha256sum(path)
+	if err != nil {
+		return fmt.Errorf("sha256 %s: %w", path, err)
+	}
+
+	// 2. 哈希闸门：相同哈希跳过
+	existing, _ := s.store.GetFileByPath(ctx, path)
+	if existing != nil && existing.ContentHash == h {
+		return nil
+	}
+
+	// 3. 检测语言并选择适配器
+	lang := detectLang(path)
+	plugin, err := s.registry.Select(lang)
+	if err != nil {
+		// 无适配器时标记为跳过，不返回错误
+		_, storeErr := s.store.UpsertFile(ctx, path, h, 0, 0)
+		return storeErr
+	}
+
+	// 4. 解析
+	ir, err := plugin.Parse(ctx, path)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if ir == nil {
+		return nil // 跳过
+	}
+
+	// 5. 填充元信息
+	ir.FileHash = h
+	ir.FilePath = path
+	if ir.LineCount == 0 {
+		ir.LineCount = countLines(path)
+	}
+	if ir.ByteSize == 0 {
+		ir.ByteSize = statSize(path)
+	}
+
+	// 6. 入库
+	return s.store.UpsertIR(ctx, ir)
+}
+
+// ScanAll 全量扫描仓库目录，使用 worker pool 并发处理。
+//
+// 每个文件使用独立 goroutine，通过 semaphore 控制并发数。
+// 文件列表按目录递归遍历，忽略 .git/ node_modules/ 等目录。
+func (s *Scanner) ScanAll(ctx context.Context, root string) error {
+	files, err := listFiles(root)
+	if err != nil {
+		return fmt.Errorf("list files: %w", err)
+	}
+
+	errCh := make(chan error, len(files))
+	done := make(chan struct{}, len(files))
+
+	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case s.semaphore <- struct{}{}:
+		}
+
+		go func(path string) {
+			defer func() {
+				<-s.semaphore
+				done <- struct{}{}
+			}()
+			if err := s.ProcessFile(ctx, path); err != nil {
+				errCh <- err
+			}
+		}(f)
+	}
+
+	// 等待所有 worker 完成
+	for i := 0; i < len(files); i++ {
+		<-done
+	}
+
+	close(errCh)
+	close(done)
+
+	// 收集错误
+	var errs []error
+	for e := range errCh {
+		errs = append(errs, e)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("scan errors (%d): %v", len(errs), errs[0])
+	}
+	return nil
+}
+
+// detectLang 根据文件扩展名检测语言。
+func detectLang(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".java":
+		return "java"
+	case ".py":
+		return "py"
+	case ".ts", ".tsx":
+		return "ts"
+	case ".js", ".jsx":
+		return "js"
+	case ".rs":
+		return "rust"
+	case ".cpp", ".cc", ".cxx":
+		return "cpp"
+	case ".c":
+		return "c"
+	case ".h", ".hpp":
+		return "cpp"
+	default:
+		return "unknown"
+	}
+}
+
+// countLines 统计文件行数。
+// 末尾换行符不增加行数。
+func countLines(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	if len(data) == 0 {
+		return 0
+	}
+	count := 1
+	for _, b := range data {
+		if b == '\n' {
+			count++
+		}
+	}
+	// 末尾换行符不增加行数
+	if data[len(data)-1] == '\n' {
+		count--
+	}
+	return count
+}
+
+// statSize 获取文件字节大小。
+func statSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// listFiles 递归列出目录下所有文件，忽略常见非源码目录。
+func listFiles(root string) ([]string, error) {
+	var files []string
+	ignoreDirs := map[string]bool{
+		".git":        true,
+		"node_modules": true,
+		"target":      true,
+		"build":       true,
+		"vendor":      true,
+		".idea":       true,
+		".vscode":     true,
+		"__pycache__": true,
+	}
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 跳过无法访问的目录
+		}
+		if info.IsDir() && ignoreDirs[info.Name()] {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
+}

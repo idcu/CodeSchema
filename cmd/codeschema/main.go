@@ -13,8 +13,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"codeschema/internal/parser"
+	"codeschema/internal/scheduler"
+	"codeschema/internal/scanner"
 	"codeschema/internal/store"
+	"codeschema/internal/watcher"
 )
 
 var (
@@ -36,7 +41,7 @@ Usage:
 
 Commands:
   scan <path>       扫描仓库并入库
-  watch <path>      文件监听增量（P0）
+  watch <path>      文件监听增量（P0，轮询模式）
   rebuild-kv        重建 KV 缓存（P2）
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
@@ -87,16 +92,21 @@ Use "codeschema <command> -h" for more information about a command.
 }
 
 func scanCmd(ctx context.Context, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: codeschema scan <path>")
-	}
-	repoPath := args[0]
+	fs := flag.NewFlagSet("scan", flag.ExitOnError)
+	workers := fs.Int("workers", 4, "并发解析 worker 数")
+	storeDir := fs.String("store", "./data", "存储目录")
+	fs.Parse(args)
 
-	fmt.Printf("scanning repository: %s\n", repoPath)
+	repoPath := fs.Arg(0)
+	if repoPath == "" {
+		return fmt.Errorf("usage: codeschema scan [--workers=4] [--store=./data] <path>")
+	}
+
+	fmt.Printf("scanning repository: %s (workers=%d)\n", repoPath, *workers)
 
 	// 初始化存储
 	st := store.NewStore("file")
-	if err := st.Open(ctx, "./data"); err != nil {
+	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
@@ -106,17 +116,66 @@ func scanCmd(ctx context.Context, args []string) error {
 		return fmt.Errorf("health check: %w", err)
 	}
 
-	fmt.Printf("store initialized, ready to scan %s\n", repoPath)
-	fmt.Println("扫描功能将在后续迭代中实现完整 parser 适配器后启用")
+	// 初始化注册中心（P0 暂无实际适配器，仅扫描能识别语言的文件）
+	reg := parser.NewRegistry()
+
+	// 创建 Scanner
+	s := scanner.NewScanner(st, reg, *workers)
+
+	// 执行全量扫描
+	start := time.Now()
+	fmt.Printf("scanning started at %s\n", start.Format(time.RFC3339))
+
+	if err := s.ScanAll(ctx, repoPath); err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+
+	elapsed := time.Since(start)
+	fmt.Printf("scan completed in %s\n", elapsed.Round(time.Millisecond))
 	return nil
 }
 
 func watchCmd(ctx context.Context, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: codeschema watch <path>")
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	workers := fs.Int("workers", 4, "并发解析 worker 数")
+	storeDir := fs.String("store", "./data", "存储目录")
+	debounceMs := fs.Int("debounce", 300, "防抖窗口（毫秒）")
+	fs.Parse(args)
+
+	repoPath := fs.Arg(0)
+	if repoPath == "" {
+		return fmt.Errorf("usage: codeschema watch [--workers=4] [--store=./data] [--debounce=300] <path>")
 	}
-	fmt.Printf("watch mode for %s — 将在 P0 MVP 迭代中实现\n", args[0])
-	return nil
+
+	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms)\n", repoPath, *workers, *debounceMs)
+
+	// 初始化存储
+	st := store.NewStore("file")
+	if err := st.Open(ctx, *storeDir); err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	// 初始化注册中心
+	reg := parser.NewRegistry()
+
+	// 创建 Scanner
+	s := scanner.NewScanner(st, reg, *workers)
+
+	// 创建调度器
+	sched := scheduler.NewScheduler(*debounceMs, 1000)
+
+	// 创建监听器
+	pw := watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, nil)
+
+	// 启动调度器
+	go sched.Start(ctx, func(ctx context.Context, path string) error {
+		return s.ProcessFile(ctx, path)
+	})
+
+	// 启动监听器（阻塞）
+	fmt.Println("watcher started, press Ctrl+C to stop")
+	return pw.Start(ctx)
 }
 
 func mcpCmd(ctx context.Context, args []string) error {

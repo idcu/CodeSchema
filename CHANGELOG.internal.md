@@ -6,9 +6,33 @@
 
 ## 提交记录
 
+### Commit 3: feat(scanner, scheduler, watcher): P0 MVP — 增量更新与文件监听
+
+**Commit Hash**: `(待提交后填写)`
+
+**核心改动点**：
+- `internal/scanner/hash.go` — SHA-256 哈希闸门函数
+- `internal/scanner/scanner.go` — Scanner 核心（ProcessFile + ScanAll + listFiles + detectLang + countLines）
+- `internal/store/upsert.go` — 行号区间匹配算法（intervalsOverlap + matchEntity，覆盖 UPDATE/DELETE/INSERT/重定位）
+- `internal/scheduler/scheduler.go` — 防抖调度器（300ms 窗口 + 队列阈值 1000 + 降级信号）
+- `internal/watcher/watcher.go` — PollWatcher 轮询监听器（mtime+size 检测变更，忽略 .git/node_modules 等）
+- 测试文件：hash_test.go（5 个）、scanner_test.go（4 个）、upsert_test.go（2 组 16 场景）、scheduler_test.go（7 个）、watcher_test.go（2 个）
+- 更新 DEV_PROGRESS.md、docs/dev/04-增量更新与文件监听.md、docs/dev/06-编排层与并发模型.md 完成标准
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（parser/scanner/scheduler/store/watcher）
+- 测试覆盖：哈希闸门命中/未命中、全量扫描 worker pool、防抖合并/刷新/降级、区间重叠 10 场景、匹配判定 6 场景
+
+**遗留 TODO / 风险**：
+- 反向引用增量更新尚未实现（P1）
+- 大文件旁路尚未实现（P1）
+- upsertIR 级联清理依赖 SQLite 实现（P1）
+- PollWatcher 轮询监听性能有限，生产环境建议切换 fsnotify
+
 ### Commit 2: perf(rename): 二进制名统一为 codeschema，与项目名对齐
 
-**Commit Hash**: `(待实际 commit 后填写)`
+**Commit Hash**: `4a64b7c`
 
 **核心改动点**：
 - 重命名 `cmd/codameta/` → `cmd/codeschema/`，二进制名从 `codameta` 统一为 `codeschema`
