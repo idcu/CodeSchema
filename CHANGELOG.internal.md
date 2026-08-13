@@ -8,7 +8,7 @@
 
 ### Commit 10: feat(analyzer): P4 Gradle 多模块路径解析 + 标准库前缀可配置化
 
-**Commit Hash**: `待补充（commit 后写入）`
+**Commit Hash**: `f0094ca`
 
 **核心改动点**：
 - `internal/analyzer/resolver.go` — 新增 `GradleResolver` 实现，支持 `:module:path:to:Class` 格式路径解析、4 种匹配策略、通配符/模块白名单/标准库过滤；`javaStdlibPrefixes` 从全局变量改为 `JavaResolver` 实例字段，新增 `SetStdlibPrefixes`/`AddStdlibPrefix` 方法
