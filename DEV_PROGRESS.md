@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 05:20
-> 当前阶段：生产级健壮性 — 优雅关闭 / 重试机制 / Panic 恢复（已完成）
-> 下一个阶段：P13 — 项目交付与生产部署准备
+> 更新时间：2026-08-14 05:25
+> 当前阶段：构建脚本 / CI 配置 / 容器化 / 部署文档（已完成）
+> 下一个阶段：项目已达到生产级可运行状态，后续按需迭代
 
 ---
 
@@ -25,6 +25,7 @@ P9       [████████████████████] 100%
 P10      [████████████████████] 100%
 P11      [████████████████████] 100%
 P12      [████████████████████] 100%
+P13      [████████████████████] 100%
 ```
 
 ---
@@ -212,17 +213,25 @@ P12      [████████████████████] 100%
 - [x] **`cmd/codeschema/main.go`** — 使用 GracefulManager 统一管理优雅关闭，注册 context_cancel 和 config_watcher 钩子，ForceExitOnSecondSignal 逃生舱口
 - [x] 验证数据：go build + go test 18 个包全部通过，0 失败；robust 包 28 个测试全部通过
 
+### P13 — 构建脚本 / CI 配置 / 容器化 / 部署文档
+- [x] **`Makefile`** — 构建自动化脚本，支持 build/test/clean/cross/lint/bench/run 等 10 个目标，跨平台交叉编译（linux/darwin/windows × amd64/arm64）
+- [x] **`Dockerfile`** — 多阶段构建，golang:1.25-alpine → alpine:3.20，CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
+- [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，4 个 Job（test 3 平台 + race 竞态检测 + cross 交叉编译 + docker 镜像）
+- [x] **`docs/dev/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
+- [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-### 后续规划
+所有 P0-P13 阶段已全部完成，项目已达到生产级可运行状态。后续按需迭代，建议方向：
 
-| 阶段 | 任务 | 参考文档 | 依赖 |
-|------|------|---------|------|
-| P13 | 项目交付与生产部署准备：构建脚本/CI 配置/容器化/部署文档/最终验证 | `docs/dev/11-配置部署与路线图.md` | P12 完成 |
+- 生产环境部署验证（Docker/CI 流水线）
+- 真实仓库 benchmark 数据采集
+- 多语言适配器扩展（SCIP/LSP）
+- 语义检索精度提升（chromem-go 集成）
 
 ## 已知问题
 
@@ -240,6 +249,6 @@ P12      [████████████████████] 100%
 4. 运行测试：`go test ./...`（18 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：P12 生产级健壮性（参见 CHANGELOG.internal.md Commit 26）
+7. 最新提交：P13 构建脚本/CI 配置/容器化（参见 CHANGELOG.internal.md Commit 27）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
 9. 当前 18 个包全部测试通过：`go test ./...`（0 失败）
