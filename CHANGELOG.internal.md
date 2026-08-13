@@ -6,11 +6,56 @@
 
 ## 提交记录
 
-### Commit 39: docs(deploy): 补充 onnxruntime 跨平台部署说明 + Dockerfile 注释
+### Commit 40: feat(onnx): 集成 bge-small-zh ONNX 语义嵌入模型
 
 **Commit Hash**: `未提交`
 
 **核心改动点**：
+- `internal/vector/embedder_onnx.go` — 新增 ONNXEmbedder：
+  - 基于 `onnxruntime_go` 加载 bge-small-zh-v1.5 ONNX 模型（FP16 量化，512 维）
+  - WordPiece 分词器（tokenizer.json 解析），支持 BERT 归一化/预分词
+  - 支持 `SetSharedLibraryPath` 指定 ONNX Runtime 动态库路径（`LibraryDir` 配置项）
+  - 实现 `Embedder` 接口，与 `LocalEmbedder` 无缝切换
+  - `NewONNXEmbedderOrFallback` 自动检测模型，失败时返回 nil 由调用方降级
+  - 全局单例 `GetONNXEmbedderGlobal` / `CloseGlobalONNXEmbedder`
+- `internal/vector/embedder_onnx_test.go` — 新增 7 个测试：
+  - 基础嵌入/维度/语义相似度/空文本/长文本截断/确定性
+- `cmd/codeschema/main.go` — `newSearcher` 优先使用 ONNX Embedder，失败降级到 LocalEmbedder
+- `internal/search/builder.go` — `IndexBuilder` 支持 `Embedder` 接口，IDF 仅 `LocalEmbedder` 使用
+- `docs/dev/09-语义检索与全文搜索.md` — 补充 ONNX 集成说明 + 文件清单
+- `docs/dev/11-配置部署与路线图.md` — 更新 onnxruntime 实际使用状态 + bge-small-zh 模型获取说明
+
+**运行时依赖变更**：
+- `down/onnxruntime/onnxruntime.dll` — 从 v1.21.0 升级到 v1.28.0（匹配 `onnxruntime_go v1.32.1` API 28）
+- `down/models/bge-small-zh-v1.5/` — 新增 ONNX 模型文件（model_fp16.onnx + model_fp16.onnx_data + tokenizer.json + config.json）
+- 使用 `ort.SetSharedLibraryPath` 优先加载 `down/onnxruntime/onnxruntime.dll`，避免系统 PATH 中旧版 DLL 干扰
+
+**新增公共抽象**：
+- `ONNXEmbedderConfig.LibraryDir` — 可选字段，指定 ONNX Runtime 动态库所在目录
+- `ONNXEmbedder` 结构体 — 实现 `Embedder` 接口，支持 `Close()` 释放资源
+- `NewONNXEmbedderOrFallback(modelDir, maxLen, libDir)` — 新增 `libDir` 参数
+- `GetONNXEmbedderGlobal` / `CloseGlobalONNXEmbedder` — 全局单例管理
+
+**验证数据**：
+- `go build ./...` — 通过
+- `go test ./...` — 24 个包全部通过
+- `TestONNXEmbedder_Embed` — 向量 512 维，非零嵌入
+- `TestONNXEmbedder_SemanticSimilarity` — similarity(天气,天气)=0.8949, similarity(天气,调度)=0.2544 ✓
+- `TestONNXEmbedder_EmptyText` — 空文本返回 512 维零向量 ✓
+- `TestONNXEmbedder_LongText` — 超长文本自动截断，不报错 ✓
+- `TestONNXEmbedder_Deterministic` — 相同输入产生相同向量 ✓
+
+**遗留 TODO / 风险**：
+- 当前仅支持 `model_fp16.onnx`（FP16 量化），如需 FP32 精度需额外下载 `model.onnx`
+- 输出层名硬编码为 `"sentence_embedding"`，不同 ONNX 转换工具可能输出不同名称
+- ONNX Runtime 环境为全局单例，不支持多实例并行初始化
+- 模型文件约 47MB，建议在 Dockerfile 中预装或通过 volume 挂载
+
+---
+
+### Commit 39: docs(deploy): 补充 onnxruntime 跨平台部署说明 + Dockerfile 注释
+
+**Commit Hash**: `未提交`
 - `Makefile` — `build-cgo` 目标从仅复制 `onnxruntime.dll` 改为跨平台智能复制：
   - Windows: `onnxruntime.dll`
   - Linux: `libonnxruntime.so`

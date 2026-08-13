@@ -19,13 +19,16 @@ import (
 // 职责：
 //   - BuildFromStore: 启动时全量构建索引
 //   - IndexDocument: 扫描后增量更新索引
-//   - 构建前自动 Observe 建立 IDF 词典
+//   - 构建前自动 Observe 建立 IDF 词典（仅 LocalEmbedder）
 //   - 支持异步索引队列，避免阻塞扫描流程
 //   - 支持 IDF 自动持久化，避免重启后 IDF 统计丢失
 type IndexBuilder struct {
 	fts      FTSEngine
 	indexer  *vector.Indexer
-	embedder *vector.LocalEmbedder
+	embedder vector.Embedder
+
+	// IDF 词典（仅 LocalEmbedder 使用，ONNX Embedder 不需要）
+	idf *vector.LocalEmbedder
 
 	// 异步索引队列（可选启用）
 	queue   chan asyncJob
@@ -49,12 +52,17 @@ type asyncJob struct {
 }
 
 // NewIndexBuilder 创建索引构建器。
-func NewIndexBuilder(fts FTSEngine, idx *vector.Indexer, emb *vector.LocalEmbedder) *IndexBuilder {
-	return &IndexBuilder{
+func NewIndexBuilder(fts FTSEngine, idx *vector.Indexer, emb vector.Embedder) *IndexBuilder {
+	b := &IndexBuilder{
 		fts:      fts,
 		indexer:  idx,
 		embedder: emb,
 	}
+	// 如果 embedder 是 LocalEmbedder，保存引用用于 IDF 操作
+	if le, ok := emb.(*vector.LocalEmbedder); ok {
+		b.idf = le
+	}
+	return b
 }
 
 // BuildResult 构建结果统计。
@@ -141,19 +149,23 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 	fmt.Printf("  collected %d docs for indexing\n", len(docs))
 
-	// 第二阶段：Observe 建立 IDF 词典（如果已加载持久化 IDF 则跳过）
-	if b.embedder.HasIDF() {
-		fmt.Println("  skipping IDF build (loaded from persistence)")
-	} else {
-		totalDocs := len(docs)
-		for i, d := range docs {
-			b.embedder.Observe(d.text)
-			if (i+1)%100 == 0 || i == totalDocs-1 {
-				pct := float64(i+1) / float64(totalDocs) * 100
-				fmt.Printf("\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
+	// 第二阶段：Observe 建立 IDF 词典（仅 LocalEmbedder 需要，ONNX 跳过）
+	if b.idf != nil {
+		if b.idf.HasIDF() {
+			fmt.Println("  skipping IDF build (loaded from persistence)")
+		} else {
+			totalDocs := len(docs)
+			for i, d := range docs {
+				b.idf.Observe(d.text)
+				if (i+1)%100 == 0 || i == totalDocs-1 {
+					pct := float64(i+1) / float64(totalDocs) * 100
+					fmt.Printf("\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
+				}
 			}
+			fmt.Println() // 换行结束 IDF 进度
 		}
-		fmt.Println() // 换行结束 IDF 进度
+	} else {
+		fmt.Println("  skipping IDF build (ONNX embedder, no IDF needed)")
 	}
 
 	// 第三阶段：批量写入 FTS 和向量索引
@@ -192,9 +204,11 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 // IndexDocument 为单个文档增量构建索引。
 //
-// 先 Observe 更新 IDF 词典，再写入 FTS 和向量索引。
+// 先 Observe 更新 IDF 词典（仅 LocalEmbedder），再写入 FTS 和向量索引。
 func (b *IndexBuilder) IndexDocument(ctx context.Context, id, text string) error {
-	b.embedder.Observe(text)
+	if b.idf != nil {
+		b.idf.Observe(text)
+	}
 
 	if err := b.fts.Index(ctx, id, text); err != nil {
 		return fmt.Errorf("index fts %s: %w", id, err)
@@ -350,9 +364,12 @@ func (b *IndexBuilder) RemoveDocument(ctx context.Context, docID string) error {
 	return nil
 }
 
-// SaveIDF 持久化 IDF 词典到文件。
+// SaveIDF 持久化 IDF 词典到文件（仅 LocalEmbedder）。
 func (b *IndexBuilder) SaveIDF(path string) error {
-	return b.embedder.SaveIDF(path)
+	if b.idf != nil {
+		return b.idf.SaveIDF(path)
+	}
+	return nil
 }
 
 // AutoSaveIDF 启动 IDF 自动持久化，定期将 IDF 词典保存到文件。
@@ -373,8 +390,8 @@ func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
 
 	// 保存一次（立即执行）
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err == nil {
-		b.embedder.SaveIDF(path) // 忽略错误，后续定时保存会重试
+	if err := os.MkdirAll(dir, 0755); err == nil && b.idf != nil {
+		b.idf.SaveIDF(path) // 忽略错误，后续定时保存会重试
 	}
 
 	go func() {
@@ -385,15 +402,17 @@ func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
 			select {
 			case <-ticker.C:
 				dir := filepath.Dir(path)
+				if b.idf != nil {
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					logger.Warn("auto save IDF: mkdir", "dir", dir, "error", err)
 					continue
 				}
-				if err := b.embedder.SaveIDF(path); err != nil {
+				if err := b.idf.SaveIDF(path); err != nil {
 					logger.Warn("auto save IDF failed", "path", path, "error", err)
 				} else {
 					logger.Debug("auto saved IDF", "path", path)
 				}
+			}
 			case <-ch:
 				return
 			}

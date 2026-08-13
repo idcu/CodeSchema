@@ -47,3 +47,6 @@ down/*.tgz
 down/*.gz
 down/go.mod
 down/go.sum
+
+# ONNX model files (large binary, download separately)
+down/models/

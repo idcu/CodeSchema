@@ -416,8 +416,9 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	return httpSrv.Start(ctx)
 }
 
-// newSearcher 创建 P8.3 双路检索器 + 索引构建器，使用持久化存储 + 本地 Embedder。
+// newSearcher 创建 P8.3 双路检索器 + 索引构建器，使用持久化存储 + 语义 Embedder。
 //
+// 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
 // 返回 (searcher, indexBuilder)，两者共享同一份 FTS 和向量索引。
 func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
@@ -440,17 +441,30 @@ func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 		store = pstore
 	}
 
-	model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
-	// 加载持久化的 IDF 词典（如果存在）
-	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	if err := model.LoadIDF(idfFile); err != nil {
-		log.Printf("WARN: load IDF dictionary (%s): %v, will rebuild on build", idfFile, err)
+	// 优先使用 ONNX Embedder（bge-small-zh），模型在 down/ 目录下
+	modelDir := filepath.Join("down", "models", "bge-small-zh-v1.5")
+	libDir := filepath.Join("down", "onnxruntime")
+	var em vector.Embedder
+	onnxEm := vector.NewONNXEmbedderOrFallback(modelDir, 512, libDir)
+	if onnxEm != nil {
+		log.Printf("semantic: using ONNX embedder (bge-small-zh, dim=%d)", onnxEm.Dim())
+		em = onnxEm
+	} else {
+		log.Printf("semantic: ONNX model not found, falling back to LocalEmbedder (dim=%d)",
+			cfg.Storage.Search.VectorDim)
+		model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
+		// 加载持久化的 IDF 词典（如果存在）
+		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
+		if err := model.LoadIDF(idfFile); err != nil {
+			log.Printf("WARN: load IDF dictionary (%s): %v, will rebuild on build", idfFile, err)
+		}
+		em = model
 	}
 
-	indexer := vector.NewIndexer(store, model, 2)
+	indexer := vector.NewIndexer(store, em, 2)
 	adapter := search.NewVectorAdapter(indexer)
 	searcher := search.NewSearcher(fts, adapter, nil)
-	builder := search.NewIndexBuilder(fts, indexer, model)
+	builder := search.NewIndexBuilder(fts, indexer, em)
 	return searcher, builder
 }
 
