@@ -8,7 +8,7 @@
 
 ### Commit 18: feat(config): P9 配置热重载 / 多配置源支持
 
-**Commit Hash**: `TBD`（待提交）
+**Commit Hash**: `de99262`
 
 **核心改动点**：
 - `internal/config/config.go` — 新增 `LoadFromEnv` 函数，从环境变量加载配置覆盖（CODESCHEMA_<SECTION>_<KEY> 格式，支持 20+ 环境变量，包括 project/storage/server/scanner/watcher/ai/parser）；新增 `Merge` 函数，合并多个配置源（字符串非空覆盖、整型 >0 覆盖、布尔 true 覆盖、切片非空覆盖、map 非空覆盖，深拷贝保证不修改原始实例）；新增 `ConfigWatcher` 结构体，支持轮询配置文件变更检测（默认 2 秒间隔），检测到变更时自动重新加载并原子切换，提供 `OnReload` 回调通知应用层
