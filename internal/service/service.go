@@ -15,9 +15,10 @@ import (
 
 // Service 是业务逻辑层，封装所有查询操作。
 type Service struct {
-	store    store.Store
-	startTime time.Time
-	searcher *search.Searcher
+	store        store.Store
+	startTime    time.Time
+	searcher     *search.Searcher
+	indexBuilder *search.IndexBuilder // P8.3 自动索引构建
 }
 
 // NewService 创建 Service 实例。
@@ -34,6 +35,22 @@ func NewService(st store.Store) *Service {
 func (s *Service) WithSearcher(searcher *search.Searcher) *Service {
 	s.searcher = searcher
 	return s
+}
+
+// WithIndexBuilder 设置自动索引构建器，在扫描后自动更新搜索索引。
+func (s *Service) WithIndexBuilder(b *search.IndexBuilder) *Service {
+	s.indexBuilder = b
+	return s
+}
+
+// BuildIndex 从 Store 全量构建搜索索引。
+//
+// 返回构建统计信息，包括文档数、索引数、耗时等。
+func (s *Service) BuildIndex(ctx context.Context) (*search.BuildResult, error) {
+	if s.indexBuilder == nil {
+		return &search.BuildResult{}, nil
+	}
+	return s.indexBuilder.BuildFromStore(ctx, s.store)
 }
 
 // HealthStatus 健康检查响应。

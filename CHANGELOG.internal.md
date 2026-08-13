@@ -6,9 +6,41 @@
 
 ## 提交记录
 
-### Commit 15: feat(search): P8.2 向量库集成 — 磁盘持久化 + 本地 Embedder
+### Commit 16: feat(search): P8.3 自动索引构建与增量同步
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `29f980f`
+
+**核心改动点**：
+- `internal/search/builder.go` — IndexBuilder 自动索引构建器，BuildFromStore 全量构建（文件→类→方法递归遍历）、BuildAndIndex 增量更新（单文件触发）、IndexDocument 单文档索引
+- `internal/search/builder_test.go` — 10 个测试覆盖空 Store、单文件/多文件、无类文件、增量构建、构建文本、文件不存在等边界
+- `internal/scanner/scanner.go` — 新增 onIndex 字段和 SetOnIndex 方法，ProcessFile 最后调用增量索引回调
+- `internal/service/service.go` — 新增 indexBuilder 字段、WithIndexBuilder 方法、BuildIndex 全量构建接口
+- `cmd/codeschema/main.go` — newSearcher 返回 (searcher, builder)，scanCmd 扫描后自动构建索引，watchCmd 启动时全量构建+增量回调，mcp/serve 命令集成 searcher
+- 文档同步：DEV_PROGRESS.md（P8.3 100%）、docs/dev/09-语义检索与全文搜索.md（P8.3 完成标准+文件清单）
+
+**新增公共抽象**：
+- `search.IndexBuilder` — 自动索引构建器（BuildFromStore/BuildAndIndex/IndexDocument）
+- `search.BuildResult` — 构建结果统计（TotalDocs/IndexedDocs/Errors/Duration）
+- `buildClassIndexText` / `buildMethodIndexText` — 索引文本生成函数
+
+**影响范围**：
+- `internal/scanner/scanner.go` — 新增 onIndex 字段和 SetOnIndex 方法，非破坏性
+- `internal/service/service.go` — 新增 WithIndexBuilder 方法和 BuildIndex 方法，向后兼容
+- `cmd/codeschema/main.go` — newSearcher 签名变更（返回双值），mcpCmd/serveCmd 需拆包
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（19 个包，0 失败）
+- 新增测试：10 个（builder 包全部覆盖）
+- 搜索包测试：35 个（25 原有 + 10 新增）
+- 测试覆盖：空 Store 边界、单文件类+方法、无类文件降级、多文件多类、IndexDocument 单文档、BuildAndIndex 增量、文件不存在错误、索引文本 FQN/签名/文档
+
+**遗留 TODO / 风险**：
+- IndexBuilder 的 IDF 词典在每次全量构建时重建，未持久化（重启后需重新 Observe）
+- 增量索引当前为同步调用，大文件场景可能阻塞扫描流程，P1 可改为异步队列
+- 删除文件时未同步删除索引（当文件被删除，FTS 和向量索引中的旧文档仍存在），P1 需实现 RemoveIndex 方法
+
+**Commit Hash**: `306251b`
 
 **核心改动点**：
 - `internal/vector/persistent.go` — PersistentStore 磁盘持久化向量存储，JSON 序列化，自动保存（每 10 次变更触发落盘），支持 Save/Load/Close

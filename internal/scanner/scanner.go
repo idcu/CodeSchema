@@ -32,6 +32,7 @@ type Scanner struct {
 	workers   int
 	semaphore chan struct{}
 	logger    *log.Logger
+	onIndex   func(ctx context.Context, filePath string) error // P8.3 索引回调
 }
 
 // NewScanner 创建 Scanner 实例。
@@ -47,6 +48,11 @@ func NewScanner(st store.Store, reg *parser.Registry, workers int) *Scanner {
 		semaphore: make(chan struct{}, workers),
 		logger:    log.WithModule("scanner"),
 	}
+}
+
+// SetOnIndex 设置索引回调，在文件入库成功后自动更新搜索索引。
+func (s *Scanner) SetOnIndex(fn func(ctx context.Context, filePath string) error) {
+	s.onIndex = fn
 }
 
 // ProcessFile 处理单个文件：哈希闸门 → 适配器选择 → 解析 → 入库。
@@ -113,6 +119,13 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 		metrics.IncCounter("scanner_errors_total", "upsert_ir")
 		metrics.IncCounter("scanner_processed_total", "error")
 		return fmt.Errorf("upsert IR %s: %w", path, err)
+	}
+
+	// 7. 增量索引回调（P8.3）
+	if s.onIndex != nil {
+		if err := s.onIndex(ctx, path); err != nil {
+			s.logger.Warn("index callback failed", "path", path, "error", err)
+		}
 	}
 
 	metrics.IncCounter("scanner_processed_total", "ok")

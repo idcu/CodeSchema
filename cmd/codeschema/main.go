@@ -149,6 +149,17 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	elapsed := time.Since(start)
 	fmt.Printf("scan completed in %s\n", elapsed.Round(time.Millisecond))
+
+	// 扫描完成后构建搜索索引
+	searcher, builder := newSearcher(cfg)
+	svc := service.NewService(st)
+	svc.WithSearcher(searcher).WithIndexBuilder(builder)
+	if result, err := svc.BuildIndex(ctx); err != nil {
+		fmt.Printf("WARN: build index: %v\n", err)
+	} else {
+		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+	}
+
 	return nil
 }
 
@@ -182,6 +193,23 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	// 创建调度器
 	sched := scheduler.NewScheduler(*debounceMs, 1000)
 
+	// 创建搜索组件
+	searcher, builder := newSearcher(cfg)
+	svc := service.NewService(st)
+	svc.WithSearcher(searcher).WithIndexBuilder(builder)
+
+	// 启动时全量构建索引
+	if result, err := svc.BuildIndex(ctx); err != nil {
+		fmt.Printf("WARN: build index: %v\n", err)
+	} else {
+		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+	}
+
+	// 设置增量索引回调
+	s.SetOnIndex(func(ctx context.Context, filePath string) error {
+		return builder.BuildAndIndex(ctx, st, filePath)
+	})
+
 	// 创建监听器
 	pw := watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, cfg.Watcher.IgnoreDirs)
 
@@ -209,7 +237,8 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	svc.WithSearcher(newSearcher(cfg))
+	s, _ := newSearcher(cfg)
+	svc.WithSearcher(s)
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
@@ -233,7 +262,8 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	svc.WithSearcher(newSearcher(cfg))
+	s, _ := newSearcher(cfg)
+	svc.WithSearcher(s)
 	httpSrv := server.NewHTTPServer(svc, *addr)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
@@ -243,15 +273,10 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	return httpSrv.Start(ctx)
 }
 
-// newSearcher 创建 P8.2 双路检索器，使用持久化存储 + 本地 Embedder。
+// newSearcher 创建 P8.3 双路检索器 + 索引构建器，使用持久化存储 + 本地 Embedder。
 //
-// 组成：
-//   - FTS: PersistentFTS（磁盘持久化全文搜索，路径由 cfg.Storage.Search.FTSDir 决定）
-//   - 向量: LocalEmbedder（1024 维 TF-IDF 哈希）+ PersistentStore + Indexer + VectorAdapter
-//   - 融合: 默认权重 Reranker（FTS 0.3 / 向量 0.7）
-//
-// 当网络恢复后，可切换为 chromem-go + SQLite FTS5。
-func newSearcher(cfg *config.Config) *search.Searcher {
+// 返回 (searcher, indexBuilder)，两者共享同一份 FTS 和向量索引。
+func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
 	var fts search.FTSEngine
 	pfts, err := search.NewPersistentFTS(ftsFile)
@@ -275,5 +300,7 @@ func newSearcher(cfg *config.Config) *search.Searcher {
 	model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
 	indexer := vector.NewIndexer(store, model, 2)
 	adapter := search.NewVectorAdapter(indexer)
-	return search.NewSearcher(fts, adapter, nil)
+	searcher := search.NewSearcher(fts, adapter, nil)
+	builder := search.NewIndexBuilder(fts, indexer, model)
+	return searcher, builder
 }

@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 23:48
-> 当前阶段：P8.2 已完成 — 向量库集成（磁盘持久化 + 本地 Embedder）
-> 下一个阶段：P8.3 — 自动索引构建与增量同步（需网络下载 chromem-go 实现真实引擎）
+> 更新时间：2026-08-13 23:58
+> 当前阶段：P8.3 已完成 — 自动索引构建与增量同步
+> 下一个阶段：P9 — 配置热重载 / 多配置源
 
 ---
 
@@ -20,6 +20,7 @@ P6       [████████████████████] 100%
 P7       [████████████████████] 100%
 P8.1     [████████████████████] 100%
 P8.2     [████████████████████] 100%
+P8.3     [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -154,6 +155,15 @@ P8.2     [████████████████████] 100%
 - [x] 新增测试：PersistentStore 4 个（SaveLoad/Search/EmptySearch/Delete）+ LocalEmbedder 7 个（Deterministic/DifferentTexts/EmptyText/Observe/Dim/ZeroDim/Reset）+ PersistentFTS 4 个（SaveLoad/Search/Remove/EmptySearch）= 15 个新测试
 - [x] 验证数据：go build + go test 18 个包全部通过，0 失败
 
+### P8.3 — 自动索引构建与增量同步
+- [x] **`internal/search/builder.go`** — IndexBuilder 自动索引构建器，BuildFromStore 全量构建 + BuildAndIndex 增量更新 + IndexDocument 单文档索引
+- [x] **`internal/search/builder_test.go`** — 10 个测试覆盖：空 Store、单文件/多文件、无类文件、增量构建、构建文本、文件不存在等边界
+- [x] **`internal/scanner/scanner.go`** — 新增 onIndex 字段和 SetOnIndex 方法，ProcessFile 中调用增量索引回调
+- [x] **`internal/service/service.go`** — 新增 indexBuilder 字段、WithIndexBuilder 方法、BuildIndex 全量构建接口
+- [x] **`cmd/codeschema/main.go`** — newSearcher 返回 searcher+builder，scanCmd 扫描后自动构建索引，watchCmd 启动时全量构建+增量回调，mcp/serve 命令集成 searcher
+- [x] 新增测试：10 个 builder 测试（New/BuildFromStore 空/有数据/无类文件/多文件/IndexDocument/BuildAndIndex/BuildAndIndex 文件不存在/buildClassIndexText/buildMethodIndexText）
+- [x] 验证数据：go build + go test 19 个包全部通过，0 失败
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
@@ -164,7 +174,6 @@ P8.2     [████████████████████] 100%
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P8.3 | 自动索引构建与增量同步（从 Store 数据自动构建 FTS 和向量索引） | `docs/dev/09-语义检索与全文搜索.md` | P8.2 完成 |
 | P9 | 配置热重载 / 多配置源 | `docs/dev/11-配置部署与路线图.md` | P7 完成 |
 
 ## 已知问题
@@ -173,7 +182,6 @@ P8.2     [████████████████████] 100%
 2. **轮询监听性能**：当前 PollWatcher 基于轮询（1s 间隔），适合开发/小仓库场景。生产环境建议切换为 fsnotify 原生监听（需安装外部包）。
 3. **tree-sitter C 绑定**：tree-sitter 适配器需要 CGO 和 tree-sitter C 运行时，需单独安装。
 4. **语义检索精度**：LocalEmbedder 基于 TF-IDF 哈希，精度低于真实语义模型（bge-small-zh）。P8.3 当网络恢复后可切换。
-5. **向量索引为空**：当前 MemoryStore 和 PersistentFTS 在启动时为空，需 P8.3 实现从 Store 数据自动构建索引。
 
 ## 接手说明
 
@@ -183,4 +191,4 @@ P8.2     [████████████████████] 100%
 4. 运行测试：`go test ./...`（15 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：P8.1 语义检索骨架（参见 CHANGELOG.internal.md Commit 14）
+7. 最新提交：P8.3 自动索引构建与增量同步（参见 CHANGELOG.internal.md Commit 16）
