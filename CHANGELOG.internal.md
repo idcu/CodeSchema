@@ -8,7 +8,7 @@
 
 ### Commit 24: perf(index): IDF 跳过 Observe + 自动持久化 — 全量构建加速 / 增量 IDF 保全
 
-**Commit Hash**: `TBD`（待提交）
+**Commit Hash**: `babea23`
 
 **核心改动点**：
 - `internal/vector/embedder_local.go` — 新增 `HasIDF()` 方法，检查是否已加载持久化 IDF 词典（`docCnt > 0`）
