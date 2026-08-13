@@ -6,9 +6,30 @@
 
 ## 提交记录
 
-### Commit 3: feat(scanner, scheduler, watcher): P0 MVP — 增量更新与文件监听
+### Commit 4: feat(service, server): P0 MVP — Service 服务层 + HTTP API + MCP Server
 
 **Commit Hash**: `(待提交后填写)`
+
+**核心改动点**：
+- `internal/service/service.go` — Service 业务逻辑层，封装 Store 操作，提供 GetContext/GetImpact/GetTests/Search 等 8 个查询方法，参数校验返回 ServiceError
+- `internal/server/http.go` — HTTP API 服务器（5 个端点 + 错误中间件 + CORS + panic recovery）
+- `internal/server/mcp.go` — MCP Server（JSON-RPC 2.0 + SSE 传输，8 个工具注册，全部对接 Service 层）
+- `cmd/codeschema/main.go` — `mcp` 和 `serve` 命令接入真实服务器实现
+- 测试：service_test.go（14 个）、http_test.go（11 个）、mcp_test.go（9 个）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（8 个包，0 失败）
+- 测试覆盖：Service 14 个测试（含参数校验 + 错误码映射）、HTTP 11 个测试（含 CORS + panic recovery）、MCP 9 个测试（含全部 8 个工具调用 + 错误场景）
+
+**遗留 TODO / 风险**：
+- Service 层当前返回 P0 占位数据，P1 接入真实 Store 查询
+- MCP Server 的 SSE 传输为简化实现，P1 可按 MCP 规范完善
+- HTTP API 缺少速率限制中间件（P2）
+
+### Commit 3: feat(scanner, scheduler, watcher): P0 MVP — 增量更新与文件监听
+
+**Commit Hash**: `c743aaa`
 
 **核心改动点**：
 - `internal/scanner/hash.go` — SHA-256 哈希闸门函数

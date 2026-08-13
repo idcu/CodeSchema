@@ -1,0 +1,194 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"codeschema/internal/service"
+	"codeschema/internal/store"
+)
+
+func newTestHTTPServer(t *testing.T) *HTTPServer {
+	t.Helper()
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	svc := service.NewService(st)
+	return NewHTTPServer(svc, ":0")
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleHealth(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "ok" {
+		t.Errorf("expected status ok, got %v", body["status"])
+	}
+}
+
+func TestHealthEndpoint_MethodNotAllowed(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealth(w, req)
+
+	if w.Result().StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestContextEndpoint_EmptySymbol(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/context", nil)
+	w := httptest.NewRecorder()
+	srv.handleContext(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+
+	var errResp errorResponse
+	json.NewDecoder(w.Result().Body).Decode(&errResp)
+	if errResp.Error.Code != "ERR_INVALID_PARAMETER" {
+		t.Errorf("expected ERR_INVALID_PARAMETER, got %s", errResp.Error.Code)
+	}
+}
+
+func TestContextEndpoint_Success(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/context?symbol=com.example.MyClass", nil)
+	w := httptest.NewRecorder()
+	srv.handleContext(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+
+	var body map[string]any
+	json.NewDecoder(w.Result().Body).Decode(&body)
+	if body["symbol"] != "com.example.MyClass" {
+		t.Errorf("expected symbol, got %v", body["symbol"])
+	}
+}
+
+func TestImpactEndpoint_EmptyMethod(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/impact", nil)
+	w := httptest.NewRecorder()
+	srv.handleImpact(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestImpactEndpoint_Success(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/impact?method=com.example.MyClass.myMethod", nil)
+	w := httptest.NewRecorder()
+	srv.handleImpact(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+
+	var body map[string]any
+	json.NewDecoder(w.Result().Body).Decode(&body)
+	if body["method"] != "com.example.MyClass.myMethod" {
+		t.Errorf("expected method, got %v", body["method"])
+	}
+}
+
+func TestTestsEndpoint_EmptyMethod(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/tests", nil)
+	w := httptest.NewRecorder()
+	srv.handleTests(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestTestsEndpoint_Success(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/tests?method=com.example.MyClass.myMethod", nil)
+	w := httptest.NewRecorder()
+	srv.handleTests(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestSearchEndpoint_EmptyQuery(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/search", nil)
+	w := httptest.NewRecorder()
+	srv.handleSearch(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestSearchEndpoint_Success(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/search?q=MyClass", nil)
+	w := httptest.NewRecorder()
+	srv.handleSearch(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestCORSMiddleware(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	handler := srv.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Test preflight
+	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204 for OPTIONS, got %d", w.Result().StatusCode)
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("expected CORS header")
+	}
+}
+
+func TestErrorRecoveryMiddleware(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	handler := srv.errorRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Result().StatusCode)
+	}
+}

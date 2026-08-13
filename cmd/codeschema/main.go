@@ -18,6 +18,8 @@ import (
 	"codeschema/internal/parser"
 	"codeschema/internal/scheduler"
 	"codeschema/internal/scanner"
+	"codeschema/internal/server"
+	"codeschema/internal/service"
 	"codeschema/internal/store"
 	"codeschema/internal/watcher"
 )
@@ -179,11 +181,39 @@ func watchCmd(ctx context.Context, args []string) error {
 }
 
 func mcpCmd(ctx context.Context, args []string) error {
-	fmt.Println("MCP Server — 将在 P0 MVP 迭代中实现")
-	return nil
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	addr := fs.String("addr", ":8080", "监听地址")
+	storeDir := fs.String("store", "./data", "存储目录")
+	fs.Parse(args)
+
+	st := store.NewStore("file")
+	if err := st.Open(ctx, *storeDir); err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	svc := service.NewService(st)
+	mcpSrv := server.NewMCPServer(svc, *addr)
+
+	fmt.Printf("MCP Server listening on %s\n", *addr)
+	return mcpSrv.Start(ctx)
 }
 
 func serveCmd(ctx context.Context, args []string) error {
-	fmt.Println("HTTP API Server — 将在 P0 MVP 迭代中实现")
-	return nil
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("http", ":8081", "监听地址")
+	storeDir := fs.String("store", "./data", "存储目录")
+	fs.Parse(args)
+
+	st := store.NewStore("file")
+	if err := st.Open(ctx, *storeDir); err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	svc := service.NewService(st)
+	httpSrv := server.NewHTTPServer(svc, *addr)
+
+	fmt.Printf("HTTP API Server listening on %s\n", *addr)
+	return httpSrv.Start(ctx)
 }

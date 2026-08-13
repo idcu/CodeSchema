@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 11:30
-> 当前阶段：P0 MVP — 增量更新与文件监听（完成）
-> 下一个阶段：P0 MVP — 接口层（CLI + HTTP + MCP）
+> 更新时间：2026-08-13 13:05
+> 当前阶段：P0 MVP — 接口层（CLI + HTTP + MCP）完成
+> 下一个阶段：P0 MVP — 适配器实现（tree-sitter + CodeGraph 直读）
 
 ---
 
@@ -10,7 +10,7 @@
 
 ```
 P0 骨架 [████████████████████] 100%
-P0 MVP   [██████████··········] 35%
+P0 MVP   [████████████████····] 80%
 P1       [····················] 0%
 P2       [····················] 0%
 P3       [····················] 0%
@@ -37,6 +37,13 @@ P3       [····················] 0%
 - [x] `internal/store/migrations/001_init.sql` — 完整 DDL（12 张表 + 索引）
 - [x] `cmd/codeschema/main.go` — 主入口（scan/watch/mcp/serve/version 命令框架）
 
+### P0 MVP — 接口层（CLI + HTTP + MCP）（第 5 步）
+- [x] `internal/service/service.go` — Service 业务逻辑层（8 个查询方法 + 参数校验 + ServiceError）
+- [x] `internal/server/http.go` — HTTP API 服务器（5 个端点 + 错误中间件 + CORS + panic recovery）
+- [x] `internal/server/mcp.go` — MCP Server（JSON-RPC 2.0 + SSE 传输，8 个工具注册）
+- [x] `cmd/codeschema/main.go` — `mcp` 和 `serve` 命令接入真实服务器
+- [x] 测试：service_test.go（14 个）、http_test.go（11 个）、mcp_test.go（9 个）
+
 ### P0 MVP — 增量更新与文件监听（第 4 步 + 第 6 步部分）
 - [x] `internal/scanner/hash.go` — SHA-256 哈希闸门函数
 - [x] `internal/scanner/scanner.go` — Scanner 核心（ProcessFile + ScanAll + listFiles + detectLang + countLines）
@@ -55,39 +62,17 @@ P3       [····················] 0%
 
 ## 下一步工作
 
-### P0 MVP — 可用系统（估计仍需 2-3 周）
+### P0 MVP — 可用系统（估计仍需 1-2 周）
 
 | 优先级 | 任务 | 模块 | 依赖 | 估计工时 |
 |--------|------|------|------|---------|
-| P0 | MCP Server 基础框架 | `internal/server` | 无 | 3 天 |
-| P0 | HTTP API 基础框架 | `internal/server` | 无 | 2 天 |
-| P0 | 集成 scan/watch 到 CLI | `cmd/codeschema` | scanner, scheduler, watcher | 1 天 |
-| P1 | Service 服务层 | `internal/service` | store | 3 天 |
-| P1 | tree-sitter 适配器骨架 | `internal/parser/adapter/treesitter` | parser | 3 天 |
-| P1 | CodeGraph 直读适配器骨架 | `internal/parser/adapter/codegraph` | parser | 2 天 |
-| P2 | 集成测试 | 全局 | 全部 | 2 天 |
+| P0 | tree-sitter 适配器骨架 | `internal/parser/adapter/treesitter` | parser | 3 天 |
+| P0 | CodeGraph 直读适配器骨架 | `internal/parser/adapter/codegraph` | parser | 2 天 |
+| P1 | 集成测试 | 全局 | 全部 | 2 天 |
 
 ### 详细任务说明
 
-#### 1. MCP Server（`internal/server`）
-- 实现 MCP 协议基础框架
-- 注册 8 个工具（context/impact/tests/affected/get_call_graph/find_dependencies/search_symbols/search_config）
-- 命名对齐 CodeGraph / JCodeIndexer 事实标准
-- 参考文档：`docs/dev/05-接口层（CLI+HTTP+MCP）.md`
-
-#### 2. HTTP API（`internal/server`）
-- 使用标准库 `net/http`
-- 实现 /context, /impact, /tests, /search, /health 端点
-- 错误响应格式 + 错误码定义
-- 参考文档：`docs/dev/05-接口层（CLI+HTTP+MCP）.md`
-
-#### 3. CLI 集成（`cmd/codeschema`）
-- `scan` 命令接入 Scanner.ScanAll
-- `watch` 命令启动 PollWatcher + Scheduler
-- 配置参数支持（workers、debounce_ms、ignore_dirs 等）
-- 参考文档：`docs/dev/05-接口层（CLI+HTTP+MCP）.md`
-
-#### 4. 适配器（`internal/parser/adapter/`）
+#### 1. 适配器（`internal/parser/adapter/`）
 - tree-sitter 适配器骨架（实现 ParserPlugin 接口）
 - CodeGraph SQLite 直读适配器骨架
 - 降级路径测试
@@ -103,7 +88,9 @@ P3       [····················] 0%
 
 1. 阅读 `docs/dev/00-项目概述与架构概览.md` 了解整体架构
 2. 按 `docs/dev/` 编号顺序阅读对应开发文档
-3. 当前 P0 MVP 已完成增量更新与文件监听模块，代码可编译运行：`go build ./cmd/codeschema`
+3. 当前 P0 MVP 已完成增量更新与文件监听模块 + 接口层（HTTP API + MCP Server），代码可编译运行：`go build ./cmd/codeschema`
 4. 运行测试：`go test ./...`
-5. 下一步开发：实现 `internal/server` 中的 MCP Server 和 HTTP API
-6. 当前提交哈希：`4a64b7c`（P0 骨架）
+5. 启动 HTTP API：`codeschema serve --http :8081`
+6. 启动 MCP Server：`codeschema mcp --addr :8080`
+7. 下一步开发：实现 `internal/parser/adapter/` 中的适配器（tree-sitter 和 CodeGraph 直读）
+8. 当前提交：`c743aaa`（P0 MVP 增量更新）、`4a64b7c`（P0 骨架）
