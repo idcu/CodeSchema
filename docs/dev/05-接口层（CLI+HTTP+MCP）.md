@@ -20,14 +20,14 @@
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
-| `scan` | 扫描并入库 | `codameta scan ./repo --lang go,java` |
-| `watch` | 文件监听增量 | `codameta watch ./repo` |
-| `rebuild-kv` | 重建 KV 缓存 | `codameta rebuild-kv` |
-| `rebuild-refs` | 重建反向引用索引 | `codameta rebuild-refs` |
-| `mcp` | 启动 MCP Server | `codameta mcp --addr :8080` |
-| `serve` | 启动 HTTP API Server | `codameta serve --http :8081` |
-| `benchmark` | 运行 benchmark | `codameta benchmark ./repo` |
-| `version` | 显示版本信息 | `codameta version` |
+| `scan` | 扫描并入库 | `codeschema scan ./repo --lang go,java` |
+| `watch` | 文件监听增量 | `codeschema watch ./repo` |
+| `rebuild-kv` | 重建 KV 缓存 | `codeschema rebuild-kv` |
+| `rebuild-refs` | 重建反向引用索引 | `codeschema rebuild-refs` |
+| `mcp` | 启动 MCP Server | `codeschema mcp --addr :8080` |
+| `serve` | 启动 HTTP API Server | `codeschema serve --http :8081` |
+| `benchmark` | 运行 benchmark | `codeschema benchmark ./repo` |
+| `version` | 显示版本信息 | `codeschema version` |
 
 ---
 
@@ -90,7 +90,7 @@ MCP Server 提供 8 个工具，命名对齐 CodeGraph 与 JCodeIndexer 事实�
 ### 5.1 实现步骤
 
 1. **实现 CLI 框架**
-   - 使用 `cobra` 库，在 `cmd/codameta/` 下定义根命令和子命令。
+   - 使用 `cobra` 库，在 `cmd/codeschema/` 下定义根命令和子命令。
    - 实现 `scan` / `watch` / `rebuild-kv` / `rebuild-refs` / `mcp` / `serve` / `benchmark` / `version` 共 8 个子命令。
    - 集成 viper 配置加载（config.yaml 路径、环境变量覆盖）。
 
@@ -143,7 +143,7 @@ func (s *MCPServer) Stop() error
 
 ## 6. 完成标准
 
-- [ ] CLI 全部 8 个命令可运行，`codameta version` 输出正确版本号。
+- [ ] CLI 全部 8 个命令可运行，`codeschema version` 输出正确版本号。
 - [ ] HTTP API 全部 5 个接口响应正确，返回 JSON 格式。
 - [ ] 错误中间件覆盖全部 5 种错误码，响应格式统一。
 - [ ] MCP Server 启动成功，所有 8 个工具注册成功。

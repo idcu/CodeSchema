@@ -1,6 +1,6 @@
 # Binaries
-codameta
-codameta.exe
+/codeschema
+/codeschema.exe
 *.exe
 *.dll
 *.so

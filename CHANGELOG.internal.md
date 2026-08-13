@@ -6,9 +6,35 @@
 
 ## 提交记录
 
-### Commit 1: docs(dev): 全维度文档分析评估与开发文档分割
+### Commit 2: perf(rename): 二进制名统一为 codeschema，与项目名对齐
 
 **Commit Hash**: `(待实际 commit 后填写)`
+
+**核心改动点**：
+- 重命名 `cmd/codameta/` → `cmd/codeschema/`，二进制名从 `codameta` 统一为 `codeschema`
+- 更新 `main.go` 中所有用法提示文本和错误信息（`codameta` → `codeschema`）
+- 更新 `.gitignore` 中的二进制名（`codameta` → `codeschema`，`codameta.exe` → `codeschema.exe`）
+- 更新文档全项目中的 `codameta` 引用为 `codeschema`：
+  - `README.md`：快速开始中的构建和运行命令
+  - `DEV_PROGRESS.md`：文件路径引用和编译命令
+  - `docs/dev/00-项目概述与架构概览.md`：模块依赖图和完成标准
+  - `docs/dev/04-增量更新与文件监听.md`：watch 命令示例
+  - `docs/dev/05-接口层（CLI+HTTP+MCP）.md`：CLI 命令表示例、开发指南、完成标准
+  - `docs/dev/11-配置部署与路线图.md`：配置模型 DSN 和 benchmark 命令
+
+**验证数据**：
+- `grep -r codameta` 全项目检查：0 处残留
+- `go build ./cmd/codeschema` 编译通过
+- `codeschema version` 输出 `CodeSchema v0.1.0` 正常
+
+**遗留 TODO / 风险**：
+- 无
+
+---
+
+### Commit 1: docs(dev): 全维度文档分析评估与开发文档分割
+
+**Commit Hash**: `c0d3ec0`
 
 **核心改动点**：
 - 对原始文档 `代码元数据KV_DB系统_开发文档.md`（1270行，v7版）进行全维度分析评估

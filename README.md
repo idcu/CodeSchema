@@ -43,16 +43,16 @@ docs/dev/
 
 ```bash
 # 构建
-go build -o codameta ./cmd/codameta
+go build -o codeschema ./cmd/codeschema
 
 # 扫描仓库
-./codameta scan ./repo --lang go
+./codeschema scan ./repo --lang go
 
 # 启动 MCP Server
-./codameta mcp --addr :8080
+./codeschema mcp --addr :8080
 
 # 启动 HTTP API
-./codameta serve --http :8081
+./codeschema serve --http :8081
 ```
 
 ## 阶段路线
