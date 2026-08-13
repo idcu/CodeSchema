@@ -3,189 +3,10 @@ package config
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 )
 
-type yamlNode struct {
-	kind  nodeKind
-	key   string
-	value any
-}
-
-type nodeKind int
-
-const (
-	kindMap nodeKind = iota
-	kindList
-	kindString
-	kindNumber
-	kindBool
-	kindNull
-)
-
-func parseYAML(input string) (map[string]any, error) {
-	lines := strings.Split(input, "\n")
-	result := make(map[string]any)
-
-	var stack []map[string]any
-	stack = append(stack, result)
-
-	for _, line := range lines {
-		line = strings.TrimRight(line, " \t\r\n")
-
-		if line == "" || isComment(line) {
-			continue
-		}
-
-		indent, key, content := splitLine(line)
-		if key == "" {
-			continue
-		}
-
-		depth := indent / 2
-		for len(stack) > depth+1 {
-			stack = stack[:len(stack)-1]
-		}
-		current := stack[len(stack)-1]
-
-		switch {
-		case content == "" || strings.HasSuffix(content, ":"):
-			// Start of a new map
-			newMap := make(map[string]any)
-			current[key] = newMap
-			stack = append(stack, newMap)
-		case strings.HasPrefix(content, "-"):
-			// List item
-			content = strings.TrimSpace(strings.TrimPrefix(content, "-"))
-			val := parseValue(content)
-			if _, ok := current[key]; !ok {
-				current[key] = []any{}
-			}
-			if list, ok := current[key].([]any); ok {
-				current[key] = append(list, val)
-			}
-		default:
-			// Key: value
-			val := parseValue(content)
-			current[key] = val
-		}
-	}
-
-	return result, nil
-}
-
-func isComment(line string) bool {
-	l := strings.TrimLeft(line, " \t")
-	return strings.HasPrefix(l, "#")
-}
-
-// stripInlineComment removes trailing inline comments from a value string.
-// It finds the first unquoted # and strips everything from there.
-func stripInlineComment(s string) string {
-	inSingle := false
-	inDouble := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == '"' && !inSingle:
-			inDouble = !inDouble
-		case ch == '\'' && !inDouble:
-			inSingle = !inSingle
-		case ch == '#' && !inSingle && !inDouble:
-			// Strip from this # to end
-			return strings.TrimRight(s[:i], " \t")
-		}
-	}
-	return s
-}
-
-func splitLine(line string) (int, string, string) {
-	indent := 0
-	for _, r := range line {
-		if r == ' ' || r == '\t' {
-			indent++
-		} else {
-			break
-		}
-	}
-
-	trimmed := line[indent:]
-	colonIdx := strings.Index(trimmed, ":")
-	if colonIdx == -1 {
-		return indent, trimmed, ""
-	}
-
-	key := trimmed[:colonIdx]
-	content := trimmed[colonIdx+1:]
-	content = strings.TrimSpace(content)
-
-	// Strip inline comments (content before first unquoted #)
-	content = stripInlineComment(content)
-
-	return indent, key, content
-}
-
-func parseValue(s string) any {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-
-	// Check for boolean
-	if lower := strings.ToLower(s); lower == "true" {
-		return true
-	} else if lower == "false" {
-		return false
-	}
-
-	// Check for null/nil
-	if lower := strings.ToLower(s); lower == "null" || lower == "nil" {
-		return nil
-	}
-
-	// Check for number
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-
-	// Unquote if quoted
-	if len(s) >= 2 && (s[0] == '"' && s[len(s)-1] == '"' || s[0] == '\'' && s[len(s)-1] == '\'') {
-		s = s[1 : len(s)-1]
-		return s
-	}
-
-	// Check for inline list [a, b, c]
-	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		s = strings.Trim(s, "[]")
-		if s == "" {
-			return []any{}
-		}
-		parts := strings.Split(s, ",")
-		list := make([]any, 0, len(parts))
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				list = append(list, parseValue(p))
-			}
-		}
-		return list
-	}
-
-	// Default to string
-	return s
-}
-
-func parseJSON(data []byte) (map[string]any, error) {
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
+// applyToConfig 将解析后的 map 数据合并到默认配置中。
+// 仅 JSON 配置使用此路径；YAML 配置直接通过 yaml.v3 的 Unmarshal 合并。
 func applyToConfig(cfg *Config, parsed map[string]any) error {
 	if v, ok := parsed["project"]; ok {
 		if m, ok := v.(map[string]any); ok {
@@ -439,4 +260,9 @@ func toInt(v any) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// jsonUnmarshal 是 json.Unmarshal 的封装，用于 JSON 配置解析。
+func jsonUnmarshal(data []byte, v any) error {
+	return json.Unmarshal(data, v)
 }

@@ -1,8 +1,7 @@
-// Package config 提供 YAML 配置文件的加载与管理。
+// Package config 提供 YAML/JSON 配置文件的加载与管理。
 //
-// 由于网络不可用无法下载 gopkg.in/yaml.v3，本包实现了一个最小 YAML 子集解析器，
-// 覆盖 CodeSchema 配置文件的全部语法（键值对、嵌套映射、列表、注释、基本类型）。
-// 后续网络恢复后可切换到 yaml.v3。
+// 使用 gopkg.in/yaml.v3 解析 YAML 配置文件，支持全部 YAML 语法。
+// JSON 配置文件通过 encoding/json 解析。
 package config
 
 import (
@@ -10,101 +9,103 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config 顶层配置结构。
 type Config struct {
-	Project ProjectConfig `json:"project"`
-	Storage StorageConfig `json:"storage"`
-	Parser  ParserConfig  `json:"parser"`
-	AI      AIConfig      `json:"ai"`
-	Server  ServerConfig  `json:"server"`
-	Watcher WatcherConfig `json:"watcher"`
-	Scanner ScannerConfig `json:"scanner"`
+	Project ProjectConfig `yaml:"project" json:"project"`
+	Storage StorageConfig `yaml:"storage" json:"storage"`
+	Parser  ParserConfig  `yaml:"parser" json:"parser"`
+	AI      AIConfig      `yaml:"ai" json:"ai"`
+	Server  ServerConfig  `yaml:"server" json:"server"`
+	Watcher WatcherConfig `yaml:"watcher" json:"watcher"`
+	Scanner ScannerConfig `yaml:"scanner" json:"scanner"`
 }
 
 // ProjectConfig 项目配置。
 type ProjectConfig struct {
-	Name      string   `json:"name"`
-	Root      string   `json:"root"`
-	Languages []string `json:"languages"`
+	Name      string   `yaml:"name" json:"name"`
+	Root      string   `yaml:"root" json:"root"`
+	Languages []string `yaml:"languages" json:"languages"`
 }
 
 // StorageConfig 存储配置。
 type StorageConfig struct {
-	Driver string        `json:"driver"`
-	DSN    string        `json:"dsn"`
-	KV     string        `json:"kv"`
-	Vector VectorConfig  `json:"vector"`
-	Search SearchConfig  `json:"search"`
+	Driver string        `yaml:"driver" json:"driver"`
+	DSN    string        `yaml:"dsn" json:"dsn"`
+	KV     string        `yaml:"kv" json:"kv"`
+	Vector VectorConfig  `yaml:"vector" json:"vector"`
+	Search SearchConfig  `yaml:"search" json:"search"`
 }
 
 // VectorConfig 向量库配置。
 type VectorConfig struct {
-	Driver         string `json:"driver"`
-	DSN            string `json:"dsn"`
-	EmbeddingModel string `json:"embedding_model"`
+	Driver         string `yaml:"driver" json:"driver"`
+	DSN            string `yaml:"dsn" json:"dsn"`
+	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model"`
 }
 
 // SearchConfig 搜索配置。
 type SearchConfig struct {
-	FTS      bool `json:"fts"`
-	Semantic bool `json:"semantic"`
+	FTS      bool `yaml:"fts" json:"fts"`
+	Semantic bool `yaml:"semantic" json:"semantic"`
 }
 
 // ParserConfig 解析器配置。
 type ParserConfig struct {
-	Adapters    []string            `json:"adapters"`
-	SCIP        SCIPConfig          `json:"scip"`
-	CodeGraph   CodeGraphConfig     `json:"codegraph"`
-	JCodeIndexer JCodeIndexerConfig `json:"jcodeindexer"`
+	Adapters     []string           `yaml:"adapters" json:"adapters"`
+	SCIP         SCIPConfig         `yaml:"scip" json:"scip"`
+	CodeGraph    CodeGraphConfig    `yaml:"codegraph" json:"codegraph"`
+	JCodeIndexer JCodeIndexerConfig `yaml:"jcodeindexer" json:"jcodeindexer"`
 }
 
 // SCIPConfig SCIP 适配器配置。
 type SCIPConfig struct {
-	IndexDir string `json:"index_dir"`
+	IndexDir string `yaml:"index_dir" json:"index_dir"`
 }
 
 // CodeGraphConfig CodeGraph 适配器配置。
 type CodeGraphConfig struct {
-	DB string `json:"db"`
+	DB string `yaml:"db" json:"db"`
 }
 
 // JCodeIndexerConfig JCodeIndexer 适配器配置。
 type JCodeIndexerConfig struct {
-	DB         string            `json:"db"`
-	ConfigFile string            `json:"config_file"`
-	Env        map[string]string `json:"env"`
+	DB         string            `yaml:"db" json:"db"`
+	ConfigFile string            `yaml:"config_file" json:"config_file"`
+	Env        map[string]string `yaml:"env" json:"env"`
 }
 
 // AIConfig AI 增强配置。
 type AIConfig struct {
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	BudgetPerScan  int    `json:"budget_per_scan"`
-	BudgetPerQuery int    `json:"budget_per_query"`
+	Provider       string `yaml:"provider" json:"provider"`
+	Model          string `yaml:"model" json:"model"`
+	BudgetPerScan  int    `yaml:"budget_per_scan" json:"budget_per_scan"`
+	BudgetPerQuery int    `yaml:"budget_per_query" json:"budget_per_query"`
 }
 
 // ServerConfig 服务器配置。
 type ServerConfig struct {
-	MCPAddr   string `json:"mcp_addr"`
-	HTTPAddr  string `json:"http_addr"`
-	AuthToken string `json:"auth_token"`
+	MCPAddr   string `yaml:"mcp_addr" json:"mcp_addr"`
+	HTTPAddr  string `yaml:"http_addr" json:"http_addr"`
+	AuthToken string `yaml:"auth_token" json:"auth_token"`
 }
 
 // WatcherConfig 文件监听配置。
 type WatcherConfig struct {
-	Enabled    bool     `json:"enabled"`
-	DebounceMs int      `json:"debounce_ms"`
-	IgnoreDirs []string `json:"ignore_dirs"`
-	BatchSize  int      `json:"batch_size"`
+	Enabled    bool     `yaml:"enabled" json:"enabled"`
+	DebounceMs int      `yaml:"debounce_ms" json:"debounce_ms"`
+	IgnoreDirs []string `yaml:"ignore_dirs" json:"ignore_dirs"`
+	BatchSize  int      `yaml:"batch_size" json:"batch_size"`
 }
 
 // ScannerConfig 扫描器配置。
 type ScannerConfig struct {
-	Workers          int `json:"workers"`
-	FileSizeLimitMB  int `json:"file_size_limit_mb"`
-	LineCountLimit   int `json:"line_count_limit"`
+	Workers          int `yaml:"workers" json:"workers"`
+	FileSizeLimitMB  int `yaml:"file_size_limit_mb" json:"file_size_limit_mb"`
+	LineCountLimit   int `yaml:"line_count_limit" json:"line_count_limit"`
 }
 
 // DefaultConfig 返回带默认值的 Config。
@@ -168,7 +169,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Load 从指定路径读取 YAML 配置文件，与默认值合并后返回。
+// Load 从指定路径读取 YAML/JSON 配置文件，与默认值合并后返回。
 // 支持 .yaml、.yml、.json 三种格式。若文件不存在则不报错，返回默认值。
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
@@ -188,16 +189,14 @@ func Load(path string) (*Config, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".yaml", ".yml":
-		parsed, err := parseYAML(string(data))
-		if err != nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("config: parse yaml %s: %w", path, err)
 		}
-		if err := applyToConfig(cfg, parsed); err != nil {
-			return nil, fmt.Errorf("config: apply %s: %w", path, err)
-		}
 	case ".json":
-		parsed, err := parseJSON(data)
-		if err != nil {
+		// 先用 JSON 解析到 map，再通过 yaml.v3 的 Marshal/Unmarshal 合并到 Config
+		// 这样可以复用 yaml.v3 的字段标签
+		var parsed map[string]any
+		if err := jsonUnmarshal(data, &parsed); err != nil {
 			return nil, fmt.Errorf("config: parse json %s: %w", path, err)
 		}
 		if err := applyToConfig(cfg, parsed); err != nil {
