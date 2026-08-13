@@ -8,7 +8,7 @@
 
 ### Commit 36: perf(log): 日志模块 data race 修复 — sync.Mutex 保护全局 defaultLogger
 
-**Commit Hash**: `（待提交）`
+**Commit Hash**: `94f5047`
 
 **核心改动点**：
 - `internal/log/logger.go` — 新增 `sync.Mutex` 保护全局 `defaultLogger` 变量，避免并发 Init/InitWriter/L 调用时的 data race
