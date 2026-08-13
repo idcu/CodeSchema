@@ -8,7 +8,7 @@
 
 ### Commit 22: fix(index): 解决 #5 向量索引为空 — mcp/serve 启动时自动构建索引
 
-**Commit Hash**: (待提交)
+**Commit Hash**: `ab30caf`
 
 **核心改动点**：
 - `cmd/codeschema/main.go` — `mcpCmd` 和 `serveCmd` 启动时自动调用 `svc.BuildIndex(ctx)` 从 Store 全量构建 FTS 和向量索引
