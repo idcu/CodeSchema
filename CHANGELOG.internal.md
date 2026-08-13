@@ -8,7 +8,7 @@
 
 ### Commit 16: feat(search): P8.3 自动索引构建与增量同步
 
-**Commit Hash**: `29f980f`
+**Commit Hash**: `d0f5f23`
 
 **核心改动点**：
 - `internal/search/builder.go` — IndexBuilder 自动索引构建器，BuildFromStore 全量构建（文件→类→方法递归遍历）、BuildAndIndex 增量更新（单文件触发）、IndexDocument 单文档索引
