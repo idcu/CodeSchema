@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 00:35
-> 当前阶段：全部外部依赖已安装 — go-sqlite3 + go-tree-sitter + onnxruntime_go
+> 更新时间：2026-08-14 00:40
+> 当前阶段：全部外部依赖已安装 — chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go
 > 下一个阶段：P10 — 异步索引多 worker 扩展 + 日志集成 + 集成测试
 
 ---
@@ -197,10 +197,10 @@ P9       [████████████████████] 100%
 
 ## 已知问题
 
-1. ~~**网络不可用**：无法下载 `mattn/go-sqlite3`、`chromem-go` 等外部包。~~ **已解决**：全部外部包已从本地 Go 模块缓存安装（go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。`chromem-go` 不在缓存中，当前使用纯 Go 替代方案。
-2. ~~**轮询监听性能**~~ **已解决**：`FsWatcher` 已实现。
-3. ~~**tree-sitter C 绑定**~~ **已解决**：`go-tree-sitter` 已安装，自带各语言 parser.c 源码，无需外部 tree-sitter C 库（CGO 自编译）。
-4. ~~**语义检索精度**~~ **部分解决**：`onnxruntime_go` 已安装，运行时需 `onnxruntime.dll`（可从 onnxruntime releases 下载）。P10 可集成 bge-small-zh ONNX 模型。
+1. ~~**网络不可用**：无法下载外部包。~~ **已解决**：全部外部包已从本地安装（chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。
+2. ~~**轮询监听性能**~~ **已解决**：FsWatcher 已实现。
+3. ~~**tree-sitter C 绑定**~~ **已解决**：go-tree-sitter 已安装，自带 parser.c 源码，CGO 自编译。
+4. ~~**语义检索精度**~~ **部分解决**：onnxruntime_go 已安装，运行时需 onnxruntime.dll。
 5. 向量索引为空：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。
 
 ## 接手说明

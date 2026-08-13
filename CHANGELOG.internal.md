@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 21: deps(go): 安装 chromem-go 向量数据库
+
+**Commit Hash**: `待生成`
+
+**核心改动点**：
+- `go.mod` — 新增 `replace github.com/philippgille/chromem-go => ./down/chromem-go/chromem-go-main`，从本地源码安装（纯 Go，零依赖，无需 CGO）
+- chromem-go 是内嵌式向量数据库，支持内存 + 可选持久化，1000 条文档查询 0.3ms
+- 为后续替换当前 MemoryStore 提供更专业的向量存储方案
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 18 个包全部通过，0 失败
+
+**遗留 TODO**：
+- 实际集成 chromem-go 替换当前 MemoryStore 留待后续 P8.3/P10 实现
+- `replace` 指向本地 `down/` 目录（已加入 .gitignore），生产环境需改为 `go get` 远程安装
+
 ### Commit 20: deps(go): 安装全部外部依赖包
 
 **Commit Hash**: `a8e465f`
