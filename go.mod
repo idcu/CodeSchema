@@ -4,6 +4,7 @@ go 1.25.2
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/philippgille/chromem-go v0.0.0-00010101000000-000000000000
 	gopkg.in/yaml.v3 v3.0.1
 )
 
