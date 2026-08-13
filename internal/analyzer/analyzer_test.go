@@ -27,6 +27,12 @@ func (m *mockStore) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR
 func (m *mockStore) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
 func (m *mockStore) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
 func (m *mockStore) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
+func (m *mockStore) UpsertTags(_ context.Context, _ int64, _ []string) error              { return nil }
+func (m *mockStore) UpsertMethodTags(_ context.Context, _ int64, _ []string) error         { return nil }
+func (m *mockStore) GetTagsByClassID(_ context.Context, _ int64) ([]string, error)         { return nil, nil }
+func (m *mockStore) GetTagsByMethodID(_ context.Context, _ int64) ([]string, error)        { return nil, nil }
+func (m *mockStore) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error)     { return nil, nil, nil }
+func (m *mockStore) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) { return nil, nil }
 
 func (m *mockStore) GetAllFiles(_ context.Context) ([]*store.FileRecord, error) {
 	return m.files, nil

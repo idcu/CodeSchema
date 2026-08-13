@@ -57,6 +57,24 @@ type Store interface {
 	// GetCallsByFileID 按文件 ID 查询调用关系。
 	GetCallsByFileID(ctx context.Context, fileID int64) ([]CallRecord, error)
 
+	// UpsertTags 设置类标签（全量替换）。
+	UpsertTags(ctx context.Context, classID int64, tags []string) error
+
+	// UpsertMethodTags 设置方法标签（全量替换）。
+	UpsertMethodTags(ctx context.Context, methodID int64, tags []string) error
+
+	// GetTagsByClassID 获取类的标签列表。
+	GetTagsByClassID(ctx context.Context, classID int64) ([]string, error)
+
+	// GetTagsByMethodID 获取方法的标签列表。
+	GetTagsByMethodID(ctx context.Context, methodID int64) ([]string, error)
+
+	// SearchByTag 按标签搜索类和方法的 ID 列表。
+	SearchByTag(ctx context.Context, tag string) (classIDs []int64, methodIDs []int64, err error)
+
+	// GetAllTagsWithCategories 返回所有已知标签及其分类。
+	GetAllTagsWithCategories(ctx context.Context) (map[string]string, error)
+
 	// HealthCheck 返回存储层健康状态。
 	HealthCheck(ctx context.Context) error
 }

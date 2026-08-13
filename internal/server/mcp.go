@@ -166,6 +166,36 @@ func defineTools() []mcpTool {
 				Required: []string{"q"},
 			},
 		},
+		{
+			Name:        "get_tags",
+			Description: "获取指定符号（类/方法）的标签列表",
+			InputSchema: toolParams{
+				Type: "object",
+				Properties: map[string]toolProperty{
+					"symbol": {Type: "string", Description: "类/方法全限定名"},
+				},
+				Required: []string{"symbol"},
+			},
+		},
+		{
+			Name:        "search_by_tag",
+			Description: "按标签搜索类和方法的 ID 和名称",
+			InputSchema: toolParams{
+				Type: "object",
+				Properties: map[string]toolProperty{
+					"tag": {Type: "string", Description: "标签名，如 controller/service/cache/go"},
+				},
+				Required: []string{"tag"},
+			},
+		},
+		{
+			Name:        "get_all_tags",
+			Description: "获取所有已知标签及其分类统计",
+			InputSchema: toolParams{
+				Type: "object",
+				Properties: map[string]toolProperty{},
+			},
+		},
 	}
 }
 
@@ -362,6 +392,29 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 		mode, _ := args["mode"].(string)
 		limit, _ := toInt(args["limit"])
 		result, err := m.service.Search(ctx, query, mode, limit)
+		if err != nil {
+			return mcpError(id, err)
+		}
+		return mcpResult(id, result)
+
+	case "get_tags":
+		symbol, _ := args["symbol"].(string)
+		result, err := m.service.GetTags(ctx, symbol)
+		if err != nil {
+			return mcpError(id, err)
+		}
+		return mcpResult(id, result)
+
+	case "search_by_tag":
+		tag, _ := args["tag"].(string)
+		result, err := m.service.SearchByTag(ctx, tag)
+		if err != nil {
+			return mcpError(id, err)
+		}
+		return mcpResult(id, result)
+
+	case "get_all_tags":
+		result, err := m.service.GetAllTags(ctx)
 		if err != nil {
 			return mcpError(id, err)
 		}

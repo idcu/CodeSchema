@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"codeschema/internal/ai"
 	"codeschema/internal/store"
 )
 
@@ -73,6 +74,16 @@ func (a *Analyzer) SetJavaStdlibPrefixes(prefixes []string) {
 // 传入 nil 表示不限制模块名。
 func (a *Analyzer) SetGradleModuleNames(names []string) {
 	a.gradleResolver.moduleNames = names
+}
+
+// TagAll 对所有已索引的实体执行标签自动推导并存储。
+//
+// 使用 ai.Tagger 的规则引擎，基于类名、方法名、目录路径、
+// 文档注释和文件语言推导六类标签（layer/biz/tech/risk/test/lang）。
+// 标签通过 Store 接口持久化。
+func (a *Analyzer) TagAll(ctx context.Context) error {
+	tagger := ai.NewTagger(a.store)
+	return tagger.DeriveAllTags(ctx)
 }
 
 // BuildAll 构建所有代码图（单次遍历）。

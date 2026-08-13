@@ -35,13 +35,16 @@
 
 ### 3.1 接口表
 
-| 接口 | 方法 | 用途 | 请求参数 | 响应 |
-|---|---|---|---|---|
-| `GET /context` | GET | 返回方法源码 ± N 行 + 类字段 + 接口 + 单测路径 | `symbol`（必需，全限定名）、`context_lines`（可选，默认 5） | `{symbol, source, class, tests, impacted_by}` |
-| `GET /impact` | GET | 返回上游调用方列表 | `method`（必需）、`depth`（可选，默认 1） | `{method, callers: [{method, depth}], callees: [{method, depth}]}` |
-| `GET /tests` | GET | 返回关联单测 | `method`（必需）、`min_confidence`（可选，默认 60） | `{method, tests: [{test_method, strategy, confidence}]}` |
-| `GET /search` | GET | 精确 + 语义双路检索 | `q`（必需）、`mode`（可选，`exact`/`semantic`/`both`，默认 `both`）、`limit`（可选，默认 20） | `{results: [{symbol, kind, file, score, snippet}]}` |
-| `GET /health` | GET | 健康检查 | — | `{status, db, kv, vector}` |
+| 接口 | 方法 | 用途 | 请求参数 | 响应 | 阶段 |
+|---|---|---|---|---|---|---|
+| `GET /context` | GET | 返回方法源码 ± N 行 + 类字段 + 接口 + 单测路径 | `symbol`（必需，全限定名）、`context_lines`（可选，默认 5） | `{symbol, source, class, tests, impacted_by}` | P0 |
+| `GET /impact` | GET | 返回上游调用方列表 | `method`（必需）、`depth`（可选，默认 1） | `{method, callers: [{method, depth}], callees: [{method, depth}]}` | P0 |
+| `GET /tests` | GET | 返回关联单测 | `method`（必需）、`min_confidence`（可选，默认 60） | `{method, tests: [{test_method, strategy, confidence}]}` | P0 |
+| `GET /search` | GET | 精确 + 语义双路检索 | `q`（必需）、`mode`（可选，`exact`/`semantic`/`both`，默认 `both`）、`limit`（可选，默认 20） | `{results: [{symbol, kind, file, score, snippet}]}` | P0 |
+| `GET /health` | GET | 健康检查 | — | `{status, db, kv, vector}` | P0 |
+| `GET /tags` | GET | 获取指定符号的标签列表 | `symbol`（必需，全限定名） | `{symbol, kind, tags, categories}` | P5 |
+| `GET /tags/search` | GET | 按标签搜索类和方法 | `tag`（必需，如 `controller`） | `{tag, class_ids: [{id, name}], method_ids: [{id, name}]}` | P5 |
+| `GET /tags/all` | GET | 获取所有已知标签及分类统计 | — | `{tags: {tag_name: category}}` | P5 |
 
 ### 3.2 错误响应格式
 
@@ -68,20 +71,23 @@
 
 ## 4. MCP Server
 
-MCP Server 提供 8 个工具，命名对齐 CodeGraph 与 JCodeIndexer 事实标准，降低 Agent 迁移成本。
+MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph 与 JCodeIndexer 事实标准，降低 Agent 迁移成本。
 
 ### 4.1 工具表
 
-| 工具 | 入参 | 返回 | 对标 |
-|---|---|---|---|
-| `context` | `symbol: string`（类/方法全名） | 精准裁剪上下文（方法体 + 字段 + 接口 + 单测） | CodeGraph `codegraph_context` |
-| `impact` | `method: string`, `depth?: number` | 上游调用方 + 下游被调 | CodeGraph `codegraph_impact` |
-| `tests` | `method: string`, `min_confidence?: number` | 关联单测列表（含 dependency） | CodeGraph `codegraph_affected` |
-| `affected` | `symbol: string`, `recursive?: boolean` | 递归 import/include 依赖找受影响测试 | CodeGraph `affected` |
-| `get_call_graph` | `symbol: string`, `depth?: number` | 调用图（双向），返回节点 + 边列表 | JCodeIndexer |
-| `search_config` | `pattern: string` | 配置项/注解搜索 | JCodeIndexer |
-| `find_dependencies` | `symbol: string` | 依赖关系列表 | JCodeIndexer |
-| `search_symbols` | `q: string`, `mode?: string`, `limit?: number` | 符号搜索（FTS5 + 向量） | code-context-mcp |
+| 工具 | 入参 | 返回 | 对标 | 阶段 |
+|---|---|---|---|---|
+| `context` | `symbol: string`（类/方法全名） | 精准裁剪上下文（方法体 + 字段 + 接口 + 单测） | CodeGraph `codegraph_context` | P0 |
+| `impact` | `method: string`, `depth?: number` | 上游调用方 + 下游被调 | CodeGraph `codegraph_impact` | P0 |
+| `tests` | `method: string`, `min_confidence?: number` | 关联单测列表（含 dependency） | CodeGraph `codegraph_affected` | P0 |
+| `affected` | `symbol: string`, `recursive?: boolean` | 递归 import/include 依赖找受影响测试 | CodeGraph `affected` | P0 |
+| `get_call_graph` | `symbol: string`, `depth?: number` | 调用图（双向），返回节点 + 边列表 | JCodeIndexer | P0 |
+| `search_config` | `pattern: string` | 配置项/注解搜索 | JCodeIndexer | P0 |
+| `find_dependencies` | `symbol: string` | 依赖关系列表 | JCodeIndexer | P0 |
+| `search_symbols` | `q: string`, `mode?: string`, `limit?: number` | 符号搜索（FTS5 + 向量） | code-context-mcp | P0 |
+| `get_tags` | `symbol: string`（类/方法全限定名） | 指定符号的标签列表 | P5 新增 | P5 |
+| `search_by_tag` | `tag: string`（如 `controller`） | 按标签搜索类和方法 | P5 新增 | P5 |
+| `get_all_tags` | — | 所有已知标签及分类统计 | P5 新增 | P5 |
 
 ---
 
@@ -144,8 +150,8 @@ func (s *MCPServer) Stop() error
 ## 6. 完成标准
 
 - [x] CLI 全部 8 个命令可运行，`codeschema version` 输出正确版本号。
-- [x] HTTP API 全部 5 个接口响应正确，返回 JSON 格式。
+- [x] HTTP API 全部 8 个接口（P0 5 个 + P5 3 个）响应正确，返回 JSON 格式。
 - [x] 错误中间件覆盖全部 5 种错误码，响应格式统一。
-- [x] MCP Server 启动成功，所有 8 个工具注册成功。
+- [x] MCP Server 启动成功，所有 11 个工具（P0 8 个 + P5 3 个）注册成功。
 - [x] MCP 工具调用返回正确结果，参数校验返回友好错误。
 - [ ] 集成测试：HTTP + MCP 一次启动测试全部接口。（P1 实现）

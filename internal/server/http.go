@@ -39,6 +39,11 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/tests", h.handleTests)
 	mux.HandleFunc("/search", h.handleSearch)
 
+	// 标签相关端点
+	mux.HandleFunc("/tags", h.handleGetTags)
+	mux.HandleFunc("/tags/search", h.handleSearchByTag)
+	mux.HandleFunc("/tags/all", h.handleGetAllTags)
+
 	// 包装为带错误恢复的中间件
 	handler := h.errorRecoveryMiddleware(h.corsMiddleware(mux))
 
@@ -150,6 +155,52 @@ func (h *HTTPServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
 	result, err := h.service.Search(r.Context(), query, mode, limit)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ---- 标签路由处理函数 ----
+
+func (h *HTTPServer) handleGetTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
+		return
+	}
+
+	symbol := r.URL.Query().Get("symbol")
+	result, err := h.service.GetTags(r.Context(), symbol)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *HTTPServer) handleSearchByTag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
+		return
+	}
+
+	tag := r.URL.Query().Get("tag")
+	result, err := h.service.SearchByTag(r.Context(), tag)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *HTTPServer) handleGetAllTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
+		return
+	}
+
+	result, err := h.service.GetAllTags(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return

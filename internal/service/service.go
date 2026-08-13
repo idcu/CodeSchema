@@ -113,7 +113,7 @@ type TestResult struct {
 	Confidence int    `json:"confidence"`
 }
 
-// GetTests 获取关联单测（P0 骨架，返回占位数据）。
+// GetTests 获取关联单测，使用多种策略（naming/same_tag/dependency）。
 func (s *Service) GetTests(ctx context.Context, method string, minConfidence int) ([]TestResult, error) {
 	if method == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "method is required"}
@@ -121,7 +121,21 @@ func (s *Service) GetTests(ctx context.Context, method string, minConfidence int
 	if minConfidence <= 0 {
 		minConfidence = 60
 	}
-	return []TestResult{}, nil
+
+	links, err := s.FindTestLinks(ctx, method, minConfidence)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find test links: %v", err)}
+	}
+
+	results := make([]TestResult, 0, len(links))
+	for _, link := range links {
+		results = append(results, TestResult{
+			TestMethod: link.TestMethod,
+			Strategy:   link.Strategy,
+			Confidence: link.Confidence,
+		})
+	}
+	return results, nil
 }
 
 // SearchResult 搜索结果项。
@@ -165,6 +179,174 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 		"depth":  depth,
 		"nodes":  []string{},
 		"edges":  []string{},
+	}, nil
+}
+
+// TagResult 标签查询结果。
+type TagResult struct {
+	Symbol     string            `json:"symbol"`
+	Kind       string            `json:"kind"` // "class" or "method"
+	Tags       []string          `json:"tags"`
+	Categories map[string]string `json:"categories,omitempty"` // tag -> category
+}
+
+// GetTags 获取指定符号的标签列表。
+//
+// symbol 格式：类的 FullName 或方法的 FullName。
+// 先尝试按类名查询，再按方法名查询。
+func (s *Service) GetTags(ctx context.Context, symbol string) (*TagResult, error) {
+	if symbol == "" {
+		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
+	}
+
+	// 先尝试按类名查询（通过所有文件）
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("get all files: %v", err)}
+	}
+
+	for _, f := range files {
+		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, cls := range classes {
+			if cls.FullName == symbol {
+				tags, err := s.store.GetTagsByClassID(ctx, cls.ID)
+				if err != nil {
+					return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("get tags: %v", err)}
+				}
+				cats, _ := s.store.GetAllTagsWithCategories(ctx)
+				result := &TagResult{
+					Symbol: symbol,
+					Kind:   "class",
+					Tags:   tags,
+				}
+				if len(cats) > 0 {
+					filtered := make(map[string]string)
+					for _, t := range tags {
+						if c, ok := cats[t]; ok {
+							filtered[t] = c
+						}
+					}
+					result.Categories = filtered
+				}
+				return result, nil
+			}
+
+			// 在方法中查询
+			methods, err := s.store.GetMethodsByClassID(ctx, cls.ID)
+			if err != nil {
+				continue
+			}
+			for _, m := range methods {
+				if m.FullName == symbol {
+					tags, err := s.store.GetTagsByMethodID(ctx, m.ID)
+					if err != nil {
+						return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("get tags: %v", err)}
+					}
+					cats, _ := s.store.GetAllTagsWithCategories(ctx)
+					result := &TagResult{
+						Symbol: symbol,
+						Kind:   "method",
+						Tags:   tags,
+					}
+					if len(cats) > 0 {
+						filtered := make(map[string]string)
+						for _, t := range tags {
+							if c, ok := cats[t]; ok {
+								filtered[t] = c
+							}
+						}
+						result.Categories = filtered
+					}
+					return result, nil
+				}
+			}
+		}
+	}
+
+	return nil, &ServiceError{Code: "ERR_SYMBOL_NOT_FOUND", Message: fmt.Sprintf("symbol not found: %s", symbol)}
+}
+
+// TagSearchResult 标签搜索结果。
+type TagSearchResult struct {
+	Tag       string   `json:"tag"`
+	ClassIDs  []int64  `json:"class_ids,omitempty"`
+	MethodIDs []int64  `json:"method_ids,omitempty"`
+	Classes   []string `json:"classes,omitempty"`   // 类名列表
+	Methods   []string `json:"methods,omitempty"`   // 方法名列表
+}
+
+// SearchByTag 按标签搜索类和方法的 ID 和名称。
+func (s *Service) SearchByTag(ctx context.Context, tag string) (*TagSearchResult, error) {
+	if tag == "" {
+		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "tag is required"}
+	}
+
+	classIDs, methodIDs, err := s.store.SearchByTag(ctx, tag)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search by tag: %v", err)}
+	}
+
+	result := &TagSearchResult{
+		Tag:       tag,
+		ClassIDs:  classIDs,
+		MethodIDs: methodIDs,
+	}
+
+	// 解析类名
+	files, _ := s.store.GetAllFiles(ctx)
+	for _, cid := range classIDs {
+		for _, f := range files {
+			classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+			for _, cls := range classes {
+				if cls.ID == cid {
+					result.Classes = append(result.Classes, cls.FullName)
+				}
+			}
+		}
+	}
+
+	// 解析方法名
+	for _, mid := range methodIDs {
+		for _, f := range files {
+			classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+			for _, cls := range classes {
+				methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
+				for _, m := range methods {
+					if m.ID == mid {
+						result.Methods = append(result.Methods, m.FullName)
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// AllTagsResult 所有标签及其分类。
+type AllTagsResult struct {
+	Tags       map[string]string `json:"tags"`        // tag -> category
+	Categories map[string]int    `json:"categories"`  // category -> count
+}
+
+// GetAllTags 返回所有已知标签及其分类统计。
+func (s *Service) GetAllTags(ctx context.Context) (*AllTagsResult, error) {
+	tags, err := s.store.GetAllTagsWithCategories(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("get all tags: %v", err)}
+	}
+
+	cats := make(map[string]int)
+	for _, cat := range tags {
+		cats[cat]++
+	}
+
+	return &AllTagsResult{
+		Tags:       tags,
+		Categories: cats,
 	}, nil
 }
 

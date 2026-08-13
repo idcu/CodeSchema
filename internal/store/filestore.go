@@ -21,6 +21,9 @@ type FileStore struct {
 	classes  map[int64][]ClassRecord  // fileID -> classes
 	methods  map[int64][]MethodRecord // classID -> methods
 	calls    map[int64][]CallRecord   // fileID -> calls
+	classTags map[int64][]string      // classID -> tags
+	methodTags map[int64][]string     // methodID -> tags
+	tagCategories map[string]string   // tag name -> category
 	nextID   int64
 }
 
@@ -84,6 +87,9 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 	fs.classes = make(map[int64][]ClassRecord)
 	fs.methods = make(map[int64][]MethodRecord)
 	fs.calls = make(map[int64][]CallRecord)
+	fs.classTags = make(map[int64][]string)
+	fs.methodTags = make(map[int64][]string)
+	fs.tagCategories = make(map[string]string)
 	fs.nextID = 1
 
 	// 尝试从磁盘恢复数据
@@ -327,22 +333,168 @@ func (fs *FileStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]Call
 	return calls, nil
 }
 
+// UpsertTags 设置类标签（全量替换）。
+func (fs *FileStore) UpsertTags(ctx context.Context, classID int64, tags []string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if len(tags) == 0 {
+		delete(fs.classTags, classID)
+		return nil
+	}
+
+	// 去重
+	seen := make(map[string]bool)
+	var unique []string
+	for _, t := range tags {
+		if !seen[t] {
+			seen[t] = true
+			unique = append(unique, t)
+		}
+	}
+	fs.classTags[classID] = unique
+
+	// 更新标签分类索引
+	for _, t := range unique {
+		if _, ok := fs.tagCategories[t]; !ok {
+			fs.tagCategories[t] = deriveTagCategory(t)
+		}
+	}
+	return nil
+}
+
+// UpsertMethodTags 设置方法标签（全量替换）。
+func (fs *FileStore) UpsertMethodTags(ctx context.Context, methodID int64, tags []string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if len(tags) == 0 {
+		delete(fs.methodTags, methodID)
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var unique []string
+	for _, t := range tags {
+		if !seen[t] {
+			seen[t] = true
+			unique = append(unique, t)
+		}
+	}
+	fs.methodTags[methodID] = unique
+
+	for _, t := range unique {
+		if _, ok := fs.tagCategories[t]; !ok {
+			fs.tagCategories[t] = deriveTagCategory(t)
+		}
+	}
+	return nil
+}
+
+// GetTagsByClassID 获取类的标签列表。
+func (fs *FileStore) GetTagsByClassID(ctx context.Context, classID int64) ([]string, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	tags, ok := fs.classTags[classID]
+	if !ok {
+		return []string{}, nil
+	}
+	return tags, nil
+}
+
+// GetTagsByMethodID 获取方法的标签列表。
+func (fs *FileStore) GetTagsByMethodID(ctx context.Context, methodID int64) ([]string, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	tags, ok := fs.methodTags[methodID]
+	if !ok {
+		return []string{}, nil
+	}
+	return tags, nil
+}
+
+// SearchByTag 按标签搜索类和方法的 ID 列表。
+func (fs *FileStore) SearchByTag(ctx context.Context, tag string) ([]int64, []int64, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	var classIDs []int64
+	for cid, tags := range fs.classTags {
+		for _, t := range tags {
+			if t == tag {
+				classIDs = append(classIDs, cid)
+				break
+			}
+		}
+	}
+
+	var methodIDs []int64
+	for mid, tags := range fs.methodTags {
+		for _, t := range tags {
+			if t == tag {
+				methodIDs = append(methodIDs, mid)
+				break
+			}
+		}
+	}
+
+	return classIDs, methodIDs, nil
+}
+
+// GetAllTagsWithCategories 返回所有已知标签及其分类。
+func (fs *FileStore) GetAllTagsWithCategories(ctx context.Context) (map[string]string, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	result := make(map[string]string, len(fs.tagCategories))
+	for k, v := range fs.tagCategories {
+		result[k] = v
+	}
+	return result, nil
+}
+
+// deriveTagCategory 根据标签名推断其分类。
+func deriveTagCategory(tag string) string {
+	switch tag {
+	case "controller", "service", "dao", "domain", "infra", "repository", "handler", "middleware", "config":
+		return "layer"
+	case "unit", "integration", "e2e", "mock":
+		return "test"
+	case "go", "java", "python", "typescript", "javascript", "cpp", "rust", "kotlin", "scala", "ruby", "php":
+		return "lang"
+	case "legacy", "todo", "deprecated", "performance", "security":
+		return "risk"
+	case "cache", "mq", "retry", "transactional", "async", "schedule", "batch":
+		return "tech"
+	default:
+		return "biz"
+	}
+}
+
 // saveToDisk 将内存数据持久化到磁盘。
 func (fs *FileStore) saveToDisk() error {
 	data := struct {
-		Files   map[string]*FileRecord   `json:"files"`
-		Classes map[int64][]ClassRecord  `json:"classes"`
-		Methods map[int64][]MethodRecord `json:"methods"`
-		Calls   map[int64][]CallRecord   `json:"calls"`
-		NextID  int64                    `json:"next_id"`
-		Updated string                   `json:"updated"`
+		Files    map[string]*FileRecord   `json:"files"`
+		Classes  map[int64][]ClassRecord  `json:"classes"`
+		Methods  map[int64][]MethodRecord `json:"methods"`
+		Calls    map[int64][]CallRecord   `json:"calls"`
+		ClassTags map[int64][]string      `json:"class_tags,omitempty"`
+		MethodTags map[int64][]string     `json:"method_tags,omitempty"`
+		TagCats  map[string]string        `json:"tag_categories,omitempty"`
+		NextID   int64                    `json:"next_id"`
+		Updated  string                   `json:"updated"`
 	}{
-		Files:   fs.files,
-		Classes: fs.classes,
-		Methods: fs.methods,
-		Calls:   fs.calls,
-		NextID:  fs.nextID,
-		Updated: time.Now().UTC().Format(time.RFC3339),
+		Files:    fs.files,
+		Classes:  fs.classes,
+		Methods:  fs.methods,
+		Calls:    fs.calls,
+		ClassTags: fs.classTags,
+		MethodTags: fs.methodTags,
+		TagCats:  fs.tagCategories,
+		NextID:   fs.nextID,
+		Updated:  time.Now().UTC().Format(time.RFC3339),
 	}
 
 	b, err := json.MarshalIndent(data, "", "  ")
@@ -371,11 +523,14 @@ func (fs *FileStore) loadFromDisk() error {
 	}
 
 	var loaded struct {
-		Files   map[string]*FileRecord   `json:"files"`
-		Classes map[int64][]ClassRecord  `json:"classes"`
-		Methods map[int64][]MethodRecord `json:"methods"`
-		Calls   map[int64][]CallRecord   `json:"calls"`
-		NextID  int64                    `json:"next_id"`
+		Files    map[string]*FileRecord   `json:"files"`
+		Classes  map[int64][]ClassRecord  `json:"classes"`
+		Methods  map[int64][]MethodRecord `json:"methods"`
+		Calls    map[int64][]CallRecord   `json:"calls"`
+		ClassTags map[int64][]string      `json:"class_tags,omitempty"`
+		MethodTags map[int64][]string     `json:"method_tags,omitempty"`
+		TagCats  map[string]string        `json:"tag_categories,omitempty"`
+		NextID   int64                    `json:"next_id"`
 	}
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return fmt.Errorf("unmarshal store: %w", err)
@@ -385,6 +540,9 @@ func (fs *FileStore) loadFromDisk() error {
 	fs.classes = loaded.Classes
 	fs.methods = loaded.Methods
 	fs.calls = loaded.Calls
+	fs.classTags = loaded.ClassTags
+	fs.methodTags = loaded.MethodTags
+	fs.tagCategories = loaded.TagCats
 	fs.nextID = loaded.NextID
 
 	if fs.files == nil {
@@ -398,6 +556,15 @@ func (fs *FileStore) loadFromDisk() error {
 	}
 	if fs.calls == nil {
 		fs.calls = make(map[int64][]CallRecord)
+	}
+	if fs.classTags == nil {
+		fs.classTags = make(map[int64][]string)
+	}
+	if fs.methodTags == nil {
+		fs.methodTags = make(map[int64][]string)
+	}
+	if fs.tagCategories == nil {
+		fs.tagCategories = make(map[string]string)
 	}
 	if fs.nextID == 0 {
 		fs.nextID = 1
