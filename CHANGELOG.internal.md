@@ -8,7 +8,7 @@
 
 ### Commit 33: fix(lsp): 修复 Init/Close 锁重入死锁，SendRequest 超时测试改为确定性取消
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `37eab95`
 
 **核心改动点**：
 - `internal/parser/adapter/lsp/adapter.go` — `Init` 方法将锁粒度从函数级缩小为仅保护子进程启动段，`sendRequest`/`sendNotification` 调用时已释放锁，消除 `sync.Mutex` 不可重入导致的死锁；`Close` 方法同样释放锁后再调用 `sendNotification`，避免关闭时死锁
