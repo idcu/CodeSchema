@@ -142,4 +142,4 @@ P5       [████████████████████] 100%
 4. 运行测试：`go test ./...`（12 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`
 6. 启动 MCP Server：`codeschema mcp --addr :8080`
-7. 最新提交：`TBD`（P5 标签分类体系 + 测试关联）
+7. 最新提交：`d76e050`（P5 标签分类体系 + 测试关联）

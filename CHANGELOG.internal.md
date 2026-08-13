@@ -6,6 +6,38 @@
 
 ## 提交记录
 
+### Commit 11: feat(ai, server, service): P5 标签分类体系（Tag）与测试关联
+
+**Commit Hash**: `d76e050`
+
+**核心改动点**：
+- `internal/ai/tagger.go` — 新增 Tag 规则推导引擎，基于类名/方法名/目录/文档注释/文件语言的六类标签（layer/biz/tech/risk/test/lang）规则推导
+- `internal/ai/tagger_test.go` — 56 个测试覆盖全部六类标签及边界情况（类标签 38 个 + 方法标签 18 个）
+- `internal/store/store.go` — Store 接口扩展：UpsertTags/UpsertMethodTags/GetTagsByClassID/GetTagsByMethodID/SearchByTag/GetAllTagsWithCategories（6 个方法）
+- `internal/store/filestore.go` — FileStore 持久化：classTags/methodTags/tagCategories 字段，saveToDisk/loadFromDisk 支持
+- `internal/analyzer/analyzer.go` — 新增 `Analyzer.TagAll()` 方法，调用 Tagger 对所有实体执行标签推导并持久化
+- `internal/service/service.go` — 新增 GetTags/SearchByTag/GetAllTags 三个查询方法
+- `internal/service/testlink.go` — 新增测试关联模块，实现三种策略（naming 类名约定 70 分/same_tag 同标签聚类 60 分/dependency 依赖递归 80 分）
+- `internal/service/testlink_test.go` — 6 个测试覆盖三种策略 + 边界情况
+- `internal/server/http.go` — 新增 3 个 HTTP 端点（GET /tags, GET /tags/search, GET /tags/all）
+- `internal/server/mcp.go` — 新增 3 个 MCP 工具（get_tags, search_by_tag, get_all_tags），MCP 工具总数从 8 个增至 11 个
+- `internal/server/mcp_test.go` — 更新 MCP 工具数量断言从 8 改为 11
+- 文档同步：docs/dev/05-接口层（CLI+HTTP+MCP）.md（HTTP 8 端点 + MCP 11 工具）、docs/dev/06-编排层与并发模型.md（P5 完成标准）、docs/dev/08-测试关联与AI增强.md（P0 已完成 + P1 待实现清单）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./... -count=1 — 全部通过（11 个包，0 失败）
+- ai 包 56 个测试全部通过（类标签 38 个 + 方法标签 18 个）
+- service 包 14 个测试全部通过（原有 8 个 + 新增 6 个 testlink 测试）
+- MCP 测试：11 个工具注册成功
+- 测试覆盖：Tag 六类标签推导、测试关联三种策略、HTTP/MCP 标签查询接口、Analyzer TagAll 集成
+
+**遗留 TODO / 风险**：
+- explicit 策略（基于显式注解的测试关联）尚未实现，P1 可补充
+- coverage 策略（基于覆盖率数据的测试关联）尚未实现，P1 可补充
+- AI 增强层（EnhanceTag/EnhanceDoc/Disambiguate）尚未实现，P1 可补充
+- 预算管控（budget_per_scan/budget_per_query）尚未实现，P1 可补充
+
 ### Commit 10: feat(analyzer): P4 Gradle 多模块路径解析 + 标准库前缀可配置化
 
 **Commit Hash**: `f0094ca`
