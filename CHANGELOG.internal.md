@@ -6,6 +6,28 @@
 
 ## 提交记录
 
+### Commit 5: feat(adapter): P0 适配器模块 — tree-sitter 文本解析 + CodeGraph 直读骨架
+
+**Commit Hash**: `[待提交]`
+
+**核心改动点**：
+- `internal/parser/adapter/adapter.go` — 适配器公共工具函数（ExtToLang/IsSourceFile/LangToExtensions/FileExists/SupportedLanguages）
+- `internal/parser/adapter/treesitter/adapter.go` — tree-sitter 文本模式解析适配器，基于正则表达式支持 6 种语言（Go/Java/TypeScript/Python/Rust/C++）的类/方法/调用提取
+- `internal/parser/adapter/codegraph/adapter.go` — CodeGraph SQLite 直读适配器骨架，实现 BatchParser 子接口，数据库不存在时返回 ErrSourceUnavailable 触发降级
+- 测试文件：treesitter/adapter_test.go（10 个测试，覆盖 6 种语言 + 空文件 + 不支持扩展名 + Init/Close）、codegraph/adapter_test.go（8 个测试，覆盖降级/分组/Init/Config）
+
+**验证数据**：
+- go build ./... — 通过
+- go test ./internal/parser/adapter/... -count=1 — 全部通过（18 个测试，0 失败）
+- go test ./internal/parser/... -count=1 — 全部通过（22 个测试，0 失败）
+- 测试覆盖：Go 类/方法解析正确性、Java 接口/枚举类型推断、TypeScript interface/class/type 区分、Python 类/方法/调用检测、Rust struct/impl 解析、空文件返回空 IR、不支持扩展名跳过、CodeGraph 数据库不存在降级返回 ErrSourceUnavailable、ParseAll 按扩展名分组
+
+**遗留 TODO / 风险**：
+- tree-sitter 适配器当前为 P0 正则实现，P1 可切换为 go-tree-sitter Go binding 获得精确语法解析
+- CodeGraph 适配器 P0 为骨架实现（ParseAll 返回空 IR），P1 需接入 go-sqlite3 读取 symbols/edges 表
+- 调用关系检测当前仅支持 Go/Python 语言，其他语言 P1 接入
+- 文档注释解析为简单实现（仅单行注释），多行注释（Javadoc/PyDoc）P1 完善
+
 ### Commit 4: feat(service, server): P0 MVP — Service 服务层 + HTTP API + MCP Server
 
 **Commit Hash**: `b68c206`
