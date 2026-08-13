@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"codeschema/internal/log"
 	"codeschema/internal/store"
 )
 
@@ -17,12 +18,13 @@ import (
 // 推导来源：包名、目录结构、类名、方法名、文档注释、文件语言。
 // 覆盖六类标签：layer / biz / tech / risk / test / lang
 type Tagger struct {
-	store store.Store
+	store  store.Store
+	logger *log.Logger
 }
 
 // NewTagger 创建标签推导器。
 func NewTagger(st store.Store) *Tagger {
-	return &Tagger{store: st}
+	return &Tagger{store: st, logger: log.WithModule("tagger")}
 }
 
 // DeriveAllTags 对所有已索引的实体执行标签推导并存储。
@@ -35,6 +37,9 @@ func (t *Tagger) DeriveAllTags(ctx context.Context) error {
 		return err
 	}
 
+	t.logger.Info("deriving tags for all entities", "files", len(files))
+
+	var classCount, methodCount int
 	for _, f := range files {
 		classes, err := t.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
@@ -45,6 +50,7 @@ func (t *Tagger) DeriveAllTags(ctx context.Context) error {
 			classTags := DeriveClassTags(cls, f)
 			if len(classTags) > 0 {
 				_ = t.store.UpsertTags(ctx, cls.ID, classTags)
+				classCount++
 			}
 
 			methods, err := t.store.GetMethodsByClassID(ctx, cls.ID)
@@ -56,10 +62,13 @@ func (t *Tagger) DeriveAllTags(ctx context.Context) error {
 				methodTags := DeriveMethodTags(m, cls, f)
 				if len(methodTags) > 0 {
 					_ = t.store.UpsertMethodTags(ctx, m.ID, methodTags)
+					methodCount++
 				}
 			}
 		}
 	}
+
+	t.logger.Info("tag derivation completed", "classes_tagged", classCount, "methods_tagged", methodCount)
 	return nil
 }
 

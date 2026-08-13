@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-13 13:35
-> 当前阶段：P5 已完成 — 标签分类体系（Tag）与测试关联
-> 下一个阶段：P6 — 可观测性增强（日志/指标/链路追踪）
+> 更新时间：2026-08-13 21:50
+> 当前阶段：P6 已完成 — 可观测性增强（日志/指标/链路追踪）
+> 下一个阶段：P7 — 配置系统（YAML 解析）
 
 ---
 
@@ -16,6 +16,7 @@ P2       [████████████████████] 100%
 P3       [████████████████████] 100%
 P4       [████████████████████] 100%
 P5       [████████████████████] 100%
+P6       [████████████████████] 100%
 ```
 
 ## 已完成工作
@@ -104,26 +105,35 @@ P5       [████████████████████] 100%
 - [x] **MCP 工具**：`get_tags`, `search_by_tag`, `get_all_tags`（共 11 个工具）
 - [x] **测试关联**：`internal/service/testlink.go`，三种策略（naming/same_tag/dependency），6 个测试
 
+### P6 — 可观测性增强（日志/指标/链路追踪）
+- [x] **结构化日志（`internal/log`）**：基于 Go 标准库 `log/slog`，支持 JSON/文本格式输出、日志级别控制、模块化 Logger、自动 caller 信息
+- [x] **基础指标（`internal/metrics`）**：纯 Go 实现 Prometheus 文本格式，支持 Counter/Gauge 类型、标签维度、线程安全
+- [x] **链路追踪（`internal/trace`）**：简单 span 模型，支持嵌套 span、耗时记录、标签附加，通过日志输出追踪信息
+- [x] **健康检查端点增强**：新增 `/health/db`（存储延迟）、`/health/kv`（缓存占位）、`/health/vector`（向量库占位）
+- [x] **安全中间件**：Bearer token 认证（`authMiddleware`）、路径遍历防护（`pathTraversalMiddleware`）、CORS、panic recovery
+- [x] **`/metrics` 端点**：暴露 Prometheus 文本格式指标数据
+- [x] **Analyzer 集成**：为 BuildAll/BuildCallGraph/BuildClassHierarchy/BuildFileGraph/BuildReverseIndex/FindImpactNodes/ShortestPath/Analyze/TagAll 添加 trace span、指标打点、日志记录
+- [x] **Scanner 集成**：为 ProcessFile/ScanAll 添加 trace span、指标打点（processed_total/files_total/errors_total/active_workers）、日志记录
+- [x] **HTTP 集成**：`requestMetricsMiddleware` 记录请求数/活跃请求数/延迟，每个请求自动 trace span
+- [x] **Tagger 集成**：添加模块化 Logger，DeriveAllTags 前后记录关键指标（classes_tagged/methods_tagged）
+- [x] 测试覆盖：log 13 个 + metrics 13 个 + trace 17 个 + server 22 个（共 65 个新测试，14 个包全部通过）
+
 ### 文档
 - [x] `docs/dev/` — 12 个开发文档按开发顺序分割
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
 
 ## 下一步工作
 
-### P6 — 可观测性增强（日志/指标/链路追踪）
+### P7 — 配置系统（YAML 解析）
 
 | 优先级 | 任务 | 模块 | 依赖 | 估计工时 |
 |--------|------|------|------|---------|
-| P6 | 结构化日志（zerolog/slog） | `internal/log` | 无 | 2h |
-| P6 | 基础指标（请求数/延迟/错误率） | `internal/metrics` | server | 2h |
-| P6 | 扫描/分析链路追踪 | `internal/trace` | analyzer | 2h |
-| P6 | 健康检查端点增强 | `internal/server` | server | 1h |
+| P7 | 配置系统（YAML 解析） | `internal/config` | 无 | 2h |
 
 ### 后续规划
 
 | 阶段 | 任务 | 参考文档 | 依赖 |
 |------|------|---------|------|
-| P6 | 可观测性增强（日志/指标/链路追踪） | `docs/dev/10-可观测性与安全设计.md` | 无外部依赖 |
 | P7 | 配置系统（YAML 解析） | `docs/dev/11-配置部署与路线图.md` | 无外部依赖 |
 | P8 | 语义检索 / 全文搜索 | `docs/dev/09-语义检索与全文搜索.md` | 需网络下载 chromem-go |
 

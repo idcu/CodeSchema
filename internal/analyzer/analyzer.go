@@ -7,8 +7,19 @@ import (
 	"strings"
 
 	"codeschema/internal/ai"
+	"codeschema/internal/log"
+	"codeschema/internal/metrics"
 	"codeschema/internal/store"
+	"codeschema/internal/trace"
 )
+
+// init 注册分析器模块的监控指标。
+func init() {
+	metrics.RegisterCounter("analyzer_build_total", "Total analyzer build operations", "operation")
+	metrics.RegisterGauge("analyzer_files_total", "Total files indexed by analyzer")
+	metrics.RegisterGauge("analyzer_nodes_total", "Total graph nodes", "graph_type")
+	metrics.RegisterCounter("analyzer_errors_total", "Total analyzer errors", "operation")
+}
 
 // Analyzer 是代码图分析器，负责构建跨文件的代码关系图。
 //
@@ -23,6 +34,7 @@ type Analyzer struct {
 	goResolver *GoResolver      // Go 模块路径解析器
 	javaResolver *JavaResolver  // Java 包路径解析器
 	gradleResolver *GradleResolver // Gradle 多模块路径解析器
+	logger   *log.Logger
 }
 
 // NewAnalyzer 创建分析器实例。
@@ -43,6 +55,7 @@ func NewAnalyzer(st store.Store) *Analyzer {
 		goResolver:     goR,
 		javaResolver:   javaR,
 		gradleResolver: gradleR,
+		logger:         log.WithModule("analyzer"),
 	}
 }
 
@@ -82,14 +95,35 @@ func (a *Analyzer) SetGradleModuleNames(names []string) {
 // 文档注释和文件语言推导六类标签（layer/biz/tech/risk/test/lang）。
 // 标签通过 Store 接口持久化。
 func (a *Analyzer) TagAll(ctx context.Context) error {
+	span := trace.Start("tag_all")
+	defer span.End()
+
+	a.logger.Info("starting tag derivation")
+
 	tagger := ai.NewTagger(a.store)
-	return tagger.DeriveAllTags(ctx)
+	err := tagger.DeriveAllTags(ctx)
+	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "tag_all")
+		a.logger.Error("tag derivation failed", "error", err)
+		return err
+	}
+
+	a.logger.Info("tag derivation completed")
+	return nil
 }
 
 // BuildAll 构建所有代码图（单次遍历）。
 //
 // 返回所有四种图结构。如果某个图构建失败，返回错误。
 func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *ReverseIndex, *FileGraph, error) {
+	span := trace.Start("build_all")
+	defer span.End()
+
+	operations := []string{"callgraph", "classhierarchy", "reverseindex", "filegraph"}
+	for _, op := range operations {
+		metrics.IncCounter("analyzer_build_total", op)
+	}
+
 	callGraph := NewCallGraph()
 	classHierarchy := NewClassHierarchy()
 	reverseIndex := NewReverseIndex()
@@ -98,8 +132,12 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 	// 1. 读取所有文件
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "get_all_files")
 		return nil, nil, nil, nil, fmt.Errorf("get all files: %w", err)
 	}
+
+	metrics.SetGauge("analyzer_files_total", float64(len(files)))
+	a.logger.Info("building all graphs", "files", len(files))
 
 	// 2. 预构建 import 索引（仅依赖文件路径，无需遍历）
 	importIdx := buildImportIndex(files)
@@ -114,6 +152,7 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 		// 读取类记录
 		classes, err := a.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
+			metrics.IncCounter("analyzer_errors_total", "get_classes")
 			return nil, nil, nil, nil, fmt.Errorf("get classes for file %d: %w", f.ID, err)
 		}
 		fgNode.ClassCount = len(classes)
@@ -126,6 +165,7 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 		// 读取调用记录
 		calls, err := a.store.GetCallsByFileID(ctx, f.ID)
 		if err != nil {
+			metrics.IncCounter("analyzer_errors_total", "get_calls")
 			return nil, nil, nil, nil, fmt.Errorf("get calls for file %d: %w", f.ID, err)
 		}
 
@@ -155,6 +195,18 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 		}
 	}
 
+	// 更新图节点数指标
+	metrics.SetGauge("analyzer_nodes_total", float64(callGraph.NodeCount()), "callgraph")
+	metrics.SetGauge("analyzer_nodes_total", float64(classHierarchy.NodeCount()), "classhierarchy")
+	metrics.SetGauge("analyzer_nodes_total", float64(fileGraph.NodeCount()), "filegraph")
+
+	a.logger.Info("build all completed",
+		"files", len(files),
+		"callgraph_nodes", callGraph.NodeCount(),
+		"classhierarchy_nodes", classHierarchy.NodeCount(),
+		"filegraph_nodes", fileGraph.NodeCount(),
+	)
+
 	return callGraph, classHierarchy, reverseIndex, fileGraph, nil
 }
 
@@ -163,16 +215,24 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 // 从 Store 中读取所有调用记录，构建方法间的调用关系图。
 // 每个调用记录生成一条边（caller -> callee）。
 func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
+	span := trace.Start("build_call_graph")
+	defer span.End()
+
+	metrics.IncCounter("analyzer_build_total", "callgraph")
+	a.logger.Debug("building call graph")
+
 	cg := NewCallGraph()
 
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "get_all_files")
 		return nil, fmt.Errorf("get all files: %w", err)
 	}
 
 	for _, f := range files {
 		calls, err := a.store.GetCallsByFileID(ctx, f.ID)
 		if err != nil {
+			metrics.IncCounter("analyzer_errors_total", "get_calls")
 			return nil, fmt.Errorf("get calls for file %d: %w", f.ID, err)
 		}
 		for _, call := range calls {
@@ -182,6 +242,9 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 		}
 	}
 
+	metrics.SetGauge("analyzer_nodes_total", float64(cg.NodeCount()), "callgraph")
+	a.logger.Debug("call graph built", "nodes", cg.NodeCount(), "edges", cg.EdgeCount())
+
 	return cg, nil
 }
 
@@ -190,22 +253,33 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 // 从 Store 中读取所有类记录，构建继承/实现关系树。
 // 通过 ClassIR.ParentFQNs 字段建立父子关系。
 func (a *Analyzer) BuildClassHierarchy(ctx context.Context) (*ClassHierarchy, error) {
+	span := trace.Start("build_class_hierarchy")
+	defer span.End()
+
+	metrics.IncCounter("analyzer_build_total", "classhierarchy")
+	a.logger.Debug("building class hierarchy")
+
 	ch := NewClassHierarchy()
 
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "get_all_files")
 		return nil, fmt.Errorf("get all files: %w", err)
 	}
 
 	for _, f := range files {
 		classes, err := a.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
+			metrics.IncCounter("analyzer_errors_total", "get_classes")
 			return nil, fmt.Errorf("get classes for file %d: %w", f.ID, err)
 		}
 		for _, cls := range classes {
 			a.buildClassHierarchyNode(ch, cls, f.ID)
 		}
 	}
+
+	metrics.SetGauge("analyzer_nodes_total", float64(ch.NodeCount()), "classhierarchy")
+	a.logger.Debug("class hierarchy built", "nodes", ch.NodeCount())
 
 	return ch, nil
 }
@@ -229,10 +303,17 @@ func (a *Analyzer) buildClassHierarchyNode(ch *ClassHierarchy, cls store.ClassRe
 // 通过分析每个文件存储的 Imports 元数据，建立文件间的引用关系。
 // 对于每个文件的 import 路径，尝试匹配到 Store 中已知的文件路径。
 func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error) {
+	span := trace.Start("build_reverse_index")
+	defer span.End()
+
+	metrics.IncCounter("analyzer_build_total", "reverseindex")
+	a.logger.Debug("building reverse index")
+
 	ri := NewReverseIndex()
 
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "get_all_files")
 		return nil, fmt.Errorf("get all files: %w", err)
 	}
 
@@ -257,6 +338,8 @@ func (a *Analyzer) BuildReverseIndex(ctx context.Context) (*ReverseIndex, error)
 			}
 		}
 	}
+
+	a.logger.Debug("reverse index built", "imports", len(ri.Imports), "references", len(ri.References))
 
 	return ri, nil
 }
@@ -307,10 +390,17 @@ func (a *Analyzer) resolveImport(imp string, importIndex map[string][]string) []
 // 从 Store 中读取所有文件记录，构建文件间的依赖关系图。
 // 包含每个文件的类/方法数量信息。
 func (a *Analyzer) BuildFileGraph(ctx context.Context) (*FileGraph, error) {
+	span := trace.Start("build_file_graph")
+	defer span.End()
+
+	metrics.IncCounter("analyzer_build_total", "filegraph")
+	a.logger.Debug("building file graph")
+
 	fg := NewFileGraph()
 
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "get_all_files")
 		return nil, fmt.Errorf("get all files: %w", err)
 	}
 
@@ -321,11 +411,15 @@ func (a *Analyzer) BuildFileGraph(ctx context.Context) (*FileGraph, error) {
 
 		classes, err := a.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
+			metrics.IncCounter("analyzer_errors_total", "get_classes")
 			return nil, fmt.Errorf("get classes for file %d: %w", f.ID, err)
 		}
 		node.ClassCount = len(classes)
 		node.MethodCount = a.countMethodsByFileID(ctx, f.ID)
 	}
+
+	metrics.SetGauge("analyzer_nodes_total", float64(fg.NodeCount()), "filegraph")
+	a.logger.Debug("file graph built", "nodes", fg.NodeCount())
 
 	return fg, nil
 }
@@ -352,6 +446,11 @@ func (a *Analyzer) countMethodsByFileID(ctx context.Context, fileID int64) int {
 // depth 控制递归深度，0 表示不限制。
 // 返回所有受影响的调用者和被调用者。
 func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth int) (callers, callees []string, err error) {
+	span := trace.Start("find_impact_nodes", "method", methodFQN)
+	defer span.End()
+
+	a.logger.Debug("finding impact nodes", "method", methodFQN, "depth", depth)
+
 	cg, err := a.BuildCallGraph(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build call graph: %w", err)
@@ -363,6 +462,9 @@ func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth 
 
 	callers = cg.GetCallers(methodFQN, depth)
 	callees = cg.GetCallees(methodFQN, depth)
+
+	a.logger.Debug("impact analysis complete", "method", methodFQN, "callers", len(callers), "callees", len(callees))
+
 	return callers, callees, nil
 }
 
@@ -371,15 +473,22 @@ func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth 
 // 返回路径上的方法 FQN 列表（含起点和终点），
 // 如果不存在路径则返回 nil。
 func (a *Analyzer) ShortestPath(ctx context.Context, from, to string) ([]string, error) {
+	span := trace.Start("shortest_path", "from", from, "to", to)
+	defer span.End()
+
+	a.logger.Debug("finding shortest path", "from", from, "to", to)
+
 	cg, err := a.BuildCallGraph(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("build call graph: %w", err)
 	}
 
 	if _, ok := cg.Nodes[from]; !ok {
+		a.logger.Debug("shortest path: source not found", "from", from)
 		return nil, nil
 	}
 	if _, ok := cg.Nodes[to]; !ok {
+		a.logger.Debug("shortest path: target not found", "to", to)
 		return nil, nil
 	}
 
@@ -394,7 +503,9 @@ func (a *Analyzer) ShortestPath(ctx context.Context, from, to string) ([]string,
 		queue = queue[1:]
 
 		if current == to {
-			return reconstructPath(prev, from, to), nil
+			path := reconstructPath(prev, from, to)
+			a.logger.Debug("shortest path found", "from", from, "to", to, "path_length", len(path))
+			return path, nil
 		}
 
 		node, ok := cg.Nodes[current]
@@ -411,6 +522,7 @@ func (a *Analyzer) ShortestPath(ctx context.Context, from, to string) ([]string,
 		}
 	}
 
+	a.logger.Debug("shortest path: no path found", "from", from, "to", to)
 	return nil, nil // 无路径
 }
 
@@ -447,8 +559,14 @@ type ModuleSummary struct {
 
 // Analyze 对仓库执行完整分析，返回模块概要。
 func (a *Analyzer) Analyze(ctx context.Context) (*ModuleSummary, error) {
+	span := trace.Start("analyze")
+	defer span.End()
+
+	a.logger.Info("starting full analysis")
+
 	cg, ch, _, fg, err := a.BuildAll(ctx)
 	if err != nil {
+		metrics.IncCounter("analyzer_errors_total", "build_all")
 		return nil, fmt.Errorf("build all graphs: %w", err)
 	}
 
@@ -487,6 +605,16 @@ func (a *Analyzer) Analyze(ctx context.Context) (*ModuleSummary, error) {
 	for _, h := range hotList[:limit] {
 		summary.HotMethods = append(summary.HotMethods, h.fqn)
 	}
+
+	a.logger.Info("analysis completed",
+		"files", summary.TotalFiles,
+		"classes", summary.TotalClasses,
+		"methods", summary.TotalMethods,
+		"calls", summary.TotalCalls,
+		"languages", len(summary.Languages),
+		"orphan_methods", len(summary.OrphanMethods),
+		"hot_methods", len(summary.HotMethods),
+	)
 
 	return summary, nil
 }

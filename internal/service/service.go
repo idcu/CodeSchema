@@ -50,6 +50,11 @@ func (s *Service) Health(ctx context.Context) *HealthStatus {
 	return status
 }
 
+// StoreHealthCheck 执行存储层健康检查。
+func (s *Service) StoreHealthCheck(ctx context.Context) error {
+	return s.store.HealthCheck(ctx)
+}
+
 // SymbolContext 符号上下文响应。
 type SymbolContext struct {
 	Symbol       string   `json:"symbol"`

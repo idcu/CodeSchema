@@ -7,9 +7,20 @@ import (
 	"path/filepath"
 	"strings"
 
+	"codeschema/internal/log"
+	"codeschema/internal/metrics"
 	"codeschema/internal/parser"
 	"codeschema/internal/store"
+	"codeschema/internal/trace"
 )
+
+// init 注册扫描器模块的监控指标。
+func init() {
+	metrics.RegisterCounter("scanner_processed_total", "Total files processed by scanner", "status")
+	metrics.RegisterGauge("scanner_files_total", "Total files discovered during scan")
+	metrics.RegisterCounter("scanner_errors_total", "Total scanner errors", "operation")
+	metrics.RegisterGauge("scanner_active_workers", "Active scanner worker count")
+}
 
 // Scanner 是编排层的核心模块，负责协调全量扫描与增量更新。
 //
@@ -20,6 +31,7 @@ type Scanner struct {
 	registry  *parser.Registry
 	workers   int
 	semaphore chan struct{}
+	logger    *log.Logger
 }
 
 // NewScanner 创建 Scanner 实例。
@@ -33,6 +45,7 @@ func NewScanner(st store.Store, reg *parser.Registry, workers int) *Scanner {
 		registry:  reg,
 		workers:   workers,
 		semaphore: make(chan struct{}, workers),
+		logger:    log.WithModule("scanner"),
 	}
 }
 
@@ -45,15 +58,21 @@ func NewScanner(st store.Store, reg *parser.Registry, workers int) *Scanner {
 //  4. 填充元信息（哈希、字节数、行数）。
 //  5. 调用 store.UpsertIR 完成增量入库。
 func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
+	span := trace.Start("process_file", "path", path)
+	defer span.End()
+
 	// 1. 计算哈希
 	h, err := sha256sum(path)
 	if err != nil {
+		metrics.IncCounter("scanner_errors_total", "sha256")
 		return fmt.Errorf("sha256 %s: %w", path, err)
 	}
 
 	// 2. 哈希闸门：相同哈希跳过
 	existing, _ := s.store.GetFileByPath(ctx, path)
 	if existing != nil && existing.ContentHash == h {
+		metrics.IncCounter("scanner_processed_total", "skipped")
+		s.logger.Debug("file skipped (hash match)", "path", path)
 		return nil
 	}
 
@@ -62,6 +81,7 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	plugin, err := s.registry.Select(lang)
 	if err != nil {
 		// 无适配器时标记为跳过，不返回错误
+		metrics.IncCounter("scanner_processed_total", "no_adapter")
 		_, storeErr := s.store.UpsertFile(ctx, path, h, 0, 0)
 		return storeErr
 	}
@@ -69,9 +89,12 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	// 4. 解析
 	ir, err := plugin.Parse(ctx, path)
 	if err != nil {
+		metrics.IncCounter("scanner_errors_total", "parse")
+		metrics.IncCounter("scanner_processed_total", "error")
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	if ir == nil {
+		metrics.IncCounter("scanner_processed_total", "skipped")
 		return nil // 跳过
 	}
 
@@ -86,7 +109,15 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	}
 
 	// 6. 入库
-	return s.store.UpsertIR(ctx, ir)
+	if err := s.store.UpsertIR(ctx, ir); err != nil {
+		metrics.IncCounter("scanner_errors_total", "upsert_ir")
+		metrics.IncCounter("scanner_processed_total", "error")
+		return fmt.Errorf("upsert IR %s: %w", path, err)
+	}
+
+	metrics.IncCounter("scanner_processed_total", "ok")
+	s.logger.Debug("file processed", "path", path, "lang", lang, "lines", ir.LineCount)
+	return nil
 }
 
 // ScanAll 全量扫描仓库目录，使用 worker pool 并发处理。
@@ -94,10 +125,20 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 // 每个文件使用独立 goroutine，通过 semaphore 控制并发数。
 // 文件列表按目录递归遍历，忽略 .git/ node_modules/ 等目录。
 func (s *Scanner) ScanAll(ctx context.Context, root string) error {
+	span := trace.Start("scan_all", "root", root)
+	defer span.End()
+
+	s.logger.Info("starting full scan", "root", root)
+
 	files, err := listFiles(root)
 	if err != nil {
+		metrics.IncCounter("scanner_errors_total", "list_files")
 		return fmt.Errorf("list files: %w", err)
 	}
+
+	metrics.SetGauge("scanner_files_total", float64(len(files)))
+	metrics.SetGauge("scanner_active_workers", float64(s.workers))
+	s.logger.Info("files discovered", "count", len(files), "workers", s.workers)
 
 	errCh := make(chan error, len(files))
 	done := make(chan struct{}, len(files))
@@ -134,8 +175,12 @@ func (s *Scanner) ScanAll(ctx context.Context, root string) error {
 		errs = append(errs, e)
 	}
 	if len(errs) > 0 {
+		metrics.IncCounter("scanner_errors_total", "scan_errors")
+		s.logger.Error("scan completed with errors", "total", len(files), "errors", len(errs))
 		return fmt.Errorf("scan errors (%d): %v", len(errs), errs[0])
 	}
+
+	s.logger.Info("scan completed", "files", len(files))
 	return nil
 }
 

@@ -192,3 +192,198 @@ func TestErrorRecoveryMiddleware(t *testing.T) {
 		t.Errorf("expected 500, got %d", w.Result().StatusCode)
 	}
 }
+
+// ---- P6 可观测性端点测试 ----
+
+func TestHealthDBEndpoint(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/health/db", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealthDB(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	json.NewDecoder(resp.Body).Decode(&body)
+	if body["status"] != "ok" {
+		t.Errorf("expected status ok, got %v", body["status"])
+	}
+	if _, ok := body["latency_ms"]; !ok {
+		t.Error("expected latency_ms field")
+	}
+}
+
+func TestHealthKVEndpoint(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/health/kv", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealthKV(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestHealthVectorEndpoint(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/health/vector", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealthVector(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.handleMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if ctype := resp.Header.Get("Content-Type"); ctype != "text/plain; version=0.0.4" {
+		t.Errorf("expected Content-Type 'text/plain; version=0.0.4', got %s", ctype)
+	}
+}
+
+// ---- 安全中间件测试 ----
+
+func TestAuthMiddleware_NoToken(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	srv.SetAuthToken("secret123")
+
+	handler := srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestAuthMiddleware_ValidToken(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	srv.SetAuthToken("secret123")
+
+	handler := srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Authorization", "Bearer secret123")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestAuthMiddleware_EmptyToken(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	// authToken 为空时，不验证
+
+	handler := srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestAuthMiddleware_WrongToken(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	srv.SetAuthToken("secret123")
+
+	handler := srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Authorization", "Bearer wrongtoken")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestPathTraversalMiddleware_Valid(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	handler := srv.pathTraversalMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/context?symbol=com.example.MyClass", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestPathTraversalMiddleware_Blocked(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	handler := srv.pathTraversalMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/context?path=../../../etc/passwd", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestMethodNotAllowedOnAllEndpoints(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	endpoints := []struct {
+		name    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"health", srv.handleHealth},
+		{"healthDB", srv.handleHealthDB},
+		{"healthKV", srv.handleHealthKV},
+		{"healthVector", srv.handleHealthVector},
+		{"context", srv.handleContext},
+		{"impact", srv.handleImpact},
+		{"tests", srv.handleTests},
+		{"search", srv.handleSearch},
+		{"tags", srv.handleGetTags},
+		{"tagsSearch", srv.handleSearchByTag},
+		{"tagsAll", srv.handleGetAllTags},
+		{"metrics", srv.handleMetrics},
+	}
+
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodPost, "/"+ep.name, nil)
+		w := httptest.NewRecorder()
+		ep.handler(w, req)
+
+		if w.Result().StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s: expected 405 for POST, got %d", ep.name, w.Result().StatusCode)
+		}
+	}
+}
