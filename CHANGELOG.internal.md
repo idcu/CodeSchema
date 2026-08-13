@@ -8,7 +8,7 @@
 
 ### Commit 4: feat(service, server): P0 MVP — Service 服务层 + HTTP API + MCP Server
 
-**Commit Hash**: `(待提交后填写)`
+**Commit Hash**: `b68c206`
 
 **核心改动点**：
 - `internal/service/service.go` — Service 业务逻辑层，封装 Store 操作，提供 GetContext/GetImpact/GetTests/Search 等 8 个查询方法，参数校验返回 ServiceError
