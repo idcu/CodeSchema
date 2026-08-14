@@ -158,6 +158,24 @@ func initPatterns() map[string]langPatterns {
 			callPattern: regexp.MustCompile(`(?i)\b(?:CALL\s+)?([\w.]+)\s*\([^)]*\)`),
 			commentTrim: "--",
 		},
+		"elixir": {
+			// defmodule 作为模块（MODULE），def/defp 为方法；elixir 无 class 概念
+			classPattern:   regexp.MustCompile(`^\s*defmodule\s+([\w.]+)`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*def(p)?\s+([\w!?]+)\s*(\(|do)`),
+			callPattern:    regexp.MustCompile(`([\w.]+)\s*\([^)]*\)`),
+			commentTrim:    "#",
+		},
+		"ocaml": {
+			// module / class 声明；let ... = 为方法（OCaml 无 class 概念时 module 作模块）
+			classPattern:   regexp.MustCompile(`^\s*(module|class)\s+([\w]+)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^\s*(let|and)\s+(rec\s+)?([\w]+)\s+[\w\s]*=`),
+			// OCaml 调用多为无括号应用（`validator.validate order`）；同时兼容括号形式。
+			// 无括号分支要求函数名与参数间至少一个空格（避免 `end`/`in` 等单词自拆分）
+			callPattern: regexp.MustCompile(`([\w.]+)\s*(?:\([^)]*\)|\s+[a-z_][\w']*(?:\s*;|\s*$|\s*\n))`),
+			commentTrim: "(*",
+		},
 	}
 }
 
@@ -274,9 +292,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		// 解析函数调用（全部语言启用；Java/TS/Rust/C++/Kotlin 的调用检测
 		// 依赖 callPattern 与 isKeyword 过滤，精度见 docs/dev 02 的启发式说明）
 		// 先剔除字符串/注释内的伪调用（跨行状态机），再匹配
-		// bash 调用无括号（命令名），其余语言调用需含 "("
+		// bash/ocaml 调用可无括号（命令名 / 无括号应用），其余语言调用需含 "("
 		code := sanitizer.clean(trimmed, lang)
-		if lang == "bash" || strings.Contains(code, "(") {
+		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
 			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern)
 		}
 
@@ -450,6 +468,15 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "TABLE"
+	case "elixir":
+		return "MODULE"
+	case "ocaml":
+		for _, m := range matches {
+			if m == "class" {
+				return "CLASS"
+			}
+		}
+		return "MODULE"
 	default:
 		return "CLASS"
 	}
@@ -620,6 +647,14 @@ func isKeyword(name string) bool {
 		// Bash
 		"cd": true, "source": true, "local": true, "export": true, "eval": true,
 		// Scala（println/require/assert 已在通用段）
+		// Elixir（IO.puts/IO.inspect/Enum 等标准库函数调用为伪调用）
+		"IO.puts": true, "IO.inspect": true, "IO.gets": true,
+		"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
+		"Map.get": true, "Map.put": true, "String.length": true,
+		// OCaml（print_endline/List.map/Printf 等标准库 + 语法关键字）
+		"print_endline": true, "print_string": true, "print_int": true,
+		"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
+		"Printf.printf": true, "failwith": true, "rec": true, "done": true,
 	}
 	return keywords[name]
 }

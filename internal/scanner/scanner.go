@@ -253,6 +253,10 @@ func detectLang(path string) string {
 		return "scala"
 	case ".sql":
 		return "sql"
+	case ".ex", ".exs":
+		return "elixir"
+	case ".ml", ".mli":
+		return "ocaml"
 	default:
 		return "unknown"
 	}

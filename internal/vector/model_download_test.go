@@ -234,3 +234,36 @@ func TestLocalSourcePath(t *testing.T) {
 		}
 	}
 }
+
+// TestModelDownloader_Ensure_LocalPresent 验证本地优先路径：模型已就位（onnx/*.onnx + tokenizer.json）
+// → Ensure 返回 ok=true 且不触发下载（即使 URL 为空、注册表无此模型也不报错）。
+func TestModelDownloader_Ensure_LocalPresent(t *testing.T) {
+	// 构造与真实模型同构的目录（down/models/<name>/onnx/*.onnx + tokenizer.json）
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, "onnx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "onnx", "model_fp16.onnx"), []byte("model"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "tokenizer.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// URL 为空 + 未知模型名：本地已存在 → 仍应 ok=true 且无错误（零下载）
+	dl := NewModelDownloader(dest, "", "")
+	ok, err := dl.Ensure(context.Background(), "unknown-local-only-model")
+	if err != nil {
+		t.Fatalf("Ensure with local model present: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true when model already present locally")
+	}
+
+	// 本地已存在时 URL 是坏的也不应触发下载
+	dl2 := NewModelDownloader(dest, "http://127.0.0.1:1/unreachable.tar.gz", "")
+	ok2, err := dl2.Ensure(context.Background(), "bge-small-zh")
+	if err != nil || !ok2 {
+		t.Fatalf("Ensure with local model + bad url: ok=%v err=%v", ok2, err)
+	}
+}

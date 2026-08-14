@@ -221,6 +221,29 @@ END;
 `,
 		Golden: []string{"COUNT"},
 	},
+	{
+		Lang: "elixir", Ext: ".ex",
+		Code: `defmodule OrderService do
+  def run(order) do
+    s = "fakeCall(1)"
+    validator.validate(order)
+    mapper.map(order)
+  end
+end
+`,
+		Golden: []string{"validator.validate", "mapper.map"},
+	},
+	{
+		Lang: "ocaml", Ext: ".ml",
+		Code: `module OrderService = struct
+  let run order =
+    let s = "fakeCall(1)" in
+    validator.validate order;
+    mapper.map order
+end
+`,
+		Golden: []string{"validator.validate", "mapper.map"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。

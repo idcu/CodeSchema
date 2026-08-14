@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 66: feat(parser+vector): 模型分发本地闭环 + elixir/ocaml 扩展（PHASE_09）
+
+**① 模型分发本地闭环（真实模型验证）**
+- `down/models/bge-small-zh-v1.5/`（onnx/model_fp16.onnx + tokenizer.json + config.json）与 main.go 默认 `modelDir = down/models/<embedding_model>` 吻合，`Ensure` 本地优先路径零下载命中
+- 新增测试：`TestModelDownloader_Ensure_LocalPresent`（同构目录 + URL 空/坏均 ok=true）、`TestRealModelDirPresent`（真实目录验证，缺失 skip）
+- docs/dev/09 补充「本地优先零下载」策略说明
+
+**② T6-2 继续扩展 elixir/ocaml → 17 语言**
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.ex`/`.exs`→elixir、`.ml`/`.mli`→ocaml
+- 正则：elixir defmodule/def/defp + 标准库关键字；ocaml module/let + 无括号应用 callPattern
+- AST：elixir walker 特判（defmodule/def/调用三分 + skipChild 跳签名）、ocaml module_definition/value_definition（含 parameter 才算函数）/application_expression
+- 修复：OCaml 正则 `end` 拆词 FP（无括号分支要求空格）、关键字去重（in/struct/rec）
+- 验证：**AST 17 语言双档 P=1.00/R=1.00（TP=68）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+
 ### Commit 65: feat(parser+ops): 继续实施——SQL 语言 + 趋势折线图 + 模型本地分发源（PHASE_09）
 
 **核心改动点（继续①·SQL 语言 → 15 语言）**：

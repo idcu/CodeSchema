@@ -29,10 +29,12 @@ import (
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
+	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
+	"github.com/smacker/go-tree-sitter/ocaml"
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/ruby"
@@ -71,6 +73,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"bash":   bash.GetLanguage(),
 			"scala":  scala.GetLanguage(),
 			"sql":    sql.GetLanguage(),
+			"elixir": elixir.GetLanguage(),
+			"ocaml":  ocaml.GetLanguage(),
 		},
 	}
 }
@@ -112,6 +116,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"bash":   {},
 	"scala":  {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
 	"sql":    {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
+	"elixir": {},
+	"ocaml":  {"module_definition": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -132,6 +138,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"bash":   {"function_definition": true},
 	"scala":  {"function_definition": true},
 	"sql":    {"create_function": true, "create_procedure": true},
+	"elixir": {},
+	"ocaml":  {"value_definition": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -152,6 +160,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"bash":   {"command": true, "command_call": true},
 	"scala":  {"call_expression": true, "method_invocation": true},
 	"sql":    {"invocation": true, "function_call": true, "call_statement": true},
+	"elixir": {"call": true},
+	"ocaml":  {"application_expression": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -189,6 +199,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	callTypes := astCallNodeTypes[lang]
 
 	var curClass *parser.ClassIR
+	// skipChild：Elixir def 的 arguments（函数签名）子节点，避免签名中的
+	// `create(order)` 被误判为调用
+	var skipChild *ts.Node
 	var walk func(n *ts.Node)
 	walk = func(n *ts.Node) {
 		if n == nil || n.IsNull() {
@@ -198,6 +211,56 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		start := n.StartPoint()
 
 		switch {
+		case lang == "elixir" && typ == "call":
+			// Elixir 的 defmodule / def / defp 与普通调用都是 call 节点，
+			// 按首个子节点标识符区分：defmodule → 模块（类）、def/defp → 方法、其余 → 调用
+			if head := elixirCallHead(n, data); head != "" {
+				switch {
+				case head == "defmodule":
+					name := elixirModuleName(n, data)
+					if name != "" {
+						cls := parser.ClassIR{
+							Name:      name,
+							FullName:  name,
+							Type:      "MODULE",
+							StartLine: int(start.Row) + 1,
+						}
+						doc.Classes = append(doc.Classes, cls)
+						curClass = &doc.Classes[len(doc.Classes)-1]
+					}
+				case head == "def" || head == "defp" || head == "defmacro" || head == "defguard":
+					name := elixirDefName(n, data)
+					if name != "" {
+						m := parser.MethodIR{
+							Name:      name,
+							Signature: string(n.Content(data)),
+							StartLine: int(start.Row) + 1,
+						}
+						if curClass != nil {
+							m.ClassFQN = curClass.FullName
+						}
+						doc.Methods = append(doc.Methods, m)
+						// 跳过 arguments（函数签名 `create(order)`）子树
+						for i := 0; i < int(n.NamedChildCount()); i++ {
+							if c := n.NamedChild(i); c.Type() == "arguments" {
+								skipChild = c
+								break
+							}
+						}
+					}
+				default:
+					callee := astCalleeName(n, data)
+					if callee != "" && !isKeyword(callee) {
+						doc.Calls = append(doc.Calls, parser.CallIR{
+							CalleeFQN:  callee,
+							CallType:   "direct",
+							LineNumber: int(start.Row) + 1,
+						})
+					}
+				}
+				break
+			}
+
 		case classTypes[typ]:
 			name := astNodeName(n, lang, data)
 			if name == "" {
@@ -213,6 +276,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			curClass = &doc.Classes[len(doc.Classes)-1]
 
 		case methodTypes[typ]:
+			// OCaml：value_definition 可能是纯值绑定（`let s = "..." in`），
+			// 仅当含 parameter（函数定义）时登记为方法
+			if lang == "ocaml" && typ == "value_definition" && !ocamlHasParam(n) {
+				break
+			}
 			name := astNodeName(n, lang, data)
 			if name == "" {
 				break
@@ -240,7 +308,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		}
 
 		for i := 0; i < int(n.NamedChildCount()); i++ {
-			walk(n.NamedChild(i))
+			c := n.NamedChild(i)
+			if skipChild != nil && c == skipChild {
+				skipChild = nil
+				continue
+			}
+			walk(c)
 		}
 	}
 	walk(tree.RootNode())
@@ -257,6 +330,23 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 //
 // 兜底：子树中第一个 identifier/type_identifier 文本。
 func astNodeName(n *ts.Node, lang string, src []byte) string {
+	// OCaml: module_definition → module_binding.name（module_name）；value_definition → let_binding.value_name
+	if lang == "ocaml" && (n.Type() == "module_definition" || n.Type() == "value_definition") {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if name := c.ChildByFieldName("name"); name != nil && !name.IsNull() {
+				if s := string(name.Content(src)); s != "" {
+					return s
+				}
+			}
+			for j := 0; j < int(c.NamedChildCount()); j++ {
+				g := c.NamedChild(j)
+				if g.Type() == "value_name" {
+					return string(g.Content(src))
+				}
+			}
+		}
+	}
 	if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
 		if s := string(name.Content(src)); s != "" {
 			return s
@@ -395,10 +485,86 @@ func astCalleeName(n *ts.Node, src []byte) string {
 			return stripTypeArgs(strings.TrimSpace(text[:idx]))
 		}
 	}
+	// OCaml application_expression：无括号应用（`validator.validate x`），
+	// 取首个子节点（field_get_expression / identifier）文本作为被调方
+	if n.Type() == "application_expression" {
+		if first := n.NamedChild(0); first != nil && !first.IsNull() {
+			return string(first.Content(src))
+		}
+	}
 	// Python call 等：直接取调用表达式文本（`(` 前）
 	text := string(n.Content(src))
 	if idx := strings.Index(text, "("); idx >= 0 {
 		return stripTypeArgs(strings.TrimSpace(text[:idx]))
+	}
+	return ""
+}
+
+// ocamlHasParam 判断 OCaml value_definition 是否为函数定义（let_binding 含 parameter 子节点）。
+func ocamlHasParam(n *ts.Node) bool {
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		for j := 0; j < int(c.NamedChildCount()); j++ {
+			if c.NamedChild(j).Type() == "parameter" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// elixirCallHead 返回 Elixir call 节点的首个子节点标识符文本（defmodule / def / defp / 被调函数名）。
+func elixirCallHead(n *ts.Node, src []byte) string {
+	if first := n.NamedChild(0); first != nil && !first.IsNull() {
+		return string(first.Content(src))
+	}
+	return ""
+}
+
+// elixirModuleName 提取 Elixir defmodule 的模块名（`defmodule OrderService do` → `OrderService`）。
+// defmodule 的首个参数是模块名（标识符或别名 `Foo.Bar`），取 arguments 子节点内的完整文本。
+func elixirModuleName(n *ts.Node, src []byte) string {
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		if c.Type() != "arguments" {
+			continue
+		}
+		for j := 0; j < int(c.NamedChildCount()); j++ {
+			g := c.NamedChild(j)
+			if g.Type() == "identifier" || g.Type() == "aliases" || g.Type() == "call" {
+				return string(g.Content(src))
+			}
+		}
+		// 兜底：arguments 内文本（`OrderService` / `Foo.Bar`）
+		if s := strings.TrimSpace(string(c.Content(src))); s != "" {
+			if idx := strings.IndexAny(s, " \t\n"); idx >= 0 {
+				s = s[:idx]
+			}
+			return s
+		}
+	}
+	return ""
+}
+
+// elixirDefName 提取 Elixir def/defp 的方法名：arguments 子节点内的首个 identifier（`def create(order)` → `create`）。
+func elixirDefName(n *ts.Node, src []byte) string {
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		if c.Type() != "arguments" {
+			continue
+		}
+		for j := 0; j < int(c.NamedChildCount()); j++ {
+			g := c.NamedChild(j)
+			if g.Type() == "identifier" || g.Type() == "call" {
+				if s := string(g.Content(src)); s != "" {
+					// `create(order)` 取 `(` 前；纯 identifier 直接返回
+					if idx := strings.Index(s, "("); idx >= 0 {
+						return strings.TrimSpace(s[:idx])
+					}
+					return s
+				}
+			}
+		}
 	}
 	return ""
 }
@@ -498,6 +664,14 @@ func isKeyword(name string) bool {
 		"export": true, "eval": true, "exit": true,
 		// Ruby / Scala
 		"puts": true, "require_relative": true,
+		// Elixir 标准库
+		"IO.puts": true, "IO.inspect": true, "IO.gets": true,
+		"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
+		"Map.get": true, "Map.put": true, "String.length": true,
+		// OCaml 标准库
+		"print_endline": true, "print_string": true, "print_int": true,
+		"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
+		"Printf.printf": true, "failwith": true,
 	}
 	return keywords[name]
 }

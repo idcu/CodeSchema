@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -763,5 +763,80 @@ END;
 	}
 	if !found {
 		t.Errorf("expected SQL call detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Elixir 验证 Elixir 模块/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Elixir(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "order_service.ex")
+	content := `defmodule OrderService do
+  def create(order) do
+    s = "fakeCall(1)"
+    validator.validate(order)
+    mapper.map(order)
+  end
+end
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "elixir" {
+		t.Errorf("expected elixir, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 module (OrderService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.validate" || c.CalleeFQN == "mapper.map" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected elixir calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_OCaml 验证 OCaml 模块/函数/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_OCaml(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "order_service.ml")
+	content := `module OrderService = struct
+  let create order =
+    let s = "fakeCall(1)" in
+    validator.validate order;
+    mapper.map order
+end
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "ocaml" {
+		t.Errorf("expected ocaml, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 module (OrderService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.validate" || c.CalleeFQN == "mapper.map" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ocaml calls detected, got calls: %+v", doc.Calls)
 	}
 }
