@@ -211,6 +211,211 @@ func callsSafe(d *parser.IRDocument) int {
 	return len(d.Calls)
 }
 
+// setupRealCodeGraphDB 创建符合「真实 CodeGraph schema」（nodes/edges + source_id/target_id）
+// 的临时 SQLite 数据库，模拟 optave/codegraph 等主流实现的真实 DDL。
+func setupRealCodeGraphDB(t *testing.T, nodes []realNode, edges []realEdge) string {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// 真实 CodeGraph DDL：nodes 主表（id 外键被 edges 引用）+ edges 关系表
+	if _, err := db.Exec(`
+		CREATE TABLE nodes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			file TEXT NOT NULL,
+			line INTEGER DEFAULT 0,
+			end_line INTEGER,
+			role TEXT
+		);
+		CREATE TABLE edges (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_id INTEGER NOT NULL,
+			target_id INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			confidence REAL DEFAULT 1.0,
+			FOREIGN KEY(source_id) REFERENCES nodes(id),
+			FOREIGN KEY(target_id) REFERENCES nodes(id)
+		);
+		CREATE INDEX idx_nodes_name ON nodes(name);
+		CREATE INDEX idx_nodes_file ON nodes(file);
+		CREATE INDEX idx_edges_source ON edges(source_id);
+	`); err != nil {
+		t.Fatalf("create real schema: %v", err)
+	}
+
+	// 插入 nodes，记录 id 以便 edges 引用
+	idByName := make(map[string]int64)
+	for _, n := range nodes {
+		res, err := db.Exec(`INSERT INTO nodes (name, kind, file, line) VALUES (?,?,?,?)`,
+			n.name, n.kind, n.file, n.line)
+		if err != nil {
+			t.Fatalf("insert node %s: %v", n.name, err)
+		}
+		id, _ := res.LastInsertId()
+		idByName[n.name] = id
+	}
+	for _, e := range edges {
+		src, ok1 := idByName[e.source]
+		dst, ok2 := idByName[e.target]
+		if !ok1 || !ok2 {
+			t.Fatalf("edge references unknown node: %s -> %s", e.source, e.target)
+		}
+		if _, err := db.Exec(`INSERT INTO edges (source_id, target_id, kind) VALUES (?,?,?)`,
+			src, dst, e.kind); err != nil {
+			t.Fatalf("insert edge %s->%s: %v", e.source, e.target, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return dbPath
+}
+
+type realNode struct {
+	name, kind, file string
+	line             int
+}
+type realEdge struct {
+	source, target, kind string
+}
+
+// TestCodeGraphAdapter_ParseAll_RealSchema 验证：真实 CodeGraph schema（nodes/edges）
+// 端到端读取——类/方法/调用关系按文件正确提取。
+func TestCodeGraphAdapter_ParseAll_RealSchema(t *testing.T) {
+	dbPath := setupRealCodeGraphDB(t, []realNode{
+		{"OrderService", "class", "order/service.go", 5},
+		{"CreateOrder", "method", "order/service.go", 12},
+		{"PaymentService", "class", "payment/service.go", 3},
+		{"Charge", "method", "payment/service.go", 9},
+		{"OrderController", "class", "web/controller.go", 1},
+		{"helper", "function", "util/helper.go", 1},
+	}, []realEdge{
+		{"CreateOrder", "Charge", "calls"},
+		{"OrderController", "OrderService", "references"},
+		{"CreateOrder", "helper", "calls"},
+	})
+	a := NewCodeGraphAdapter(dbPath)
+	ctx := context.Background()
+
+	ch, err := a.ParseAll(ctx, []string{"order/service.go", "payment/service.go", "web/controller.go", "util/helper.go"})
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	docs := map[string]*parser.IRDocument{}
+	for d := range ch {
+		docs[d.FilePath] = d
+	}
+	// 4 个有符号的文件应各产生 1 个文档
+	if len(docs) != 4 {
+		t.Fatalf("expected 4 docs, got %d", len(docs))
+	}
+
+	svc := docs["order/service.go"]
+	if svc == nil {
+		t.Fatal("missing order/service.go doc")
+	}
+	if len(svc.Classes) != 1 || svc.Classes[0].Name != "OrderService" || svc.Classes[0].Type != "CLASS" {
+		t.Errorf("service.go class mismatch: %+v", svc.Classes)
+	}
+	if len(svc.Methods) != 1 || svc.Methods[0].Name != "CreateOrder" {
+		t.Errorf("service.go method mismatch: %+v", svc.Methods)
+	}
+	// 调用边按 caller 文件归属：CreateOrder（service.go）→ Charge（payment）与 helper
+	if len(svc.Calls) != 2 {
+		t.Errorf("service.go expected 2 calls, got %d: %+v", len(svc.Calls), svc.Calls)
+	}
+	foundCharge := false
+	for _, c := range svc.Calls {
+		if c.CalleeFQN == "Charge" && c.CallType == "direct" {
+			foundCharge = true
+		}
+	}
+	if !foundCharge {
+		t.Errorf("expected call to Charge with type direct: %+v", svc.Calls)
+	}
+
+	pay := docs["payment/service.go"]
+	if pay == nil || len(pay.Classes) != 1 || pay.Classes[0].Name != "PaymentService" {
+		t.Errorf("payment doc mismatch: %+v", pay)
+	}
+
+	// function 节点不产生类，但文档应存在
+	if docs["util/helper.go"] == nil || len(docs["util/helper.go"].Classes) != 0 {
+		t.Errorf("helper.go should exist with 0 classes (function only): %+v", docs["util/helper.go"])
+	}
+}
+
+// TestCodeGraphAdapter_ParseAll_RealSchema_MissingTables 验证：真实 schema 缺表仍显式报错。
+func TestCodeGraphAdapter_ParseAll_RealSchema_MissingTables(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE only_nodes (id INTEGER)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	a := NewCodeGraphAdapter(dbPath)
+	_, err = a.ParseAll(context.Background(), []string{"x.go"})
+	if err == nil {
+		t.Fatal("expected error for missing edges table, got nil")
+	}
+}
+
+// TestCodeGraphAdapter_DetectSchema 验证 schema 形态检测优先级（真实 nodes/edges 优先）。
+func TestCodeGraphAdapter_DetectSchema(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE nodes (id INTEGER); CREATE TABLE edges (id INTEGER);`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	v, err := detectSchema(context.Background(), db2)
+	if err != nil {
+		t.Fatalf("detectSchema: %v", err)
+	}
+	if v != schemaReal {
+		t.Fatalf("expected schemaReal, got %d", v)
+	}
+}
+
+// TestCodeGraphAdapter_DetectSchema_Legacy 验证：仅 symbols+edges 时走 legacy 契约。
+func TestCodeGraphAdapter_DetectSchema_Legacy(t *testing.T) {
+	dbPath := setupCodeGraphDB(t, nil, nil)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	v, err := detectSchema(context.Background(), db)
+	if err != nil {
+		t.Fatalf("detectSchema: %v", err)
+	}
+	if v != schemaLegacy {
+		t.Fatalf("expected schemaLegacy, got %d", v)
+	}
+}
+
 func TestCodeGraphAdapter_InitClose(t *testing.T) {
 	a := NewCodeGraphAdapter("")
 	ctx := context.Background()
