@@ -54,6 +54,17 @@ type VectorConfig struct {
 	Driver         string `yaml:"driver" json:"driver"`
 	DSN            string `yaml:"dsn" json:"dsn"`
 	EmbeddingModel string `yaml:"embedding_model" json:"embedding_model"`
+
+	// ModelDir 语义模型目录（含 onnx/ 子目录与 tokenizer.json）。
+	// 默认 down/models/<embedding_model>；模型缺失时若配置了远程源则自动下载。
+	ModelDir string `yaml:"model_dir" json:"model_dir"`
+
+	// ModelDownloadURL ONNX 模型远程分发地址（可选）。
+	// 模型缺失且配置了该地址时，启动时自动下载到 ModelDir（幂等：已存在跳过）。
+	// 支持模板占位 {model}：如 https://example.com/models/{model}.tar.gz。
+	ModelDownloadURL string `yaml:"model_download_url" json:"model_download_url"`
+	// ModelSHA256 模型压缩包 SHA-256 校验和（可选，配置后下载完成即校验，不匹配报错）。
+	ModelSHA256 string `yaml:"model_sha256" json:"model_sha256"`
 }
 
 // SearchConfig 搜索配置。
@@ -330,6 +341,15 @@ func LoadFromEnv(cfg *Config) {
 	if v := os.Getenv("CODESCHEMA_STORAGE_KV"); v != "" {
 		cfg.Storage.KV = v
 	}
+	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_DIR"); v != "" {
+		cfg.Storage.Vector.ModelDir = v
+	}
+	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_DOWNLOAD_URL"); v != "" {
+		cfg.Storage.Vector.ModelDownloadURL = v
+	}
+	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_SHA256"); v != "" {
+		cfg.Storage.Vector.ModelSHA256 = v
+	}
 
 	// server
 	if v := os.Getenv("CODESCHEMA_SERVER_MCP_ADDR"); v != "" {
@@ -459,6 +479,15 @@ func Merge(base, overlay *Config) *Config {
 	}
 	if overlay.Storage.Vector.EmbeddingModel != "" {
 		merged.Storage.Vector.EmbeddingModel = overlay.Storage.Vector.EmbeddingModel
+	}
+	if overlay.Storage.Vector.ModelDir != "" {
+		merged.Storage.Vector.ModelDir = overlay.Storage.Vector.ModelDir
+	}
+	if overlay.Storage.Vector.ModelDownloadURL != "" {
+		merged.Storage.Vector.ModelDownloadURL = overlay.Storage.Vector.ModelDownloadURL
+	}
+	if overlay.Storage.Vector.ModelSHA256 != "" {
+		merged.Storage.Vector.ModelSHA256 = overlay.Storage.Vector.ModelSHA256
 	}
 	// Search sub
 	mergeSearch(&merged.Storage.Search, &overlay.Storage.Search)

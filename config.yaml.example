@@ -42,8 +42,15 @@ storage:
     driver: "chromem"
     # 向量库路径
     dsn: "./vector.db"
-    # Embedding 模型（当前仅用于标识）
+    # Embedding 模型（用于模型目录与远程分发占位）
     embedding_model: "bge-small-zh"
+    # 模型目录（含 onnx/ 子目录 + tokenizer.json）；默认 down/models/<embedding_model>
+    model_dir: "./down/models/bge-small-zh"
+    # ONNX 模型远程分发（可选）：模型缺失时自动下载并解包（幂等）。
+    # 支持 {model} 占位符替换 embedding_model。
+    model_download_url: ""
+    # 模型压缩包 SHA-256 校验和（可选，配置后下载即校验，不匹配拒绝解包）
+    model_sha256: ""
 
   # 搜索配置
   search:

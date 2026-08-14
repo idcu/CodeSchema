@@ -243,6 +243,10 @@ func detectLang(path string) string {
 		return "swift"
 	case ".php":
 		return "php"
+	case ".cs":
+		return "csharp"
+	case ".rb":
+		return "ruby"
 	default:
 		return "unknown"
 	}

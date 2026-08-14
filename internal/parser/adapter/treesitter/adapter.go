@@ -113,6 +113,20 @@ func initPatterns() map[string]langPatterns {
 			callPattern: regexp.MustCompile(`(?:\$?[\w]*\s*(?:->|::)\s*)?(\w[\w:]*)\s*\([^)]*\)`),
 			commentTrim: "//",
 		},
+		"csharp": {
+			classPattern:   regexp.MustCompile(`^(public\s+|private\s+|internal\s+|protected\s+)?(abstract\s+|sealed\s+|static\s+|partial\s+)?(class|interface|struct|enum|record)\s+(\w+)`),
+			classNameIndex: 4,
+			methodPattern:  regexp.MustCompile(`^\s*(public|private|internal|protected|static|virtual|override|async|partial|\s)+\s*[\w<>\[\],\s]*\s+(\w[\w]*)\s*\([^)]*\)\s*\{`),
+			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
+		"ruby": {
+			classPattern:   regexp.MustCompile(`^\s*(class|module)\s+(\w[\w:]*)\s*(<|\s*$)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^\s*(def\s+|def\s+self\.)\s*(\w[\w!?=]*)\s*\(`),
+			callPattern:    regexp.MustCompile(`(\w[\w.!?]*)\s*\([^)]*\)`),
+			commentTrim:    "#",
+		},
 	}
 }
 
@@ -349,6 +363,25 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "CLASS"
+	case "csharp":
+		for _, m := range matches {
+			switch m {
+			case "interface":
+				return "INTERFACE"
+			case "enum":
+				return "ENUM"
+			case "struct":
+				return "CLASS"
+			}
+		}
+		return "CLASS"
+	case "ruby":
+		for _, m := range matches {
+			if m == "module" {
+				return "MODULE"
+			}
+		}
+		return "CLASS"
 	default:
 		return "CLASS"
 	}
@@ -423,14 +456,14 @@ func (c *codeSanitizer) clean(line, lang string) string {
 			continue
 		}
 
-		// 行注释：// 与 Python 的 #
+		// 行注释：// 与 Python/Ruby 的 #
 		if ch == '/' && i+1 < len(line) && line[i+1] == '/' {
 			for j := i; j < len(line); j++ {
 				out[j] = ' '
 			}
 			break
 		}
-		if lang == "py" && ch == '#' {
+		if (lang == "py" || lang == "ruby") && ch == '#' {
 			for j := i; j < len(line); j++ {
 				out[j] = ' '
 			}
@@ -513,6 +546,9 @@ func isKeyword(name string) bool {
 		// PHP
 		"echo": true, "print_r": true, "var_dump": true, "isset": true,
 		"empty": true, "unset": true, "die": true, "exit": true,
+		// Ruby
+		"puts": true, "require_relative": true,
+		"attr_accessor": true, "attr_reader": true, "attr_writer": true, "loop": true,
 	}
 	return keywords[name]
 }

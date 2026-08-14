@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby"}
 }
 
 // FileExists 检查文件是否存在。
@@ -48,6 +48,10 @@ func ExtToLang(ext string) string {
 		return "swift"
 	case ".php":
 		return "php"
+	case ".cs":
+		return "csharp"
+	case ".rb":
+		return "ruby"
 	default:
 		return "unknown"
 	}
@@ -87,6 +91,10 @@ func LangToExtensions(lang string) []string {
 		return []string{".swift"}
 	case "php":
 		return []string{".php"}
+	case "csharp":
+		return []string{".cs"}
+	case "ruby":
+		return []string{".rb"}
 	default:
 		return nil
 	}

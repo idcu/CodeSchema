@@ -26,12 +26,14 @@ import (
 
 	ts "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/cpp"
+	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
+	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
 	"github.com/smacker/go-tree-sitter/swift"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
@@ -59,6 +61,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"kotlin": kotlin.GetLanguage(),
 			"swift":  swift.GetLanguage(),
 			"php":    php.GetLanguage(),
+			"csharp": csharp.GetLanguage(),
+			"ruby":   ruby.GetLanguage(),
 		},
 	}
 }
@@ -94,6 +98,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"kotlin": {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
 	"swift":  {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
 	"php":    {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
+	"csharp": {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
+	"ruby":   {"class": true, "module": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -108,6 +114,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"kotlin": {"function_declaration": true},
 	"swift":  {"function_declaration": true},
 	"php":    {"function_definition": true, "method_declaration": true},
+	"csharp": {"method_declaration": true, "constructor_declaration": true},
+	"ruby":   {"method": true, "singleton_method": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -122,6 +130,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"kotlin": {"call_expression": true},
 	"swift":  {"call_expression": true},
 	"php":    {"function_call_expression": true, "member_call_expression": true},
+	"csharp": {"invocation_expression": true},
+	"ruby":   {"call": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -310,6 +320,34 @@ func astCalleeName(n *ts.Node, src []byte) string {
 			if c := n.NamedChild(i); c != nil && !c.IsNull() && c.Type() == "name" {
 				return string(c.Content(src))
 			}
+		}
+	}
+	// Ruby call：取调用表达式 `(` 前完整文本（`validator.validate(x)` → `validator.validate`），
+	// 与正则路径口径一致（完整成员链，而非仅方法名）
+	if n.Type() == "call" {
+		text := string(n.Content(src))
+		if idx := strings.Index(text, "("); idx >= 0 {
+			return stripTypeArgs(strings.TrimSpace(text[:idx]))
+		}
+	}
+	// C# invocation_expression：取 name/member_access 的完整文本（`validator.Validate` → 完整）
+	if n.Type() == "invocation_expression" {
+		text := string(n.Content(src))
+		if idx := strings.Index(text, "("); idx >= 0 {
+			return stripTypeArgs(strings.TrimSpace(text[:idx]))
+		}
+	}
+	// Java method_invocation：object 是 method_invocation → 链式，取 name 字段（`invoke`）；
+	// object 是 identifier → 普通 obj.method，取 `(` 前完整文本
+	if n.Type() == "method_invocation" {
+		if obj := n.ChildByFieldName("object"); obj != nil && !obj.IsNull() && obj.Type() == "method_invocation" {
+			if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
+				return string(name.Content(src))
+			}
+		}
+		text := string(n.Content(src))
+		if idx := strings.Index(text, "("); idx >= 0 {
+			return stripTypeArgs(strings.TrimSpace(text[:idx]))
 		}
 	}
 	// Python call 等：直接取调用表达式文本（`(` 前）

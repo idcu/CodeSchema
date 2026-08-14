@@ -16,8 +16,8 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php"}
-	unsupported := []string{"ruby", "unknown"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php", "csharp", "ruby"}
+	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
 		if !a.Supports(lang) {
@@ -535,5 +535,78 @@ class OrderService {
 	}
 	if !found {
 		t.Errorf("expected pay detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_CSharp 验证 C# 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_CSharp(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OrderService.cs")
+	content := `using System;
+
+public class OrderService {
+    public Order Create(OrderDto dto) {
+        var s = "fakeCall(1)";
+        return validator.Validate(dto);
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "csharp" {
+		t.Errorf("expected csharp, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 class (OrderService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.Validate" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected validator.Validate detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Ruby 验证 Ruby 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Ruby(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "order_service.rb")
+	content := `class OrderService
+  def create(order)
+    s = "fakeCall(1)"
+    validator.validate(order)
+  end
+end
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "ruby" {
+		t.Errorf("expected ruby, got %s", doc.Language)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validate" || c.CalleeFQN == "validator.validate" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected validate detected, got calls: %+v", doc.Calls)
 	}
 }

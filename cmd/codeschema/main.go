@@ -501,13 +501,27 @@ func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 		store = pstore
 	}
 
-	// 优先使用 ONNX Embedder（bge-small-zh），模型在 down/ 目录下
-	modelDir := filepath.Join("down", "models", "bge-small-zh-v1.5")
+	// 优先使用 ONNX Embedder（bge-small-zh），模型在 down/ 目录下；
+	// 模型缺失且配置了 model_download_url 时自动下载（远程分发，见 vector.ModelDownloader）
+	modelDir := cfg.Storage.Vector.ModelDir
+	if modelDir == "" {
+		modelDir = filepath.Join("down", "models", cfg.Storage.Vector.EmbeddingModel)
+	}
 	libDir := filepath.Join("down", "onnxruntime")
 	var em vector.Embedder
+
+	// 远程分发：模型缺失时尝试下载（幂等），失败则降级到 LocalEmbedder
+	if dl := vector.NewModelDownloader(modelDir, cfg.Storage.Vector.ModelDownloadURL, cfg.Storage.Vector.ModelSHA256); dl != nil {
+		if ok, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
+			log.Printf("WARN: ONNX model remote fetch failed (%v), falling back to LocalEmbedder", err)
+		} else if ok {
+			log.Printf("semantic: ONNX model ensured at %s", modelDir)
+		}
+	}
+
 	onnxEm := vector.NewONNXEmbedderOrFallback(modelDir, 512, libDir)
 	if onnxEm != nil {
-		log.Printf("semantic: using ONNX embedder (bge-small-zh, dim=%d)", onnxEm.Dim())
+		log.Printf("semantic: using ONNX embedder (%s, dim=%d)", cfg.Storage.Vector.EmbeddingModel, onnxEm.Dim())
 		em = onnxEm
 	} else {
 		log.Printf("semantic: ONNX model not found, falling back to LocalEmbedder (dim=%d)",

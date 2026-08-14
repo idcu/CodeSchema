@@ -12,14 +12,14 @@ import (
 // TestASTAdapter_Supports 验证 AST 版支持 7 语言。
 func TestASTAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php", "csharp", "ruby"}
 	for _, lang := range supported {
 		if !a.Supports(lang) {
 			t.Errorf("expected %s to be supported", lang)
 		}
 	}
-	if a.Supports("ruby") {
-		t.Error("expected ruby to be unsupported")
+	if a.Supports("unknown") {
+		t.Error("expected unknown to be unsupported")
 	}
 }
 

@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 62: feat(parser+vector): 非阻塞项全量——C#/Ruby 扩展 + 反射基准 + ONNX 模型远程分发（PHASE_09）
+
+**核心改动点（非阻塞①·T6-2 扩展 C#/Ruby → 11 语言）**：
+- `internal/parser/adapter/adapter.go` / `internal/scanner/scanner.go`：`ExtToLang`/`SupportedLanguages`/`LangToExtensions`/`detectLang` 增加 `.cs`→csharp、`.rb`→ruby。
+- 正则版 `adapter.go`：`initPatterns` 增加 csharp（class/interface/struct/enum/record + 方法模式）/ruby（class/module + def/def self. 方法）模式；`detectClassType`（csharp INTERFACE/ENUM、ruby MODULE）；`isKeyword` 补 Ruby（puts/attr_* 等）；`codeSanitizer` 支持 Ruby `#` 行注释。
+- AST 版 `adapter_ast.go`：注册 csharp/ruby grammar + 类/方法/调用节点类型（csharp `invocation_expression`/`member_access_expression`、ruby `class`/`module`/`method`/`call`）；`astCalleeName` 增 Ruby call（`(` 前完整链）与 C# invocation_expression 分支。
+- 测试：C#/Ruby 解析测试 + 基准样本扩充至 11 语言。**AST 11 语言双档 P=1.00/R=1.00（TP=57）；正则 SIMPLE P=1.00/R=1.00、COMPLEX P=0.95/R=0.86**。
+
+**核心改动点（非阻塞②·基准扩充反射/模板特化档）**：
+- `internal/adapterbench/treesitter_callgraph_bench_test.go`：complex 档追加 Go 反射（`reflect.ValueOf`/`MethodByName`/`Call`）、Java 反射（`Class.forName`/`getMethod().invoke()` 链式）、C++ 模板特化（模板方法体真实调用 + `std::vector<int> tmp(10)` 构造对照）3 样本。
+- **修复 AST 版 Java 链式调用**：`method_invocation` 的 object 是 method_invocation（链式）时取 name 字段——`cls.getMethod("invoke").invoke(null)` 的 `invoke` 不再漏检。**COMPLEX 达 P=1.00/R=1.00（TP=35）**。
+
+**核心改动点（非阻塞③·E3 ONNX 模型远程分发）**：
+- 新增 `internal/vector/model_download.go`：`ModelDownloader`——幂等下载（本地已存在跳过）+ SHA-256 校验 + tar.gz 安全解包（防路径穿越）+ 优雅降级（无远程源/下载失败/校验不匹配均返回可观测错误，调用方降级 LocalEmbedder）；`{model}` 占位符。
+- `internal/config/config.go`：`VectorConfig` 新增 `ModelDir`/`ModelDownloadURL`/`ModelSHA256` + 环境变量 `CODESCHEMA_STORAGE_VECTOR_MODEL_*` + merge 逻辑。
+- `cmd/codeschema/main.go`：`newSearcherWithStore` 在 ONNX 分支前调 `ModelDownloader.Ensure`（模型缺失自动下载，失败降级）。
+- `config.yaml.example` / `docs/dev/09-语义检索与全文搜索.md` / `README.md` 同步。
+- 测试 4 项：下载+解包+幂等、无远程源降级、SHA-256 不匹配拒绝、路径穿越拒绝。
+
+**验证**：默认/`-tags treesitter` 双路径构建+测试全绿；全仓 23 包通过；`go mod tidy` 后仍绿。
+**文档同步**：docs/dev 02/07/09 + README（11 语言、模型分发）；任务清单 + 调用图基准报告。
+**遗留**：真实 ONNX 模型制品发布为可下载 URL（模型注册表）；基准接 CI 趋势图。
+
 ### Commit 61: feat(parser): T2-1 可选项全量——AST 语言细分 + 两档基准 + CI treesitter job + Swift/PHP 扩展（PHASE_09）
 
 **核心改动点（可选项①·AST 语言细分）**：

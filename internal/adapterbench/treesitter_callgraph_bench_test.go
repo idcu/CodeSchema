@@ -145,6 +145,30 @@ class OrderService {
 `,
 		Golden: []string{"pay", "send"},
 	},
+	{
+		Lang: "csharp", Ext: ".cs",
+		Code: `public class OrderService {
+    public void run() {
+        var s = "fakeCall(1)";
+        validator.Validate(dto);
+        notify.Send(dto); // fakeB(2)
+    }
+}
+`,
+		Golden: []string{"validator.Validate", "notify.Send"},
+	},
+	{
+		Lang: "ruby", Ext: ".rb",
+		Code: `class OrderService
+  def run(order)
+    s = "fakeCall(1)"
+    validator.validate(order)
+    notify.send(order) # fakeB(2)
+  end
+end
+`,
+		Golden: []string{"validator.validate", "notify.send"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。
@@ -256,6 +280,50 @@ public:
 }
 `,
 		Golden: []string{"repository.findById", "mapper.map", "audit.track"},
+	},
+	// 反射调用样本：真实调用（reflect.Call / Class.forName 后调用）应检出，
+	// 字符串内的伪调用（"com.X.fakeCall"）应被剔除
+	{
+		Lang: "go", Ext: ".go",
+		Code: `package main
+
+import "reflect"
+
+func run() {
+	value := reflect.ValueOf(obj)
+	value.MethodByName("DoWork").Call(nil)
+	className := "com.example.fakeCall(1)"
+	realFn("afterReflect")
+}
+`,
+		Golden: []string{"reflect.ValueOf", "value.MethodByName", "Call", "realFn"},
+	},
+	{
+		Lang: "java", Ext: ".java",
+		Code: `public class ReflectDemo {
+    public void run() throws Exception {
+        Class<?> cls = Class.forName("com.example.Service");
+        String name = "fakeCall(1)";
+        cls.getMethod("invoke").invoke(null);
+    }
+}
+`,
+		Golden: []string{"Class.forName", "cls.getMethod", "invoke"},
+	},
+	// C++ 模板特化：模板方法体中的真实调用应检出
+	{
+		Lang: "cpp", Ext: ".cpp",
+		Code: `template <typename T>
+class Cache {
+public:
+    void put(const T& v) {
+        storage.save(v);
+        std::vector<int> tmp(10);
+        notify.publish();
+    }
+};
+`,
+		Golden: []string{"storage.save", "notify.publish"},
 	},
 }
 
