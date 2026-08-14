@@ -25,8 +25,8 @@
 ## 技术栈
 
 - 语言：Go 1.25.2
-- 依赖：go-sqlite3 / go-tree-sitter / fsnotify / yaml.v3 / onnxruntime_go
-- 存储：JSON 文件持久化（P0）→ 可扩展为 SQLite / PostgreSQL / Redis（P2+）
+- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（tree-sitter 为 6 语言正则解析，无 CGO 依赖）
+- 存储：JSON 文件（默认 fallback）+ SQLite（modernc.org/sqlite 纯 Go，已接线，`storage.driver=sqlite` 启用）→ 可扩展 PostgreSQL / Redis
 - 协议：MCP Server（JSON-RPC 2.0 + SSE）+ HTTP API（RESTful）
 - 部署：单二进制 / Docker 容器 / 多平台交叉编译
 
@@ -164,6 +164,14 @@ make clean
 | P18 | 100% | 多仓库 benchmark 对比框架 |
 | 后续优化 | 100% | 多仓库 benchmark 实际运行 / LSP 适配器稳定性验证 / 向量可视化增强 / 日志 data race 修复 |
 
+### 最新进展（2026-08-14）
+
+- **SQLite 权威存储已接线**：新增 `internal/store/sqlite`（基于纯 Go 的 `modernc.org/sqlite`，免 CGO），完整实现 `store.Store` 接口（文件/类/方法/调用/标签 + 反向查询 + `UpsertIR` 增量入库），`storage.driver=sqlite` 即启用，默认仍 JSON 文件存储作 fallback。消除了「文档声称 SQLite、现实仅 JSON」的实现落差。
+- **SCIP / LSP 适配器生产验证**：
+  - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。
+  - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 真实服务器传输层验证（clangd 需 compile-commands/project 上下文才登记独立文件，缺上下文时优雅跳过）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复 `SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类的**生产缺陷**。
+  - 多语言验证/基准框架见 `internal/integration/adapter_validation_test.go`，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`。
+
 ## 测试
 
 ```bash
@@ -174,14 +182,14 @@ make test
 make bench
 ```
 
-当前 24 个包全部通过测试，0 失败（含 -race 竞态检测）。
+当前全部包通过测试，0 失败（含 -race 竞态检测）。
 
 ## 环境要求
 
 | 依赖 | 最低版本 | 说明 |
 |------|---------|------|
 | Go | 1.25+ | 编译运行 |
-| GCC/MinGW | 任一 C 编译器 | CGO 构建必需（SQLite/tree-sitter） |
+| GCC/MinGW | 任一 C 编译器 | 可选；默认纯 Go 构建（modernc.org/sqlite）无需 CGO，仅改用 CGO 版 SQLite/tree-sitter 时才需要 |
 | Docker | 24+ | 容器化部署 |
 | onnxruntime | 1.28+ | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |

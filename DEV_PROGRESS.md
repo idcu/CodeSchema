@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 17:30
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复）
+> 更新时间：2026-08-14
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证**）
 > 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
 ---
@@ -274,6 +274,17 @@ P18      [████████████████████] 100%
 - [x] **向量索引可视化工具前端增强** — 新增单文档 API、点击展开详情、搜索内容展示、刷新按钮、Toast 通知（Commit 34）
 - [x] **日志模块 data race 修复** — 使用 sync.Mutex 保护全局 defaultLogger 的初始化和访问，通过 -race 验证（Commit 36）
 
+### 维护优化（2026-08-14）：SQLite 权威存储接线 + SCIP/LSP 生产验证
+
+本会话基于「全维度竞品分析」给出的优先级清单推进实施：
+
+- [x] **优先级① SQLite 权威存储接线** — 新增 `internal/store/sqlite/sqlite.go`，基于纯 Go 的 `modernc.org/sqlite`（免 CGO，契合单二进制目标）完整实现 `store.Store` 接口：文件/类/方法/调用/标签 + 反向查询 + `UpsertIR` 增量入库（语义对齐 FileStore，额外支持跨会话一致与并发查询）。`cmd/codeschema/main.go` 经 `newStore(cfg)` 接线，`storage.driver=sqlite` 即启用，默认仍 JSON 文件存储作 fallback。修复 DDL 可空文本列 `NULL`→Go string 扫描失败（给 `file.language` / `class.method.modifier,doc_comment,source` / `call.source` 补 `DEFAULT ''`），并同步对齐未接线的 `001_init.sql`。`go build ./...` / `go vet` / `go test ./internal/store/sqlite/`（5 项全 PASS）通过。
+- [x] **优先级② SCIP / LSP 适配器生产验证** —
+  - **SCIP**：新增真实 fixture 端到端测试（`fixture_test.go`），覆盖 class/method/**调用关系（Calls）提取**逻辑（此前 0 覆盖）；并修复 `ParseAll` 误用 `adapter.FileExists`（仅对文件返回 true）校验 `indexDir` 目录，导致目录永远被判为「不存在」的 Bug（改为 `scipDirExists` 目录存在性判断）。
+  - **LSP**：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS；`clangd` 真实服务器传输层验证（JSON-RPC 实际连通，clangd 因缺少 compile-commands/project 上下文拒绝登记独立文件，已改为优雅跳过并记录缺口）。三处**生产修复**：①`Parse` 的 `didOpen` 改为携带真实文件内容（clangd 等要求，gopls/mock 不受影响）；②新增 `lspPathToOSPath` / `readLSPFileContent` 辅助；③**关键修复**——`addSymbolInfo` / `addDocumentSymbol` 的 `SymbolKind` 映射原仅覆盖 5(Class)/6(Method)/9(Constructor)，漏掉 Go 的 Struct(23)/Interface(24)/Function(12)，导致 gopls 对 Go 源码解析出 0 类 0 方法；补齐 `case 23→STRUCT / 24→INTERFACE / 6,12→方法` 后，gopls 真实返回类与方法（验证由 `TestLSPAdapter_RealGopls` 从 FAIL 转为 PASS）。
+  - **多语言验证/基准框架**：`internal/integration/adapter_validation_test.go`，对 SCIP（fixture，始终可用）+ LSP（gopls/clangd/jdtls，按工具可用性）逐语言真实解析并记录符号数与延迟，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
+- [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 6 语言正则解析实现（非 CGO 版 go-tree-sitter）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决**：全部外部包已从本地安装（chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。
@@ -287,7 +298,7 @@ P18      [████████████████████] 100%
 1. 阅读 `docs/dev/00-项目概述与架构概览.md` 了解整体架构
 2. 按 `docs/dev/` 编号顺序阅读对应开发文档
 3. 当前所有模块可编译运行：`go build ./cmd/codeschema`
-4. 运行测试：`go test ./...`（23 个包，全部通过）
+4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
 7. 最新提交：docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标（`899e7ec`，参见 CHANGELOG.internal.md Commit 41）

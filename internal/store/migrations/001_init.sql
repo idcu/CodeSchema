@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS file (
   line_count INTEGER DEFAULT 0,          -- 文件总行数，规模感知/裁剪限流
   byte_size INTEGER DEFAULT 0,           -- 字节大小，大文件旁路/分批
   referenced_by_files TEXT DEFAULT '[]', -- JSONB，反向引用本文件的文件清单
-  language TEXT,                         -- 文件主语言，高频查询免 join project
+  language TEXT DEFAULT '',              -- 文件主语言，高频查询免 join project
   last_indexed_at TEXT,                  -- 本次成功索引时间
   parse_status TEXT DEFAULT 'parse_ok',  -- parse_ok / parse_skipped / parse_error
   updated_at TEXT DEFAULT (datetime('now')),
@@ -43,10 +43,10 @@ CREATE TABLE IF NOT EXISTS class (
   parent_class_id INTEGER,
   start_line INTEGER, start_col INTEGER,
   end_line INTEGER, end_col INTEGER,
-  modifier TEXT,
-  doc_comment TEXT,
-  annotations TEXT,                      -- JSONB
-  source TEXT,                           -- 数据来源
+  modifier TEXT DEFAULT '',
+  doc_comment TEXT DEFAULT '',
+  annotations TEXT DEFAULT '[]',         -- JSONB
+  source TEXT DEFAULT '',                -- 数据来源
   extra TEXT,                            -- JSONB，语言差异兜底
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -71,14 +71,14 @@ CREATE TABLE IF NOT EXISTS method (
   return_type TEXT,
   start_line INTEGER, start_col INTEGER,
   end_line INTEGER, end_col INTEGER,
-  modifier TEXT,
-  doc_comment TEXT,
-  annotations TEXT,                      -- JSONB
+  modifier TEXT DEFAULT '',
+  doc_comment TEXT DEFAULT '',
+  annotations TEXT DEFAULT '[]',         -- JSONB
   is_static INTEGER DEFAULT 0,
   is_abstract INTEGER DEFAULT 0,
   is_constructor INTEGER DEFAULT 0,
-  imports TEXT,                          -- JSONB：方法所在文件的 import 快照
-  source TEXT,
+  imports TEXT DEFAULT '[]',             -- JSONB：方法所在文件的 import 快照
+  source TEXT DEFAULT '',
   extra TEXT,                            -- JSONB
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -127,9 +127,9 @@ CREATE TABLE IF NOT EXISTS call (
   id INTEGER PRIMARY KEY,
   caller_method_id INTEGER,
   callee_method_id INTEGER,
-  call_type TEXT,                        -- direct / interface / dynamic / unknown
+  call_type TEXT DEFAULT '',            -- direct / interface / dynamic / unknown
   line_number INTEGER,
-  source TEXT
+  source TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_method_id);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_method_id);

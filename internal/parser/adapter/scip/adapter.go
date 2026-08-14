@@ -19,7 +19,6 @@ import (
 
 	"github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/parser"
-	"github.com/idcu/codeschema/internal/parser/adapter"
 )
 
 // SCIPIndex 表示 SCIP index 文件的结构。
@@ -148,7 +147,7 @@ func (a *SCIPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocumen
 
 // ParseAll 批量解析，加载 SCIP index 并按文件分发 IR。
 func (a *SCIPAdapter) ParseAll(ctx context.Context, paths []string) (<-chan *parser.IRDocument, error) {
-	if a.indexDir == "" || !adapter.FileExists(a.indexDir) {
+	if a.indexDir == "" || !scipDirExists(a.indexDir) {
 		return nil, fmt.Errorf("SCIP index directory not found: %s: %w", a.indexDir, errors.ErrSourceUnavailable)
 	}
 
@@ -201,6 +200,15 @@ func (a *SCIPAdapter) ParseAll(ctx context.Context, paths []string) (<-chan *par
 		}
 	}()
 	return ch, nil
+}
+
+// scipDirExists 判断路径是否为已存在的目录（indexDir 应是目录，非文件）。
+func scipDirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 // loadIndex 扫描 indexDir 目录下的 .scip 文件并加载。

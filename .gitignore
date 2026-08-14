@@ -50,3 +50,19 @@ down/go.sum
 
 # ONNX model files (large binary, download separately)
 down/models/
+
+# Temporary analysis docs (competitor analyses, reviews, drafts — not deliverables)
+/analysis/
+
+# Agent workspace memory (private, per-machine)
+.workbuddy/
+
+# Runtime storage output (FileStore JSON driver writes here)
+/data/
+
+# LSP adapter real-server E2E test artifact
+/cs_lsp_tmp/
+
+# Build/runtime bench outputs (regenerated; *.exe/*.dll already ignored above)
+build/*.json
+build_err.txt

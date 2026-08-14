@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -251,12 +252,16 @@ func (a *LSPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument
 
 	// 1. 发送 textDocument/didOpen 通知
 	uri := "file://" + path
+	// 携带真实文件内容：部分语言服务器（如 clangd）要求 didOpen 提供文本，
+	// 否则不会登记文档，后续 documentSymbol 会报 "non-added document"。
+	// 读取失败则回退为空文本（gopls 等会自行从磁盘读取，行为不变）。
+	text := readLSPFileContent(lspPathToOSPath(path))
 	didOpenParams := map[string]any{
 		"textDocument": map[string]any{
 			"uri":        uri,
 			"languageId": a.lang,
 			"version":    1,
-			"text":       "",
+			"text":       text,
 		},
 	}
 	a.sendNotification("textDocument/didOpen", didOpenParams)
@@ -304,6 +309,25 @@ func (a *LSPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument
 	return ir, nil
 }
 
+// lspPathToOSPath 将 LSP 路径（适配器内 "file://" + path 形式）还原为操作系统路径，
+// 用于读取真实文件内容。反向 toLSPPath："/C:/Users/x" → "C:/Users/x"，
+// Unix 路径 "/home/x" 保持不变。
+func lspPathToOSPath(p string) string {
+	if len(p) > 2 && p[0] == '/' && p[2] == ':' {
+		p = p[1:] // 去掉前导斜杠，得到 "C:/Users/x"
+	}
+	return filepath.FromSlash(p)
+}
+
+// readLSPFileContent 读取文件内容用于 didOpen 文本；失败返回空字符串（降级）。
+func readLSPFileContent(p string) string {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // symbolInfo 对应 LSP SymbolInformation 结构。
 type symbolInfo struct {
 	Name     string     `json:"name"`
@@ -346,8 +370,9 @@ type documentRange struct {
 
 // addSymbolInfo 将 SymbolInformation 添加到 IRDocument。
 func (a *LSPAdapter) addSymbolInfo(ir *parser.IRDocument, sym symbolInfo) *parser.IRDocument {
-	// LSP SymbolKind: 1=File, 2=Module, 3=Namespace, 4=Package,
-	// 5=Class, 6=Method, 7=Property, 8=Field, 9=Constructor, ...
+	// LSP SymbolKind（部分）：5=Class, 6=Method, 9=Constructor, 11=Field,
+	// 12=Function, 23=Struct, 24=Interface。
+	// 注意：Go 的 struct/interface/func 分别为 23/24/12，原实现仅映射 5/6 会漏掉 Go 符号。
 	switch sym.Kind {
 	case 5, 9: // Class, Constructor
 		ir.Classes = append(ir.Classes, parser.ClassIR{
@@ -359,7 +384,27 @@ func (a *LSPAdapter) addSymbolInfo(ir *parser.IRDocument, sym symbolInfo) *parse
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
-	case 6: // Method
+	case 23: // Struct
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      sym.Name,
+			FullName:  sym.ContainerName + "." + sym.Name,
+			Type:      "STRUCT",
+			StartLine: sym.Location.Range.Start.Line + 1,
+			StartCol:  sym.Location.Range.Start.Character + 1,
+			EndLine:   sym.Location.Range.End.Line + 1,
+			EndCol:    sym.Location.Range.End.Character + 1,
+		})
+	case 24: // Interface
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      sym.Name,
+			FullName:  sym.ContainerName + "." + sym.Name,
+			Type:      "INTERFACE",
+			StartLine: sym.Location.Range.Start.Line + 1,
+			StartCol:  sym.Location.Range.Start.Character + 1,
+			EndLine:   sym.Location.Range.End.Line + 1,
+			EndCol:    sym.Location.Range.End.Character + 1,
+		})
+	case 6, 12: // Method, Function
 		ir.Methods = append(ir.Methods, parser.MethodIR{
 			Name:      sym.Name,
 			ClassFQN:  sym.ContainerName,
@@ -385,7 +430,27 @@ func (a *LSPAdapter) addDocumentSymbol(ir *parser.IRDocument, ds documentSymbol)
 			EndLine:   ds.Range.End.Line + 1,
 			EndCol:    ds.Range.End.Character + 1,
 		})
-	case 6: // Method
+	case 23: // Struct
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      ds.Name,
+			FullName:  ds.Name,
+			Type:      "STRUCT",
+			StartLine: ds.Range.Start.Line + 1,
+			StartCol:  ds.Range.Start.Character + 1,
+			EndLine:   ds.Range.End.Line + 1,
+			EndCol:    ds.Range.End.Character + 1,
+		})
+	case 24: // Interface
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      ds.Name,
+			FullName:  ds.Name,
+			Type:      "INTERFACE",
+			StartLine: ds.Range.Start.Line + 1,
+			StartCol:  ds.Range.Start.Character + 1,
+			EndLine:   ds.Range.End.Line + 1,
+			EndCol:    ds.Range.End.Character + 1,
+		})
+	case 6, 12: // Method, Function
 		ir.Methods = append(ir.Methods, parser.MethodIR{
 			Name:      ds.Name,
 			StartLine: ds.Range.Start.Line + 1,

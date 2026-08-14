@@ -25,6 +25,7 @@ import (
 	"github.com/idcu/codeschema/internal/server"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
+	sqlitestore "github.com/idcu/codeschema/internal/store/sqlite"
 	"github.com/idcu/codeschema/internal/vector"
 	"github.com/idcu/codeschema/internal/watcher"
 )
@@ -32,6 +33,16 @@ import (
 var (
 	version = "0.1.0"
 )
+
+// newStore 根据配置选择存储实现。
+// "sqlite" 驱动使用 SQLite 权威存储（纯 Go，免 CGO）；
+// 其余（含默认 "file"）回退到 JSON 文件存储。
+func newStore(cfg *config.Config) store.Store {
+	if cfg.Storage.Driver == "sqlite" {
+		return sqlitestore.NewSQLiteStore()
+	}
+	return store.NewStore(cfg.Storage.Driver)
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -163,7 +174,7 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fmt.Printf("scanning repository: %s (workers=%d)\n", repoPath, *workers)
 
 	// 初始化存储
-	st := store.NewStore(cfg.Storage.Driver)
+	st := newStore(cfg)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -232,7 +243,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms, mode=%s)\n", repoPath, *workers, *debounceMs, mode)
 
 	// 初始化存储
-	st := store.NewStore(cfg.Storage.Driver)
+	st := newStore(cfg)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -313,7 +324,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := store.NewStore(cfg.Storage.Driver)
+	st := newStore(cfg)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -357,7 +368,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := store.NewStore(cfg.Storage.Driver)
+	st := newStore(cfg)
 	if err := st.Open(ctx, *storeDir); err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
