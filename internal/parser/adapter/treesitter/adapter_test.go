@@ -16,8 +16,8 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp"}
-	unsupported := []string{"ruby", "php", "swift", "kotlin", "unknown"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin"}
+	unsupported := []string{"ruby", "php", "swift", "unknown"}
 
 	for _, lang := range supported {
 		if !a.Supports(lang) {
@@ -299,5 +299,124 @@ func TestTreeSitterAdapter_InitClose(t *testing.T) {
 	}
 	if err := a.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_JavaCalls 验证 Java 调用检测（T2-1：调用检测扩展到全语言）。
+func TestTreeSitterAdapter_Parse_JavaCalls(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OrderService.java")
+	content := `package com.example;
+
+public class OrderService {
+    public void createOrder(Order order) {
+        paymentService.pay(order);
+        if (order.isValid()) {
+            notifyService.send(order);
+        }
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.Classes) != 1 {
+		t.Fatalf("expected 1 class, got %d", len(doc.Classes))
+	}
+	if len(doc.Methods) != 1 {
+		t.Fatalf("expected 1 method, got %d", len(doc.Methods))
+	}
+	if len(doc.Calls) == 0 {
+		t.Fatal("expected calls detected in Java (T2-1), got 0")
+	}
+	// 应检测到 paymentService.pay 与 notifyService.send；if/order.isValid 为关键字/短名应被过滤或保留
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "paymentService.pay" || c.CalleeFQN == "notifyService.send" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected paymentService.pay / notifyService.send in calls, got %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Kotlin 验证 Kotlin 类/方法解析（T6-2：多语言扩展）。
+func TestTreeSitterAdapter_Parse_Kotlin(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "UserService.kt")
+	content := `package com.example
+
+data class User(val name: String, val age: Int)
+
+class UserService {
+    fun getUser(id: Long): User {
+        val user = repository.findById(id)
+        return user
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "kotlin" {
+		t.Errorf("expected language kotlin, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 2 {
+		t.Fatalf("expected 2 classes (User + UserService), got %d: %+v", len(doc.Classes), doc.Classes)
+	}
+	if len(doc.Methods) != 1 {
+		t.Fatalf("expected 1 method (getUser), got %d", len(doc.Methods))
+	}
+	if doc.Methods[0].Name != "getUser" {
+		t.Errorf("expected method getUser, got %s", doc.Methods[0].Name)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_CppCalls 验证 C++ 调用检测。
+func TestTreeSitterAdapter_Parse_CppCalls(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engine.cpp")
+	content := `class Engine {
+public:
+    void start() {
+        fuelPump.pump();
+        if (ready) {
+            ignition.fire();
+        }
+    }
+};
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "fuelPump.pump" || c.CalleeFQN == "ignition.fire" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected C++ calls detected, got %+v", doc.Calls)
 	}
 }

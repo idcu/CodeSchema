@@ -21,7 +21,7 @@ import (
 // langPatterns 每种语言的解析模式。
 type langPatterns struct {
 	classPattern   *regexp.Regexp // 匹配类/结构体/接口定义
-	classNameIndex int           // 类名在 classPattern 匹配结果中的索引
+	classNameIndex int            // 类名在 classPattern 匹配结果中的索引
 	methodPattern  *regexp.Regexp // 匹配方法/函数定义
 	callPattern    *regexp.Regexp // 匹配函数调用
 	commentTrim    string         // 注释前缀，用于提取文档
@@ -81,6 +81,13 @@ func initPatterns() map[string]langPatterns {
 			classPattern:   regexp.MustCompile(`^(class|struct|enum)\s+(\w+)\s*[:\{]`),
 			classNameIndex: 2,
 			methodPattern:  regexp.MustCompile(`(\w[\w<>*&:\s]+)\s+(\w[\w]*)\s*\([^)]*\)\s*(const|override|final|\s)*\s*\{`),
+			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
+		"kotlin": {
+			classPattern:   regexp.MustCompile(`^(public\s+|private\s+|internal\s+|protected\s+)?(data\s+|sealed\s+|abstract\s+)?(class|interface|enum class|object|data class)\s+(\w+)`),
+			classNameIndex: 4,
+			methodPattern:  regexp.MustCompile(`^\s*(public|private|internal|protected|override|suspend|inline|async|\s)*\s*fun\s+(\w[\w]*)\s*\(`),
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
 			commentTrim:    "//",
 		},
@@ -196,12 +203,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			continue
 		}
 
-		// 解析函数调用（仅当行包含调用）
-		if doc.Language == "go" || doc.Language == "py" {
-			// Go/Python 调用检测
-			if strings.Contains(trimmed, "(") && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "#") {
-				detectCalls(trimmed, lineNum, &doc.Calls, patterns.callPattern)
-			}
+		// 解析函数调用（全部语言启用；Java/TS/Rust/C++/Kotlin 的调用检测
+		// 依赖 callPattern 与 isKeyword 过滤，精度见 docs/dev 02 的启发式说明）
+		if strings.Contains(trimmed, "(") && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "#") {
+			detectCalls(trimmed, lineNum, &doc.Calls, patterns.callPattern)
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -283,6 +288,18 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "CLASS"
+	case "kotlin":
+		for _, m := range matches {
+			switch m {
+			case "interface":
+				return "INTERFACE"
+			case "enum", "enum class":
+				return "ENUM"
+			case "object":
+				return "OBJECT"
+			}
+		}
+		return "CLASS"
 	default:
 		return "CLASS"
 	}
@@ -318,6 +335,16 @@ func isKeyword(name string) bool {
 		"recover": true, "range": true, "defer": true, "go": true,
 		"assert": true, "raise": true, "yield": true, "await": true,
 		"async": true, "super": true, "this": true, "self": true,
+		// Kotlin 关键字
+		"fun": true, "val": true, "var": true, "when": true, "is": true,
+		"in": true, "suspend": true, "require": true,
+		"check": true, "error": true, "TODO": true, "println": true,
+		// Rust
+		"fn": true, "let": true, "mut": true, "match": true, "impl": true,
+		"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
+		// C/C++
+		"sizeof": true, "static_cast": true, "dynamic_cast": true,
+		"reinterpret_cast": true, "const_cast": true, "printf": true,
 	}
 	return keywords[name]
 }

@@ -237,6 +237,8 @@ func detectLang(path string) string {
 		return "c"
 	case ".h", ".hpp":
 		return "cpp"
+	case ".kt", ".kts":
+		return "kotlin"
 	default:
 		return "unknown"
 	}
