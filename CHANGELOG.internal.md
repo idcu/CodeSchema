@@ -6,9 +6,22 @@
 
 ## 提交记录
 
-### Commit 41: docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标
+### Commit 42: docs(deploy): 同步 ONNX 集成文档 + 清理旧版本包
 
 **Commit Hash**: `待提交`
+
+**核心改动点**：
+- `DEV_PROGRESS.md` — 更新已知问题 #4（ONNX 模型集成细节），更新最新提交信息为 899e7ec
+- `README.md` — 更新测试包计数 23→24，环境要求表 onnxruntime 版本 1.17+→1.28+，新增 bge-small-zh 模型行
+- `docs/dev/11-配置部署与路线图.md` — 补充 macOS Intel 1.23.2 为最后 x86 版本的说明
+- `CHANGELOG.internal.md` — 修正 Commit 41 哈希值（待提交→899e7ec）
+- `build/bench-compare.json`、`build/realrepo-bench.json` — 同步基准数据
+
+**验证数据**：纯文档更新 + 基准数据同步，无代码变更
+
+### Commit 41: docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标
+
+**Commit Hash**: `899e7ec`
 
 **核心改动点**：
 - `docs/dev/11-配置部署与路线图.md` — 交换 macOS 下载表顺序，Apple Silicon（arm64）设为主条目，Intel（x86_64）标注为旧机型

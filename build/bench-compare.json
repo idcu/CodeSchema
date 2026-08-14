@@ -3,14 +3,14 @@
     {
       "repo_name": "CodeSchema",
       "repo_path": "E:\\CodeSchema",
-      "file_count": 81,
-      "scan_time_ms": 357,
-      "index_time_ms": 68,
-      "heap_mb": 5.7265625,
-      "search_p50_ms": 7.638,
-      "search_p95_ms": 8.963,
-      "search_p99_ms": 8.963,
-      "search_avg_ms": 7.596055555555556
+      "file_count": 83,
+      "scan_time_ms": 561,
+      "index_time_ms": 18,
+      "heap_mb": 671.5546875,
+      "search_p50_ms": 1.188,
+      "search_p95_ms": 1.993,
+      "search_p99_ms": 1.993,
+      "search_avg_ms": 1.407388888888889
     }
   ],
   "baseline": "CodeSchema",

@@ -174,7 +174,7 @@ make test
 make bench
 ```
 
-当前 23 个包全部通过测试，0 失败（含 -race 竞态检测）。
+当前 24 个包全部通过测试，0 失败（含 -race 竞态检测）。
 
 ## 环境要求
 
@@ -183,7 +183,8 @@ make bench
 | Go | 1.25+ | 编译运行 |
 | GCC/MinGW | 任一 C 编译器 | CGO 构建必需（SQLite/tree-sitter） |
 | Docker | 24+ | 容器化部署 |
-| onnxruntime | 1.17+ | 可选，语义检索加速 |
+| onnxruntime | 1.28+ | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`） |
+| bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |
 
 ## 许可证
 

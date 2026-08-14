@@ -1,6 +1,6 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14 00:00
+> 更新时间：2026-08-14 17:30
 > 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复）
 > 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
@@ -279,7 +279,7 @@ P18      [████████████████████] 100%
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决**：全部外部包已从本地安装（chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。
 2. ~~**轮询监听性能**~~ **已解决**：FsWatcher 已实现。
 3. ~~**tree-sitter C 绑定**~~ **已解决**：go-tree-sitter 已安装，自带 parser.c 源码，CGO 自编译。
-4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`onnxruntime.dll` 可从 ONNX Runtime 官方 Releases 下载并放置到 `down/onnxruntime/`，`make build-cgo` 自动复制到输出目录。当前语义检索默认使用纯 Go LocalEmbedder，无需外部 DLL。
+4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`bge-small-zh-v1.5` 模型已预转换为 ONNX 格式（FP16 量化，512 维），位于 `down/models/bge-small-zh-v1.5/`。`onnxruntime.dll`（v1.28.0）位于 `down/onnxruntime/`，`make build-cgo` 自动复制到输出目录。应用启动时自动检测 ONNX 模型，优先使用 ONNXEmbedder，失败时降级到 LocalEmbedder。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
 
 ## 接手说明
@@ -290,5 +290,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（23 个包，全部通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：perf(log): 日志模块 data race 修复（参见 CHANGELOG.internal.md Commit 36）
+7. 最新提交：docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标（`899e7ec`，参见 CHANGELOG.internal.md Commit 41）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
