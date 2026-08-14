@@ -107,6 +107,7 @@ Commands:
   scan <path>       扫描仓库并入库
   watch <path>      文件监听增量（P0，轮询模式；--fsnotify 切换为原生监听）
   rebuild-kv        重建 KV 缓存（P2）
+  benchmark         全链路基准（扫描/索引/检索指标，多仓库对比）
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
   version           显示版本信息
@@ -192,6 +193,9 @@ Use "codeschema <command> -h" for more information about a command.
 
 	case "watch":
 		return watchCmd(ctx, cfg, args[1:])
+
+	case "benchmark":
+		return benchmarkCmd(ctx, cfg, args[1:])
 
 	case "mcp":
 		return mcpCmd(ctx, cfg, args[1:])
