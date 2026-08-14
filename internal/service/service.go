@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
+	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -26,6 +28,10 @@ type Service struct {
 
 	// analyzer 供影响面分析（GetImpact）使用；未注入时 GetImpact 返回空（向后兼容）。
 	analyzer *analyzer.Analyzer
+
+	// enhancer 供查询期同名方法消歧（Disambiguate）使用；
+	// 未注入或 LLM 不可用时搜索不消歧（结果原样返回，向后兼容）。
+	enhancer *ai.Enhancer
 
 	// coverage 保存「测试方法 FQN → 其覆盖的生产方法 FQN 列表」的映射，
 	// 由 SetCoverage / LoadCoverageJSON 注入，供 coverage 测试关联策略反查。
@@ -57,6 +63,15 @@ func (s *Service) WithIndexBuilder(b *search.IndexBuilder) *Service {
 // WithImpactAnalyzer 注入代码图分析器，启用真实调用图影响面分析（含关联单测）。
 func (s *Service) WithImpactAnalyzer(a *analyzer.Analyzer) *Service {
 	s.analyzer = a
+	return s
+}
+
+// WithAIEnhancer 注入 AI 增强层，启用查询期同名方法消歧（Disambiguate）。
+//
+// 未注入或 LLM 不可用时，搜索不消歧、结果原样返回（向后兼容）；
+// 消歧失败（预算超限/LLM 错误）同样回退到原始结果，不影响主流程。
+func (s *Service) WithAIEnhancer(e *ai.Enhancer) *Service {
+	s.enhancer = e
 	return s
 }
 
@@ -287,6 +302,10 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 		// 富化搜索结果：从 Store 查询 Kind 和 File 信息
 		s.enrichResults(ctx, results)
 
+		// 查询期同名方法消歧（可选）：多个同名方法候选时用 AI 选最佳，
+		// 预算超限/LLM 失败时结果原样返回（向后兼容）。
+		results = s.disambiguateMethodResults(ctx, query, results)
+
 		// 映射为 service.SearchResult
 		svcResults := make([]SearchResult, 0, len(results))
 		for _, r := range results {
@@ -303,6 +322,119 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 
 	// 回退到 P0 占位行为
 	return []SearchResult{}, nil
+}
+
+// disambiguateMethodResults 对搜索结果中的同名方法候选做 AI 消歧（可选）。
+//
+// 逻辑：
+//  1. 仅当注入 enhancer 且查询非空时执行；
+//  2. 收集 Kind=="method" 的结果，按「方法简单名」分组（同名方法 = 多个类中同名方法）；
+//  3. 对每组（≥2 候选）构建 parser.MethodIR 候选列表，调用 Enhancer.Disambiguate
+//     选择最佳项；最佳项保留、其余同组候选取消（降噪）；
+//  4. 任何失败（预算超限/LLM 错误/解析异常）都静默回退：结果原样返回，不影响主流程。
+func (s *Service) disambiguateMethodResults(ctx context.Context, query string, results []search.SearchResult) []search.SearchResult {
+	if s.enhancer == nil || query == "" || len(results) < 2 {
+		return results
+	}
+
+	// 收集 method 类型结果（符号为 method:<id>）
+	type methodCandidate struct {
+		idx      int
+		methodIR parser.MethodIR
+	}
+	methodByID := make(map[int64]parser.MethodIR)
+	var methodIdxs []int
+	for i, r := range results {
+		if !strings.HasPrefix(r.Symbol, "method:") {
+			continue
+		}
+		id := parseInt64(strings.TrimPrefix(r.Symbol, "method:"))
+		if id <= 0 {
+			continue
+		}
+		ir, ok := s.loadMethodIR(ctx, id)
+		if !ok {
+			continue
+		}
+		methodByID[id] = ir
+		methodIdxs = append(methodIdxs, i)
+	}
+	if len(methodIdxs) < 2 {
+		return results
+	}
+
+	// 按方法简单名分组
+	groups := make(map[string][]methodCandidate)
+	for _, i := range methodIdxs {
+		id := parseInt64(strings.TrimPrefix(results[i].Symbol, "method:"))
+		ir := methodByID[id]
+		groups[ir.Name] = append(groups[ir.Name], methodCandidate{idx: i, methodIR: ir})
+	}
+
+	// 对每组 ≥2 的候选做消歧：保留最佳，取消其余
+	drop := make(map[int]bool)
+	s.enhancer.SetPhase(ai.PhaseQuery)
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		candidates := make([]parser.MethodIR, 0, len(group))
+		for _, c := range group {
+			candidates = append(candidates, c.methodIR)
+		}
+		best, err := s.enhancer.Disambiguate(ctx, candidates, query)
+		if err != nil || best < 0 || best >= len(group) {
+			continue // 失败回退：该组不消歧
+		}
+		for gi, c := range group {
+			if gi != best {
+				drop[c.idx] = true
+			}
+		}
+	}
+
+	if len(drop) == 0 {
+		return results
+	}
+	filtered := make([]search.SearchResult, 0, len(results))
+	for i, r := range results {
+		if drop[i] {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
+}
+
+// loadMethodIR 按方法 ID 加载 MethodIR（供消歧候选构建）。
+func (s *Service) loadMethodIR(ctx context.Context, id int64) (parser.MethodIR, bool) {
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return parser.MethodIR{}, false
+	}
+	for _, f := range files {
+		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, cls := range classes {
+			methods, err := s.store.GetMethodsByClassID(ctx, cls.ID)
+			if err != nil {
+				continue
+			}
+			for _, m := range methods {
+				if m.ID == id {
+					return parser.MethodIR{
+						Name:      m.Name,
+						ClassFQN:  cls.FullName,
+						Signature: m.Signature,
+						Doc:       m.Doc,
+					}, true
+				}
+			}
+		}
+	}
+	return parser.MethodIR{}, false
 }
 
 // enrichResults 从 Store 查询搜索结果中每个符号的 Kind 和 File 信息。

@@ -55,6 +55,17 @@ func newAIEnhancer(cfg *config.Config) *ai.Enhancer {
 	return ai.NewEnhancer(client, budget)
 }
 
+// withAIEnhancer 将 AI 增强层注入 Service（查询期同名方法消歧）与 Analyzer（标签补全）。
+// 未配置 LLM 时返回 nil（调用方自行处理禁用），不视为错误。
+func withAIEnhancer(svc *service.Service, cfg *config.Config) *ai.Enhancer {
+	enh := newAIEnhancer(cfg)
+	if enh == nil {
+		return nil
+	}
+	svc.WithAIEnhancer(enh)
+	return enh
+}
+
 // runTagAll 对已入库数据执行标签推导（规则 + 可选 AI 增强）。
 func runTagAll(ctx context.Context, st store.Store, cfg *config.Config) error {
 	an := analyzer.NewAnalyzer(st)
@@ -374,6 +385,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	s, builder := newSearcher(cfg)
 	svc.WithSearcher(s).WithIndexBuilder(builder)
 	withImpactAnalyzer(svc, st)
+	withAIEnhancer(svc, cfg) // 查询期同名方法消歧（可选）
 
 	// 启动时全量构建索引
 	if result, err := svc.BuildIndex(ctx); err != nil {
@@ -419,6 +431,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	s, builder, vecStore := newSearcherWithStore(cfg)
 	svc.WithSearcher(s).WithIndexBuilder(builder)
 	withImpactAnalyzer(svc, st)
+	withAIEnhancer(svc, cfg) // 查询期同名方法消歧（可选）
 
 	// 启动时全量构建索引
 	if result, err := svc.BuildIndex(ctx); err != nil {

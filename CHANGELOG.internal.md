@@ -6,6 +6,31 @@
 
 ## 提交记录
 
+### Commit 58: feat(parser): 调用检测扩展到全语言 + Kotlin 支持 + T2-1 方案评估（T2-1 低成本路径 + T6-2 部分/PHASE_09）
+
+**核心改动点**：
+- `internal/parser/adapter/treesitter/adapter.go`：
+  - 移除「仅 go/py」调用检测门控，**全部 7 语言（go/java/ts/py/rust/cpp/kotlin）启用调用检测**（callPattern + `isKeyword` 过滤）。
+  - `isKeyword` 扩充 Kotlin/Rust/C++ 关键字（fun/val/var/when/fn/let/match/sizeof/static_cast 等），减少误匹配。
+  - 新增 **Kotlin 支持**（T6-2 部分）：`langPatterns["kotlin"]`（class/interface/enum class/object/data class 类模式 + `fun` 方法模式）；`detectClassType` 支持 kotlin 的 INTERFACE/ENUM/OBJECT 类型。
+- `internal/parser/adapter/adapter.go`：`ExtToLang` 增加 `.kt`/`.kts` → `kotlin`；`SupportedLanguages`/`LangToExtensions` 同步补 kotlin。
+- `internal/scanner/scanner.go`：`detectLang` 增加 `.kt`/`.kts` → `kotlin`。
+- 测试：新增 Java 调用检测（paymentService.pay / notifyService.send）、C++ 调用检测（fuelPump.pump / ignition.fire）、Kotlin 类/方法解析（User + UserService + getUser）3 项。
+
+**验证**：`go test ./internal/parser/... ./internal/scanner/` 全绿；`go build ./...` / `go vet ./...` / 全仓 23 包测试通过。
+**方案评估**：`analysis/2026-08-14-t2-1-parser-precision-eval.md` 产出三方向方案（A CGO 真语法树 / B 强化正则 / C 混合推荐），默认走正则（免 CGO，T0-2 不回归），真语法树留作 `-tags treesitter` 远期可选项，**待用户拍板**。
+**文档同步**：`docs/dev/02-解析适配中间层.md`、`docs/dev/07-适配器实现指南.md`（7 语言清单 + Kotlin 扩展步骤 + 精度档位说明）、`README.md`（语言/依赖描述）。
+
+### Commit 57: feat(service): 查询期同名方法消歧——Disambiguate 接入搜索处理器（T4-1 剩余/PHASE_09）
+
+**核心改动点**：
+- `internal/service/service.go`：`Service` 新增 `enhancer` 字段 + `WithAIEnhancer`；`Search` 富化后调 `disambiguateMethodResults`——收集 `method:<id>` 结果按「方法简单名」分组（同名方法 = 多类中同名），每组 ≥2 候选时构建 `parser.MethodIR` 列表（`loadMethodIR` 从 store 装载 Name/ClassFQN/Signature/Doc）调用 `Enhancer.Disambiguate` 选最佳；**保留最佳、取消其余候选**（降噪）；预算超限（`ErrBudgetExceeded`）/ LLM 失败 / 索引越界均静默回退原结果——搜索永不因 AI 降级。
+- `cmd/codeschema/main.go`：新增 `withAIEnhancer(svc, cfg)` 辅助，在 mcp/serve 构造点注入 Service（watch 构造点注入 analyzer 标签增强路径）。
+- 测试：新增 3 项——消歧保留 AI 选中项（两个同名 getUser 候选，Choose 选 0 → 保留第一个）、未注入 enhancer 结果原样返回、查询预算耗尽回退原结果。
+
+**验证**：`go test -race ./internal/service/` 全绿；`go build ./...` / `go vet ./...` / `-tags pg/redis/onnx` 构建全绿。
+**遗留**：无（T4-1 全部收口：explicit/coverage 策略、AI 增强层、生产编排、查询期消歧均已完成）。
+
 ### Commit 55: feat(ai+service): Enhancer 生产编排接入 + 影响面分析含关联单测（T4-1 剩余 + T4-2/PHASE_09）
 
 **核心改动点（T4-1 剩余·Enhancer 编排接入）**：

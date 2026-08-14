@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/search"
@@ -543,5 +545,123 @@ func TestGetImpact_WithoutAnalyzer_EmptyBackwardCompat(t *testing.T) {
 	}
 	if len(result.Callers) != 0 || len(result.Callees) != 0 {
 		t.Errorf("expected empty impact without analyzer, got callers=%v callees=%v", result.Callers, result.Callees)
+	}
+}
+
+// chooseLLM 模拟 LLMClient：Choose 返回固定索引，Complete 不可用。
+type chooseLLM struct {
+	idx int
+}
+
+func (m chooseLLM) Complete(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (m chooseLLM) Choose(_ context.Context, _ string) (int, error)        { return m.idx, nil }
+
+// TestSearch_Disambiguate 验证查询期同名方法消歧：同名方法多候选时保留 AI 选中项。
+func TestSearch_Disambiguate(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	// 两个类各有同名方法 getUser（不同 FQN/Doc，模拟同名方法候选）
+	ir1 := &parser.IRDocument{
+		Source: "test", Language: "go", FilePath: "/proj/order.go", FileHash: "h1", LineCount: 10, ByteSize: 100,
+		Classes: []parser.ClassIR{{Name: "OrderService", FullName: "com.x.OrderService", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "getUser", ClassFQN: "com.x.OrderService", Doc: "按订单维度查询用户"}},
+	}
+	ir2 := &parser.IRDocument{
+		Source: "test", Language: "go", FilePath: "/proj/auth.go", FileHash: "h2", LineCount: 10, ByteSize: 100,
+		Classes: []parser.ClassIR{{Name: "AuthService", FullName: "com.x.AuthService", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "getUser", ClassFQN: "com.x.AuthService", Doc: "认证上下文中的当前用户"}},
+	}
+	if err := st.UpsertIR(context.Background(), ir1); err != nil {
+		t.Fatalf("upsert ir1: %v", err)
+	}
+	if err := st.UpsertIR(context.Background(), ir2); err != nil {
+		t.Fatalf("upsert ir2: %v", err)
+	}
+
+	// 找到两个方法的 ID
+	var id1, id2 int64
+	files, _ := st.GetAllFiles(context.Background())
+	for _, f := range files {
+		classes, _ := st.GetClassesByFileID(context.Background(), f.ID)
+		for _, cls := range classes {
+			methods, _ := st.GetMethodsByClassID(context.Background(), cls.ID)
+			for _, m := range methods {
+				if m.Name == "getUser" {
+					if id1 == 0 {
+						id1 = m.ID
+					} else {
+						id2 = m.ID
+					}
+				}
+			}
+		}
+	}
+	if id1 == 0 || id2 == 0 {
+		t.Fatalf("expected 2 getUser methods, got id1=%d id2=%d", id1, id2)
+	}
+
+	svc := NewService(st)
+	// 注入 AI 增强层：Choose 恒选索引 0（第一个候选）
+	svc.WithAIEnhancer(ai.NewEnhancer(chooseLLM{idx: 0}, ai.NewBudget(10, 10)))
+
+	// 构造搜索结果：两个同名方法候选
+	results := []search.SearchResult{
+		{Symbol: fmt.Sprintf("method:%d", id1), Score: 0.9, Source: "fts"},
+		{Symbol: fmt.Sprintf("method:%d", id2), Score: 0.8, Source: "fts"},
+	}
+
+	got := svc.disambiguateMethodResults(context.Background(), "查询当前登录用户", results)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 result after disambiguation, got %d: %v", len(got), got)
+	}
+	if got[0].Symbol != fmt.Sprintf("method:%d", id1) {
+		t.Errorf("expected chosen method:%d, got %s", id1, got[0].Symbol)
+	}
+}
+
+// TestSearch_Disambiguate_NoEnhancer 验证未注入 enhancer 时结果原样返回（向后兼容）。
+func TestSearch_Disambiguate_NoEnhancer(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	svc := NewService(st)
+	results := []search.SearchResult{
+		{Symbol: "method:1", Score: 0.9},
+		{Symbol: "method:2", Score: 0.8},
+	}
+	got := svc.disambiguateMethodResults(context.Background(), "查询", results)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 results without enhancer, got %d", len(got))
+	}
+}
+
+// TestSearch_Disambiguate_BudgetExhausted 验证预算耗尽时回退到原始结果。
+func TestSearch_Disambiguate_BudgetExhausted(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	svc := NewService(st)
+	// 查询预算 0：Disambiguate 触发 ErrBudgetExceeded → 不消歧
+	svc.WithAIEnhancer(ai.NewEnhancer(chooseLLM{idx: 0}, ai.NewBudget(10, 0)))
+	results := []search.SearchResult{
+		{Symbol: "method:1", Score: 0.9},
+		{Symbol: "method:2", Score: 0.8},
+	}
+	got := svc.disambiguateMethodResults(context.Background(), "查询", results)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 results with exhausted budget, got %d", len(got))
 	}
 }
