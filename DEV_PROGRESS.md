@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-08-14
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）**）
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）**）
 > 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
 ---
@@ -260,7 +260,7 @@ P18      [████████████████████] 100%
 - [x] **LSP 适配器 `readResponses` 按字节读取** — 将 `bufio.Scanner` 逐行读取改为 `bufio.Reader` 按字节读取 Content-Length 头，精确解析 JSON 体，解决 JSON 体换行导致的解析问题
 - [x] **`internal/server/viz.go`** — 向量索引可视化工具 HTTP 处理器，提供概览/文档列表/搜索 API，内嵌 HTML 模板，支持分页和文本搜索
 - [x] **`internal/server/http.go`** — 集成 VizHandler，可选注册可视化路由，SetVizHandler 方法注入
-- [x] **`cmd/codeschema/main.go`** — chromemVizStore/chromemVizSearcher 适配器，serveCmd 中根据 chromem 驱动自动启用可视化工具
+- [x] **`cmd/codeschema/main.go`** — `vectorVizStore`/`vectorVizSearcher` 适配器，serve 中基于默认向量索引（Persistent/Memory，与检索共用同一 store、统一 embedding）统一启用 `/viz`，移除「仅 chromem 驱动才可用」的限制（T3-2/PHASE_09）
 - [x] **`internal/vector/chromem.go`** — 新增 Size() 返回真实文档数，ListDocuments()/QueryText() 方法支持可视化工具查询
 - [x] 验证数据：`go build` 通过 | `go test` 22 包 0 失败 | 新增 1 个文件，修改 4 个文件
 

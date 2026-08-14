@@ -121,6 +121,17 @@ func (ps *PersistentStore) Close() error {
 	return ps.save()
 }
 
+// ListIDs 返回当前索引中所有向量的 ID 列表。
+func (ps *PersistentStore) ListIDs(_ context.Context) ([]string, error) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	ids := make([]string, 0, len(ps.vecs))
+	for id := range ps.vecs {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // Save 强制保存数据到磁盘。
 func (ps *PersistentStore) Save() error {
 	ps.mu.Lock()

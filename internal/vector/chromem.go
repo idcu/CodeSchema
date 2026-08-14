@@ -170,6 +170,19 @@ func (s *ChromemStore) ListDocuments(ctx context.Context) ([]struct {
 	return result, nil
 }
 
+// ListIDs 返回集合中全部文档的 ID 列表（满足 vector.VectorStore 接口）。
+func (s *ChromemStore) ListIDs(ctx context.Context) ([]string, error) {
+	docs, err := s.ListDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(docs))
+	for i, d := range docs {
+		ids[i] = d.ID
+	}
+	return ids, nil
+}
+
 // QueryText 使用文本查询 chromem 集合（内置 embedding 函数）。
 func (s *ChromemStore) QueryText(ctx context.Context, query string, k int) ([]SearchResult, error) {
 	s.mu.RLock()

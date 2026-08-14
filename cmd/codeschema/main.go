@@ -367,7 +367,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	svc := service.NewService(st)
-	s, builder := newSearcher(cfg)
+	s, builder, vecStore := newSearcherWithStore(cfg)
 	svc.WithSearcher(s).WithIndexBuilder(builder)
 
 	// 启动时全量构建索引
@@ -393,26 +393,16 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		httpSrv.SetAuthToken(*authToken)
 	}
 
-	// 向量索引可视化工具（仅 chromem 驱动支持）
-	if cfg.Storage.Vector.Driver == "chromem" {
-		cs, err := vector.NewPersistentChromemStore(
-			"codeschema",
-			cfg.Storage.Vector.DSN,
+	// 向量索引可视化工具（默认栈 Persistent/Memory 与 chromem 共用同一向量索引，避免 embedding 不一致）
+	if vecStore != nil {
+		vizHandler := server.NewVizHandler(
+			&vectorVizStore{VectorStore: vecStore},
+			&vectorVizSearcher{Searcher: s},
 			cfg.Storage.Search.VectorDim,
-			nil, // 使用默认 embedding 函数（仅用于文本搜索查询）
+			cfg.Storage.Search.VectorDir,
 		)
-		if err == nil {
-			vizHandler := server.NewVizHandler(
-				&chromemVizStore{ChromemStore: cs},
-				&chromemVizSearcher{ChromemStore: cs},
-				cfg.Storage.Search.VectorDim,
-				cfg.Storage.Vector.DSN,
-			)
-			httpSrv.SetVizHandler(vizHandler)
-			fmt.Println("vector index visualization enabled at /viz")
-		} else {
-			fmt.Printf("WARN: cannot create chromem store for viz: %v\n", err)
-		}
+		httpSrv.SetVizHandler(vizHandler)
+		fmt.Println("vector index visualization enabled at /viz")
 	}
 
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
@@ -423,7 +413,11 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 //
 // 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
 // 返回 (searcher, indexBuilder)，两者共享同一份 FTS 和向量索引。
-func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
+// newSearcherWithStore 创建 P8.3 双路检索器 + 索引构建器，并返回底层向量存储。
+//
+// 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
+// 返回 (searcher, indexBuilder, store)，store 供 /viz 可视化复用同一份索引（统一 embedding）。
+func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
 	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
 	var fts search.FTSEngine
 	pfts, err := search.NewPersistentFTS(ftsFile)
@@ -468,39 +462,50 @@ func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 	adapter := search.NewVectorAdapter(indexer)
 	searcher := search.NewSearcher(fts, adapter, nil)
 	builder := search.NewIndexBuilder(fts, indexer, em)
-	return searcher, builder
+	return searcher, builder, store
 }
 
-// chromemVizStore 适配 *vector.ChromemStore 到 server.VizStore 接口。
-type chromemVizStore struct {
-	*vector.ChromemStore
+// newSearcher 兼容旧签名的委托：仅返回 searcher 与 indexBuilder。
+func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
+	s, b, _ := newSearcherWithStore(cfg)
+	return s, b
 }
 
-func (s *chromemVizStore) ListDocuments(ctx context.Context) ([]server.VizDocInfo, error) {
-	docs, err := s.ChromemStore.ListDocuments(ctx)
+// vectorVizStore 适配 vector.VectorStore（默认栈 Persistent/Memory）到 server.VizStore 接口。
+//
+// 默认向量索引仅持久化 id→向量，不含原文，故文档 Content 留空；
+// 可视化以索引元数据（文档数、维度、模式）与文本检索为主。
+type vectorVizStore struct {
+	vector.VectorStore
+}
+
+func (s *vectorVizStore) ListDocuments(ctx context.Context) ([]server.VizDocInfo, error) {
+	ids, err := s.VectorStore.ListIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]server.VizDocInfo, len(docs))
-	for i, d := range docs {
-		result[i] = server.VizDocInfo{ID: d.ID, Content: d.Content}
+	docs := make([]server.VizDocInfo, len(ids))
+	for i, id := range ids {
+		docs[i] = server.VizDocInfo{ID: id, Content: ""}
 	}
-	return result, nil
+	return docs, nil
 }
 
-// chromemVizSearcher 适配 *vector.ChromemStore 到 server.VizSearcher 接口。
-type chromemVizSearcher struct {
-	*vector.ChromemStore
+// vectorVizSearcher 适配 *search.Searcher（默认栈 FTS 双路）到 server.VizSearcher 接口。
+//
+// 使用 SearchModeExact（仅 FTS），避免 SearchModeBoth 在 reranker 为 nil 时 panic。
+type vectorVizSearcher struct {
+	*search.Searcher
 }
 
-func (s *chromemVizSearcher) QueryText(ctx context.Context, query string, k int) ([]server.VizSearchResult, error) {
-	results, err := s.ChromemStore.QueryText(ctx, query, k)
+func (s *vectorVizSearcher) QueryText(ctx context.Context, query string, k int) ([]server.VizSearchResult, error) {
+	results, err := s.Searcher.Search(ctx, query, search.SearchModeExact, k)
 	if err != nil {
 		return nil, err
 	}
 	sr := make([]server.VizSearchResult, len(results))
 	for i, r := range results {
-		sr[i] = server.VizSearchResult{ID: r.ID, Score: r.Score}
+		sr[i] = server.VizSearchResult{ID: r.Symbol, Score: r.Score}
 	}
 	return sr, nil
 }

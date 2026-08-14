@@ -36,6 +36,9 @@ type VectorStore interface {
 	// Size 返回当前索引中的向量数量。
 	Size() int
 
+	// ListIDs 返回当前索引中所有向量的 ID 列表（用于可视化等需要枚举的场景）。
+	ListIDs(ctx context.Context) ([]string, error)
+
 	// Close 释放资源。
 	Close() error
 }
@@ -125,6 +128,17 @@ func (m *MemoryStore) Size() int {
 // Close 释放资源（MemoryStore 无操作）。
 func (m *MemoryStore) Close() error {
 	return nil
+}
+
+// ListIDs 返回当前索引中所有向量的 ID 列表。
+func (m *MemoryStore) ListIDs(_ context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ids := make([]string, 0, len(m.vecs))
+	for id := range m.vecs {
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // cosineSimilarity 计算两个向量的余弦相似度。

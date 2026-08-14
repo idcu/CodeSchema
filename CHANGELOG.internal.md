@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 48: feat(viz): /viz 默认栈可用，统一向量索引（T3-2/PHASE_09）
+
+**核心改动点**：
+- `internal/vector/store.go`：`VectorStore` 接口新增 `ListIDs(ctx) ([]string, error)`；`MemoryStore`/`PersistentStore`/`ChromemStore` 均实现（枚举索引内向量 ID）。
+- `cmd/codeschema/main.go`：`newSearcher` 重构为 `newSearcherWithStore`（多返回底层 `vector.VectorStore`），保留 `newSearcher` 兼容委托；serve 中基于该 store 经 `vectorVizStore`/`vectorVizSearcher` 适配器统一启用 `/viz`，移除「仅 `storage.vector.driver=chromem` 才可用」的限制。
+- 默认栈（Persistent/Memory 向量索引）与检索共用同一 store/embedder → 消除原 chromem 独立索引导致的「文本检索精度不一致」；`vectorVizSearcher.QueryText` 用 `SearchModeExact`（仅 FTS），规避 `SearchModeBoth` 在 reranker 为 nil 时 panic。
+
+**验证数据**：`go build ./...` + `go vet ./...` 通过；`go test ./internal/vector/...` 全绿（新增 `TestMemoryStore_ListIDs`）；`cmd/codeschema` 测试可编译。
+**遗留风险**：默认向量索引仅持久化 `id→向量`、不含原文，故 `/viz` 文档 `Content` 为空（以索引元数据 + 文本检索为主）；如需展示原文需另存 content（后续任务）。
+
 ### Commit 47: fix(parser): CodeGraph 适配器去骨架，不再静默返回空 IR（T2-4/PHASE_09）
 
 **核心改动点**：
