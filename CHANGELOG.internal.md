@@ -639,6 +639,11 @@
   - `github.com/yalue/onnxruntime_go v1.32.1` — ONNX 运行时 Go 绑定（CGO，需外部 onnxruntime.dll）
 - 所有包均基于 CGO（GCC 16.1.0 已可用），为后续 SQLite 存储、精确语法树解析、本地 ONNX 嵌入模型做好准备
 
+> **2026-08-14 更正说明（当前实际状态）**：上述 `go-sqlite3` / `go-tree-sitter` 依赖在后续演进中已被替换，当前 `go.mod` **不再包含** 二者：
+> - SQLite 实际使用 **`modernc.org/sqlite`（纯 Go，免 CGO）**；
+> - 多语言解析实际为 **6 语言正则启发式解析**，并非 `go-tree-sitter` CGO 绑定。
+> 故「已安装 go-sqlite3 / go-tree-sitter」的表述与当前代码不符，特此更正。此外，`onnxruntime_go` 已于 2026-08-14 通过 `//go:build onnx` 隔离，默认 `go build` 不再强制依赖 CGO/gcc。
+
 **验证数据**：
 - go build ./... — 通过
 - go test ./... -count=1 — 18 个包全部通过，0 失败

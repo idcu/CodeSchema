@@ -32,6 +32,17 @@ func NewRedisCache(addr string) (*RedisCache, error) {
 	return &RedisCache{client: c}, nil
 }
 
+// NewRedisCacheFromURL 从 redis:// URL 创建缓存（使用 go-redis 标准 URL 解析，
+// 兼容 storage.kv 配置的 "redis://host:port/db" 形式，如 redis://localhost:6379/0）。
+func NewRedisCacheFromURL(rawURL string) (*RedisCache, error) {
+	opt, err := redis.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("redis parse url: %w", err)
+	}
+	c := redis.NewClient(opt)
+	return &RedisCache{client: c}, nil
+}
+
 func (c *RedisCache) Close() error { return c.client.Close() }
 
 func (c *RedisCache) HealthCheck(ctx context.Context) error {

@@ -97,7 +97,10 @@ type FileRecord struct {
 }
 
 // NewStore 根据驱动类型创建对应的存储实现。
-// 当前仅支持 "file" 驱动。
+//
+// 注意：因 sqlitestore/pg 子包反向依赖本包（实现 Store 接口），本函数按设计
+// 仅分发 "file"；SQLite/PG 等后端经 cmd/codeschema 的 build-tagged 统一分发
+// 接线（见 store_dispatch.go），避免在 store 包内形成循环依赖。
 func NewStore(driver string) Store {
 	switch driver {
 	case "file":

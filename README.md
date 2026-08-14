@@ -25,10 +25,23 @@
 ## 技术栈
 
 - 语言：Go 1.25.2
-- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（tree-sitter 为 6 语言正则解析，无 CGO 依赖）
-- 存储：JSON 文件（默认 fallback）+ SQLite（modernc.org/sqlite 纯 Go，已接线，`storage.driver=sqlite` 启用）→ 可扩展 PostgreSQL / Redis
+- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（**可选**：仅在 `go build -tags onnx` 时引入，tree-sitter 为 6 语言正则解析，无 CGO 依赖）
+- 存储：JSON 文件（默认 fallback）+ SQLite（modernc.org/sqlite 纯 Go 免 CGO，已接线，`storage.driver=sqlite` 启用）；PostgreSQL（`storage.driver=pg|postgres`，需 `go build -tags pg`）+ Redis 热点缓存层（`storage.kv=redis://host:6379/0`，需 `go build -tags redis`）经 `cmd/codeschema` 统一分发接入
 - 协议：MCP Server（JSON-RPC 2.0 + SSE）+ HTTP API（RESTful）
 - 部署：单二进制 / Docker 容器 / 多平台交叉编译
+
+## 存储后端（多驱动可插拔）
+
+存储层以 `internal/store.Store` 接口统一抽象，后端经 `cmd/codeschema` 的 build-tagged 分发接线（因 sqlite/pg 反向依赖 `internal/store`，分发必须落在 cmd 层而非 `store.NewStore`，否则循环依赖）：
+
+| 驱动 | 配置 | 构建标签 | 说明 |
+|---|---|---|---|
+| `file`（默认） | `storage.driver=file` | 无 | JSON 文件存储，零依赖 |
+| `sqlite` | `storage.driver=sqlite` | 无 | modernc.org/sqlite 纯 Go 免 CGO，关系查询/跨会话一致 |
+| `pg` / `postgres` | `storage.driver=pg` + `storage.dsn=postgres://...` | `-tags pg` | PostgreSQL，亿级横向扩展（需 `go get github.com/lib/pq`） |
+| Redis 缓存层 | `storage.kv=redis://host:6379/0` | `-tags redis` | 热点类/调用反查 L2 缓存，地址为空则不启用（需 `go get github.com/redis/go-redis/v9`） |
+
+> 默认 `go build ./...` 不含 pg/redis 代码；启用对应后端时加 `-tags pg` / `-tags redis` 并拉取驱动依赖即可，详见 `docs/dev/12-存储扩展与大规模迁移路径.md`。
 
 ## 快速开始
 
@@ -177,7 +190,7 @@ make clean
 > 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/dev/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
 
 - **包数量**：实际 **27** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24 个包」等旧表述已过时。
-- **默认构建强制 CGO**：`embedder_onnx.go` 无条件 `import onnxruntime_go`，故 `go build ./...` 实际需 gcc（环境 CGO_ENABLED=1）。「GCC 可选」的旧表述不准确。
+- **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 实测并非生产级写入**：`docs/dev/12` 记录的 scalebench 显示，N=10万 单批 upsert SQLite 约 **193s**，JSON FileStore 约 **0.4s**（慢约 500 倍）。当前 SQLite 写入路径有严重瓶颈，「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反——超大仓写入建议走 `BulkUpsert`/PG 或 chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准，237 行）均已存在；PG/Redis/scalebench 已在 `docs/dev/12` 登记，但本 README 与 `DEV_PROGRESS.md` 此前未提及。
 - **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」仅列到 `11`，缺 `12-存储扩展与大规模迁移路径.md`。
@@ -199,7 +212,7 @@ make bench
 | 依赖 | 最低版本 | 说明 |
 |------|---------|------|
 | Go | 1.25+ | 编译运行 |
-| GCC/MinGW | 任一 C 编译器 | **实际为必需**：`internal/vector/embedder_onnx.go` 无条件依赖 CGO 版 `onnxruntime_go`，故默认 `go build ./...` 即需 CGO/gcc（即使不使用 ONNX 模型）。纯 CGO -free 构建需为 ONNX 嵌入器加 build tag 隔离 |
+| GCC/MinGW | 任一 C 编译器 | **仅 ONNX 语义检索需要**：默认 `go build ./...` 已免 CGO/gcc。`go build -tags onnx` 启用 ONNX 嵌入器（bge-small-zh）时需 gcc 与 onnxruntime 动态库；不使用 ONNX 时纯 Go 构建即可（modernc.org/sqlite 亦为纯 Go）。 |
 | Docker | 24+ | 容器化部署 |
 | onnxruntime | 1.28+ | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |

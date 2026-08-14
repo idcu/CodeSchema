@@ -238,6 +238,13 @@ func Validate(cfg *Config) []error {
 
 	if cfg.Storage.Driver == "" {
 		errs = append(errs, fmt.Errorf("storage.driver must not be empty"))
+	} else {
+		switch cfg.Storage.Driver {
+		case "file", "sqlite", "pg", "postgres":
+			// 合法驱动；pg/postgres 需以 -tags pg 构建方可实际启用
+		default:
+			errs = append(errs, fmt.Errorf("storage.driver %q is unsupported (allowed: file, sqlite, pg, postgres)", cfg.Storage.Driver))
+		}
 	}
 
 	if cfg.Storage.DSN == "" {

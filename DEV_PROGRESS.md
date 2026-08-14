@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-08-14
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化**）
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）**）
 > 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
 ---
@@ -40,9 +40,9 @@ P18      [████████████████████] 100%
 > 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/dev/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
 
 1. **包数量实为 27 个**（`go list ./...`），全文历史「23/24 个包」表述已过时；`go build ./...` 通过（exit 0）。
-2. **默认构建强制 CGO**：`internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，故即使不用 ONNX 模型，`go build` 也需 gcc（本机 CGO_ENABLED=1，gcc 16.1.0）。「GCC 可选」的旧表述不准确。
+2. **默认构建强制 CGO（已修复）**：原 `internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，即使不用 ONNX 也需 gcc。现已以 `//go:build onnx` 隔离 ONNX 实现，新增 `embedder_onnx_stub.go`（`!onnx`）提供同名 API 桩，默认 `go build ./...`（CGO 关）免 gcc；ONNX 语义检索需 `go build -tags onnx`（仍依赖 gcc + onnxruntime 动态库）。「GCC 可选」的旧表述已校正为「仅 ONNX 需要」。
 3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/dev/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
-4. **存在但未在本文件登记的代码**：`internal/store/pg`（PG 完整实现 507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准 237 行）均已存在且已在 `docs/dev/12` 登记，但此前本文件与 README 均未提及。
+4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 106 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）。详见 `docs/dev/12` §12.5 与 README「存储后端」小节。
 5. **tree-sitter 实为「正则轻量解析」**，并非 CGO 版 go-tree-sitter 语法树（go.mod 无 `go-tree-sitter`；依赖为 `modernc.org/sqlite` + `chromem-go` + `onnxruntime_go`）。下文「已知问题 #3」的旧结论需修正。
 6. **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，README/本文此前仅列到 `11`。
 7. **阶段完成度口径**：P0–P18 的「功能实现」确已完成并通过测试；但「生产级」「权威存储」等运行期/性能声明需以上述实测为准，不能仅凭 phase 100% 推定。

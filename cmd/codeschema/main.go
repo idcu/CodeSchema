@@ -24,8 +24,6 @@ import (
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/server"
 	"github.com/idcu/codeschema/internal/service"
-	"github.com/idcu/codeschema/internal/store"
-	sqlitestore "github.com/idcu/codeschema/internal/store/sqlite"
 	"github.com/idcu/codeschema/internal/vector"
 	"github.com/idcu/codeschema/internal/watcher"
 )
@@ -34,15 +32,9 @@ var (
 	version = "0.1.0"
 )
 
-// newStore 根据配置选择存储实现。
-// "sqlite" 驱动使用 SQLite 权威存储（纯 Go，免 CGO）；
-// 其余（含默认 "file"）回退到 JSON 文件存储。
-func newStore(cfg *config.Config) store.Store {
-	if cfg.Storage.Driver == "sqlite" {
-		return sqlitestore.NewSQLiteStore()
-	}
-	return store.NewStore(cfg.Storage.Driver)
-}
+// 存储后端的统一分发（含 pg/redis 的 build-tagged 接线）见 store_dispatch.go。
+// 因 sqlite/pg 子包反向依赖 internal/store（实现其接口），分发必须落在 cmd 层，
+// 不能在 internal/store.NewStore 内联（否则形成循环依赖）。
 
 func main() {
 	if err := run(); err != nil {
@@ -174,8 +166,8 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fmt.Printf("scanning repository: %s (workers=%d)\n", repoPath, *workers)
 
 	// 初始化存储
-	st := newStore(cfg)
-	if err := st.Open(ctx, *storeDir); err != nil {
+	st, err := newStore(ctx, cfg, *storeDir)
+	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
@@ -243,8 +235,8 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fmt.Printf("watching repository: %s (workers=%d, debounce=%dms, mode=%s)\n", repoPath, *workers, *debounceMs, mode)
 
 	// 初始化存储
-	st := newStore(cfg)
-	if err := st.Open(ctx, *storeDir); err != nil {
+	st, err := newStore(ctx, cfg, *storeDir)
+	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
@@ -324,8 +316,8 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := newStore(cfg)
-	if err := st.Open(ctx, *storeDir); err != nil {
+	st, err := newStore(ctx, cfg, *storeDir)
+	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
@@ -368,8 +360,8 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st := newStore(cfg)
-	if err := st.Open(ctx, *storeDir); err != nil {
+	st, err := newStore(ctx, cfg, *storeDir)
+	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
