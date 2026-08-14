@@ -28,7 +28,10 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/log"
+	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/robust"
 )
 
 // LSPAdapter 通用 LSP 适配器，通过 JSON-RPC 2.0 与 LSP 服务器通信。
@@ -51,6 +54,11 @@ type LSPAdapter struct {
 
 	alive      bool          // 连接是否存活，readResponses 退出时自动置 false
 	aliveCheck chan struct{} // readResponses 退出时关闭，用于等待优雅退出
+
+	logger         *log.Logger      // 结构化日志，暴露降级原因，避免"静默丢信息"
+	retryAttempts  int             // documentSymbol 等高频请求的可重试次数（含首次）
+	retryBaseDelay time.Duration   // 重试退避基础延迟
+	retryMaxDelay  time.Duration   // 重试退避最大延迟
 }
 
 // jsonRPCRequest JSON-RPC 2.0 请求结构。
@@ -94,7 +102,26 @@ func NewLSPAdapter(name, cmd string, args []string, lang string, timeout time.Du
 		timeout:    timeout,
 		pending:    make(map[int]chan<- *jsonRPCResponse),
 		aliveCheck: make(chan struct{}),
+		logger:      log.WithModule("lsp:" + name),
+		// 重试以覆盖 LSP 子进程的瞬时抖动（超时、连接重置），不放大单文件解析延迟。
+		retryAttempts: 2,
+		retryBaseDelay: 150 * time.Millisecond,
+		retryMaxDelay:  time.Second,
 	}
+}
+
+// init 注册 LSP 适配器的可观测性指标，暴露降级与失败原因。
+func init() {
+	metrics.RegisterCounter("lsp_missing_compile_commands_total",
+		"clangd 初始化时未发现 compile_commands.json（C/C++ 可能静默返回空符号）")
+	metrics.RegisterCounter("lsp_parse_empty_symbols_total",
+		"解析非空 C/C++ 文件但 LSP 返回 0 个符号（疑似缺项目上下文）", "lang")
+	metrics.RegisterCounter("lsp_parse_errors_total",
+		"LSP 解析请求失败次数", "reason")
+	metrics.RegisterCounter("lsp_retries_total",
+		"LSP 请求重试次数（瞬时失败）", "method")
+	metrics.RegisterCounter("lsp_malformed_frames_total",
+		"被静默恢复的异常 LSP 协议帧（已暴露为 WARN）", "kind")
 }
 
 // NewGoplsAdapter 创建 gopls 适配器。
@@ -164,9 +191,22 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 	a.aliveCheck = make(chan struct{})
 	a.mu.Unlock()
 
-	// 捕获 stderr，防止缓冲区满导致进程阻塞
+	// 捕获 stderr：clangd 等常把降级/错误原因（如缺 compile_commands.json）写到 stderr，
+	// 原实现直接丢弃（io.Discard），导致"静默丢信息"。这里按行暴露到日志。
 	go func() {
-		io.Copy(io.Discard, stderr)
+		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" {
+				continue
+			}
+			if isLSPServerErrorLine(line) {
+				a.logger.Warn("LSP server stderr", "server", a.name, "line", line)
+			} else {
+				a.logger.Debug("LSP server stderr", "server", a.name, "line", line)
+			}
+		}
 	}()
 
 	// 启动异步响应读取协程
@@ -180,6 +220,14 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 		}
 	}
 
+	// 探测项目上下文：clangd 缺 compile_commands.json 时会静默返回空符号，
+	// 这里显式探测并暴露原因，避免"静默丢信息"。
+	if a.lang == "cpp" {
+		if rootDir, ok := rootURIToDir(rootURI); ok {
+			a.probeCompileCommands(rootDir)
+		}
+	}
+
 	// 发送 initialize 请求（此时已释放锁，不会与 sendRequest 内部锁冲突）
 	initParams := map[string]any{
 		"processId":             nil,
@@ -190,6 +238,8 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 	}
 	_, err = a.sendRequest(ctx, "initialize", initParams)
 	if err != nil {
+		a.logger.Warn("LSP initialize failed, degrading to fallback parser",
+			"server", a.name, "error", err.Error())
 		cmd.Process.Kill()
 		a.mu.Lock()
 		a.alive = false
@@ -266,12 +316,15 @@ func (a *LSPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument
 	}
 	a.sendNotification("textDocument/didOpen", didOpenParams)
 
-	// 2. 发送 textDocument/documentSymbol 请求
+	// 2. 发送 textDocument/documentSymbol 请求（带重试，覆盖瞬时失败）
 	symbolParams := map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 	}
-	symbolResult, err := a.sendRequest(ctx, "textDocument/documentSymbol", symbolParams)
+	symbolResult, err := a.requestWithRetry(ctx, "textDocument/documentSymbol", symbolParams)
 	if err != nil {
+		metrics.IncCounter("lsp_parse_errors_total", "document_symbol")
+		a.logger.Warn("LSP documentSymbol failed after retries, file skipped",
+			"server", a.name, "path", path, "error", err.Error())
 		// 发送 didClose 通知
 		a.sendNotification("textDocument/didClose", map[string]any{
 			"textDocument": map[string]string{"uri": uri},
@@ -306,7 +359,86 @@ func (a *LSPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument
 		"textDocument": map[string]string{"uri": uri},
 	})
 
+	// 5. 可观测性：clangd 缺项目上下文（如 compile_commands.json）时会静默返回空符号，
+	// 这里对非空 C/C++ 文件显式暴露该降级，避免"静默丢信息"。
+	a.maybeReportEmptySymbols(path, text, ir)
+
 	return ir, nil
+}
+
+// maybeReportEmptySymbols 在 C/C++ 非空文件却解析出 0 个符号时显式告警，
+// 通常意味着 clangd 缺少项目上下文（compile_commands.json），原实现会静默返回空 IR。
+func (a *LSPAdapter) maybeReportEmptySymbols(path, text string, ir *parser.IRDocument) {
+	if a.lang != "cpp" || len(text) == 0 || len(ir.Classes) != 0 || len(ir.Methods) != 0 {
+		return
+	}
+	a.logger.Warn("LSP returned zero symbols for non-empty C/C++ file; likely missing project context",
+		"server", a.name, "path", path,
+		"hint", "ensure compile_commands.json exists (cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON or bear -- make)")
+	metrics.IncCounter("lsp_parse_empty_symbols_total", "cpp")
+}
+
+// requestWithRetry 发送 JSON-RPC 请求，并在瞬时失败时按指数退避重试（复用 robust）。
+// 仅对可重试错误（超时、连接重置等）重试；参数/权限/未实现等错误直接返回。
+func (a *LSPAdapter) requestWithRetry(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	var result json.RawMessage
+	var calls int
+	err := robust.Retry(ctx, func(c context.Context) error {
+		calls++
+		if calls > 1 {
+			metrics.IncCounter("lsp_retries_total", method)
+			a.logger.Warn("retrying LSP request after transient failure",
+				"server", a.name, "method", method, "attempt", calls)
+		}
+		r, e := a.sendRequest(c, method, params)
+		if e != nil {
+			return e
+		}
+		result = r
+		return nil
+	},
+		robust.WithMaxAttempts(a.retryAttempts),
+		robust.WithBaseDelay(a.retryBaseDelay),
+		robust.WithMaxDelay(a.retryMaxDelay),
+		robust.WithRetryable(robust.RetryableError),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// rootURIToDir 将 LSP rootUri（"file:///path" 或 "/path"）还原为目录路径。
+func rootURIToDir(rootURI any) (string, bool) {
+	s, ok := rootURI.(string)
+	if !ok || s == "" {
+		return "", false
+	}
+	s = strings.TrimPrefix(s, "file://")
+	return s, true
+}
+
+// probeCompileCommands 探测 clangd 所需的 compile_commands.json，
+// 缺失时显式告警暴露降级原因（否则 clangd 会静默返回空符号）。返回是否找到。
+func (a *LSPAdapter) probeCompileCommands(rootDir string) bool {
+	candidates := []string{
+		filepath.Join(rootDir, "compile_commands.json"),
+		filepath.Join(rootDir, "build", "compile_commands.json"),
+		filepath.Join(rootDir, "cmake-build-debug", "compile_commands.json"),
+		filepath.Join(rootDir, "out", "compile_commands.json"),
+		filepath.Join(rootDir, ".cache", "clangd", "compile_commands.json"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			a.logger.Info("found compile_commands.json for clangd", "path", c)
+			return true
+		}
+	}
+	a.logger.Warn("no compile_commands.json found; clangd may return empty symbols (missing project context)",
+		"root", rootDir,
+		"hint", "generate via 'cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON' or 'bear -- make'")
+	metrics.IncCounter("lsp_missing_compile_commands_total")
+	return false
 }
 
 // lspPathToOSPath 将 LSP 路径（适配器内 "file://" + path 形式）还原为操作系统路径，
@@ -578,9 +710,17 @@ func (a *LSPAdapter) readResponses() {
 			}
 			if strings.HasPrefix(line, "Content-Length: ") {
 				cl := strings.TrimPrefix(line, "Content-Length: ")
-				contentLength, err = strconv.Atoi(strings.TrimSpace(cl))
-				if err != nil || contentLength <= 0 {
+				n, perr := strconv.Atoi(strings.TrimSpace(cl))
+				if perr != nil || n <= 0 {
+					if perr != nil {
+						// 异常响应头：Content-Length 无法解析，原实现静默丢弃，此处暴露为 WARN。
+						a.logger.Warn("malformed LSP Content-Length header, frame skipped",
+							"server", a.name, "value", cl)
+						metrics.IncCounter("lsp_malformed_frames_total", "content_length")
+					}
 					contentLength = 0
+				} else {
+					contentLength = n
 				}
 			}
 			// 其他头（Content-Type 等）被忽略
@@ -602,6 +742,10 @@ func (a *LSPAdapter) readResponses() {
 		body := buf.Bytes()
 		var resp jsonRPCResponse
 		if err := json.Unmarshal(body, &resp); err != nil {
+			// 异常帧：JSON 解析失败原实现静默跳过，此处暴露为 WARN 便于定位。
+			a.logger.Warn("malformed LSP body (invalid JSON), frame skipped",
+				"server", a.name, "body", truncate(string(body), 200))
+			metrics.IncCounter("lsp_malformed_frames_total", "json")
 			continue
 		}
 
@@ -614,7 +758,35 @@ func (a *LSPAdapter) readResponses() {
 			if ok {
 				ch <- &resp
 				close(ch)
+			} else {
+				// 孤儿响应：没有对应的待处理请求，原实现静默丢弃，此处暴露为 WARN。
+				a.logger.Warn("orphan LSP response (no matching pending request), dropped",
+					"server", a.name, "id", resp.ID)
+				metrics.IncCounter("lsp_malformed_frames_total", "orphan")
 			}
 		}
 	}
+}
+
+// truncate 截断字符串用于日志，避免超长 body 污染日志。
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+// isLSPServerErrorLine 判断 LSP 服务器 stderr 行是否值得以 WARN 暴露
+// （错误/失败/降级原因），其余行以 DEBUG 记录，避免日志风暴。
+func isLSPServerErrorLine(line string) bool {
+	lower := strings.ToLower(line)
+	for _, kw := range []string{
+		"error", "fail", "compile", "missing", "not found",
+		"unable", "cannot", "warning", "exception", "panic",
+	} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }

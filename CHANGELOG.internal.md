@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 49: fix(lsp): LSP 适配器健壮性——可观测降级 + 失败重试（T2-3/PHASE_09）
+
+**核心改动点**：
+- `internal/parser/adapter/lsp/adapter.go`：
+  - 引入 `log`/`metrics`/`robust`，新增 `logger` 字段与重试配置（`retryAttempts`/`retryBaseDelay`/`retryMaxDelay`）。
+  - `Init` 阶段对 clangd 显式探测 `compile_commands.json`（根目录及 `build`/`cmake-build-debug`/`out`/`.cache/clangd`），缺失则 WARN + `lsp_missing_compile_commands_total`，消除「缺项目上下文静默空符号」。
+  - `Parse` 的 `documentSymbol` 请求改用 `requestWithRetry` 包裹（复用 `robust.Retry` 指数退避 + `robust.RetryableError` 判定），瞬时失败（超时/连接重置）自动重试，不放大单文件延迟。
+  - `Parse` 对「非空 C/C++ 文件却 0 符号」显式 WARN（`maybeReportEmptySymbols`）+ `lsp_parse_empty_symbols_total{lang="cpp"}`，不再静默空 IR。
+  - `readResponses` 中原本静默丢弃的异常帧改为 WARN + `lsp_malformed_frames_total{kind=...}`：Content-Length 解析失败 / JSON 体解析失败 / 孤儿响应（无对应 pending 请求）。
+  - 子进程 stderr 由 `io.Discard` 改为按行日志：含 error/fail/compile/missing 等关键字以 WARN 暴露（即 clangd 自身降级原因），其余 DEBUG。
+  - `init()` 注册 5 个 LSP 可观测指标（`lsp_missing_compile_commands_total` / `lsp_parse_empty_symbols_total` / `lsp_parse_errors_total` / `lsp_retries_total` / `lsp_malformed_frames_total`）。
+- `internal/parser/adapter/lsp/adapter_test.go`：新增 8 项测试覆盖探测命中/缺失、空符号告警、重试失败/取消、孤儿/畸形 Content-Length/畸形 JSON 帧。
+
+**验证数据**：`go build ./...` + `go vet ./...` 通过；`go test -race ./internal/parser/adapter/lsp/...` 全绿（新增 8 项均 PASS，相关 WARN 日志已确认输出）。
+**遗留风险**：LSP 适配器当前仍为独立子包，尚未接入 `parser.Registry` 编排主路（降级到 tree-sitter 的「首选返回 `ErrSourceUnavailable` → `Select` 回退」链路未在生产编排中串联）；接入时复用本任务的探测/告警即可暴露降级原因。
+
 ### Commit 48: feat(viz): /viz 默认栈可用，统一向量索引（T3-2/PHASE_09）
 
 **核心改动点**：

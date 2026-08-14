@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -548,5 +550,157 @@ func TestLSPAdapter_ReadResponses_MultiHeader(t *testing.T) {
 	}
 	if len(ir.Classes) == 0 {
 		t.Error("expected at least 1 class from Parse")
+	}
+}
+
+// --- T2-3 LSP 健壮性测试 ---
+
+// TestLSPAdapter_ProbeCompileCommands_Found 验证找到 compile_commands.json 时返回 true。
+func TestLSPAdapter_ProbeCompileCommands_Found(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "compile_commands.json"), []byte("[]"), 0o644); err != nil {
+		t.Fatalf("write compile_commands.json: %v", err)
+	}
+	a := NewClangdAdapter()
+	if !a.probeCompileCommands(dir) {
+		t.Error("expected probeCompileCommands=true when compile_commands.json exists")
+	}
+}
+
+// TestLSPAdapter_ProbeCompileCommands_Missing 验证缺失时返回 false 并暴露指标。
+func TestLSPAdapter_ProbeCompileCommands_Missing(t *testing.T) {
+	dir := t.TempDir() // 空目录，无 compile_commands.json
+	a := NewClangdAdapter()
+	if a.probeCompileCommands(dir) {
+		t.Error("expected probeCompileCommands=false when compile_commands.json missing")
+	}
+	// 无标签指标用 Collect 精确校验增量（Render 会对无值指标打印 0，无法分辨是否触发）。
+	if metrics.Collect().Counters["lsp_missing_compile_commands_total"] < 1 {
+		t.Error("expected lsp_missing_compile_commands_total >= 1 after missing probe")
+	}
+}
+
+// TestLSPAdapter_MaybeReportEmptySymbols 验证非空 C/C++ 文件 0 符号时显式告警并记指标。
+func TestLSPAdapter_MaybeReportEmptySymbols(t *testing.T) {
+	// 1) cpp + 非空文本 + 空 IR → 应触发
+	clangd := NewClangdAdapter()
+	clangd.maybeReportEmptySymbols("a.cc", "int main(){}", &parser.IRDocument{})
+	if !strings.Contains(metrics.Render(), `lsp_parse_empty_symbols_total{lang="cpp"}`) {
+		t.Error("expected lsp_parse_empty_symbols_total{lang=\"cpp\"} after empty cpp parse")
+	}
+
+	// 2) go 语言不应触发（避免误报普通空文件）
+	gopls := NewGoplsAdapter()
+	gopls.maybeReportEmptySymbols("a.go", "package main", &parser.IRDocument{})
+
+	// 3) 空文本不应触发
+	clangd2 := NewClangdAdapter()
+	clangd2.maybeReportEmptySymbols("a.cc", "", &parser.IRDocument{})
+
+	// 4) 有符号不应触发
+	clangd3 := NewClangdAdapter()
+	clangd3.maybeReportEmptySymbols("a.cc", "int main(){}", &parser.IRDocument{
+		Classes: []parser.ClassIR{{Name: "Foo"}},
+	})
+}
+
+// TestLSPAdapter_RequestWithRetry_Failure 验证瞬时失败时按 robust 重试并记指标。
+func TestLSPAdapter_RequestWithRetry_Failure(t *testing.T) {
+	a := newMockLSPAdapter(t, 3*time.Second)
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	defer a.Close()
+
+	// 关闭 stdin，使后续请求写入失败（瞬时可重试错误），驱动重试逻辑。
+	if err := a.stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+
+	_, err := a.requestWithRetry(context.Background(), "textDocument/documentSymbol", map[string]any{
+		"textDocument": map[string]string{"uri": "file:///x.cc"},
+	})
+	if err == nil {
+		t.Fatal("expected error from requestWithRetry after stdin closed")
+	}
+	if !strings.Contains(metrics.Render(), `lsp_retries_total{method="textDocument/documentSymbol"}`) {
+		t.Error("expected lsp_retries_total{method=\"textDocument/documentSymbol\"} after retry")
+	}
+}
+
+// TestLSPAdapter_RequestWithRetry_Cancelled 验证已取消的 context 不重试、立即返回。
+func TestLSPAdapter_RequestWithRetry_Cancelled(t *testing.T) {
+	a := newMockLSPAdapter(t, 3*time.Second)
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	defer a.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消
+	_, err := a.requestWithRetry(ctx, "textDocument/documentSymbol", map[string]any{
+		"textDocument": map[string]string{"uri": "file:///x.cc"},
+	})
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+}
+
+// TestLSPAdapter_ReadResponses_OrphanResponse 验证孤儿响应被显式暴露为 WARN 而非静默丢弃。
+func TestLSPAdapter_ReadResponses_OrphanResponse(t *testing.T) {
+	a := NewLSPAdapter("test", "echo", nil, "go", 0)
+	pr, pw := io.Pipe()
+	a.stdout = pr
+
+	go a.readResponses()
+
+	// 发送一个 id=999 的孤儿响应（无对应 pending 请求）
+	body := `{"jsonrpc":"2.0","id":999,"result":[]}`
+	fmt.Fprintf(pw, "Content-Length: %d\r\n\r\n%s", len(body), body)
+	time.Sleep(100 * time.Millisecond)
+	pw.Close()
+	a.WaitAlive()
+
+	if !strings.Contains(metrics.Render(), `lsp_malformed_frames_total{kind="orphan"}`) {
+		t.Error("expected lsp_malformed_frames_total{kind=\"orphan\"} for orphan response")
+	}
+}
+
+// TestLSPAdapter_ReadResponses_MalformedContentLength 验证 Content-Length 解析失败时暴露为 WARN。
+func TestLSPAdapter_ReadResponses_MalformedContentLength(t *testing.T) {
+	a := NewLSPAdapter("test", "echo", nil, "go", 0)
+	pr, pw := io.Pipe()
+	a.stdout = pr
+
+	go a.readResponses()
+
+	// 发送非法 Content-Length 头
+	fmt.Fprint(pw, "Content-Length: not-a-number\r\n\r\n")
+	time.Sleep(100 * time.Millisecond)
+	pw.Close()
+	a.WaitAlive()
+
+	if !strings.Contains(metrics.Render(), `lsp_malformed_frames_total{kind="content_length"}`) {
+		t.Error("expected lsp_malformed_frames_total{kind=\"content_length\"} for malformed header")
+	}
+}
+
+// TestLSPAdapter_ReadResponses_MalformedJSON 验证 body 非法 JSON 时被暴露为 WARN 而非静默跳过。
+func TestLSPAdapter_ReadResponses_MalformedJSON(t *testing.T) {
+	a := NewLSPAdapter("test", "echo", nil, "go", 0)
+	pr, pw := io.Pipe()
+	a.stdout = pr
+
+	go a.readResponses()
+
+	// 合法 Content-Length 但非法 JSON body
+	body := `{not valid json`
+	fmt.Fprintf(pw, "Content-Length: %d\r\n\r\n%s", len(body), body)
+	time.Sleep(100 * time.Millisecond)
+	pw.Close()
+	a.WaitAlive()
+
+	if !strings.Contains(metrics.Render(), `lsp_malformed_frames_total{kind="json"}`) {
+		t.Error("expected lsp_malformed_frames_total{kind=\"json\"} for invalid JSON body")
 	}
 }
