@@ -247,6 +247,10 @@ func detectLang(path string) string {
 		return "csharp"
 	case ".rb":
 		return "ruby"
+	case ".sh", ".bash":
+		return "bash"
+	case ".scala", ".sc":
+		return "scala"
 	default:
 		return "unknown"
 	}

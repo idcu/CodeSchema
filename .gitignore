@@ -68,6 +68,9 @@ build/*.json
 build/*.jsonl
 build/*.db
 build/*.log
+build/*.html
+build/models-*.tar.gz
+build/models-*.sha256
 build_err.txt
 
 # Adapter benchmark 测试的历史残留（已被仓库根 build/analysis 取代；可能被本机杀软锁定）

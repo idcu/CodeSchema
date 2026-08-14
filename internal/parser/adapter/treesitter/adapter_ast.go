@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	ts "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/bash"
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
@@ -36,6 +37,7 @@ import (
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
+	"github.com/smacker/go-tree-sitter/scala"
 	"github.com/smacker/go-tree-sitter/swift"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
 
@@ -65,6 +67,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"php":    php.GetLanguage(),
 			"csharp": csharp.GetLanguage(),
 			"ruby":   ruby.GetLanguage(),
+			"bash":   bash.GetLanguage(),
+			"scala":  scala.GetLanguage(),
 		},
 	}
 }
@@ -103,6 +107,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"php":    {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
 	"csharp": {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
 	"ruby":   {"class": true, "module": true},
+	"bash":   {},
+	"scala":  {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -120,6 +126,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"php":    {"function_definition": true, "method_declaration": true},
 	"csharp": {"method_declaration": true, "constructor_declaration": true},
 	"ruby":   {"method": true, "singleton_method": true},
+	"bash":   {"function_definition": true},
+	"scala":  {"function_definition": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -137,6 +145,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"php":    {"function_call_expression": true, "member_call_expression": true},
 	"csharp": {"invocation_expression": true},
 	"ruby":   {"call": true},
+	"bash":   {"command": true, "command_call": true},
+	"scala":  {"call_expression": true, "method_invocation": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -238,12 +248,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 // 优先级：
 //  1. name 字段（Go method_declaration / Java method_declaration / TS 等）；
 //  2. 声明头部第一个 identifier 类子节点（Kotlin function_declaration 无 name 字段，
-//     但头部有 simple_identifier；注意避开返回类型/参数中的 identifier）。
+//     但头部有 simple_identifier；bash function_definition 头部是 word）。
 //
 // 兜底：子树中第一个 identifier/type_identifier 文本。
 func astNodeName(n *ts.Node, lang string, src []byte) string {
 	if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
-		return string(name.Content(src))
+		if s := string(name.Content(src)); s != "" {
+			return s
+		}
 	}
 	// 部分语言（如 Go 的 type_declaration → type_spec 子节点）name 字段在更深层
 	if child := n.ChildByFieldName("type"); child != nil && !child.IsNull() {
@@ -254,7 +266,8 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 	// Kotlin 等：取头部前几个 named 子节点中第一个 identifier/simple_identifier
 	for i := 0; i < int(n.NamedChildCount()); i++ {
 		c := n.NamedChild(i)
-		if c.Type() == "identifier" || c.Type() == "simple_identifier" || c.Type() == "type_identifier" {
+		if c.Type() == "identifier" || c.Type() == "simple_identifier" || c.Type() == "type_identifier" ||
+			(lang == "bash" && c.Type() == "word") {
 			return string(c.Content(src))
 		}
 		// 嵌套一层（如 modifiers + name 组合）
@@ -333,6 +346,15 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		text := string(n.Content(src))
 		if idx := strings.Index(text, "("); idx >= 0 {
 			return stripTypeArgs(strings.TrimSpace(text[:idx]))
+		}
+	}
+	// Bash command：取第一个 word 子节点（命令名）
+	if n.Type() == "command" || n.Type() == "command_call" {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if c.Type() == "word" || c.Type() == "command_name" {
+				return strings.TrimSpace(string(c.Content(src)))
+			}
 		}
 	}
 	// C# invocation_expression：取 name/member_access 的完整文本（`validator.Validate` → 完整）
@@ -453,6 +475,11 @@ func isKeyword(name string) bool {
 		"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
 		"sizeof": true, "static_cast": true, "dynamic_cast": true,
 		"reinterpret_cast": true, "const_cast": true, "printf": true,
+		// Bash
+		"echo": true, "cd": true, "source": true, "local": true,
+		"export": true, "eval": true, "exit": true,
+		// Ruby / Scala
+		"puts": true, "require_relative": true,
 	}
 	return keywords[name]
 }

@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 64: feat(parser+ops): 遗留项——bash/scala 扩展 + 模型打包发布 + 基准趋势可视化（PHASE_09）
+
+**核心改动点（遗留①·ONNX 模型打包发布）**：
+- `Makefile`：新增 `make models-pack MODEL=<name>`（本地模型打包 tar.gz + 输出 SHA-256 到 build/models-<name>.sha256）、`make bench-callgraph`（双路径精度基准一键跑）、`make bench-trend`（趋势可视化）。
+- `internal/vector/model_registry.go`：回填 bge-small-zh-v1.5 的**真实 SHA-256**（由本机 make models-pack 生成，48b70f80…）；URL 仍为制品托管占位。
+
+**核心改动点（遗留②·扩展 bash/scala → 14 语言）**：
+- `internal/parser/adapter/adapter.go` / `internal/scanner/scanner.go`：`.sh`/`.bash`→bash、`.scala`/`.sc`→scala。
+- 正则版 `adapter.go`：bash（function_definition 作方法 + 行首命令名 callPattern）、scala（class/trait/object/enum + def 方法）模式；detectClassType（bash FUNCTION、scala INTERFACE/ENUM/OBJECT）；isKeyword 补 bash/scala（含跨语言关键字去重）；**修复 bash 无括号命令调用检测**（括号门控放行 bash）。
+- AST 版 `adapter_ast.go`：注册 bash/scala grammar + 节点类型（bash function_definition 方法 + command 调用、scala class_definition/object_definition/trait_definition/enum_definition + function_definition + call_expression/method_invocation）；astNodeName 支持 bash word。
+- 测试：Bash/Scala 解析测试（正则/AST 双路径）+ 基准样本。**AST 14 语言双档 P=1.00/R=1.00（TP=63）；正则 SIMPLE P=1.00/R=1.00**。
+
+**核心改动点（遗留③·基准趋势可视化）**：
+- 新增 `scripts/benchtrend/main.go`：纯 Go 读 `build/treesitter-bench-history.jsonl` → 生成 `build/treesitter-bench-trend.html`（趋势表 + 末次快照摘要 + 精度健康提示，无第三方依赖）。
+
+**验证**：默认/`-tags treesitter` 双路径构建+测试全绿；全仓 23 包通过；`go mod tidy` 后仍绿；`make models-pack`/`make bench-trend` 实跑正常。
+**文档同步**：docs/dev 02/07 + README（14 语言）；任务清单。
+**遗留**：注册表 URL 仍为占位（models.example.com），真实制品托管后替换；go-tree-sitter 其余语言按需继续扩展。
+
 ### Commit 63: feat(parser+vector): 非阻塞项——C 语言补齐 + 基准 CI 趋势 + ONNX 模型注册表（PHASE_09）
 
 **核心改动点（非阻塞①·补齐 C 语言 → 12 语言）**：

@@ -134,6 +134,21 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`(\w[\w.!?]*)\s*\([^)]*\)`),
 			commentTrim:    "#",
 		},
+		"bash": {
+			classPattern:   regexp.MustCompile(`^(function\s+)?(\w+)\s*\(\)\s*\{`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^(function\s+)?(\w+)\s*\(\)\s*\{`),
+			// 行首命令名（无参数命令 build_app / 带参数命令 git commit）
+			callPattern: regexp.MustCompile(`^\s*(\w[\w-]*)\s*($|[^=])`),
+			commentTrim: "#",
+		},
+		"scala": {
+			classPattern:   regexp.MustCompile(`^(case\s+|abstract\s+|final\s+|sealed\s+)?(class|trait|object|enum)\s+(\w+)`),
+			classNameIndex: 3,
+			methodPattern:  regexp.MustCompile(`^\s*(private|protected|final|override|implicit|def|\s)*\s*def\s+(\w[\w]*)\s*\(`),
+			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
 	}
 }
 
@@ -250,8 +265,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		// 解析函数调用（全部语言启用；Java/TS/Rust/C++/Kotlin 的调用检测
 		// 依赖 callPattern 与 isKeyword 过滤，精度见 docs/dev 02 的启发式说明）
 		// 先剔除字符串/注释内的伪调用（跨行状态机），再匹配
+		// bash 调用无括号（命令名），其余语言调用需含 "("
 		code := sanitizer.clean(trimmed, lang)
-		if strings.Contains(code, "(") {
+		if lang == "bash" || strings.Contains(code, "(") {
 			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern)
 		}
 
@@ -396,6 +412,20 @@ func detectClassType(matches []string, lang string) string {
 		for _, m := range matches {
 			if m == "module" {
 				return "MODULE"
+			}
+		}
+		return "CLASS"
+	case "bash":
+		return "FUNCTION"
+	case "scala":
+		for _, m := range matches {
+			switch m {
+			case "trait":
+				return "INTERFACE"
+			case "enum":
+				return "ENUM"
+			case "object":
+				return "OBJECT"
 			}
 		}
 		return "CLASS"
@@ -566,6 +596,9 @@ func isKeyword(name string) bool {
 		// Ruby
 		"puts": true, "require_relative": true,
 		"attr_accessor": true, "attr_reader": true, "attr_writer": true, "loop": true,
+		// Bash
+		"cd": true, "source": true, "local": true, "export": true, "eval": true,
+		// Scala（println/require/assert 已在通用段）
 	}
 	return keywords[name]
 }

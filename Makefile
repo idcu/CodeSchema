@@ -78,6 +78,36 @@ bench:
 	@echo "==> Running scalebench (BulkUpsert 回归看护) ..."
 	$(GO) test -run '^$$' -bench=BenchmarkScaleBulk -benchmem -count=1 -timeout 300s ./internal/scalebench/...
 
+# 调用图精度基准（正则 + 真语法树两路径；产出 build/treesitter-callgraph-bench.json 与历史 JSONL）
+.PHONY: bench-callgraph
+bench-callgraph:
+	@echo "==> Running treesitter callgraph precision bench (default/regex) ..."
+	$(GO) test -run TestTreeSitterCallGraphBench -count=1 -timeout 120s ./internal/adapterbench/
+	@echo "==> Running treesitter callgraph precision bench (-tags treesitter) ..."
+	$(GO) test -tags treesitter -run TestTreeSitterCallGraphBench -count=1 -timeout 120s ./internal/adapterbench/
+	@echo "==> Bench outputs: build/treesitter-callgraph-bench.json + build/treesitter-bench-history.jsonl"
+
+# 基准历史趋势可视化：读取 build/treesitter-bench-history.jsonl 生成 HTML 趋势图
+.PHONY: bench-trend
+bench-trend:
+	@echo "==> Generating bench trend report (build/treesitter-bench-trend.html) ..."
+	$(GO) run ./scripts/benchtrend
+	@echo "==> Trend report: build/treesitter-bench-trend.html"
+
+# ONNX 模型打包发布：将本地 down/models/<name> 打包为 tar.gz 并输出 SHA-256，
+# 供发布到制品托管后回填 internal/vector/model_registry.go 的 DownloadURL/SHA256
+# 用法：make models-pack MODEL=bge-small-zh-v1.5
+.PHONY: models-pack
+MODEL ?= bge-small-zh-v1.5
+models-pack:
+	@if [ ! -d "down/models/$(MODEL)" ]; then echo "model dir not found: down/models/$(MODEL)"; exit 1; fi
+	@mkdir -p $(OUTPUT)
+	@echo "==> Packing down/models/$(MODEL) -> $(OUTPUT)/models-$(MODEL).tar.gz ..."
+	@tar -C down/models -czf $(OUTPUT)/models-$(MODEL).tar.gz $(MODEL)
+	@echo "==> SHA-256:"
+	@shasum -a 256 $(OUTPUT)/models-$(MODEL).tar.gz | tee $(OUTPUT)/models-$(MODEL).sha256
+	@echo "==> 发布到制品托管后，将 URL 与 SHA-256 回填 internal/vector/model_registry.go"
+
 # 代码检查
 .PHONY: lint
 lint:

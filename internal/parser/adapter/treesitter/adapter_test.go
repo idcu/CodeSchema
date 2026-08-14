@@ -16,7 +16,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -647,5 +647,73 @@ int start(struct Engine *e) {
 	}
 	if !found {
 		t.Errorf("expected C calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Bash 验证 Bash 函数/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Bash(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deploy.sh")
+	content := `#!/bin/bash
+deploy() {
+  build_app
+  deploy_app
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "bash" {
+		t.Errorf("expected bash, got %s", doc.Language)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "build_app" || c.CalleeFQN == "deploy_app" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected bash calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Scala 验证 Scala 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Scala(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OrderService.scala")
+	content := `class OrderService {
+  def create(order: Order): Order = {
+    val s = "fakeCall(1)"
+    validator.validate(order)
+    mapper.map(order)
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "scala" {
+		t.Errorf("expected scala, got %s", doc.Language)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.validate" || c.CalleeFQN == "mapper.map" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected scala calls detected, got calls: %+v", doc.Calls)
 	}
 }

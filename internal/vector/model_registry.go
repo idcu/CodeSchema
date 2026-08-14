@@ -30,7 +30,9 @@ var builtinModelRegistry = []ModelRegistryEntry{
 	{
 		Name:        "bge-small-zh-v1.5",
 		DownloadURL: "https://models.example.com/codeschema/bge-small-zh-v1.5.tar.gz",
-		SHA256:      "",
+		// 由 make models-pack MODEL=bge-small-zh-v1.5 生成的本地制品校验和
+		// （build/models-bge-small-zh-v1.5.tar.gz）；制品托管后回填真实 URL。
+		SHA256: "48b70f807905ede95483b4c204c5d59dc1ac5a665608149c3cff7d978e58b95f",
 	},
 	{
 		Name:        "bge-base-zh",

@@ -185,6 +185,28 @@ void run(void) {
 `,
 		Golden: []string{"fuelPump.pump", "ignition.fire"},
 	},
+	{
+		Lang: "bash", Ext: ".sh",
+		Code: `#!/bin/bash
+deploy() {
+  build_app
+  deploy_app
+}
+`,
+		Golden: []string{"build_app", "deploy_app"},
+	},
+	{
+		Lang: "scala", Ext: ".scala",
+		Code: `class OrderService {
+  def run(order: Order): Unit = {
+    val s = "fakeCall(1)"
+    validator.validate(order)
+    mapper.map(order)
+  }
+}
+`,
+		Golden: []string{"validator.validate", "mapper.map"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。
