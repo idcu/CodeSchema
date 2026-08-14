@@ -1,16 +1,17 @@
 // Package service 提供测试关联策略实现。
 //
 // 五种策略（按置信度降序）：
-//   - explicit (100): 显式注解匹配（预留，P1 实现）
-//   - naming   (70):  命名约定（OrderServiceTest ↔ OrderService）
-//   - coverage (90):  覆盖率数据反查（预留，P1 实现）
-//   - same_tag (60):  同 Tag 聚类
+//   - explicit (100): 显式注解匹配（@TestFor(...) 解析目标类）
+//   - coverage (90):  覆盖率数据反查（注入 coverage 报告）
 //   - dependency (80): 导入依赖递归
+//   - naming   (70):  命名约定（OrderServiceTest ↔ OrderService）
+//   - same_tag (60):  同 Tag 聚类
 package service
 
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/idcu/codeschema/internal/store"
@@ -74,7 +75,22 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 	targetClass := extractClassFQN(methodFQN)
 	allTestClasses := s.discoverTestClasses(ctx, files)
 
-	// 1. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
+	// 预构建全量类映射（classFQN -> ClassRecord），供 explicit 策略解析目标类
+	allClasses := make(map[string]store.ClassRecord)
+	for _, f := range files {
+		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+		for _, cls := range classes {
+			allClasses[cls.FullName] = cls
+		}
+	}
+
+	// 0. explicit 策略：@TestFor(...) 显式注解（置信度 100）
+	s.linkByExplicit(ctx, files, allClasses, addResult)
+
+	// 1. coverage 策略：覆盖率数据反查（置信度 90）
+	s.linkByCoverage(methodFQN, addResult)
+
+	// 2. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
 	for classFQN, testClassFQN := range allTestClasses {
 		if classFQN == targetClass {
 			// 找到该类下的所有方法，关联到对应测试类下的方法
@@ -82,12 +98,12 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 		}
 	}
 
-	// 2. same_tag 策略：同 Tag 聚类
+	// 3. same_tag 策略：同 Tag 聚类
 	if len(results) < 20 {
 		s.linkBySameTag(ctx, files, methodFQN, addResult)
 	}
 
-	// 3. dependency 策略：依赖递归
+	// 4. dependency 策略：依赖递归
 	if len(results) < 10 {
 		s.linkByDependency(ctx, files, methodFQN, addResult)
 	}
@@ -299,6 +315,124 @@ func hasCommonTag(a, b []string) bool {
 		}
 	}
 	return false
+}
+
+// explicitAnnotationRe 匹配 @TestFor 注解，捕获目标类标识（支持 FQN 或简单类名）。
+//
+// 支持写法：@TestFor(OrderService.class) / @TestFor(com.example.OrderService) /
+// @TestFor OrderService / @testfor: order.OrderService / @TestFor=OrderService
+var explicitAnnotationRe = regexp.MustCompile(`(?i)@TestFor\s*[:=(]?\s*([\w.]+)\s*\)?`)
+
+// parseExplicitTargets 从一段文档注释中提取所有 @TestFor 标注的目标类标识。
+func parseExplicitTargets(doc string) []string {
+	if doc == "" {
+		return nil
+	}
+	matches := explicitAnnotationRe.FindAllStringSubmatch(doc, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	targets := make([]string, 0, len(matches))
+	for _, m := range matches {
+		targets = append(targets, m[1])
+	}
+	return targets
+}
+
+// resolveExplicitClass 将 @TestFor 捕获的标识解析为已知类 FullName。
+//
+// 解析优先级：
+//  1. 全限定名精确匹配（token 含 "." 且等于某类 FullName）
+//  2. 全限定名后缀匹配（token 是某类 FullName 的尾部，如 com.example.OrderService 匹配 OrderService）
+//  3. 简单类名匹配（取 FQN 最后一段与 token 相等）
+func resolveExplicitClass(token string, allClasses map[string]store.ClassRecord) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+
+	// 1. 精确匹配
+	if _, ok := allClasses[token]; ok {
+		return token
+	}
+
+	// 2/3. 后缀 + 简单名匹配
+	var simpleMatch string
+	for fqn := range allClasses {
+		if strings.HasSuffix(fqn, "."+token) || fqn == token {
+			return fqn
+		}
+		if simpleMatch == "" {
+			parts := strings.Split(fqn, ".")
+			if parts[len(parts)-1] == token {
+				simpleMatch = fqn
+			}
+		}
+	}
+	return simpleMatch
+}
+
+// linkByExplicit 通过显式 @TestFor 注解建立关联（置信度 100）。
+//
+// 遍历所有测试类/测试方法，解析其 Doc 中的 @TestFor(<目标类>) 注解，
+// 将测试方法关联到目标类的全部生产方法。
+func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord, allClasses map[string]store.ClassRecord, add func(string, string, string, int)) {
+	for _, f := range files {
+		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+		for _, cls := range classes {
+			if !isTestClass(cls) {
+				continue
+			}
+
+			// 类级注解（如 @TestFor(OrderService) 标在测试类上）
+			classTargets := parseExplicitTargets(cls.Doc)
+
+			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
+			for _, m := range methods {
+				// 方法级注解优先，其次类级注解
+				targets := parseExplicitTargets(m.Doc)
+				if len(targets) == 0 {
+					targets = classTargets
+				}
+				for _, tok := range targets {
+					targetClassFQN := resolveExplicitClass(tok, allClasses)
+					if targetClassFQN == "" {
+						continue
+					}
+					targetCls, ok := allClasses[targetClassFQN]
+					if !ok {
+						continue
+					}
+					prodMethods, _ := s.store.GetMethodsByClassID(ctx, targetCls.ID)
+					for _, pm := range prodMethods {
+						add(m.FullName, pm.Name, "explicit", 100)
+					}
+				}
+			}
+		}
+	}
+}
+
+// linkByCoverage 通过覆盖率数据反查建立关联（置信度 90）。
+//
+// 使用注入的 coverage 报告（testMethodFQN -> 被覆盖的生产方法 FQN 列表），
+// 找到覆盖目标方法的测试方法并关联。
+func (s *Service) linkByCoverage(methodFQN string, add func(string, string, string, int)) {
+	if len(s.coverage) == 0 {
+		return
+	}
+	for testMethod, covered := range s.coverage {
+		for _, prodFQN := range covered {
+			if prodFQN == methodFQN {
+				// MethodName 取 FQN 最后一段
+				name := prodFQN
+				if idx := strings.LastIndex(prodFQN, "."); idx >= 0 {
+					name = prodFQN[idx+1:]
+				}
+				add(testMethod, name, "coverage", 90)
+			}
+		}
+	}
 }
 
 // linkByDependency 通过依赖递归建立关联。

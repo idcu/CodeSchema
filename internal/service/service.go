@@ -6,7 +6,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -20,6 +22,10 @@ type Service struct {
 	startTime    time.Time
 	searcher     *search.Searcher
 	indexBuilder *search.IndexBuilder // P8.3 自动索引构建
+
+	// coverage 保存「测试方法 FQN → 其覆盖的生产方法 FQN 列表」的映射，
+	// 由 SetCoverage / LoadCoverageJSON 注入，供 coverage 测试关联策略反查。
+	coverage map[string][]string
 }
 
 // NewService 创建 Service 实例。
@@ -42,6 +48,27 @@ func (s *Service) WithSearcher(searcher *search.Searcher) *Service {
 func (s *Service) WithIndexBuilder(b *search.IndexBuilder) *Service {
 	s.indexBuilder = b
 	return s
+}
+
+// SetCoverage 注入覆盖率报告，供 coverage 测试关联策略反查。
+//
+// 入参映射：测试方法 FQN → 其覆盖的生产方法 FQN 列表。
+// 例如：{"com.x.OrderServiceTest.testGetOrder": ["com.x.OrderService.getOrder"]}。
+func (s *Service) SetCoverage(report map[string][]string) {
+	s.coverage = report
+}
+
+// LoadCoverageJSON 从 JSON 读取器解析覆盖率报告并注入。
+//
+// JSON 格式：对象，键为测试方法 FQN，值为被覆盖的生产方法 FQN 数组。
+// 解析失败返回错误（不污染已注入的 coverage）。
+func (s *Service) LoadCoverageJSON(r io.Reader) error {
+	var report map[string][]string
+	if err := json.NewDecoder(r).Decode(&report); err != nil {
+		return fmt.Errorf("decode coverage json: %w", err)
+	}
+	s.coverage = report
+	return nil
 }
 
 // BuildIndex 从 Store 全量构建搜索索引。

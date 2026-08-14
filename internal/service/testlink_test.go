@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/parser"
@@ -360,6 +361,193 @@ func TestDirFromPath(t *testing.T) {
 		got := dirFromPath(tt.path)
 		if got != tt.expected {
 			t.Errorf("dirFromPath(%q) = %q, want %q", tt.path, got, tt.expected)
+		}
+	}
+}
+
+func TestFindTestLinks_Explicit(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/project/internal/order/service_spec.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "com.example.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "OrderServiceSpec", FullName: "com.example.OrderServiceSpec", Doc: "@TestFor(OrderService)"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				{ID: 100, ClassID: 10, Name: "getOrder", FullName: "com.example.OrderService.getOrder"},
+				{ID: 101, ClassID: 10, Name: "createOrder", FullName: "com.example.OrderService.createOrder"},
+			},
+			20: {
+				{ID: 200, ClassID: 20, Name: "shouldGetOrder", FullName: "com.example.OrderServiceSpec.shouldGetOrder"},
+			},
+		},
+	}
+
+	svc := NewService(st)
+	links, err := svc.FindTestLinks(ctx, "com.example.OrderService.getOrder", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+
+	found := false
+	for _, link := range links {
+		if link.Strategy == "explicit" && link.TestMethod == "com.example.OrderServiceSpec.shouldGetOrder" {
+			found = true
+			if link.Confidence != 100 {
+				t.Errorf("expected explicit confidence 100, got %d", link.Confidence)
+			}
+			if link.MethodName != "getOrder" {
+				t.Errorf("expected target method getOrder, got %q", link.MethodName)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected explicit link via @TestFor, got %+v", links)
+	}
+}
+
+func TestFindTestLinks_Explicit_MethodLevel(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/internal/user/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/project/internal/user/service_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "UserService", FullName: "com.example.UserService"}},
+			2: {{ID: 20, FileID: 2, Name: "UserServiceTest", FullName: "com.example.UserServiceTest"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				{ID: 100, ClassID: 10, Name: "deleteUser", FullName: "com.example.UserService.deleteUser"},
+			},
+			20: {
+				// 方法级 @TestFor 注解（而非类级）
+				{ID: 200, ClassID: 20, Name: "TestDeleteUser", FullName: "com.example.UserServiceTest.TestDeleteUser", Doc: "@TestFor(com.example.UserService)"},
+			},
+		},
+	}
+
+	svc := NewService(st)
+	links, err := svc.FindTestLinks(ctx, "com.example.UserService.deleteUser", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+
+	found := false
+	for _, link := range links {
+		if link.Strategy == "explicit" && link.TestMethod == "com.example.UserServiceTest.TestDeleteUser" && link.Confidence == 100 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected method-level explicit link, got %+v", links)
+	}
+}
+
+func TestFindTestLinks_Coverage(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/internal/payment/service.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "PaymentService", FullName: "com.example.PaymentService"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				{ID: 100, ClassID: 10, Name: "charge", FullName: "com.example.PaymentService.charge"},
+			},
+		},
+	}
+
+	svc := NewService(st)
+	svc.SetCoverage(map[string][]string{
+		"com.example.PaymentServiceTest.testCharge": {"com.example.PaymentService.charge"},
+	})
+
+	links, err := svc.FindTestLinks(ctx, "com.example.PaymentService.charge", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+
+	found := false
+	for _, link := range links {
+		if link.Strategy == "coverage" && link.TestMethod == "com.example.PaymentServiceTest.testCharge" {
+			found = true
+			if link.Confidence != 90 {
+				t.Errorf("expected coverage confidence 90, got %d", link.Confidence)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected coverage link, got %+v", links)
+	}
+}
+
+func TestLoadCoverageJSON(t *testing.T) {
+	svc := NewService(&mockStoreWithTestData{})
+	jsonStr := `{"com.example.FooTest.testBar": ["com.example.Foo.bar", "com.example.Foo.baz"]}`
+	if err := svc.LoadCoverageJSON(strings.NewReader(jsonStr)); err != nil {
+		t.Fatalf("LoadCoverageJSON: %v", err)
+	}
+	if len(svc.coverage) != 1 {
+		t.Fatalf("expected 1 coverage entry, got %d", len(svc.coverage))
+	}
+	covered := svc.coverage["com.example.FooTest.testBar"]
+	if len(covered) != 2 || covered[0] != "com.example.Foo.bar" || covered[1] != "com.example.Foo.baz" {
+		t.Errorf("unexpected coverage mapping: %+v", covered)
+	}
+}
+
+func TestParseExplicitTargets(t *testing.T) {
+	tests := []struct {
+		doc      string
+		expected []string
+	}{
+		{"@TestFor(OrderService.class)", []string{"OrderService.class"}},
+		{"@TestFor(com.example.OrderService)", []string{"com.example.OrderService"}},
+		{"@TestFor OrderService", []string{"OrderService"}},
+		{"@testfor: order.OrderService", []string{"order.OrderService"}},
+		{"no annotation here", nil},
+		{"@TestFor(A) and @TestFor(B)", []string{"A", "B"}},
+	}
+	for _, tt := range tests {
+		got := parseExplicitTargets(tt.doc)
+		if len(got) != len(tt.expected) {
+			t.Errorf("parseExplicitTargets(%q) = %v, want %v", tt.doc, got, tt.expected)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.expected[i] {
+				t.Errorf("parseExplicitTargets(%q)[%d] = %q, want %q", tt.doc, i, got[i], tt.expected[i])
+			}
+		}
+	}
+}
+
+func TestResolveExplicitClass(t *testing.T) {
+	all := map[string]store.ClassRecord{
+		"com.example.OrderService":     {ID: 1, Name: "OrderService", FullName: "com.example.OrderService"},
+		"com.example.user.UserService": {ID: 2, Name: "UserService", FullName: "com.example.user.UserService"},
+	}
+	tests := []struct {
+		token    string
+		expected string
+	}{
+		{"com.example.OrderService", "com.example.OrderService"}, // 精确
+		{"OrderService", "com.example.OrderService"},             // 简单名
+		{"UserService", "com.example.user.UserService"},         // 简单名
+		{"NonExistent", ""},                                     // 解析失败
+	}
+	for _, tt := range tests {
+		got := resolveExplicitClass(tt.token, all)
+		if got != tt.expected {
+			t.Errorf("resolveExplicitClass(%q) = %q, want %q", tt.token, got, tt.expected)
 		}
 	}
 }

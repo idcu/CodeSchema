@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 50: feat(testlink): 测试关联补齐 explicit + coverage 策略（T4-1/PHASE_09）
+
+**核心改动点**：
+- `internal/service/testlink.go`：
+  - 新增 **explicit 策略**（置信度 100）：解析测试类/方法 `Doc` 中的 `@TestFor(...)` 注解（支持 `@TestFor(OrderService.class)` / `@TestFor(com.example.OrderService)` / `@TestFor OrderService` / `@testfor: order.OrderService` / `@TestFor=OrderService`），将测试方法关联到目标类全部生产方法。目标类解析支持全限定名精确匹配、FQN 后缀匹配、简单类名匹配（`resolveExplicitClass`）；注解可标在类级或方法级（方法级优先）。
+  - 新增 **coverage 策略**（置信度 90）：基于注入的覆盖率报告反查——`testMethodFQN → 被覆盖生产方法 FQN 列表`，命中目标方法即关联。
+  - `FindTestLinks` 接入上述两策略（explicit 先于 coverage，再 naming/same_tag/dependency）。
+  - 包注释更新为「五种策略（按置信度降序）：explicit(100)/coverage(90)/dependency(80)/naming(70)/same_tag(60)」。
+- `internal/service/service.go`：
+  - `Service` 新增 `coverage map[string][]string` 字段。
+  - 新增 `SetCoverage(report)` 注入覆盖率报告；新增 `LoadCoverageJSON(io.Reader)` 从 JSON 解析注入（`{"testMethodFQN": ["prod.MethodA", ...]}`），解析失败不污染已有覆盖数据。
+- `internal/service/testlink_test.go`：新增 6 项测试——explicit 类级/方法级、coverage 反查、LoadCoverageJSON 解析、parseExplicitTargets / resolveExplicitClass 单元测试；`go test -race` 全绿。
+
+**验证**：`go vet` / `go build ./...` / `go test -race ./internal/service/...` 全绿（含 3 项 FindTestLinks 关联 + 3 项单元，新增约 160 行测试）。
+**遗留**：AI 增强层（Enhancer/Budget）与「explicit/coverage 从真实注解/覆盖率文件自动采集」的接入（当前为内存计算 + 注入式，与 naming/same_tag/dependency 一致），列为后续 T4-1 剩余项。
+
 ### Commit 49: fix(lsp): LSP 适配器健壮性——可观测降级 + 失败重试（T2-3/PHASE_09）
 
 **核心改动点**：
