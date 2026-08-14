@@ -172,6 +172,16 @@ make clean
   - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 真实服务器传输层验证（clangd 需 compile-commands/project 上下文才登记独立文件，缺上下文时优雅跳过）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复 `SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类的**生产缺陷**。
   - 多语言验证/基准框架见 `internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
 
+## 实际核查备注（2026-08-14）
+
+> 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/dev/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
+
+- **包数量**：实际 **27** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24 个包」等旧表述已过时。
+- **默认构建强制 CGO**：`embedder_onnx.go` 无条件 `import onnxruntime_go`，故 `go build ./...` 实际需 gcc（环境 CGO_ENABLED=1）。「GCC 可选」的旧表述不准确。
+- **SQLite 实测并非生产级写入**：`docs/dev/12` 记录的 scalebench 显示，N=10万 单批 upsert SQLite 约 **193s**，JSON FileStore 约 **0.4s**（慢约 500 倍）。当前 SQLite 写入路径有严重瓶颈，「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反——超大仓写入建议走 `BulkUpsert`/PG 或 chromem。
+- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准，237 行）均已存在；PG/Redis/scalebench 已在 `docs/dev/12` 登记，但本 README 与 `DEV_PROGRESS.md` 此前未提及。
+- **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」仅列到 `11`，缺 `12-存储扩展与大规模迁移路径.md`。
+
 ## 测试
 
 ```bash
@@ -189,7 +199,7 @@ make bench
 | 依赖 | 最低版本 | 说明 |
 |------|---------|------|
 | Go | 1.25+ | 编译运行 |
-| GCC/MinGW | 任一 C 编译器 | 可选；默认纯 Go 构建（modernc.org/sqlite）无需 CGO，仅改用 CGO 版 SQLite/tree-sitter 时才需要 |
+| GCC/MinGW | 任一 C 编译器 | **实际为必需**：`internal/vector/embedder_onnx.go` 无条件依赖 CGO 版 `onnxruntime_go`，故默认 `go build ./...` 即需 CGO/gcc（即使不使用 ONNX 模型）。纯 CGO -free 构建需为 ONNX 嵌入器加 build tag 隔离 |
 | Docker | 24+ | 容器化部署 |
 | onnxruntime | 1.28+ | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |
