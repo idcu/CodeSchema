@@ -6,6 +6,38 @@
 
 ## 提交记录
 
+### Commit 45: docs(bench): 固化超大仓基准与部署文档（PHASE_09 存储性能收尾）
+
+**Commit Hash**: `24071a0`
+
+**核心改动点**：
+- `build/bench-compare.json`、`build/realrepo-bench.json` — 同步 BulkUpsert 基准数据
+- `docs/DEPLOYMENT_AND_USAGE.md` — 部署文档更新
+
+**验证数据**：文档/基准数据更新，无代码变更（`docs/ops/01` 因重命名进行中暂未纳入）
+
+### Commit 44: feat(storage): 存储主线统一分发，接入 pg/redis 后端（T1-1/T1-2/T1-3 + E5/PHASE_09）
+
+**Commit Hash**: `fb92b2c`
+
+**核心改动点**：
+- `cmd/codeschema/store_dispatch.go`（基础分发 + Redis 叠加点）、`store_pg.go`（`//go:build pg` 注册 PG）、`store_redis.go`（`//go:build redis` 叠加 Redis L2 缓存）
+- `internal/store/redis` 增加 `NewRedisCacheFromURL`（解析 `redis://` URL）
+- `internal/config` 的 `Validate` 增加 `storage.driver` 允许清单（file/sqlite/pg/postgres）
+- 同步 `README`「存储后端」小节、`docs/dev/12` §12.5、`DEV_PROGRESS` 核查结论
+
+**验证数据**：`go build ./...` 与 `-tags pg` / `-tags redis` / `-tags pg,redis` 均通过，`go vet` 通过
+
+### Commit 43: refactor(build): ONNX 嵌入器 build tag 隔离，默认构建免 CGO（T0-2/PHASE_09）
+
+**Commit Hash**: `49c51fb`
+
+**核心改动点**：
+- `internal/vector/embedder_onnx.go` 增加 `//go:build onnx`；新增 `embedder_onnx_stub.go`（`!onnx`）提供同名公开 API 桩，默认返回 nil 由调用方降级
+- `embedder_onnx_test.go` 增加 `//go:build onnx`
+
+**验证数据**：`CGO_ENABLED=0 go build ./...` 通过；`go build -tags onnx ./...` 仍可用 ONNX
+
 ### Commit 42: docs(deploy): 同步 ONNX 集成文档 + 清理旧版本包
 
 **Commit Hash**: `9e4ea51`
