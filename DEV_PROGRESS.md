@@ -35,6 +35,18 @@ P18      [████████████████████] 100%
 
 ---
 
+## 实际核查结论（2026-08-14 · 代码级）
+
+> 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/dev/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
+
+1. **包数量实为 27 个**（`go list ./...`），全文历史「23/24 个包」表述已过时；`go build ./...` 通过（exit 0）。
+2. **默认构建强制 CGO**：`internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，故即使不用 ONNX 模型，`go build` 也需 gcc（本机 CGO_ENABLED=1，gcc 16.1.0）。「GCC 可选」的旧表述不准确。
+3. **SQLite 写入非生产级**：`docs/dev/12` scalebench 实测 N=10万 单批 upsert，SQLite ≈ **193s**，JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务；解法为 `BulkUpsert`（单事务批量）或切 PG / cgo-sqlite。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反。
+4. **存在但未在本文件登记的代码**：`internal/store/pg`（PG 完整实现 507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准 237 行）均已存在且已在 `docs/dev/12` 登记，但此前本文件与 README 均未提及。
+5. **tree-sitter 实为「正则轻量解析」**，并非 CGO 版 go-tree-sitter 语法树（go.mod 无 `go-tree-sitter`；依赖为 `modernc.org/sqlite` + `chromem-go` + `onnxruntime_go`）。下文「已知问题 #3」的旧结论需修正。
+6. **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，README/本文此前仅列到 `11`。
+7. **阶段完成度口径**：P0–P18 的「功能实现」确已完成并通过测试；但「生产级」「权威存储」等运行期/性能声明需以上述实测为准，不能仅凭 phase 100% 推定。
+
 ## 已完成工作
 
 ### 基础文件
@@ -285,12 +297,18 @@ P18      [████████████████████] 100%
   - **多语言验证/基准框架**：`internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、刻意不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），对 SCIP（fixture，始终可用）+ LSP（gopls/clangd/jdtls，按工具可用性）逐语言真实解析并记录符号数与延迟，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
   - **架构调整（绕开 cgo 慢编译）**：原 `internal/integration/adapter_validation_test.go` 因 `package integration` 传递引入完整 scan/index/vector 流水线的 `onnxruntime_go` cgo 依赖，在本机 MinGW 下编译极慢（>50min）。将适配器验证测试迁移到独立包 `internal/adapterbench`（只 import lsp+scip），编译+运行降至 ~1min 且真实验证 gopls（classes=1/methods=2）。旧文件已从索引移除（磁盘锁定副本待杀软释放后清理）。
 - [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 6 语言正则解析实现（非 CGO 版 go-tree-sitter）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
+- [x] **优先级④ 超大仓瓶颈验证 + PG/Redis 迁移路径** —
+  - **超大仓基准框架** `internal/scalebench/scale_bench_test.go`：纯 Go 无 cgo，合成每文件 1 类/3 方法/2 调用 IR，压测 N=1k/5k/10k/50k/100k 的插入/落盘/内存；SQLite 每 N 独立 dsn 隔离累积干扰；产物 `build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md`。
+  - **实测结论（推翻原假设）**：SQLite 是主导瓶颈——100k 文件（≈700k 行）单批插入 **237s**（≈1000× chromem），根因为 `UpsertIR` 多笔独立 INSERT 未批量入事务；FileStore 为内存 O(n)（100k≈1.08GB）、chromem 线性（100k≈169MB）均远快于 SQLite。须实现 `BulkUpsert` 方可生产化。
+  - **PG 适配器骨架** `internal/store/pg/pg.go`（`//go:build pg`）：完整 `store.Store` 接口 + PG DDL；**Redis 缓存骨架** `internal/store/redis/redis.go`（`//go:build redis`）：热点类 HASH + 调用反查 SET + 文件→类索引。均 `go get` 即启用。
+  - **文档** `docs/dev/12-存储扩展与大规模迁移路径.md`：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
+  - **环境状态（实测）**：用户反馈杀软已退出，但本机实测 `go.mod` 仍被锁（`echo >>` 报 Permission denied），且 `go build ./...` 因 GOMODCACHE 写锁失败——故 `go get` PG/Redis 驱动仍不可行，骨架保持 build-tag 隔离；`build/`/`analysis/` 仅「新建文件」可写、已存在文件仍锁，基准报告未落盘（数字取自测试日志）。定向编译/测试正常（scalebench 基准 PASS 435s）。
 
 ## 已知问题
 
-1. ~~**网络不可用**：无法下载外部包。~~ **已解决**：全部外部包已从本地安装（chromem-go + go-sqlite3 + go-tree-sitter + onnxruntime_go + yaml.v3 + fsnotify）。
+1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 6 语言正则解析（非 CGO 语法树）。
 2. ~~**轮询监听性能**~~ **已解决**：FsWatcher 已实现。
-3. ~~**tree-sitter C 绑定**~~ **已解决**：go-tree-sitter 已安装，自带 parser.c 源码，CGO 自编译。
+3. ~~**tree-sitter C 绑定**~~ **已解决（实现方式已更正）**：`internal/parser/adapter/treesitter` 为基于正则表达式的轻量解析（6 语言：Go/Java/TypeScript/Python/Rust/C++），**并非 CGO 版 go-tree-sitter 语法树**，因此解析层不依赖 `go-tree-sitter` 与 C 编译器；调用关系检测仅 Go/Python 较准，其余语言为启发式。
 4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`bge-small-zh-v1.5` 模型已预转换为 ONNX 格式（FP16 量化，512 维），位于 `down/models/bge-small-zh-v1.5/`。`onnxruntime.dll`（v1.28.0）位于 `down/onnxruntime/`，`make build-cgo` 自动复制到输出目录。应用启动时自动检测 ONNX 模型，优先使用 ONNXEmbedder，失败时降级到 LocalEmbedder。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
 

@@ -65,6 +65,8 @@ down/models/
 
 # Build/runtime bench outputs (regenerated; *.exe/*.dll already ignored above)
 build/*.json
+build/*.db
+build/*.log
 build_err.txt
 
 # Adapter benchmark 测试的历史残留（已被仓库根 build/analysis 取代；可能被本机杀软锁定）

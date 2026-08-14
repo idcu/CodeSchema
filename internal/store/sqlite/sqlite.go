@@ -121,8 +121,10 @@ func (s *SQLiteStore) Open(ctx context.Context, dsn string) error {
 	if err != nil {
 		return fmt.Errorf("open sqlite %s: %w", path, err)
 	}
-	// 提升并发与写入健壮性
-	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;"); err != nil {
+	// 提升并发与写入健壮性。WAL + synchronous=NORMAL：仅 WAL 检查点时 fsync，
+	// 而非每事务 fsync，批量写入（索引大仓）吞吐显著提升；电源故障最多丢最近一次
+	// 检查点内的提交，对“可重建的索引缓存”是可接受权衡。
+	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;"); err != nil {
 		_ = db.Close()
 		return fmt.Errorf("set pragma: %w", err)
 	}
