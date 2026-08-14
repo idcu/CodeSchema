@@ -2,8 +2,10 @@ package scip
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -269,5 +271,64 @@ func TestSCIPAdapter_LoadIndex_SkipNonScipFiles(t *testing.T) {
 	}
 	if len(a.documents) != 1 {
 		t.Errorf("expected 1 document (skip .txt), got %d", len(a.documents))
+	}
+}
+func TestSCIPAdapter_LoadIndex_StreamingBackpressure(t *testing.T) {
+	dir := t.TempDir()
+	// 构造一个包含 5 个文档的 index，验证 maxDocs 背压截断（流式加载不整读内存）
+	var b strings.Builder
+	b.WriteString(`{"metadata": {"tool_info": {"name": "scip-java"}}, "documents": [`)
+	for i := 0; i < 5; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(fmt.Sprintf(`{"relative_path": "f%d.java", "language": "Java", "symbols": [], "occurrences": []}`, i))
+	}
+	b.WriteString(`]}`)
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewSCIPAdapter(dir)
+	a.SetMaxDocs(2)
+	if err := a.loadIndex(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(a.documents) != 2 {
+		t.Fatalf("expected 2 documents (backpressure), got %d", len(a.documents))
+	}
+	if !a.Truncated() {
+		t.Fatal("expected truncated=true when maxDocs exceeded")
+	}
+
+	// 不限流时应全量加载且不截断
+	a2 := NewSCIPAdapter(dir)
+	if err := a2.loadIndex(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(a2.documents) != 5 {
+		t.Fatalf("expected 5 documents, got %d", len(a2.documents))
+	}
+	if a2.Truncated() {
+		t.Fatal("expected truncated=false without maxDocs")
+	}
+}
+
+func TestSCIPAdapter_LoadIndex_ReloadIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	indexJSON := `{"documents": [{"relative_path": "a.java", "language": "Java", "symbols": [], "occurrences": []}]}`
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(indexJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewSCIPAdapter(dir)
+	if err := a.loadIndex(); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	// 重复 Init → loadIndex 应幂等（清空后重载，不累积重复文档）
+	if err := a.loadIndex(); err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+	if len(a.documents) != 1 {
+		t.Fatalf("expected 1 document after reload, got %d", len(a.documents))
 	}
 }
