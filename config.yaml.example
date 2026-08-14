@@ -86,6 +86,10 @@ parser:
     config_file: ".jindexer/config.yaml"
     env:
       INDEXER_EMBEDDING_ENABLED: "false"
+  # LSP 适配器配置（接入解析编排主路，按语言分发 gopls/jdtls/clangd）
+  # 启用后：工具存在则优先 LSP 解析（精度更高），缺失/失败自动回退 tree-sitter。
+  lsp:
+    enabled: false
 
 # ---------------------------------------------------------------------------
 # AI 增强配置

@@ -83,6 +83,14 @@ type ParserConfig struct {
 	SCIP         SCIPConfig         `yaml:"scip" json:"scip"`
 	CodeGraph    CodeGraphConfig    `yaml:"codegraph" json:"codegraph"`
 	JCodeIndexer JCodeIndexerConfig `yaml:"jcodeindexer" json:"jcodeindexer"`
+	LSP          LSPConfig          `yaml:"lsp" json:"lsp"`
+}
+
+// LSPConfig LSP 适配器配置（接入 Registry 编排主路的开关）。
+type LSPConfig struct {
+	// Enabled 是否启用 LSP 适配器（按语言分发 gopls/jdtls/clangd）。
+	// 默认 false：工具缺失时优雅跳过，失败自动回退 tree-sitter，不影响主路。
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 // SCIPConfig SCIP 适配器配置。
@@ -177,6 +185,9 @@ func DefaultConfig() *Config {
 				DB:         "./jcodeindexer.db",
 				ConfigFile: ".jindexer/config.yaml",
 				Env:        map[string]string{},
+			},
+			LSP: LSPConfig{
+				Enabled: false, // 默认关闭，配置 parser.lsp.enabled=true 启用（需系统安装对应语言服务器）
 			},
 		},
 		AI: AIConfig{
@@ -428,6 +439,11 @@ func LoadFromEnv(cfg *Config) {
 	if v := os.Getenv("CODESCHEMA_PARSER_CODEGRAPH_DB"); v != "" {
 		cfg.Parser.CodeGraph.DB = v
 	}
+	if v := os.Getenv("CODESCHEMA_PARSER_LSP_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Parser.LSP.Enabled = b
+		}
+	}
 }
 
 // Merge 合并两个配置实例，overlay 中的非零值字段会覆盖 base 的对应字段。
@@ -510,6 +526,9 @@ func Merge(base, overlay *Config) *Config {
 	}
 	if len(overlay.Parser.JCodeIndexer.Env) > 0 {
 		merged.Parser.JCodeIndexer.Env = cloneStringMap(overlay.Parser.JCodeIndexer.Env)
+	}
+	if overlay.Parser.LSP.Enabled {
+		merged.Parser.LSP.Enabled = true
 	}
 
 	// AI
@@ -636,6 +655,9 @@ func cloneConfig(cfg *Config) *Config {
 				DB:         cfg.Parser.JCodeIndexer.DB,
 				ConfigFile: cfg.Parser.JCodeIndexer.ConfigFile,
 				Env:        cloneStringMap(cfg.Parser.JCodeIndexer.Env),
+			},
+			LSP: LSPConfig{
+				Enabled: cfg.Parser.LSP.Enabled,
 			},
 		},
 		AI: AIConfig{

@@ -19,7 +19,6 @@ import (
 	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/config"
-	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/robust"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/scheduler"
@@ -233,8 +232,9 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		return fmt.Errorf("health check: %w", err)
 	}
 
-	// 初始化注册中心
-	reg := parser.NewRegistry()
+	// 初始化解析适配器注册中心（tree-sitter 兜底 + 可选 LSP/SCIP/CodeGraph 高精度优先）
+	// 注：T1-3 修复——此前此处创建空 Registry 导致 CLI 扫描从未真正解析符号。
+	reg := newParserRegistry(ctx, cfg, repoPath)
 
 	// 创建 Scanner
 	s := scanner.NewScanner(st, reg, *workers)
@@ -303,8 +303,8 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	}
 	defer st.Close()
 
-	// 初始化注册中心
-	reg := parser.NewRegistry()
+	// 初始化解析适配器注册中心（tree-sitter 兜底 + 可选 LSP/SCIP/CodeGraph 高精度优先）
+	reg := newParserRegistry(ctx, cfg, repoPath)
 
 	// 创建 Scanner
 	s := scanner.NewScanner(st, reg, *workers)
