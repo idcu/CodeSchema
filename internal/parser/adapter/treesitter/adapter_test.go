@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -1036,5 +1036,60 @@ func TestTreeSitterAdapter_Parse_HTML(t *testing.T) {
 	}
 	if len(doc.Classes) < 3 {
 		t.Errorf("expected html/body/div/button elements, got %d", len(doc.Classes))
+	}
+}
+
+// TestTreeSitterAdapter_Parse_HCL 验证 Terraform HCL 块解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_HCL(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.tf")
+	content := `resource "aws_instance" "web" {
+  ami = "ami-123"
+}
+variable "region" {
+  default = "us-east-1"
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "hcl" {
+		t.Errorf("expected hcl, got %s", doc.Language)
+	}
+	if len(doc.Classes) < 2 {
+		t.Errorf("expected resource+variable blocks, got %d", len(doc.Classes))
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Svelte 验证 Svelte 组件解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Svelte(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Counter.svelte")
+	content := `<script>
+  let count = 0;
+  function increment() {
+    count += 1;
+  }
+</script>
+<button on:click={increment}>{count}</button>
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "svelte" {
+		t.Errorf("expected svelte, got %s", doc.Language)
+	}
+	if len(doc.Classes) == 0 {
+		t.Error("expected at least 1 svelte component (script)")
 	}
 }

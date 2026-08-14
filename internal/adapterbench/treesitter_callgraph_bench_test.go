@@ -304,6 +304,29 @@ message CreateOrderReq {
 		Golden: []string{}, // 标记语言无函数调用
 	},
 	{
+		Lang: "hcl", Ext: ".tf",
+		Code: `resource "aws_instance" "web" {
+  ami = "ami-123"
+}
+variable "region" {
+  default = "us-east-1"
+}
+`,
+		Golden: []string{}, // 基础设施即代码无函数调用
+	},
+	{
+		Lang: "svelte", Ext: ".svelte",
+		Code: `<script>
+  let count = 0;
+  function increment() {
+    count += 1;
+  }
+</script>
+<button on:click={increment}>{count}</button>
+`,
+		Golden: []string{}, // 组件内 JS 为 raw_text,AST 不覆盖
+	},
+	{
 		Lang: "toml", Ext: ".toml",
 		Code: `[server]
 host = "localhost"

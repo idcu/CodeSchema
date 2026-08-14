@@ -232,6 +232,22 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`\b\B`), // HTML 标签非调用(永不匹配)
 			commentTrim:    "<!--",
 		},
+		"hcl": {
+			// Terraform 资源/变量/模块块作为「类」登记
+			classPattern:   regexp.MustCompile(`^\s*(resource|data|variable|module|output|provider|locals|terraform)\s+([\w."-]+)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^\s*[\w-]+\s*=\s*\{`),
+			callPattern:    regexp.MustCompile(`\b\B`), // HCL 配置无函数调用(永不匹配)
+			commentTrim:    "#",
+		},
+		"svelte": {
+			// Svelte 组件：script 块作为「类」登记
+			classPattern:   regexp.MustCompile(`^\s*<script(\s+[^>]*)?>`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*(export\s+|async\s+)?function\s+(\w+)`),
+			callPattern:    regexp.MustCompile(`([\w.]+)\s*\([^)]*\)`),
+			commentTrim:    "<!--",
+		},
 	}
 }
 
@@ -547,6 +563,10 @@ func detectClassType(matches []string, lang string) string {
 		return "CLASS"
 	case "html":
 		return "ELEMENT"
+	case "hcl":
+		return "BLOCK"
+	case "svelte":
+		return "COMPONENT"
 	case "groovy":
 		for _, m := range matches {
 			switch m {

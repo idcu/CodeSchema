@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte"}
 }
 
 // FileExists 检查文件是否存在。
@@ -76,6 +76,10 @@ func ExtToLang(ext string) string {
 		return "protobuf"
 	case ".html", ".htm":
 		return "html"
+	case ".tf", ".hcl":
+		return "hcl"
+	case ".svelte":
+		return "svelte"
 	default:
 		return "unknown"
 	}
@@ -143,6 +147,10 @@ func LangToExtensions(lang string) []string {
 		return []string{".proto"}
 	case "html":
 		return []string{".html", ".htm"}
+	case "hcl":
+		return []string{".tf", ".hcl"}
+	case "svelte":
+		return []string{".svelte"}
 	default:
 		return nil
 	}

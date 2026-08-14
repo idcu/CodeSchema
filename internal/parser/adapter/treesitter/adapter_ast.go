@@ -33,6 +33,7 @@ import (
 	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/groovy"
+	"github.com/smacker/go-tree-sitter/hcl"
 	"github.com/smacker/go-tree-sitter/html"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
@@ -46,6 +47,7 @@ import (
 	"github.com/smacker/go-tree-sitter/rust"
 	"github.com/smacker/go-tree-sitter/scala"
 	"github.com/smacker/go-tree-sitter/sql"
+	"github.com/smacker/go-tree-sitter/svelte"
 	"github.com/smacker/go-tree-sitter/swift"
 	"github.com/smacker/go-tree-sitter/toml"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
@@ -89,6 +91,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"yaml":     yaml.GetLanguage(),
 			"protobuf": protobuf.GetLanguage(),
 			"html":     html.GetLanguage(),
+			"hcl":      hcl.GetLanguage(),
+			"svelte":   svelte.GetLanguage(),
 		},
 	}
 }
@@ -139,6 +143,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"yaml":     {},
 	"protobuf": {"message": true, "service": true, "enum": true},
 	"html":     {"element": true},
+	"hcl":      {"block": true},
+	"svelte":   {"script_element": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -168,6 +174,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"yaml":     {},
 	"protobuf": {"rpc": true},
 	"html":     {},
+	"hcl":      {},
+	"svelte":   {},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -197,6 +205,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"yaml":     {},
 	"protobuf": {},
 	"html":     {},
+	"hcl":      {},
+	"svelte":   {},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -390,6 +400,25 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 			}
 		}
 	}
+	// Svelte script_element：固定名称「script」
+	if n.Type() == "script_element" {
+		return "script"
+	}
+	// HCL block：类型 + 标签拼接（`resource "aws_instance" "web"` → `resource.aws_instance.web`）
+	if n.Type() == "block" {
+		parts := []string{}
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if c.Type() == "identifier" || c.Type() == "string_lit" {
+				s := string(c.Content(src))
+				s = strings.Trim(s, "\"")
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, ".")
+		}
+	}
 	// HTML element → start_tag → tag_name（`<div ...>` → `div`）
 	if n.Type() == "element" {
 		for i := 0; i < int(n.NamedChildCount()); i++ {
@@ -441,6 +470,10 @@ func astClassType(nodeType, lang string) string {
 		return "OBJECT"
 	case "element":
 		return "ELEMENT"
+	case "block":
+		return "BLOCK"
+	case "script_element":
+		return "COMPONENT"
 	default:
 		return "CLASS"
 	}

@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 70: feat(parser): 继续扩展 hcl/svelte → 26 语言（PHASE_09）
+
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.tf`/`.hcl`→hcl、`.svelte`→svelte
+- 正则：hcl resource/data/variable/module 块；svelte script 组件 + function 方法（修函数定义误检调用）
+- AST：hcl block（类型+标签拼接名称）、svelte script_element（固定名 script）；astClassType 增 block/script_element 分支
+- 验证：**AST 26 语言双档 P=1.00/R=1.00（TP=72）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+- 注：svelte 组件内 JS 为 raw_text 节点，AST 调用检测不覆盖（grammar 局限）
+
 ### Commit 69: feat(parser): 继续扩展 protobuf/html → 24 语言（PHASE_09）
 
 - ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.proto`→protobuf、`.html`/`.htm`→html

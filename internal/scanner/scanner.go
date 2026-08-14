@@ -271,6 +271,10 @@ func detectLang(path string) string {
 		return "protobuf"
 	case ".html", ".htm":
 		return "html"
+	case ".tf", ".hcl":
+		return "hcl"
+	case ".svelte":
+		return "svelte"
 	default:
 		return "unknown"
 	}
