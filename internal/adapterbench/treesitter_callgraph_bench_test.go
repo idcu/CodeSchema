@@ -207,6 +207,20 @@ deploy() {
 `,
 		Golden: []string{"validator.validate", "mapper.map"},
 	},
+	{
+		Lang: "sql", Ext: ".sql",
+		Code: `CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    amount DECIMAL(10,2)
+);
+
+CREATE PROCEDURE process_orders()
+BEGIN
+    SELECT COUNT(*) FROM orders;
+END;
+`,
+		Golden: []string{"COUNT"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。

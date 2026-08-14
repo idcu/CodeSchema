@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql"}
 }
 
 // FileExists 检查文件是否存在。
@@ -56,6 +56,8 @@ func ExtToLang(ext string) string {
 		return "bash"
 	case ".scala", ".sc":
 		return "scala"
+	case ".sql":
+		return "sql"
 	default:
 		return "unknown"
 	}
@@ -103,6 +105,8 @@ func LangToExtensions(lang string) []string {
 		return []string{".sh", ".bash"}
 	case "scala":
 		return []string{".scala", ".sc"}
+	case "sql":
+		return []string{".sql"}
 	default:
 		return nil
 	}

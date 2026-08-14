@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -715,5 +716,52 @@ func TestTreeSitterAdapter_Parse_Scala(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected scala calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_SQL 验证 SQL 表/视图/过程/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_SQL(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orders.sql")
+	content := `-- 订单表
+CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    amount DECIMAL(10,2)
+);
+
+CREATE VIEW paid_orders AS
+SELECT * FROM orders WHERE amount > 0;
+
+CREATE PROCEDURE process_orders()
+BEGIN
+    SELECT COUNT(*) FROM paid_orders;
+    CALL archive_orders();
+END;
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "sql" {
+		t.Errorf("expected sql, got %s", doc.Language)
+	}
+	if len(doc.Classes) == 0 {
+		t.Error("expected at least 1 SQL declaration (table/view/procedure)")
+	}
+	// CALL 语句 grammar 不支持（解析为 ERROR 节点，见 go-tree-sitter SQL grammar 局限）；
+	// 验证 SELECT COUNT(*) 的 invocation 检出（AST 版）或任意调用检出（正则版）
+	found := false
+	for _, c := range doc.Calls {
+		if strings.Contains(c.CalleeFQN, "COUNT") || strings.Contains(c.CalleeFQN, "paid_orders") || strings.Contains(c.CalleeFQN, "archive") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected SQL call detected, got calls: %+v", doc.Calls)
 	}
 }

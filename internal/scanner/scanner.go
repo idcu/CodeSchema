@@ -251,6 +251,8 @@ func detectLang(path string) string {
 		return "bash"
 	case ".scala", ".sc":
 		return "scala"
+	case ".sql":
+		return "sql"
 	default:
 		return "unknown"
 	}

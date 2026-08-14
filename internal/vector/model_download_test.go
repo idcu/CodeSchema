@@ -178,3 +178,59 @@ func TestModelDownloader_Ensure_PathTraversalRejected(t *testing.T) {
 		t.Error("path traversal wrote file outside dest")
 	}
 }
+
+// TestModelDownloader_Ensure_LocalSource 验证本地分发源（file:// 与本地路径）。
+func TestModelDownloader_Ensure_LocalSource(t *testing.T) {
+	archive, sha := buildTarGz(t, map[string]string{
+		"onnx/model.onnx": "fake-model",
+		"tokenizer.json":  "{}",
+	})
+	// 写入本地归档文件
+	archivePath := filepath.Join(t.TempDir(), "models-bge-small-zh.tar.gz")
+	if err := os.WriteFile(archivePath, archive, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// file:// 形式
+	dest := t.TempDir()
+	dl := NewModelDownloader(dest, "file://"+archivePath, sha)
+	ok, err := dl.Ensure(context.Background(), "bge-small-zh")
+	if err != nil || !ok {
+		t.Fatalf("file:// ensure failed: ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("file:// extract failed: %v", err)
+	}
+
+	// 本地路径形式
+	dest2 := t.TempDir()
+	dl2 := NewModelDownloader(dest2, archivePath, "")
+	ok2, err := dl2.Ensure(context.Background(), "bge-small-zh")
+	if err != nil || !ok2 {
+		t.Fatalf("local path ensure failed: ok=%v err=%v", ok2, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest2, "tokenizer.json")); err != nil {
+		t.Fatalf("local path extract failed: %v", err)
+	}
+}
+
+// TestLocalSourcePath 验证本地源 URL 解析。
+func TestLocalSourcePath(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"https://x/m.tar.gz", ""},
+		{"http://x/m.tar.gz", ""},
+		{"file:///abs/m.tar.gz", "/abs/m.tar.gz"},
+		{"file://rel/m.tar.gz", "rel/m.tar.gz"},
+		{"rel/m.tar.gz", "rel/m.tar.gz"},
+		{"/abs/m.tar.gz", "/abs/m.tar.gz"},
+	}
+	for _, c := range cases {
+		got := localSourcePath(c.url)
+		if got != c.want {
+			t.Errorf("localSourcePath(%q) = %q, want %q", c.url, got, c.want)
+		}
+	}
+}

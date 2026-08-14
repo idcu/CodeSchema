@@ -38,6 +38,7 @@ import (
 	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
 	"github.com/smacker/go-tree-sitter/scala"
+	"github.com/smacker/go-tree-sitter/sql"
 	"github.com/smacker/go-tree-sitter/swift"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
 
@@ -69,6 +70,7 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"ruby":   ruby.GetLanguage(),
 			"bash":   bash.GetLanguage(),
 			"scala":  scala.GetLanguage(),
+			"sql":    sql.GetLanguage(),
 		},
 	}
 }
@@ -109,6 +111,7 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"ruby":   {"class": true, "module": true},
 	"bash":   {},
 	"scala":  {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
+	"sql":    {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -128,6 +131,7 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"ruby":   {"method": true, "singleton_method": true},
 	"bash":   {"function_definition": true},
 	"scala":  {"function_definition": true},
+	"sql":    {"create_function": true, "create_procedure": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -147,6 +151,7 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"ruby":   {"call": true},
 	"bash":   {"command": true, "command_call": true},
 	"scala":  {"call_expression": true, "method_invocation": true},
+	"sql":    {"invocation": true, "function_call": true, "call_statement": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -346,6 +351,19 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		text := string(n.Content(src))
 		if idx := strings.Index(text, "("); idx >= 0 {
 			return stripTypeArgs(strings.TrimSpace(text[:idx]))
+		}
+	}
+	// SQL call_statement（CALL proc();）：取子 invocation 文本（`(` 前）
+	if n.Type() == "call_statement" {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if c.Type() == "invocation" || c.Type() == "function_call" {
+				text := string(c.Content(src))
+				if idx := strings.Index(text, "("); idx >= 0 {
+					return stripTypeArgs(strings.TrimSpace(text[:idx]))
+				}
+				return text
+			}
 		}
 	}
 	// Bash command：取第一个 word 子节点（命令名）

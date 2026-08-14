@@ -149,6 +149,15 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
 			commentTrim:    "//",
 		},
+		"sql": {
+			// SQL 无类；CREATE TABLE/VIEW/PROCEDURE 作为「声明」登记
+			classPattern:   regexp.MustCompile(`(?i)^\s*CREATE\s+(OR\s+REPLACE\s+)?(TABLE|VIEW|FUNCTION|PROCEDURE)\s+([\w.]+)`),
+			classNameIndex: 3,
+			methodPattern:  regexp.MustCompile(`(?i)^\s*CREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|PROCEDURE)\s+([\w.]+)\s*\(`),
+			// CALL proc() / func(...) / schema.func(...) 形式；非捕获组消费 CALL，m[1] 为函数名
+			callPattern: regexp.MustCompile(`(?i)\b(?:CALL\s+)?([\w.]+)\s*\([^)]*\)`),
+			commentTrim: "--",
+		},
 	}
 }
 
@@ -429,6 +438,18 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "CLASS"
+	case "sql":
+		for _, m := range matches {
+			switch m {
+			case "VIEW":
+				return "VIEW"
+			case "FUNCTION":
+				return "FUNCTION"
+			case "PROCEDURE":
+				return "PROCEDURE"
+			}
+		}
+		return "TABLE"
 	default:
 		return "CLASS"
 	}

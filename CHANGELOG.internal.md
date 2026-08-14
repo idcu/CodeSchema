@@ -6,6 +6,26 @@
 
 ## 提交记录
 
+### Commit 65: feat(parser+ops): 继续实施——SQL 语言 + 趋势折线图 + 模型本地分发源（PHASE_09）
+
+**核心改动点（继续①·SQL 语言 → 15 语言）**：
+- `internal/parser/adapter/adapter.go` / `internal/scanner/scanner.go`：`.sql`→sql。
+- 正则版 `adapter.go`：sql 模式（CREATE TABLE/VIEW/FUNCTION/PROCEDURE 声明 + CALL/func 调用，非捕获组支持 CALL）、detectClassType（TABLE/VIEW/FUNCTION/PROCEDURE）、`--` 注释。
+- AST 版 `adapter_ast.go`：注册 sql grammar + 节点类型（create_table/create_view/create_function/create_procedure + invocation/function_call/call_statement）；astCalleeName 增 call_statement 分支。
+- **发现 go-tree-sitter SQL grammar 不支持 CALL 语句（解析为 ERROR 节点）**——测试改为验证 SELECT COUNT(*) 的 invocation 检出，并在测试注释说明该 grammar 局限。
+- 测试 + 基准样本。**AST 15 语言双档 P=1.00/R=1.00（TP=64）；正则 SIMPLE P=0.97/R=1.00（1 FP：SQL DECIMAL 构造）**。
+
+**核心改动点（继续②·基准趋势折线图）**：
+- `scripts/benchtrend/main.go`：新增 `renderLineChart`——纯手写 SVG polyline（Overall Precision 红 / Recall 蓝 + 网格线 + 数据点 + 图例），无 JS/外部依赖；14 历史点实测 2 折线 + 28 点正常渲染。
+
+**核心改动点（继续③·模型本地分发源）**：
+- `internal/vector/model_download.go`：`downloadAndExtract` 重构支持三种分发源——`https://`（HTTP 下载）/ `file://`（本地文件直读）/ 本地路径；新增 `localSourcePath`（file:// 绝对/相对路径解析）。无网络环境可直接用 `make models-pack` 产物做本地分发。
+- 测试 2 项：file:// 与本地路径解包、URL 解析。
+
+**验证**：默认/`-tags treesitter` 双路径构建+测试全绿；全仓 23 包通过；`go mod tidy` 后仍绿。
+**文档同步**：docs/dev 02/07 + README（15 语言）；docs/dev 09（分发源类型）；任务清单。
+**遗留**：注册表 URL 仍为占位（models.example.com），真实制品托管后替换（无网络环境可用 file:// 指向本地打包产物）；go-tree-sitter 其余语言按需继续扩展。
+
 ### Commit 64: feat(parser+ops): 遗留项——bash/scala 扩展 + 模型打包发布 + 基准趋势可视化（PHASE_09）
 
 **核心改动点（遗留①·ONNX 模型打包发布）**：

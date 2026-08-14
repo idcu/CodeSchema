@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +17,27 @@ import (
 
 	"github.com/idcu/codeschema/internal/log"
 )
+
+// localSourcePath 判断 URL 是否为本地分发源并返回本地路径。
+//
+//   - `file:///abs/path` → `/abs/path`
+//   - `file://relative.tar.gz` → `relative.tar.gz`
+//   - 不以 http(s):// 开头 → 视为本地路径原样返回
+//   - http(s):// → 返回空（走 HTTP 下载）
+func localSourcePath(url string) string {
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return ""
+	}
+	if strings.HasPrefix(url, "file://") {
+		p := strings.TrimPrefix(url, "file://")
+		// file:///abs → 绝对路径（保留前导 /）；file://rel → 相对路径
+		if strings.HasPrefix(p, "/") && strings.HasPrefix(url, "file:///") {
+			return p // 已是 /abs
+		}
+		return p
+	}
+	return url // 本地相对/绝对路径
+}
 
 // ModelDownloader 负责 ONNX 语义模型的远程分发（幂等下载 + SHA-256 校验 + tar.gz 解包）。
 //
@@ -111,7 +133,12 @@ func (d *ModelDownloader) modelFilesPresent() bool {
 	return true
 }
 
-// downloadAndExtract 下载 tar.gz 压缩包、可选校验、解包到 ModelDir。
+// downloadAndExtract 获取 tar.gz 压缩包、可选校验、解包到 ModelDir。
+//
+// 分发源支持三类：
+//   - http(s)://...：HTTP 下载；
+//   - file:///abs/path：本地文件直读（无网络环境可分发 make models-pack 产物）；
+//   - 相对/绝对本地路径：直接作为 tar.gz 路径。
 func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName string) error {
 	url := strings.ReplaceAll(d.URL, "{model}", modelName)
 
@@ -126,36 +153,49 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 		os.Remove(tmpPath)
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("new request: %w", err)
-	}
-	client := &http.Client{Timeout: d.Timeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("http get %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http status %d for %s", resp.StatusCode, url)
+	var hasher io.Writer = sha256.New()
+	var body io.Reader
+	var needHash bool = d.SHA256 != ""
+
+	// 本地源（file:// 或本地路径）→ 直接拷贝文件
+	if localPath := localSourcePath(url); localPath != "" {
+		src, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("open local model archive %s: %w", localPath, err)
+		}
+		defer src.Close()
+		body = src
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("new request: %w", err)
+		}
+		client := &http.Client{Timeout: d.Timeout}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("http get %s: %w", url, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("http status %d for %s", resp.StatusCode, url)
+		}
+		body = resp.Body
 	}
 
-	// 边下载边算 SHA-256（如需校验）
-	var body io.Reader = resp.Body
-	hasher := sha256.New()
-	if d.SHA256 != "" {
-		body = io.TeeReader(resp.Body, hasher)
+	// 边拷贝边算 SHA-256（如需校验）
+	if needHash {
+		body = io.TeeReader(body, hasher)
 	}
 	if _, err := io.Copy(tmpFile, body); err != nil {
-		return fmt.Errorf("download body: %w", err)
+		return fmt.Errorf("copy model archive: %w", err)
 	}
 	if err := tmpFile.Sync(); err != nil {
 		return fmt.Errorf("sync temp: %w", err)
 	}
 
 	// 校验和
-	if d.SHA256 != "" {
-		got := hex.EncodeToString(hasher.Sum(nil))
+	if needHash {
+		got := hex.EncodeToString(hasher.(hash.Hash).Sum(nil))
 		if !strings.EqualFold(got, d.SHA256) {
 			return fmt.Errorf("sha256 mismatch: got %s want %s", got, d.SHA256)
 		}
