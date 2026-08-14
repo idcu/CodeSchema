@@ -1,8 +1,14 @@
+//go:build !treesitter
+
 // Package treesitter 提供基于文本模式匹配的源码解析适配器。
 //
-// P0 阶段使用纯 Go 正则表达式实现代码解析，无需 CGO 或 tree-sitter 运行时。
-// 支持 6 种语言（Go/Java/TypeScript/Python/Rust/C++）的类/方法/调用解析。
-// P1 阶段可切换为 tree-sitter Go binding 以获得精确语法解析。
+// 默认实现（本文件）：纯 Go 正则表达式实现代码解析，无需 CGO 或 tree-sitter 运行时。
+// 支持 7 种语言（Go/Java/TypeScript/Python/Rust/C++/Kotlin）的类/方法/调用解析。
+//
+// 可选实现（真语法树）：以 `go build -tags treesitter` 编译时启用
+// `adapter_ast.go`（基于 CGO tree-sitter binding，语法级精确解析），本文件被 build tag 排除。
+// 二者共享同一 TreeSitterAdapter 类型与 IR 契约：默认路径免 CGO（与 T0-2 决策一致），
+// 需要精度时一键切换（方案 C：analysis/2026-08-14-t2-1-parser-precision-eval.md）。
 package treesitter
 
 import (
@@ -74,8 +80,9 @@ func initPatterns() map[string]langPatterns {
 			classPattern:   regexp.MustCompile(`^(pub\s+)?(struct|enum|trait|impl)\s+(\w+)`),
 			classNameIndex: 3,
 			methodPattern:  regexp.MustCompile(`^(pub\s+|fn\s+)?(unsafe\s+)?fn\s+(\w[\w]*)\s*\(`),
-			callPattern:    regexp.MustCompile(`(\w[\w!]*)\s*\([^)]*\)`),
-			commentTrim:    "//",
+			// 捕获组含 . 以支持 obj.method() 与 mod::fn() 的调用形式
+			callPattern: regexp.MustCompile(`(\w[\w.:]*)\s*\([^)]*\)`),
+			commentTrim: "//",
 		},
 		"cpp": {
 			classPattern:   regexp.MustCompile(`^(class|struct|enum)\s+(\w+)\s*[:\{]`),
@@ -141,6 +148,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	lineNum := 0
 	var currentClass *parser.ClassIR
 	var docComment strings.Builder
+	var sanitizer codeSanitizer // 跨行状态（块注释 / 三引号字符串）
 
 	for scanner.Scan() {
 		select {
@@ -205,8 +213,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 
 		// 解析函数调用（全部语言启用；Java/TS/Rust/C++/Kotlin 的调用检测
 		// 依赖 callPattern 与 isKeyword 过滤，精度见 docs/dev 02 的启发式说明）
-		if strings.Contains(trimmed, "(") && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "#") {
-			detectCalls(trimmed, lineNum, &doc.Calls, patterns.callPattern)
+		// 先剔除字符串/注释内的伪调用（跨行状态机），再匹配
+		code := sanitizer.clean(trimmed, lang)
+		if strings.Contains(code, "(") {
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern)
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -303,6 +313,119 @@ func detectClassType(matches []string, lang string) string {
 	default:
 		return "CLASS"
 	}
+}
+
+// codeSanitizer 剔除代码行中字符串/注释内的伪调用（跨行状态机）。
+//
+// 目标：`msg := "foo(bar)"` / `// foo(bar)` 等行内的括号不应被误认为函数调用。
+// 状态机维护跨行状态：
+//   - inBlockComment：C 风格 /* ... */ 注释（可跨多行）
+//   - inTripleQuote：Python 三引号字符串 ”'...”' / """..."""（可跨多行）
+//
+// 剔除策略：字符串与注释内容替换为空格（保持字符位置，避免影响正则的行内列匹配），
+// 行注释（// 与 #）之后的全部内容替换为空格。
+type codeSanitizer struct {
+	inBlockComment bool
+	inTripleQuote  string // 三引号定界符（"""/'''），空表示不在三引号内
+}
+
+// clean 返回剔除字符串/注释后的代码行（仅保留真实代码），并更新跨行状态。
+func (c *codeSanitizer) clean(line, lang string) string {
+	if line == "" {
+		return line
+	}
+	out := []byte(line)
+	quote := byte(0) // 当前行内字符串定界符（0 = 不在字符串内）
+	escaped := false // 上一个字符是转义符（\\）
+	i := 0
+	for i < len(line) {
+		ch := line[i]
+
+		// 块注释状态（跨行）
+		if c.inBlockComment {
+			if ch == '*' && i+1 < len(line) && line[i+1] == '/' {
+				out[i], out[i+1] = ' ', ' '
+				c.inBlockComment = false
+				i += 2
+				continue
+			}
+			out[i] = ' '
+			i++
+			continue
+		}
+
+		// 三引号字符串状态（跨行，Python）
+		if c.inTripleQuote != "" {
+			if strings.HasPrefix(line[i:], c.inTripleQuote) {
+				delimLen := len(c.inTripleQuote)
+				for j := 0; j < delimLen; j++ {
+					out[i+j] = ' '
+				}
+				c.inTripleQuote = ""
+				i += delimLen
+				continue
+			}
+			out[i] = ' '
+			i++
+			continue
+		}
+
+		// 行内字符串状态
+		if quote != 0 {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			out[i] = ' '
+			i++
+			continue
+		}
+
+		// 行注释：// 与 Python 的 #
+		if ch == '/' && i+1 < len(line) && line[i+1] == '/' {
+			for j := i; j < len(line); j++ {
+				out[j] = ' '
+			}
+			break
+		}
+		if lang == "py" && ch == '#' {
+			for j := i; j < len(line); j++ {
+				out[j] = ' '
+			}
+			break
+		}
+
+		// 进入块注释
+		if ch == '/' && i+1 < len(line) && line[i+1] == '*' {
+			c.inBlockComment = true
+			out[i], out[i+1] = ' ', ' '
+			i += 2
+			continue
+		}
+
+		// 进入三引号（Python）
+		if lang == "py" && (ch == '"' || ch == '\'') &&
+			i+2 < len(line) && line[i+1] == ch && line[i+2] == ch {
+			c.inTripleQuote = string(ch) + string(ch) + string(ch)
+			out[i], out[i+1], out[i+2] = ' ', ' ', ' '
+			i += 3
+			continue
+		}
+
+		// 进入行内字符串
+		if ch == '"' || ch == '\'' {
+			quote = ch
+			out[i] = ' '
+			i++
+			continue
+		}
+
+		i++
+	}
+	return string(out)
 }
 
 // detectCalls 从行文本中提取函数调用。

@@ -7,6 +7,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/philippgille/chromem-go v0.0.0-00010101000000-000000000000
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/yalue/onnxruntime_go v1.32.1
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.56.0

@@ -420,3 +420,42 @@ public:
 		t.Errorf("expected C++ calls detected, got %+v", doc.Calls)
 	}
 }
+
+// TestTreeSitterAdapter_Parse_StringCallFiltered 验证字符串内伪调用不进 Calls。
+func TestTreeSitterAdapter_Parse_StringCallFiltered(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "svc.go")
+	content := `package main
+
+type Svc struct{}
+
+func (s *Svc) Run() {
+	msg := "fakeCall(1)"
+	realCall(msg)
+	// commentCall(2)
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	foundFake, foundReal := false, false
+	for _, c := range doc.Calls {
+		switch c.CalleeFQN {
+		case "fakeCall", "commentCall":
+			foundFake = true
+		case "realCall":
+			foundReal = true
+		}
+	}
+	if foundFake {
+		t.Errorf("expected string/comment pseudo-calls filtered, got calls: %+v", doc.Calls)
+	}
+	if !foundReal {
+		t.Errorf("expected realCall detected, got calls: %+v", doc.Calls)
+	}
+}

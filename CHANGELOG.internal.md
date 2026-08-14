@@ -6,6 +6,34 @@
 
 ## 提交记录
 
+### Commit 59: feat(parser): T2-1 方案 C 全量落地——伪调用剔除 + 调用图基准 + `-tags treesitter` 真语法树（PHASE_09）
+
+**核心改动点（补强①·字符串/注释剔除状态机）**：
+- `internal/parser/adapter/treesitter/adapter.go`：新增 `codeSanitizer` **跨行状态机**——剔除字符串/注释内的伪调用：
+  块注释 `/* ... */`（跨行状态）、Python 三引号 `"""`/`'''`（跨行状态）、行内字符串 `"`/`'`（含 `\` 转义）、
+  行注释 `//` 与 Python `#`（行尾清空）；调用检测前先 `sanitizer.clean(line, lang)` 再匹配，
+  避免 `msg := "foo(bar)"` / `// foo(bar)` 被误判为调用。测试 4 项。
+
+**核心改动点（补强②·7 语言调用图基准）**：
+- 新增 `internal/adapterbench/treesitter_callgraph_bench_test.go`：7 语言黄金样本（≥2 真实调用 + 伪调用陷阱），
+  统计检出 vs 黄金的 Precision/Recall；产出 `build/treesitter-callgraph-bench.json` + `analysis/2026-08-14-treesitter-callgraph-bench.md`。
+- **修复真实 bug**：Rust `callPattern` 捕获组原为 `(\w[\w!]*)`（不含 `.`）致 `helper.do_work()` 只检出 `do_work`；
+  改为 `(\w[\w.:]*)` 支持 `obj.method()` / `mod::fn()`。**基准结果：7 语言 P=1.00 / R=1.00（TP=14 FP=0 FN=0）**。
+
+**核心改动点（第 3 步·`-tags treesitter` 隔离框架）**：
+- `adapter.go` 加 `//go:build !treesitter`（正则实现，默认，免 CGO）。
+- 新增 `adapter_ast.go`（`//go:build treesitter`）：基于 go-tree-sitter（CGO）真语法树实现——7 语言 grammar 注册，
+  AST 遍历提取类/方法/调用（`astNodeName` 兼容 Kotlin `simple_identifier` 头部；`astCalleeName` 取 `(` 前完整表达式
+  覆盖 Java method_invocation 与 Kotlin/Go nav 调用；`astClassType` 映射 INTERFACE/ENUM/OBJECT）。
+- 新增 `adapter_ast_test.go`（`//go:build treesitter`）：Go/Java/Kotlin 语法级解析测试（含字符串陷阱过滤断言）。
+- `sanitizer_test.go` 拆为 `//go:build !treesitter` 专属（codeSanitizer 仅正则版存在）。
+- `go.mod`：新增 `github.com/smacker/go-tree-sitter` 直接依赖。
+- **Registry 零改动**：`adapter.NewTreeSitterAdapter()` 同一构造点按 build tag 自动切换实现。
+
+**验证**：默认 `go build ./...` / `go vet ./...` / 全仓 23 包通过（免 CGO）；`go build -tags treesitter ./...` /
+`go test -tags treesitter ./internal/parser/adapter/treesitter/` 全绿；`go mod tidy` 后双路径仍全绿。
+**遗留**：AST 版语言细分（C++ 模板/泛型节点细调）、基准扩充复杂样本（重载/泛型/注解）、CI 增 treesitter job（需 gcc）为后续可选项。
+
 ### Commit 58: feat(parser): 调用检测扩展到全语言 + Kotlin 支持 + T2-1 方案评估（T2-1 低成本路径 + T6-2 部分/PHASE_09）
 
 **核心改动点**：
