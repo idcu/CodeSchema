@@ -6,9 +6,19 @@
 
 ## 提交记录
 
+### Commit 41: docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标
+
+**Commit Hash**: `待提交`
+
+**核心改动点**：
+- `docs/dev/11-配置部署与路线图.md` — 交换 macOS 下载表顺序，Apple Silicon（arm64）设为主条目，Intel（x86_64）标注为旧机型
+- `docs/dev/11-配置部署与路线图.md` — 环境要求表 onnxruntime 版本从 1.17+ 更新为 1.28+
+
+**验证数据**：纯文档更新，无代码变更
+
 ### Commit 40: feat(onnx): 集成 bge-small-zh ONNX 语义嵌入模型
 
-**Commit Hash**: `未提交`
+**Commit Hash**: `bc84553`
 
 **核心改动点**：
 - `internal/vector/embedder_onnx.go` — 新增 ONNXEmbedder：
