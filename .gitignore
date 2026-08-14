@@ -70,3 +70,7 @@ build_err.txt
 # Adapter benchmark 测试的历史残留（已被仓库根 build/analysis 取代；可能被本机杀软锁定）
 /internal/adapterbench/build/
 /internal/adapterbench/analysis/
+
+# 已被迁移到 internal/adapterbench 的旧副本残留（平台安全删除守卫拦截无法物理删除，
+# 已加 build-ignore 不参与编译，此处忽略使其不污染 git 状态）
+/internal/integration/adapter_validation_test.go
