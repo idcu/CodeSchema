@@ -170,7 +170,7 @@ make clean
 - **SCIP / LSP 适配器生产验证**：
   - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。
   - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 真实服务器传输层验证（clangd 需 compile-commands/project 上下文才登记独立文件，缺上下文时优雅跳过）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复 `SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类的**生产缺陷**。
-  - 多语言验证/基准框架见 `internal/integration/adapter_validation_test.go`，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`。
+  - 多语言验证/基准框架见 `internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
 
 ## 测试
 
