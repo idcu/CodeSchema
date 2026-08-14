@@ -65,6 +65,7 @@ down/models/
 
 # Build/runtime bench outputs (regenerated; *.exe/*.dll already ignored above)
 build/*.json
+build/*.jsonl
 build/*.db
 build/*.log
 build_err.txt

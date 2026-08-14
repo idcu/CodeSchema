@@ -510,7 +510,8 @@ func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	libDir := filepath.Join("down", "onnxruntime")
 	var em vector.Embedder
 
-	// 远程分发：模型缺失时尝试下载（幂等），失败则降级到 LocalEmbedder
+	// 远程分发：模型缺失时尝试下载（幂等；URL 未配置则查内置模型注册表回填），
+	// 失败则降级到 LocalEmbedder
 	if dl := vector.NewModelDownloader(modelDir, cfg.Storage.Vector.ModelDownloadURL, cfg.Storage.Vector.ModelSHA256); dl != nil {
 		if ok, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
 			log.Printf("WARN: ONNX model remote fetch failed (%v), falling back to LocalEmbedder", err)

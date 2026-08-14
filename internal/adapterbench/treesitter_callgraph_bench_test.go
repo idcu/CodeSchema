@@ -169,6 +169,22 @@ end
 `,
 		Golden: []string{"validator.validate", "notify.send"},
 	},
+	{
+		Lang: "c", Ext: ".c",
+		Code: `#include <stdio.h>
+
+struct Engine {
+    int rpm;
+};
+
+void run(void) {
+    char *s = "fakeCall(1)";
+    fuelPump.pump();
+    ignition.fire(); // fakeB(2)
+}
+`,
+		Golden: []string{"fuelPump.pump", "ignition.fire"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。
@@ -462,7 +478,7 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 		"complex_overall": complexOverall,
 		"overall":         overall,
 		"conclusion": fmt.Sprintf(
-			"7 语言调用检测精度基线（两档）：简单档 P=%.2f/R=%.2f（TP=%d FP=%d FN=%d），复杂档（重载/泛型/注解/多行签名/嵌套/链式）P=%.2f/R=%.2f（TP=%d FP=%d FN=%d）；总体 P=%.2f/R=%.2f。样本含字符串/注释伪调用陷阱（状态机剔除已生效）；复杂档暴露启发式/真语法树在真实复杂度下的差距（T2-1 补强②）。",
+			"12 语言调用检测精度基线（两档）：简单档 P=%.2f/R=%.2f（TP=%d FP=%d FN=%d），复杂档（重载/泛型/注解/多行签名/嵌套/链式）P=%.2f/R=%.2f（TP=%d FP=%d FN=%d）；总体 P=%.2f/R=%.2f。样本含字符串/注释伪调用陷阱（状态机剔除已生效）；复杂档暴露启发式/真语法树在真实复杂度下的差距（T2-1 补强②）。",
 			simpleOverall.Precision, simpleOverall.Recall, simpleOverall.TruePos, simpleOverall.FalsePos, simpleOverall.FalseNeg,
 			complexOverall.Precision, complexOverall.Recall, complexOverall.TruePos, complexOverall.FalsePos, complexOverall.FalseNeg,
 			overall.Precision, overall.Recall),
@@ -476,7 +492,64 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "build", "treesitter-callgraph-bench.json"), data, 0o644); err != nil {
 		t.Logf("warn: 写 build/treesitter-callgraph-bench.json 失败: %v", err)
 	}
+	appendBenchHistory(t, root, simpleOverall, complexOverall, overall)
 	writeCallGraphMarkdown(t, root, out)
+}
+
+// benchHistoryPoint 单次基准的精度快照（追加到历史 JSONL 供跨提交趋势对比）。
+type benchHistoryPoint struct {
+	GeneratedAt string  `json:"generated_at"`
+	GitSHA      string  `json:"git_sha,omitempty"`
+	SimpleP     float64 `json:"simple_precision"`
+	SimpleR     float64 `json:"simple_recall"`
+	ComplexP    float64 `json:"complex_precision"`
+	ComplexR    float64 `json:"complex_recall"`
+	OverallP    float64 `json:"overall_precision"`
+	OverallR    float64 `json:"overall_recall"`
+	TP          int     `json:"true_positive"`
+	FP          int     `json:"false_positive"`
+	FN          int     `json:"false_negative"`
+}
+
+// appendBenchHistory 以 JSONL 追加式记录本次基准精度快照（build/treesitter-bench-history.jsonl），
+// 供 CI 跨提交归档对比精度漂移；文件不存在则创建（含表头说明注释）。
+func appendBenchHistory(t *testing.T, root string, simple, complex, overall langResult) {
+	t.Helper()
+	point := benchHistoryPoint{
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		SimpleP:     simple.Precision,
+		SimpleR:     simple.Recall,
+		ComplexP:    complex.Precision,
+		ComplexR:    complex.Recall,
+		OverallP:    overall.Precision,
+		OverallR:    overall.Recall,
+		TP:          overall.TruePos,
+		FP:          overall.FalsePos,
+		FN:          overall.FalseNeg,
+	}
+	// 尝试读 git HEAD SHA（不可用则留空）
+	if b, err := os.ReadFile(filepath.Join(root, ".git", "HEAD")); err == nil {
+		point.GitSHA = strings.TrimSpace(string(b))
+	}
+
+	data, err := json.Marshal(point)
+	if err != nil {
+		t.Logf("warn: marshal history point: %v", err)
+		return
+	}
+	historyPath := filepath.Join(root, "build", "treesitter-bench-history.jsonl")
+	// 首次创建时写表头注释行（JSONL 规范允许 # 开头注释，解析端跳过）
+	f, err := os.OpenFile(historyPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Logf("warn: 追加历史 %s 失败: %v", historyPath, err)
+		return
+	}
+	defer f.Close()
+	if fi, _ := f.Stat(); fi.Size() == 0 {
+		_, _ = f.WriteString("# treesitter 调用图基准历史（JSONL：generated_at/git_sha/simple/complex/overall 精度）\n")
+	}
+	_, _ = f.WriteString(string(data) + "\n")
+	t.Logf("history appended: %s", historyPath)
 }
 
 // writeCallGraphMarkdown 写基准报告 markdown。

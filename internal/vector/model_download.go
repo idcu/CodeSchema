@@ -42,6 +42,24 @@ func NewModelDownloader(modelDir, url, sha256 string) *ModelDownloader {
 	}
 }
 
+// ResolveFromRegistry 若未显式配置 URL，则按模型名查内置注册表回填（含 SHA256）。
+// 返回是否成功回填；未命中注册表且无显式 URL 时返回 false（调用方降级）。
+func (d *ModelDownloader) ResolveFromRegistry(modelName string) bool {
+	if d.URL != "" {
+		return true // 已有显式配置
+	}
+	url, sha, ok := ResolveDownloadConfig(modelName, "", "")
+	if !ok {
+		return false
+	}
+	d.URL = url
+	if d.SHA256 == "" {
+		d.SHA256 = sha
+	}
+	d.logger.Debug("model download config resolved from registry", "model", modelName, "url", url)
+	return true
+}
+
 // Ensure 确保模型可用：已存在直接返回 true；缺失则尝试下载。
 // 返回 (ok, err)：ok=false 表示模型不可用（调用方应降级），err 为可观测的失败原因。
 func (d *ModelDownloader) Ensure(ctx context.Context, modelName string) (bool, error) {
@@ -52,9 +70,9 @@ func (d *ModelDownloader) Ensure(ctx context.Context, modelName string) (bool, e
 		return true, nil
 	}
 
-	// 2. 未配置远程源 → 降级
-	if d.URL == "" {
-		return false, fmt.Errorf("ONNX model not found under %s and no model_download_url configured", d.ModelDir)
+	// 2. 未配置远程源 → 尝试注册表回填；仍未命中 → 降级
+	if d.URL == "" && !d.ResolveFromRegistry(modelName) {
+		return false, fmt.Errorf("ONNX model not found under %s, no model_download_url configured, and %q not in model registry", d.ModelDir, modelName)
 	}
 
 	// 3. 下载 + 校验 + 解包

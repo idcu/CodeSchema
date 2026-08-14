@@ -16,7 +16,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php", "csharp", "ruby"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -608,5 +608,44 @@ end
 	}
 	if !found {
 		t.Errorf("expected validate detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_C 验证 C 语言 struct/函数/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_C(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engine.c")
+	content := `#include <stdio.h>
+
+struct Engine {
+    int rpm;
+};
+
+int start(struct Engine *e) {
+    char *s = "fakeCall(1)";
+    fuelPump.pump();
+    return ignition.fire(e);
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "c" {
+		t.Errorf("expected c, got %s", doc.Language)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "fuelPump.pump" || c.CalleeFQN == "ignition.fire" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected C calls detected, got calls: %+v", doc.Calls)
 	}
 }

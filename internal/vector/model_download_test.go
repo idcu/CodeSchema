@@ -95,16 +95,17 @@ func TestModelDownloader_Ensure_DownloadsAndExtracts(t *testing.T) {
 
 func TestModelDownloader_Ensure_NoRemoteConfig(t *testing.T) {
 	dest := t.TempDir()
+	// 未知模型：不在注册表且无显式 URL → 报错（不触发下载）
 	dl := NewModelDownloader(dest, "", "")
-	ok, err := dl.Ensure(context.Background(), "bge-small-zh")
+	ok, err := dl.Ensure(context.Background(), "unknown-model-not-in-registry")
 	if err == nil {
 		t.Fatal("expected error when no remote url and model missing")
 	}
 	if ok {
 		t.Fatal("expected ok=false when model unavailable")
 	}
-	if !strings.Contains(err.Error(), "no model_download_url") {
-		t.Errorf("expected hint about model_download_url, got %v", err)
+	if !strings.Contains(err.Error(), "not in model registry") {
+		t.Errorf("expected hint about model registry, got %v", err)
 	}
 }
 

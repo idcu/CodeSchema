@@ -6,6 +6,26 @@
 
 ## 提交记录
 
+### Commit 63: feat(parser+vector): 非阻塞项——C 语言补齐 + 基准 CI 趋势 + ONNX 模型注册表（PHASE_09）
+
+**核心改动点（非阻塞①·补齐 C 语言 → 12 语言）**：
+- `internal/parser/adapter/treesitter/adapter.go`：`initPatterns` 增加 `"c"`（typedef struct/enum/union + 函数模式），`detectClassType` 增 c（ENUM/CLASS）；此前 ExtToLang 有 `.c→c` 但适配器无模式，C 文件返回空 IR——已修复。
+- `internal/parser/adapter/treesitter/adapter_ast.go`：注册 `c` grammar（go-tree-sitter/c）+ 节点类型（struct_specifier/enum_specifier/union_specifier、function_definition、call_expression）。
+- 测试：C 解析测试（正则/AST 双路径）+ 基准样本（SIMPLE 档）。**AST 12 语言双档 P=1.00/R=1.00（TP=59）；正则 SIMPLE P=1.00/R=1.00**。
+
+**核心改动点（非阻塞②·调用图基准 CI 趋势化）**：
+- `internal/adapterbench/treesitter_callgraph_bench_test.go`：新增 `appendBenchHistory`——每次运行把 simple/complex/overall 精度快照（含 git SHA）**追加为 JSONL**（`build/treesitter-bench-history.jsonl`，首行注释表头），供跨提交趋势对比。
+- `.github/workflows/ci.yml`：treesitter job 末尾增 `upload-artifact`（`treesitter-bench-$sha`）归档 `treesitter-callgraph-bench.json` + 历史 JSONL。
+
+**核心改动点（非阻塞③·ONNX 模型注册表）**：
+- 新增 `internal/vector/model_registry.go`：内置已知模型注册表（bge-small-zh/bge-small-zh-v1.5/bge-base-zh → 下载 URL + 可选 SHA256）；`LookupModelRegistry`/`ResolveDownloadConfig`（显式配置优先）；`ModelDownloader.ResolveFromRegistry` 在无显式 URL 时自动查表回填——用户仅配 `embedding_model` 即可分发已知模型。
+- `internal/vector/model_download.go`：`Ensure` 无 URL 时先查注册表，未知模型才报「not in model registry」。
+- 测试 3 项：注册表查询、解析优先级（显式>注册表）、回填成功/未知模型失败/显式保留。
+
+**验证**：默认/`-tags treesitter` 双路径构建+测试全绿；全仓 23 包通过；`go mod tidy` 后仍绿。
+**文档同步**：docs/dev 02/07/09 + README（12 语言、注册表说明）；config.yaml.example；任务清单。
+**遗留**：注册表 URL 为占位（models.example.com），真实 ONNX 制品托管后回填 SHA256；历史趋势可视化为可选本地脚本。
+
 ### Commit 62: feat(parser+vector): 非阻塞项全量——C#/Ruby 扩展 + 反射基准 + ONNX 模型远程分发（PHASE_09）
 
 **核心改动点（非阻塞①·T6-2 扩展 C#/Ruby → 11 语言）**：

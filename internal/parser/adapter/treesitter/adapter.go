@@ -91,6 +91,13 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
 			commentTrim:    "//",
 		},
+		"c": {
+			classPattern:   regexp.MustCompile(`^(typedef\s+(struct|enum|union)\s+)?(struct|enum|union)\s+(\w+)\s*\{`),
+			classNameIndex: 4,
+			methodPattern:  regexp.MustCompile(`^([\w\s\*]+)\s+(\w[\w]*)\s*\([^)]*\)\s*\{`),
+			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
 		"kotlin": {
 			classPattern:   regexp.MustCompile(`^(public\s+|private\s+|internal\s+|protected\s+)?(data\s+|sealed\s+|abstract\s+)?(class|interface|enum class|object|data class)\s+(\w+)`),
 			classNameIndex: 4,
@@ -324,6 +331,16 @@ func detectClassType(matches []string, lang string) string {
 			}
 			if m == "enum" {
 				return "ENUM"
+			}
+		}
+		return "CLASS"
+	case "c":
+		for _, m := range matches {
+			if m == "enum" {
+				return "ENUM"
+			}
+			if m == "union" {
+				return "CLASS"
 			}
 		}
 		return "CLASS"

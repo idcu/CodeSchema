@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	ts "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/golang"
@@ -58,6 +59,7 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"py":     python.GetLanguage(),
 			"rust":   rust.GetLanguage(),
 			"cpp":    cpp.GetLanguage(),
+			"c":      c.GetLanguage(),
 			"kotlin": kotlin.GetLanguage(),
 			"swift":  swift.GetLanguage(),
 			"php":    php.GetLanguage(),
@@ -95,6 +97,7 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"py":     {"class_definition": true},
 	"rust":   {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
 	"cpp":    {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
+	"c":      {"struct_specifier": true, "enum_specifier": true, "union_specifier": true},
 	"kotlin": {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
 	"swift":  {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
 	"php":    {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
@@ -111,6 +114,7 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"py":     {"function_definition": true},
 	"rust":   {"function_item": true},
 	"cpp":    {"function_definition": true},
+	"c":      {"function_definition": true},
 	"kotlin": {"function_declaration": true},
 	"swift":  {"function_declaration": true},
 	"php":    {"function_definition": true, "method_declaration": true},
@@ -127,6 +131,7 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"py":     {"call": true},
 	"rust":   {"call_expression": true},
 	"cpp":    {"call_expression": true},
+	"c":      {"call_expression": true},
 	"kotlin": {"call_expression": true},
 	"swift":  {"call_expression": true},
 	"php":    {"function_call_expression": true, "member_call_expression": true},
