@@ -45,6 +45,10 @@ type Store interface {
 	// UpsertIR 对一个文件的 IR 执行增量入库。
 	UpsertIR(ctx context.Context, ir *parser.IRDocument) error
 
+	// BulkUpsert 批量入库多个文件的 IR（语义同逐文件 UpsertIR，但置于单事务/单批，
+	// 消除逐文件事务提交放大，用于超大仓首次灌入或整仓重索引）。
+	BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error
+
 	// GetAllFiles 返回所有文件记录。
 	GetAllFiles(ctx context.Context) ([]*FileRecord, error)
 

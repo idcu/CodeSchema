@@ -610,3 +610,86 @@ func (fs *FileStore) loadFromDisk() error {
 
 	return nil
 }
+
+// BulkUpsert 批量入库（持有外层锁，避免逐文件重复加锁）。语义同逐文件 UpsertIR：
+// 内存填充 file/class/method/call 映射，Close 时一次性全量落盘（O(n)）。
+func (fs *FileStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	for _, ir := range irs {
+		fileID, err := fs.upsertFileInMemory(ir.FilePath, ir.FileHash, ir.LineCount, ir.ByteSize)
+		if err != nil {
+			return fmt.Errorf("upsert file: %w", err)
+		}
+		var classRecords []ClassRecord
+		classMap := make(map[string]int64, len(ir.Classes))
+		for _, c := range ir.Classes {
+			id := fs.nextID
+			fs.nextID++
+			classRecords = append(classRecords, ClassRecord{
+				ID: id, FileID: fileID, Name: c.Name, FullName: c.FullName, Type: c.Type,
+				ParentFQNs: c.ParentFQNs, StartLine: c.StartLine, StartCol: c.StartCol,
+				EndLine: c.EndLine, EndCol: c.EndCol, Modifier: c.Modifier, Doc: c.Doc,
+			})
+			classMap[c.FullName] = id
+		}
+		fs.classes[fileID] = classRecords
+
+		if len(ir.Methods) > 0 {
+			var methodRecords []MethodRecord
+			for _, m := range ir.Methods {
+				cid, ok := classMap[m.ClassFQN]
+				if !ok {
+					continue
+				}
+				id := fs.nextID
+				fs.nextID++
+				methodRecords = append(methodRecords, MethodRecord{
+					ID: id, ClassID: cid, Name: m.Name, FullName: m.ClassFQN + "." + m.Name,
+					Signature: m.Signature, ReturnType: m.ReturnType,
+					StartLine: m.StartLine, StartCol: m.StartCol, EndLine: m.EndLine, EndCol: m.EndCol, Doc: m.Doc,
+				})
+			}
+			byClass := make(map[int64][]MethodRecord, len(methodRecords))
+			for _, m := range methodRecords {
+				byClass[m.ClassID] = append(byClass[m.ClassID], m)
+			}
+			for cid, recs := range byClass {
+				fs.methods[cid] = recs
+			}
+		}
+
+		if len(ir.Calls) > 0 {
+			var callRecords []CallRecord
+			for _, c := range ir.Calls {
+				callRecords = append(callRecords, CallRecord{
+					CallerFQN: c.CallerFQN, CalleeFQN: c.CalleeFQN, CallType: c.CallType, LineNumber: c.LineNumber,
+				})
+			}
+			fs.calls[fileID] = callRecords
+		}
+
+		if f, ok := fs.files[ir.FilePath]; ok && len(ir.Imports) > 0 {
+			f.Imports = ir.Imports
+		}
+	}
+	return nil
+}
+
+// upsertFileInMemory 在已持锁前提下插入/更新文件记录（不重复加锁）。
+func (fs *FileStore) upsertFileInMemory(filePath, contentHash string, lineCount int, byteSize int64) (int64, error) {
+	if f, ok := fs.files[filePath]; ok {
+		f.ContentHash = contentHash
+		f.LineCount = lineCount
+		f.ByteSize = byteSize
+		f.ParseStatus = "parse_ok"
+		return f.ID, nil
+	}
+	id := fs.nextID
+	fs.nextID++
+	fs.files[filePath] = &FileRecord{
+		ID: id, AbsolutePath: filePath, ContentHash: contentHash,
+		LineCount: lineCount, ByteSize: byteSize, ParseStatus: "parse_ok",
+	}
+	return id, nil
+}

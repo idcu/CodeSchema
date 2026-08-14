@@ -569,6 +569,7 @@ func (m *mockStoreWithTags) UpsertClasses(_ context.Context, _ int64, _ []parser
 func (m *mockStoreWithTags) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
 func (m *mockStoreWithTags) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
 func (m *mockStoreWithTags) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
+func (m *mockStoreWithTags) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error           { return nil }
 
 func (m *mockStoreWithTags) UpsertTags(_ context.Context, classID int64, tags []string) error {
 	if m.classTags == nil {

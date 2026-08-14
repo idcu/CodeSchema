@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-08-14
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证**）
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强 + 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化**）
 > 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
 
 ---
@@ -41,7 +41,7 @@ P18      [████████████████████] 100%
 
 1. **包数量实为 27 个**（`go list ./...`），全文历史「23/24 个包」表述已过时；`go build ./...` 通过（exit 0）。
 2. **默认构建强制 CGO**：`internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，故即使不用 ONNX 模型，`go build` 也需 gcc（本机 CGO_ENABLED=1，gcc 16.1.0）。「GCC 可选」的旧表述不准确。
-3. **SQLite 写入非生产级**：`docs/dev/12` scalebench 实测 N=10万 单批 upsert，SQLite ≈ **193s**，JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务；解法为 `BulkUpsert`（单事务批量）或切 PG / cgo-sqlite。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反。
+3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/dev/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
 4. **存在但未在本文件登记的代码**：`internal/store/pg`（PG 完整实现 507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准 237 行）均已存在且已在 `docs/dev/12` 登记，但此前本文件与 README 均未提及。
 5. **tree-sitter 实为「正则轻量解析」**，并非 CGO 版 go-tree-sitter 语法树（go.mod 无 `go-tree-sitter`；依赖为 `modernc.org/sqlite` + `chromem-go` + `onnxruntime_go`）。下文「已知问题 #3」的旧结论需修正。
 6. **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，README/本文此前仅列到 `11`。
@@ -299,10 +299,10 @@ P18      [████████████████████] 100%
 - [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 6 语言正则解析实现（非 CGO 版 go-tree-sitter）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
 - [x] **优先级④ 超大仓瓶颈验证 + PG/Redis 迁移路径** —
   - **超大仓基准框架** `internal/scalebench/scale_bench_test.go`：纯 Go 无 cgo，合成每文件 1 类/3 方法/2 调用 IR，压测 N=1k/5k/10k/50k/100k 的插入/落盘/内存；SQLite 每 N 独立 dsn 隔离累积干扰；产物 `build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md`。
-  - **实测结论（推翻原假设）**：SQLite 是主导瓶颈——100k 文件（≈700k 行）单批插入 **237s**（≈1000× chromem），根因为 `UpsertIR` 多笔独立 INSERT 未批量入事务；FileStore 为内存 O(n)（100k≈1.08GB）、chromem 线性（100k≈169MB）均远快于 SQLite。须实现 `BulkUpsert` 方可生产化。
+  - **实测结论（推翻原假设）**：SQLite(UpsertIR) 是主导瓶颈——100k 文件（≈700k 行）单批插入 **77~237s**（本机波动，≈560× chromem），根因为 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；FileStore 为内存 O(n)（100k≈1.08GB）、chromem 线性（100k≈169MB）均远快于 SQLite。**已实现 `BulkUpsert`（单事务 + 预编译语句）消除提交放大**：100k 落库降至 **约 5~14s（约一个数量级 / 跨 N 点位稳定 5~14× 提速）**，生产化应使用它（analyzer 整仓重索引时批量灌入）。
   - **PG 适配器骨架** `internal/store/pg/pg.go`（`//go:build pg`）：完整 `store.Store` 接口 + PG DDL；**Redis 缓存骨架** `internal/store/redis/redis.go`（`//go:build redis`）：热点类 HASH + 调用反查 SET + 文件→类索引。均 `go get` 即启用。
   - **文档** `docs/dev/12-存储扩展与大规模迁移路径.md`：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
-  - **环境状态（实测）**：用户反馈杀软已退出，但本机实测 `go.mod` 仍被锁（`echo >>` 报 Permission denied），且 `go build ./...` 因 GOMODCACHE 写锁失败——故 `go get` PG/Redis 驱动仍不可行，骨架保持 build-tag 隔离；`build/`/`analysis/` 仅「新建文件」可写、已存在文件仍锁，基准报告未落盘（数字取自测试日志）。定向编译/测试正常（scalebench 基准 PASS 435s）。
+  - **环境状态（已解决）**：本机已将仓库加入杀软信任目录——`go.mod` 恢复可写、`go build ./...` 由 50min+ 降至 ~4s、生成目录可写。已 `go get` 拉入 `lib/pq` + `go-redis/v9`，PG/Redis 骨架（`go build -tags pg/redis`）均编译通过；`build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md` 已落盘。
 
 ## 已知问题
 

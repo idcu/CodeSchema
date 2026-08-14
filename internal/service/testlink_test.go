@@ -30,6 +30,7 @@ func (m *mockStoreWithTestData) UpsertClasses(_ context.Context, _ int64, _ []pa
 func (m *mockStoreWithTestData) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
 func (m *mockStoreWithTestData) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
 func (m *mockStoreWithTestData) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
+func (m *mockStoreWithTestData) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error           { return nil }
 func (m *mockStoreWithTestData) UpsertTags(_ context.Context, classID int64, tags []string) error {
 	if m.classTags == nil {
 		m.classTags = make(map[int64][]string)

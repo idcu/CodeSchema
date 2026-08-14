@@ -50,6 +50,8 @@ func (m *mockStore) GetCallsByFileID(_ context.Context, fileID int64) ([]store.C
 	return m.calls[fileID], nil
 }
 
+func (m *mockStore) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error { return nil }
+
 // newTestStore 创建一个预置测试数据的 mock 存储。
 func newTestStore() *mockStore {
 	return &mockStore{

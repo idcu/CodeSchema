@@ -498,3 +498,67 @@ CREATE INDEX IF NOT EXISTS idx_mtl_test ON method_test_link(test_method_id);
 }
 
 var _ store.Store = (*PGStore)(nil)
+
+// BulkUpsert 批量入库多个文件的 IR（语义同逐文件 UpsertIR，但置于单事务 +
+// prepared statement + RETURNING id 维护 classID 映射，消除逐文件事务提交放大）。
+// 注意：相对 UpsertIR 额外补全了 methods 入库（UpsertIR 骨架当时未覆盖 methods）。
+func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error {
+	if len(irs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	const qFile = `INSERT INTO file (absolute_path, relative_path, content_hash, commit_hash, line_count, byte_size, referenced_by_files, language, parse_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (absolute_path) DO UPDATE SET content_hash=EXCLUDED.content_hash, line_count=EXCLUDED.line_count, byte_size=EXCLUDED.byte_size, referenced_by_files=EXCLUDED.referenced_by_files, language=EXCLUDED.language, updated_at=now() RETURNING id`
+	const qClass = `INSERT INTO class (file_id, name, full_name, type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, source, extra)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`
+	const qMethod = `INSERT INTO method (class_id, name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, is_static, is_abstract, is_constructor, source, extra)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
+
+	for _, ir := range irs {
+		ref, _ := json.Marshal(ir.ReferencedBy)
+		var fileID int64
+		if err := tx.QueryRowContext(ctx, qFile, ir.FilePath, ir.FilePath, ir.FileHash, ir.CommitHash,
+			ir.LineCount, ir.ByteSize, string(ref), ir.Language, "parse_ok").Scan(&fileID); err != nil {
+			return fmt.Errorf("bulk upsert file %s: %w", ir.FilePath, err)
+		}
+		classIDByFQN := make(map[string]int64, len(ir.Classes))
+		if len(ir.Classes) > 0 {
+			for _, c := range ir.Classes {
+				ann, _ := json.Marshal(c.Annotations)
+				extra, _ := json.Marshal(c.Extra)
+				var cid int64
+				if err := tx.QueryRowContext(ctx, qClass, fileID, c.Name, c.FullName, c.Type,
+					c.StartLine, c.StartCol, c.EndLine, c.EndCol, c.Modifier, c.Doc, string(ann), ir.Source, string(extra)).Scan(&cid); err != nil {
+					return fmt.Errorf("bulk insert class %s: %w", c.FullName, err)
+				}
+				classIDByFQN[c.FullName] = cid
+			}
+		}
+		if len(ir.Methods) > 0 {
+			for _, m := range ir.Methods {
+				cid, ok := classIDByFQN[m.ClassFQN]
+				if !ok {
+					continue
+				}
+				ann, _ := json.Marshal(m.Annotations)
+				extra, _ := json.Marshal(m.Extra)
+				if _, err := tx.ExecContext(ctx, qMethod, cid, m.Name, m.Signature, m.ReturnType,
+					m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Modifier, m.Doc, string(ann),
+					boolToInt(m.IsStatic), boolToInt(m.IsAbstract), boolToInt(m.IsConstructor), "", string(extra)); err != nil {
+					return fmt.Errorf("bulk insert method %s: %w", m.Name, err)
+				}
+			}
+		}
+		if len(ir.Calls) > 0 {
+			if err := upsertCallsTx(ctx, tx, fileID, ir.Calls, ir.Source); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}

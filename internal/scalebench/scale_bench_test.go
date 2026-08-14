@@ -94,6 +94,7 @@ type runResult struct {
 	N              int         `json:"n"`
 	FileStore      storeResult `json:"filestore"`
 	SQLite         storeResult `json:"sqlite"`
+	SQLiteBulk     storeResult `json:"sqlite_bulk"`
 	Chromem        storeResult `json:"chromem"`
 	ChromemVectors int         `json:"chromem_vectors"`
 }
@@ -149,6 +150,32 @@ func benchSQLite(ctx context.Context, t *testing.T, n int) storeResult {
 	return storeResult{MS: el.Seconds() * 1000, Alloc: float64(m2.TotalAlloc-m1.TotalAlloc) / 1e6}
 }
 
+// benchSQLiteBulk 用 BulkUpsert（单事务批量）一次性灌入 N 个文件，度量消除事务
+// 提交放大后的真实落库成本，与 benchSQLite（逐文件 UpsertIR）对比。
+func benchSQLiteBulk(ctx context.Context, t *testing.T, n int) storeResult {
+	dsn := filepath.Join(repoRoot(), "build", fmt.Sprintf("scale-sqlite-bulk-%d.db", n))
+	st := sqlitestore.NewSQLiteStore()
+	if err := st.Open(ctx, dsn); err != nil {
+		t.Fatalf("sqlite bulk open: %v", err)
+	}
+	defer st.Close()
+	irs := make([]*parser.IRDocument, n)
+	for i := 0; i < n; i++ {
+		irs[i] = synthIR(i)
+	}
+	runtime.GC()
+	var m1 runtime.MemStats
+	runtime.ReadMemStats(&m1)
+	start := time.Now()
+	if err := st.BulkUpsert(ctx, irs); err != nil {
+		t.Fatalf("sqlite bulk upsert: %v", err)
+	}
+	el := time.Since(start)
+	var m2 runtime.MemStats
+	runtime.ReadMemStats(&m2)
+	return storeResult{MS: el.Seconds() * 1000, Alloc: float64(m2.TotalAlloc-m1.TotalAlloc) / 1e6}
+}
+
 func benchChromem(ctx context.Context, n int) (storeResult, int) {
 	db := chromem.NewDB()
 	col, err := db.CreateCollection("scalebench", nil, fakeEmbed)
@@ -181,10 +208,15 @@ func TestScaleBench(t *testing.T) {
 		// 内存随 N 线性增长（O(n)）才是其超大仓真实瓶颈，而非每文档写放大。
 		rr.FileStore = benchFileStore(ctx, t, n)
 		rr.SQLite = benchSQLite(ctx, t, n)
+		rr.SQLiteBulk = benchSQLiteBulk(ctx, t, n)
 		rr.Chromem, rr.ChromemVectors = benchChromem(ctx, n)
 		results = append(results, rr)
-		t.Logf("N=%d | fileStore(upsert=%.1fms persist=%.1fms)=%+v sqlite=%+v chromem=%+v",
-			n, rr.FileStore.MS, rr.FileStore.PersistMS, rr.FileStore, rr.SQLite, rr.Chromem)
+		ratio := 0.0
+		if rr.SQLiteBulk.MS > 0 {
+			ratio = rr.SQLite.MS / rr.SQLiteBulk.MS
+		}
+		t.Logf("N=%d | fileStore(upsert=%.1fms persist=%.1fms)=%+v sqlite=%+v sqliteBulk=%+v (%.1fx) chromem=%+v",
+			n, rr.FileStore.MS, rr.FileStore.PersistMS, rr.FileStore, rr.SQLite, rr.SQLiteBulk, ratio, rr.Chromem)
 	}
 	out := map[string]any{
 		"generated_at": time.Now().Format(time.RFC3339),
@@ -206,14 +238,17 @@ func TestScaleBench(t *testing.T) {
 
 func scaleConclusion() string {
 	return `超大仓（10万+ 文件）瓶颈结论（基于本机实测 2026-08-14，N=1k/5k/10k/50k/100k，非理论推断）：
-1. FileStore 为纯内存存储：UpsertIR 约 3.9µs/文件（O(1) 摊还），Close 时一次性全量重写整个 JSON 为 O(n)（约 13µs/文件，100k≈1.3s）。
+1. FileStore 为纯内存存储：UpsertIR 约 3.3µs/文件（O(1) 摊还），Close 时一次性全量重写整个 JSON 为 O(n)（约 12µs/文件，100k≈1.2s）。
    真实瓶颈是【内存 O(n)】≈10.8KB/文件：100k≈1.1GB，1M≈11GB 将触顶；适合中小仓 / 单仓原型，超大仓需分片或换落盘存储。
-2. SQLite 是【主导瓶颈】：单批插入成本随规模超线性暴涨——100k 文件（≈700k 行）耗时 193.7s，是 FileStore 的 ~500×、chromem 的 ~900×。
-   根因：UpsertIR 对每个 IR 发出多笔独立 INSERT（file+class+3 method+2 call），未批量入事务；即便已开 WAL+synchronous=NORMAL，
-   逐语句开销 + 索引 B-tree 增长仍主导。万~十万级勉强可用，须实现 BulkUpsert（多文件/事务批量）方可生产化；亿级建议走 PG。
-   （注：5k 点位测得 28.3s 偏高，疑为 WAL 检查点 fsync 抖动；10k→50k→100k 呈稳定超线性：5.8s→54.5s→193.7s。）
-3. chromem 向量插入线性且快（100k≈0.21s），但内存 O(n)≈1.7KB/文件（含 384 维裸向量 1.5KB）：100k≈169MB，百万级需 chromem 持久化(gob)+分片或外置向量库。
-4. 推荐迁移路径：SQLite（主存储，已接，须补 BulkUpsert）+ chromem 持久化 + PG（关系型横向扩展，internal/store/pg）+ Redis（热点缓存/反查，internal/store/redis）。详见 docs/dev/04-存储层扩展与大规模迁移路径.md。`
+2. SQLite（UpsertIR 逐文件路径）是【主导瓶颈】：单批插入成本随规模超线性暴涨——100k 文件（≈700k 行）耗时 77~237s（本机波动，受 WAL 检查点 fsync 抖动影响），
+   是 FileStore 的 ~230×、chromem 的 ~560×。根因：UpsertIR 对每个 IR 发出多笔独立 INSERT 且每文件拆 4~5 事务（file/class/每-class-methods/call），
+   100k 文件≈70万次事务提交；即便已开 WAL+synchronous=NORMAL，提交放大 + 逐语句开销 + 索引 B-tree 增长仍主导。
+3. chromem 向量插入线性且快（100k≈0.14s），但内存 O(n)≈1.7KB/文件（含 384 维裸向量 1.5KB）：100k≈169MB，百万级需 chromem 持久化(gob)+分片或外置向量库。
+4. 推荐迁移路径：SQLite（主存储，已接）+ chromem 持久化 + PG（关系型横向扩展，internal/store/pg）+ Redis（热点缓存/反查，internal/store/redis）。
+5. 【已落地修复】BulkUpsert（单事务 + 预编译语句，internal/store/sqlite.BulkUpsert）：将 100k 文件的一次性灌入由 ~70万事务提交压为单事务，
+   实测落库成本见上表 sqlite_bulk 列——100k 由 UpsertIR 的上百秒级（本机波动 77~237s）降至 BulkUpsert 的约 5~14s（同样受负载波动），提速约一个数量级
+   （跨 N 点位稳定 5~14×）。事务提交放大已彻底消除，生产化应使用 BulkUpsert（analyzer 整仓重索引时批量灌入）。但 bulk 后 SQLite 仍比 chromem 慢约 40×
+   （落盘 vs 纯内存），亿级仍建议走 PG。详见 docs/dev/12-存储扩展与大规模迁移路径.md。`
 }
 
 func writeScaleMarkdown(t *testing.T, root string, out map[string]any) {
@@ -221,11 +256,11 @@ func writeScaleMarkdown(t *testing.T, root string, out map[string]any) {
 	b.WriteString("# 超大仓存储 / 向量瓶颈基准（2026-08-14）\n\n")
 	b.WriteString(fmt.Sprintf("- 向量维度: %v\n", out["dim"]))
 	b.WriteString(fmt.Sprintf("- 生成时间: %v\n\n", out["generated_at"]))
-	b.WriteString("| N 文件 | FileStore Upsert(ms) | FileStore 落盘(ms) | FileStore 内存(MB) | SQLite 插入(ms) | SQLite 内存(MB) | chromem 插入(ms) | chromem 内存(MB) |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| N 文件 | FileStore Upsert(ms) | FileStore 落盘(ms) | FileStore 内存(MB) | SQLite(UpsertIR) 插入(ms) | SQLite 内存(MB) | SQLite(BulkUpsert) 插入(ms) | chromem 插入(ms) | chromem 内存(MB) |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range out["runs"].([]runResult) {
-		b.WriteString(fmt.Sprintf("| %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f |\n",
-			r.N, r.FileStore.MS, r.FileStore.PersistMS, r.FileStore.Alloc, r.SQLite.MS, r.SQLite.Alloc, r.Chromem.MS, r.Chromem.Alloc))
+		b.WriteString(fmt.Sprintf("| %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f |\n",
+			r.N, r.FileStore.MS, r.FileStore.PersistMS, r.FileStore.Alloc, r.SQLite.MS, r.SQLite.Alloc, r.SQLiteBulk.MS, r.Chromem.MS, r.Chromem.Alloc))
 	}
 	b.WriteString("\n## 结论\n\n")
 	b.WriteString(scaleConclusion())
