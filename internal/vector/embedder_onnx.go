@@ -1,3 +1,5 @@
+//go:build onnx
+
 package vector
 
 import (
