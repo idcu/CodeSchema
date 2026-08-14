@@ -233,7 +233,7 @@ P18      [████████████████████] 100%
 ### P13 — 构建脚本 / CI 配置 / 容器化 / 部署文档
 - [x] **`Makefile`** — 构建自动化脚本，支持 build/test/clean/cross/lint/bench/run 等 10 个目标，跨平台交叉编译（linux/darwin/windows × amd64/arm64）
 - [x] **`Dockerfile`** — 多阶段构建，golang:1.25-alpine → alpine:3.20，CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
-- [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，4 个 Job（test 3 平台 + race 竞态检测 + cross 交叉编译 + docker 镜像）
+- [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，5 个 Job（test 3 平台 + race 竞态检测 + cross 交叉编译 + **bench 规模基准（BulkUpsert 回归看护）** + docker 镜像）
 - [x] **`docs/dev/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
 - [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新
 
@@ -286,7 +286,7 @@ P18      [████████████████████] 100%
 - [x] **向量索引可视化工具前端增强** — 新增单文档 API、点击展开详情、搜索内容展示、刷新按钮、Toast 通知（Commit 34）
 - [x] **日志模块 data race 修复** — 使用 sync.Mutex 保护全局 defaultLogger 的初始化和访问，通过 -race 验证（Commit 36）
 
-### 维护优化（2026-08-14）：SQLite 权威存储接线 + SCIP/LSP 生产验证
+### 维护优化（2026-08-14）：SQLite 权威存储接线 + SCIP/LSP 生产验证 + 存储主线统一分发 + 默认构建解除 CGO + 规模基准固化 CI
 
 本会话基于「全维度竞品分析」给出的优先级清单推进实施：
 

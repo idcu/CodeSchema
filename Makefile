@@ -73,8 +73,10 @@ test-cover:
 # 性能基准测试
 .PHONY: bench
 bench:
-	@echo "==> Running benchmarks ..."
+	@echo "==> Running integration benchmarks ..."
 	$(GO) test -bench=. -benchmem -count=1 -timeout 300s ./internal/integration/...
+	@echo "==> Running scalebench (BulkUpsert 回归看护) ..."
+	$(GO) test -run '^$$' -bench=BenchmarkScaleBulk -benchmem -count=1 -timeout 300s ./internal/scalebench/...
 
 # 代码检查
 .PHONY: lint

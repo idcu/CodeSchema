@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 46: test(ci): 固化 scalebench 基准进 CI，看护 BulkUpsert 回归（T6-1/PHASE_09）
+
+**核心改动点**：
+- `internal/scalebench/scale_bench_test.go` — 新增 `BenchmarkScaleBulk`（N=1万、单事务批量入库），作为 BulkUpsert 落库成本的回归看护基准。
+- `Makefile` — `bench` target 增加 scalebench（BulkUpsert 回归看护），命令加 `-run '^$'`（仅跑基准，避免误触发同包分钟级慢测试 `TestScaleBench`）。
+- `.github/workflows/ci.yml` — 新增 `bench` job，跑 `BenchmarkScaleBulk`（N=1万、秒级）守护 `BulkUpsert` 单事务批量入库，防止「逐文件事务提交放大」回潮。
+
+**验证数据**：`go test -run '^$' -bench=BenchmarkScaleBulk -benchtime=1x ./internal/scalebench` → 782ms/op（N=1万）；`go build ./...` + `go vet` 通过。
+**遗留 TODO**：`TestScaleBench` 全量 N=1k~100k 慢测试（分钟级）尚未接 CI（需独立长时 job），目前仅固化了秒级回归看护基准。
+
 ### Commit 45: docs(bench): 固化超大仓基准与部署文档（PHASE_09 存储性能收尾）
 
 **Commit Hash**: `24071a0`

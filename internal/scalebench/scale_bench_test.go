@@ -269,3 +269,28 @@ func writeScaleMarkdown(t *testing.T, root string, out map[string]any) {
 		t.Logf("warn: 写 analysis/2026-08-14-scale-bench.md 失败（可能本机杀软锁定生成文件）: %v", err)
 	}
 }
+
+// BenchmarkScaleBulk 固化 BulkUpsert（单事务批量入库）的落库成本基准，
+// 作为超大仓存储优化的回归看护：任何让「逐文件事务提交放大」回潮的改动都会在此暴露。
+// 运行：go test -bench=BenchmarkScaleBulk -benchtime=1x ./internal/scalebench
+func BenchmarkScaleBulk(b *testing.B) {
+	ctx := context.Background()
+	const n = 10000
+	irs := make([]*parser.IRDocument, n)
+	for i := 0; i < n; i++ {
+		irs[i] = synthIR(i)
+	}
+	for i := 0; i < b.N; i++ {
+		dsn := filepath.Join(b.TempDir(), "scale-bulk.db")
+		st := sqlitestore.NewSQLiteStore()
+		if err := st.Open(ctx, dsn); err != nil {
+			b.Fatalf("sqlite bulk open: %v", err)
+		}
+		if err := st.BulkUpsert(ctx, irs); err != nil {
+			b.Fatalf("sqlite bulk upsert: %v", err)
+		}
+		if err := st.Close(); err != nil {
+			b.Fatalf("sqlite bulk close: %v", err)
+		}
+	}
+}

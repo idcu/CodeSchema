@@ -50,6 +50,24 @@ jobs:
       - name: Test
         run: go test -count=1 -timeout 120s ./...
 
+  # === 规模基准（BulkUpsert 回归看护） ===
+  bench:
+    name: Scale Benchmark
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Scale benchmark (BulkUpsert regression guard)
+        # -run '^$' 仅跑基准，避免触发同包内超慢的 TestScaleBench（100k 逐文件 UpsertIR，分钟级）
+        run: go test -run '^$' -bench=BenchmarkScaleBulk -benchmem -count=1 -timeout 300s ./internal/scalebench/...
+
   # === 竞态检测（仅 Linux） ===
   race:
     name: Race Detector

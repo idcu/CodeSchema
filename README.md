@@ -192,7 +192,7 @@ make clean
 - **包数量**：实际 **27** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 实测并非生产级写入**：`docs/dev/12` 记录的 scalebench 显示，N=10万 单批 upsert SQLite 约 **193s**，JSON FileStore 约 **0.4s**（慢约 500 倍）。当前 SQLite 写入路径有严重瓶颈，「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反——超大仓写入建议走 `BulkUpsert`/PG 或 chromem。
-- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准，237 行）均已存在；PG/Redis/scalebench 已在 `docs/dev/12` 登记，但本 README 与 `DEV_PROGRESS.md` 此前未提及。
+- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。
 - **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」仅列到 `11`，缺 `12-存储扩展与大规模迁移路径.md`。
 
 ## 测试
@@ -201,7 +201,7 @@ make clean
 # 运行全部测试
 make test
 
-# 性能基准测试
+# 性能基准测试（含 internal/scalebench 的 BulkUpsert 回归看护 BenchmarkScaleBulk）
 make bench
 ```
 
