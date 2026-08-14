@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 68: feat(parser+ops): AST 基准精度门槛 + css/toml/yaml 扩展（PHASE_09）
+
+**① AST 基准精度门槛守护**
+- 基准从「报告」变「守护」：`benchASTPath()`（!treesitter / treesitter 双 build tag 文件）区分路径
+- AST 路径 OVERALL P/R < 0.95 → t.Errorf（CI 红）；正则启发式路径仅提示不设门槛
+- CI treesitter job 的 `go test -tags treesitter` 现同时是精度回归守门
+- 顺带修正基准结论文本「12 语言」过时描述
+
+**② T6-2 继续扩展 css/toml/yaml → 22 语言**
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.css`→css、`.toml`→toml、`.yml`/`.yaml`→yaml
+- 正则：css 选择器/媒体查询、toml table、yaml 顶层键（配置类无调用，callPattern 用永不匹配正则）
+- AST：css rule_set/media_statement（selectors 名称提取）、toml table
+- 验证：**AST 22 语言双档 P=1.00/R=1.00（TP=72）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+
 ### Commit 67: feat(parser+vector): 本地产物零配置分发 + lua/groovy 扩展（PHASE_09）
 
 **① 本地产物零配置分发（真实产物端到端验证）**

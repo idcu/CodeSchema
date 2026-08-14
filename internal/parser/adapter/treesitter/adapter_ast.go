@@ -29,6 +29,7 @@ import (
 	"github.com/smacker/go-tree-sitter/c"
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
+	"github.com/smacker/go-tree-sitter/css"
 	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/groovy"
@@ -44,7 +45,9 @@ import (
 	"github.com/smacker/go-tree-sitter/scala"
 	"github.com/smacker/go-tree-sitter/sql"
 	"github.com/smacker/go-tree-sitter/swift"
+	"github.com/smacker/go-tree-sitter/toml"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
+	"github.com/smacker/go-tree-sitter/yaml"
 
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter"
@@ -79,6 +82,9 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"ocaml":  ocaml.GetLanguage(),
 			"lua":    lua.GetLanguage(),
 			"groovy": groovy.GetLanguage(),
+			"css":    css.GetLanguage(),
+			"toml":   toml.GetLanguage(),
+			"yaml":   yaml.GetLanguage(),
 		},
 	}
 }
@@ -124,6 +130,9 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"ocaml":  {"module_definition": true},
 	"lua":    {},
 	"groovy": {"class_definition": true},
+	"css":    {"rule_set": true, "media_statement": true, "keyframes_statement": true},
+	"toml":   {"table": true},
+	"yaml":   {},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -148,6 +157,9 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"ocaml":  {"value_definition": true},
 	"lua":    {"function_statement": true},
 	"groovy": {"function_definition": true},
+	"css":    {},
+	"toml":   {},
+	"yaml":   {},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -172,6 +184,9 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"ocaml":  {"application_expression": true},
 	"lua":    {"function_call": true},
 	"groovy": {"function_call": true},
+	"css":    {},
+	"toml":   {},
+	"yaml":   {},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -354,6 +369,14 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 				if g.Type() == "value_name" {
 					return string(g.Content(src))
 				}
+			}
+		}
+	}
+	// CSS rule_set：取 selectors 子节点文本（`.button` 等选择器）
+	if n.Type() == "rule_set" {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			if c := n.NamedChild(i); c.Type() == "selectors" {
+				return string(c.Content(src))
 			}
 		}
 	}

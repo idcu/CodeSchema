@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -911,5 +911,74 @@ func TestTreeSitterAdapter_Parse_Groovy(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected groovy calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_CSS 验证 CSS 选择器/媒体查询解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_CSS(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.css")
+	content := `.button {
+  color: red;
+}
+@media (max-width: 600px) {
+  .small { font-size: 10px; }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "css" {
+		t.Errorf("expected css, got %s", doc.Language)
+	}
+	if len(doc.Classes) == 0 {
+		t.Error("expected at least 1 CSS declaration (selector/media)")
+	}
+}
+
+// TestTreeSitterAdapter_Parse_TOML 验证 TOML 表段解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_TOML(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.toml")
+	content := `[server]
+host = "localhost"
+port = 8080
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "toml" {
+		t.Errorf("expected toml, got %s", doc.Language)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_YAML 验证 YAML 解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_YAML(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.yaml")
+	content := `server:
+  host: localhost
+  port: 8080
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "yaml" {
+		t.Errorf("expected yaml, got %s", doc.Language)
 	}
 }

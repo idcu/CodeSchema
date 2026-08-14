@@ -268,6 +268,33 @@ return OrderService
 `,
 		Golden: []string{"validator.validate", "mapper.map"},
 	},
+	{
+		Lang: "css", Ext: ".css",
+		Code: `.button {
+  color: red;
+}
+@media (max-width: 600px) {
+  .small { font-size: 10px; }
+}
+`,
+		Golden: []string{}, // 配置类语言无函数调用
+	},
+	{
+		Lang: "toml", Ext: ".toml",
+		Code: `[server]
+host = "localhost"
+port = 8080
+`,
+		Golden: []string{},
+	},
+	{
+		Lang: "yaml", Ext: ".yaml",
+		Code: `server:
+  host: localhost
+  port: 8080
+`,
+		Golden: []string{},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。
@@ -561,7 +588,7 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 		"complex_overall": complexOverall,
 		"overall":         overall,
 		"conclusion": fmt.Sprintf(
-			"12 语言调用检测精度基线（两档）：简单档 P=%.2f/R=%.2f（TP=%d FP=%d FN=%d），复杂档（重载/泛型/注解/多行签名/嵌套/链式）P=%.2f/R=%.2f（TP=%d FP=%d FN=%d）；总体 P=%.2f/R=%.2f。样本含字符串/注释伪调用陷阱（状态机剔除已生效）；复杂档暴露启发式/真语法树在真实复杂度下的差距（T2-1 补强②）。",
+			"19 语言调用检测精度基线（两档）：简单档 P=%.2f/R=%.2f（TP=%d FP=%d FN=%d），复杂档（重载/泛型/注解/多行签名/嵌套/链式）P=%.2f/R=%.2f（TP=%d FP=%d FN=%d）；总体 P=%.2f/R=%.2f。样本含字符串/注释伪调用陷阱（状态机剔除已生效）；复杂档暴露启发式/真语法树在真实复杂度下的差距（T2-1 补强②）。",
 			simpleOverall.Precision, simpleOverall.Recall, simpleOverall.TruePos, simpleOverall.FalsePos, simpleOverall.FalseNeg,
 			complexOverall.Precision, complexOverall.Recall, complexOverall.TruePos, complexOverall.FalsePos, complexOverall.FalseNeg,
 			overall.Precision, overall.Recall),
@@ -577,6 +604,20 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 	}
 	appendBenchHistory(t, root, simpleOverall, complexOverall, overall)
 	writeCallGraphMarkdown(t, root, out)
+
+	// 精度门槛守护：AST 路径（-tags treesitter）精度低于阈值 → 测试失败（CI 红）。
+	// 正则启发式路径有已知局限（如 C++ 构造调用、SQL DECIMAL 等），仅提示不设门槛。
+	if benchASTPath() {
+		if overall.Precision < 0.95 || overall.Recall < 0.95 {
+			t.Errorf("AST 路径精度门槛未达标: OVERALL P=%.3f R=%.3f（阈值 0.95）; TP=%d FP=%d FN=%d——请检查 treesitter 适配器回归",
+				overall.Precision, overall.Recall, overall.TruePos, overall.FalsePos, overall.FalseNeg)
+		} else {
+			t.Logf("AST 路径精度门槛通过: OVERALL P=%.3f R=%.3f", overall.Precision, overall.Recall)
+		}
+	} else {
+		t.Logf("正则路径（启发式，不设门槛）: OVERALL P=%.3f R=%.3f（TP=%d FP=%d FN=%d）",
+			overall.Precision, overall.Recall, overall.TruePos, overall.FalsePos, overall.FalseNeg)
+	}
 }
 
 // benchHistoryPoint 单次基准的精度快照（追加到历史 JSONL 供跨提交趋势对比）。

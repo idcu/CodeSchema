@@ -192,6 +192,30 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`([\w.$]+)\s*\([^)]*\)`),
 			commentTrim:    "//",
 		},
+		"css": {
+			// CSS 无调用；选择器规则块作为「声明」登记（@media/.class/#id/元素选择器）
+			classPattern:   regexp.MustCompile(`^\s*([.@#]?[\w-]+(?:\s*[>+~]\s*[\w.-]+|\s+[\w.-]+)*)\s*\{`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*(@media|@supports|@keyframes|@font-face)\b`),
+			callPattern:    regexp.MustCompile(`\b\B`), // CSS 无函数调用(永不匹配)
+			commentTrim:    "/*",
+		},
+		"toml": {
+			// TOML 无调用；table 段作为「声明」登记
+			classPattern:   regexp.MustCompile(`^\s*\[\[?([\w.-]+)\]\]?\s*$`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*[\w.-]+\s*=`),
+			callPattern:    regexp.MustCompile(`\b\B`), // TOML 无函数调用(永不匹配)
+			commentTrim:    "#",
+		},
+		"yaml": {
+			// YAML 无调用；顶层 map 键作为「声明」登记
+			classPattern:   regexp.MustCompile(`^([\w.-]+):\s*(?:\||>)?\s*$`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s{2,}[\w.-]+:`),
+			callPattern:    regexp.MustCompile(`\b\B`), // YAML 无函数调用(永不匹配)
+			commentTrim:    "#",
+		},
 	}
 }
 

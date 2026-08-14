@@ -261,6 +261,12 @@ func detectLang(path string) string {
 		return "lua"
 	case ".groovy":
 		return "groovy"
+	case ".css":
+		return "css"
+	case ".toml":
+		return "toml"
+	case ".yml", ".yaml":
+		return "yaml"
 	default:
 		return "unknown"
 	}
