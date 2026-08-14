@@ -176,6 +176,22 @@ func initPatterns() map[string]langPatterns {
 			callPattern: regexp.MustCompile(`([\w.]+)\s*(?:\([^)]*\)|\s+[a-z_][\w']*(?:\s*;|\s*$|\s*\n))`),
 			commentTrim: "(*",
 		},
+		"lua": {
+			// Lua 无 class 概念；local function / function 定义为方法
+			classPattern:   regexp.MustCompile(`^\s*local\s+[\w.]+\s*=\s*\{`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*(local\s+)?function\s+([\w.:]+)\s*\(`),
+			callPattern:    regexp.MustCompile(`([\w.:]+)\s*\([^)]*\)`),
+			commentTrim:    "--",
+		},
+		"groovy": {
+			// class / interface / trait 声明 + def 方法
+			classPattern:   regexp.MustCompile(`^\s*(public|private|protected|final|abstract|@\w+\([^)]*\)\s*)*\s*(class|interface|trait|enum)\s+(\w+)`),
+			classNameIndex: 3,
+			methodPattern:  regexp.MustCompile(`^\s*(public|private|protected|static|final|synchronized|def|void|[\w.<>\[\]]+)\s+(def\s+)?(\w+)\s*\(`),
+			callPattern:    regexp.MustCompile(`([\w.$]+)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
 	}
 }
 
@@ -477,6 +493,20 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "MODULE"
+	case "lua":
+		return "CLASS"
+	case "groovy":
+		for _, m := range matches {
+			switch m {
+			case "interface":
+				return "INTERFACE"
+			case "trait":
+				return "INTERFACE"
+			case "enum":
+				return "ENUM"
+			}
+		}
+		return "CLASS"
 	default:
 		return "CLASS"
 	}
@@ -655,6 +685,14 @@ func isKeyword(name string) bool {
 		"print_endline": true, "print_string": true, "print_int": true,
 		"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
 		"Printf.printf": true, "failwith": true, "rec": true, "done": true,
+		// Lua（标准库；print/require/assert/error/type/pairs/ipairs 已在通用段）
+		"pcall":    true,
+		"tostring": true, "tonumber": true, "rawget": true, "rawset": true,
+		"string.format": true, "string.len": true, "table.insert": true,
+		"table.remove": true, "math.floor": true, "math.max": true,
+		// Groovy（println/assert/printf 已在通用段；groovy 特有）
+		"sprintf": true, "size": true, "each": true, "collect": true,
+		"findAll": true, "inject": true,
 	}
 	return keywords[name]
 }

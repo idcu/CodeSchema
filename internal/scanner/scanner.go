@@ -257,6 +257,10 @@ func detectLang(path string) string {
 		return "elixir"
 	case ".ml", ".mli":
 		return "ocaml"
+	case ".lua":
+		return "lua"
+	case ".groovy":
+		return "groovy"
 	default:
 		return "unknown"
 	}

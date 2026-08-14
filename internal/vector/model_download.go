@@ -50,25 +50,52 @@ type ModelDownloader struct {
 	URL      string // 远程地址（支持 {model} 占位）
 	SHA256   string // 可选校验和
 	Timeout  time.Duration
-	logger   *log.Logger
+	// LocalArtifactDirs 本地产物搜索目录（make models-pack 产物所在目录）。
+	// 解析分发源时优先匹配 `<dir>/models-<model>.tar.gz`，命中则用 file:// 本地源，
+	// 实现「make models-pack 后零配置分发」。默认 ["build", "down"]。
+	LocalArtifactDirs []string
+	logger            *log.Logger
 }
 
 // NewModelDownloader 创建模型下载器。
 func NewModelDownloader(modelDir, url, sha256 string) *ModelDownloader {
 	return &ModelDownloader{
-		ModelDir: modelDir,
-		URL:      url,
-		SHA256:   sha256,
-		Timeout:  5 * time.Minute,
-		logger:   log.WithModule("vector.model"),
+		ModelDir:          modelDir,
+		URL:               url,
+		SHA256:            sha256,
+		Timeout:           5 * time.Minute,
+		LocalArtifactDirs: []string{"build", "down"},
+		logger:            log.WithModule("vector.model"),
 	}
 }
 
-// ResolveFromRegistry 若未显式配置 URL，则按模型名查内置注册表回填（含 SHA256）。
-// 返回是否成功回填；未命中注册表且无显式 URL 时返回 false（调用方降级）。
+// resolveLocalArtifact 在本地产物目录中查找 models-<model>.tar.gz；
+// 命中返回 (本地路径, true)，未命中返回 ("", false)。
+func (d *ModelDownloader) resolveLocalArtifact(modelName string) (string, bool) {
+	for _, dir := range d.LocalArtifactDirs {
+		p := filepath.Join(dir, "models-"+modelName+".tar.gz")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+// ResolveFromRegistry 解析模型分发源（优先级）：
+//  1. 显式配置 URL → 直接使用；
+//  2. 本地产物（make models-pack 产物 models-<model>.tar.gz）→ file:// 本地源；
+//  3. 内置注册表 → 回填 URL（含 SHA256）。
+//
+// 返回是否成功回填；全部未命中且无显式 URL 时返回 false（调用方降级）。
 func (d *ModelDownloader) ResolveFromRegistry(modelName string) bool {
 	if d.URL != "" {
 		return true // 已有显式配置
+	}
+	// 本地产物优先：make models-pack 产物，零配置本地分发
+	if p, ok := d.resolveLocalArtifact(modelName); ok {
+		d.URL = "file://" + p
+		d.logger.Debug("model download config resolved from local artifact", "model", modelName, "path", p)
+		return true
 	}
 	url, sha, ok := ResolveDownloadConfig(modelName, "", "")
 	if !ok {
@@ -213,7 +240,17 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 }
 
 // extractTarGz 解包 tar.gz 到目标目录（防路径穿越：拒绝绝对路径与 .. 段）。
+//
+// 兼容两种归档布局：
+//   - 扁平：`onnx/model.onnx` / `tokenizer.json`（直接解到 destDir 根）；
+//   - 带顶层目录：`bge-small-zh-v1.5/onnx/model.onnx`（make models-pack 产物，
+//     剥离首段后解到 destDir 根，避免多出一层 `destDir/<model>/`）。
+//
+// 顶层目录探测：两遍扫描——先读全部条目名判断是否所有条目共享同一顶层段
+// （目录条目本身不计入）；若共享则第二遍解包时剥离该段。
 func extractTarGz(archivePath, destDir string) error {
+	top := detectTarTopDir(archivePath)
+
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -236,10 +273,20 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		// 安全路径
 		name := filepath.Clean(hdr.Name)
 		if filepath.IsAbs(name) || strings.HasPrefix(name, "..") {
 			return fmt.Errorf("unsafe path in archive: %s", hdr.Name)
+		}
+		// 跳过 macOS AppleDouble 元数据条目（tar 生成的 ._* 文件，非模型内容）
+		if strings.HasPrefix(filepath.Base(name), "._") {
+			continue
+		}
+		// 剥离顶层目录段（若存在）
+		if top != "" {
+			name = strings.TrimPrefix(name, top+"/")
+			if name == "" || strings.HasPrefix(name, "..") {
+				return fmt.Errorf("unsafe path in archive: %s", hdr.Name)
+			}
 		}
 		target := filepath.Join(destDir, name)
 		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(filepath.Separator)) && target != filepath.Clean(destDir) {
@@ -267,4 +314,54 @@ func extractTarGz(archivePath, destDir string) error {
 		}
 	}
 	return nil
+}
+
+// detectTarTopDir 探测 tar.gz 的公共顶层目录：仅当**所有非目录条目**的首段一致时
+// 返回该段（视为打包时的包裹目录）；扁平布局（onnx/ + tokenizer.json 首段不同）
+// 或空归档返回 ""。
+func detectTarTopDir(archivePath string) string {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return ""
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	var top string
+	seen := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return ""
+		}
+		if hdr.Typeflag == tar.TypeDir {
+			continue // 目录条目不计入
+		}
+		name := filepath.Clean(hdr.Name)
+		// 跳过 macOS AppleDouble 元数据条目（._* 文件）
+		if strings.HasPrefix(filepath.Base(name), "._") {
+			continue
+		}
+		seg := name
+		if idx := strings.Index(seg, "/"); idx >= 0 {
+			seg = seg[:idx]
+		}
+		if !seen {
+			top = seg
+			seen = true
+			continue
+		}
+		if seg != top {
+			return "" // 首段不一致 → 扁平布局
+		}
+	}
+	return top
 }

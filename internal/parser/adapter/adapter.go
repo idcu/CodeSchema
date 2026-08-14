@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy"}
 }
 
 // FileExists 检查文件是否存在。
@@ -62,6 +62,10 @@ func ExtToLang(ext string) string {
 		return "elixir"
 	case ".ml", ".mli":
 		return "ocaml"
+	case ".lua":
+		return "lua"
+	case ".groovy":
+		return "groovy"
 	default:
 		return "unknown"
 	}
@@ -115,6 +119,10 @@ func LangToExtensions(lang string) []string {
 		return []string{".ex", ".exs"}
 	case "ocaml":
 		return []string{".ml", ".mli"}
+	case "lua":
+		return []string{".lua"}
+	case "groovy":
+		return []string{".groovy"}
 	default:
 		return nil
 	}

@@ -244,6 +244,30 @@ end
 `,
 		Golden: []string{"validator.validate", "mapper.map"},
 	},
+	{
+		Lang: "lua", Ext: ".lua",
+		Code: `local OrderService = {}
+function OrderService.run(order)
+  local s = "fakeCall(1)"
+  validator.validate(order)
+  mapper.map(order)
+end
+return OrderService
+`,
+		Golden: []string{"validator.validate", "mapper.map"},
+	},
+	{
+		Lang: "groovy", Ext: ".groovy",
+		Code: `class OrderService {
+    def run(order) {
+        def s = "fakeCall(1)"
+        validator.validate(order)
+        mapper.map(order)
+    }
+}
+`,
+		Golden: []string{"validator.validate", "mapper.map"},
+	},
 }
 
 // complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。

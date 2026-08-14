@@ -31,9 +31,11 @@ import (
 	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
+	"github.com/smacker/go-tree-sitter/groovy"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
+	"github.com/smacker/go-tree-sitter/lua"
 	"github.com/smacker/go-tree-sitter/ocaml"
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
@@ -75,6 +77,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"sql":    sql.GetLanguage(),
 			"elixir": elixir.GetLanguage(),
 			"ocaml":  ocaml.GetLanguage(),
+			"lua":    lua.GetLanguage(),
+			"groovy": groovy.GetLanguage(),
 		},
 	}
 }
@@ -118,6 +122,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"sql":    {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
 	"elixir": {},
 	"ocaml":  {"module_definition": true},
+	"lua":    {},
+	"groovy": {"class_definition": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -140,6 +146,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"sql":    {"create_function": true, "create_procedure": true},
 	"elixir": {},
 	"ocaml":  {"value_definition": true},
+	"lua":    {"function_statement": true},
+	"groovy": {"function_definition": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -162,6 +170,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"sql":    {"invocation": true, "function_call": true, "call_statement": true},
 	"elixir": {"call": true},
 	"ocaml":  {"application_expression": true},
+	"lua":    {"function_call": true},
+	"groovy": {"function_call": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。

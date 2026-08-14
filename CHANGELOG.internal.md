@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 67: feat(parser+vector): 本地产物零配置分发 + lua/groovy 扩展（PHASE_09）
+
+**① 本地产物零配置分发（真实产物端到端验证）**
+- `ModelDownloader` 新增 `LocalArtifactDirs`（默认 build/、down/）：`ResolveFromRegistry` 优先匹配 `models-<model>.tar.gz` → file:// 本地源，`make models-pack` 后零配置分发
+- 修复 2 个真实产物解包 bug：extractTarGz 顶层目录剥离（detectTarTopDir 两遍扫描，仅全条目首段一致才剥离）、跳过 macOS AppleDouble `._*` 条目
+- 测试 3 项：LocalArtifact（零配置分发）/ TopDirStrip（扁平 vs 带顶层）/ RealLocalArtifact（真实 build 产物解包成功）
+
+**② T6-2 继续扩展 lua/groovy → 19 语言**
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.lua`→lua、`.groovy`→groovy
+- 正则：lua function/local table、groovy class/interface/trait/enum + def；AST：lua function_statement/function_call、groovy class_definition/function_definition/function_call
+- 验证：**AST 19 语言双档 P=1.00/R=1.00（TP=72）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+
 ### Commit 66: feat(parser+vector): 模型分发本地闭环 + elixir/ocaml 扩展（PHASE_09）
 
 **① 模型分发本地闭环（真实模型验证）**

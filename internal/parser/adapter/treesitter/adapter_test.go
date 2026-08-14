@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -838,5 +838,78 @@ end
 	}
 	if !found {
 		t.Errorf("expected ocaml calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Lua 验证 Lua 函数/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Lua(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "order_service.lua")
+	content := `local OrderService = {}
+function OrderService.create(order)
+  local s = "fakeCall(1)"
+  validator.validate(order)
+  mapper.map(order)
+end
+return OrderService
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "lua" {
+		t.Errorf("expected lua, got %s", doc.Language)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.validate" || c.CalleeFQN == "mapper.map" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected lua calls detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Groovy 验证 Groovy 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Groovy(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OrderService.groovy")
+	content := `class OrderService {
+    def create(order) {
+        def s = "fakeCall(1)"
+        validator.validate(order)
+        mapper.map(order)
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "groovy" {
+		t.Errorf("expected groovy, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 class (OrderService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "validator.validate" || c.CalleeFQN == "mapper.map" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected groovy calls detected, got calls: %+v", doc.Calls)
 	}
 }

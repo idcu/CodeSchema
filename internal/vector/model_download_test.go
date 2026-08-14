@@ -267,3 +267,70 @@ func TestModelDownloader_Ensure_LocalPresent(t *testing.T) {
 		t.Fatalf("Ensure with local model + bad url: ok=%v err=%v", ok2, err)
 	}
 }
+
+// TestModelDownloader_Ensure_LocalArtifact 验证本地产物优先：make models-pack 产物
+// （build/models-<name>.tar.gz）存在时零配置分发——URL 为空也走 file:// 本地源。
+func TestModelDownloader_Ensure_LocalArtifact(t *testing.T) {
+	// 真实 models-pack 布局：带顶层目录 bge-small-zh-v1.5/
+	archive, _ := buildTarGz(t, map[string]string{
+		"bge-small-zh-v1.5/onnx/model.onnx": "fake-model",
+		"bge-small-zh-v1.5/tokenizer.json":  "{}",
+	})
+	artifactDir := t.TempDir()
+	artifactPath := filepath.Join(artifactDir, "models-bge-small-zh-v1.5.tar.gz")
+	if err := os.WriteFile(artifactPath, archive, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := t.TempDir()
+	dl := NewModelDownloader(dest, "", "") // URL 为空
+	dl.LocalArtifactDirs = []string{artifactDir}
+	ok, err := dl.Ensure(context.Background(), "bge-small-zh-v1.5")
+	if err != nil || !ok {
+		t.Fatalf("Ensure via local artifact: ok=%v err=%v", ok, err)
+	}
+	// 顶层目录被剥离：dest/onnx/model.onnx + dest/tokenizer.json
+	if _, err := os.Stat(filepath.Join(dest, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("onnx/model.onnx not extracted (top dir strip failed): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "tokenizer.json")); err != nil {
+		t.Fatalf("tokenizer.json not extracted: %v", err)
+	}
+}
+
+// TestExtractTarGz_TopDirStrip 验证 extractTarGz 顶层目录剥离：
+// 扁平布局（onnx/ + tokenizer.json 首段不同）不剥离；带顶层目录布局剥离。
+func TestExtractTarGz_TopDirStrip(t *testing.T) {
+	// 扁平布局
+	flat, _ := buildTarGz(t, map[string]string{
+		"onnx/model.onnx": "m1",
+		"tokenizer.json":  "{}",
+	})
+	flatPath := filepath.Join(t.TempDir(), "flat.tar.gz")
+	os.WriteFile(flatPath, flat, 0644)
+	d1 := t.TempDir()
+	if err := extractTarGz(flatPath, d1); err != nil {
+		t.Fatalf("flat extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(d1, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("flat layout should NOT strip top dir: %v", err)
+	}
+
+	// 带顶层目录布局（make models-pack 产物）
+	wrapped, _ := buildTarGz(t, map[string]string{
+		"bge-small-zh-v1.5/onnx/model.onnx": "m2",
+		"bge-small-zh-v1.5/tokenizer.json":  "{}",
+	})
+	wPath := filepath.Join(t.TempDir(), "wrapped.tar.gz")
+	os.WriteFile(wPath, wrapped, 0644)
+	d2 := t.TempDir()
+	if err := extractTarGz(wPath, d2); err != nil {
+		t.Fatalf("wrapped extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(d2, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("wrapped layout should strip top dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(d2, "bge-small-zh-v1.5")); !os.IsNotExist(err) {
+		t.Fatalf("top dir should be stripped, found: %v", err)
+	}
+}
