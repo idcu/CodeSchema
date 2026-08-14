@@ -108,6 +108,18 @@ models-pack:
 	@shasum -a 256 $(OUTPUT)/models-$(MODEL).tar.gz | tee $(OUTPUT)/models-$(MODEL).sha256
 	@echo "==> 发布到制品托管后，将 URL 与 SHA-256 回填 internal/vector/model_registry.go"
 
+# ONNX 模型本地 HTTP 分发（模拟公网制品源 / 局域网分发）：
+# 把 build/ 目录（含 make models-pack 产物）起一个静态 HTTP 服务，
+# 供「无本地模型」的干净环境通过 model_download_url 自动拉取。
+# 用法：make models-serve PORT=8090   （默认 8090）
+# 客户端配置示例：storage.vector.model_download_url = "http://<host>:8090/models-{model}.tar.gz"
+.PHONY: models-serve
+PORT ?= 8090
+models-serve:
+	@echo "==> Serving $(OUTPUT)/ on http://localhost:$(PORT)/ ..."
+	@echo "    模型 URL 示例: http://localhost:$(PORT)/models-$(MODEL).tar.gz"
+	@cd $(OUTPUT) && python3 -m http.server $(PORT)
+
 # 代码检查
 .PHONY: lint
 lint:

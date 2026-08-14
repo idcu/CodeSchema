@@ -10,7 +10,15 @@ package vector
 //   - DownloadURL：模型 tar.gz 制品地址（支持 {model} 占位，通常直接写死模型名）
 //   - SHA256：制品校验和（安全分发；缺失时跳过校验但记录 WARN）
 //
-// 注意：模型制品托管于外部（本仓库不含大文件），URL 指向公开制品源。
+// 制品发布与回填（T2-1 分发闭环）：
+//   1. 本地打包：make models-pack MODEL=<name> → build/models-<name>.tar.gz + SHA-256；
+//   2. 托管：上传到任意公网制品源（GitHub Releases / 对象存储 / 自建 HTTP 服务）；
+//   3. 回填：把真实 DownloadURL 与 SHA256 写回下方条目。
+//   无公网环境：make models-serve 起本地 HTTP 分发（build/ 目录静态服务），
+//   客户端配 model_download_url = http://<host>:8090/models-{model}.tar.gz 即可。
+//
+// 注意：URL 仍为约定占位（README 徽章指向的 GitHub 仓库未托管制品）；
+// 本地产物零配置分发（build/models-<name>.tar.gz）不受影响，优先命中。
 
 // ModelRegistryEntry 注册表单条记录。
 type ModelRegistryEntry struct {
@@ -24,19 +32,19 @@ type ModelRegistryEntry struct {
 var builtinModelRegistry = []ModelRegistryEntry{
 	{
 		Name:        "bge-small-zh",
-		DownloadURL: "https://models.example.com/codeschema/bge-small-zh-v1.5.tar.gz",
+		DownloadURL: "https://github.com/idcu/code-schema/releases/download/models/bge-small-zh-v1.5.tar.gz",
 		SHA256:      "",
 	},
 	{
 		Name:        "bge-small-zh-v1.5",
-		DownloadURL: "https://models.example.com/codeschema/bge-small-zh-v1.5.tar.gz",
+		DownloadURL: "https://github.com/idcu/code-schema/releases/download/models/bge-small-zh-v1.5.tar.gz",
 		// 由 make models-pack MODEL=bge-small-zh-v1.5 生成的本地制品校验和
-		// （build/models-bge-small-zh-v1.5.tar.gz）；制品托管后回填真实 URL。
+		// （build/models-bge-small-zh-v1.5.tar.gz）；制品托管后按上文步骤回填真实 URL。
 		SHA256: "48b70f807905ede95483b4c204c5d59dc1ac5a665608149c3cff7d978e58b95f",
 	},
 	{
 		Name:        "bge-base-zh",
-		DownloadURL: "https://models.example.com/codeschema/bge-base-zh.tar.gz",
+		DownloadURL: "https://github.com/idcu/code-schema/releases/download/models/bge-base-zh.tar.gz",
 		SHA256:      "",
 	},
 }

@@ -334,3 +334,64 @@ func TestExtractTarGz_TopDirStrip(t *testing.T) {
 		t.Fatalf("top dir should be stripped, found: %v", err)
 	}
 }
+
+// TestModelDownloader_Ensure_RealArtifactOverHTTP 端到端验证公网分发链路（T2-1）：
+// 用 make models-pack 的**真实制品**（build/models-bge-small-zh-v1.5.tar.gz）经
+// HTTP 服务分发到「无本地模型」的干净目录，验证 自动下载 → SHA-256 校验 → 解包 →
+// 模型就位 全链路。制品缺失时跳过（CI 无制品时优雅跳过）。
+func TestModelDownloader_Ensure_RealArtifactOverHTTP(t *testing.T) {
+	const artifactPath = "../.." // 相对 internal/vector 的仓库根路径（实际在下方用 os.Getwd 解析）
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// internal/vector → 仓库根
+	root := filepath.Dir(filepath.Dir(wd))
+	realArtifact := filepath.Join(root, "build", "models-bge-small-zh-v1.5.tar.gz")
+	realSHA, err := os.ReadFile(filepath.Join(root, "build", "models-bge-small-zh-v1.5.sha256"))
+	if err != nil {
+		t.Skipf("real model artifact sha256 not present (run make models-pack first): %v", err)
+	}
+	archive, err := os.ReadFile(realArtifact)
+	if err != nil {
+		t.Skipf("real model artifact not present (run make models-pack first): %v", err)
+	}
+	// 从 sha256 文件提取哈希（格式：`<hash>  build/models-*.tar.gz`）
+	shaParts := strings.Fields(string(realSHA))
+	if len(shaParts) == 0 {
+		t.Fatal("sha256 file format unexpected")
+	}
+	sha := shaParts[0]
+
+	// 用 HTTP 服务模拟公网制品源
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+
+	// 干净目录（无本地模型）→ 从 HTTP 源拉取
+	dest := t.TempDir()
+	dl := NewModelDownloader(dest, srv.URL+"/models-{model}.tar.gz", sha)
+	ok, err := dl.Ensure(context.Background(), "bge-small-zh-v1.5")
+	if err != nil {
+		t.Fatalf("Ensure from HTTP source: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true after HTTP download")
+	}
+	// 真实制品布局：onnx/*.onnx + tokenizer.json 已解包到 dest 根（顶层目录剥离）
+	if _, err := os.Stat(filepath.Join(dest, "onnx")); err != nil {
+		t.Fatalf("onnx dir not extracted from real artifact: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "tokenizer.json")); err != nil {
+		t.Fatalf("tokenizer.json not extracted from real artifact: %v", err)
+	}
+	// 幂等：关闭服务后再次 Ensure 不触发下载（本地已就位）
+	srv.Close()
+	ok2, err := dl.Ensure(context.Background(), "bge-small-zh-v1.5")
+	if err != nil || !ok2 {
+		t.Fatalf("idempotent Ensure after HTTP download: ok=%v err=%v", ok2, err)
+	}
+}
