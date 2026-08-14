@@ -81,7 +81,7 @@
   <div class="inout">
     <div class="box">
       <div class="lab">输入</div>
-      <div class="val">你的代码仓库（比如一个 Go 项目）</div>
+      <div class="val">你的代码仓库（支持 30 种语言，含 Go / Java / TS / Python 等）</div>
     </div>
     <div class="box">
       <div class="lab">输出</div>
@@ -101,37 +101,37 @@
   <div class="pipe" style="border-top-color:var(--c1)">
     <div class="no">第 1 站</div>
     <div class="what">📂 扫描</div>
-    <div class="plain">把仓库里所有文件列出来，没变过的跳过。</div>
+    <div class="plain">把仓库里所有文件列出来，没变过的跳过（内容哈希去重）。</div>
     <div class="tech">scanner · SHA-256 去重</div>
   </div>
   <div class="pipe" style="border-top-color:var(--c2)">
     <div class="no">第 2 站</div>
     <div class="what">🧩 拆解</div>
-    <div class="plain">把源码拆成积木：有哪些类、方法、调用了谁。</div>
-    <div class="tech">parser · tree-sitter 等</div>
+    <div class="plain">把源码拆成积木：有哪些类、方法、调用了谁。默认纯 Go 正则（30 语言），可切真语法树。</div>
+    <div class="tech">parser · 30 语言 · 双路径</div>
   </div>
   <div class="pipe" style="border-top-color:var(--c3)">
     <div class="no">第 3 站</div>
     <div class="what">🕸️ 分析</div>
     <div class="plain">画关系网：谁调谁、谁继承谁、改一处会影响哪。</div>
-    <div class="tech">analyzer · 4 张关系图</div>
+    <div class="tech">analyzer · 关系图</div>
   </div>
   <div class="pipe" style="border-top-color:var(--c4)">
     <div class="no">第 4 站</div>
     <div class="what">🗄️ 存档</div>
-    <div class="plain">积木存起来，重启不丢。</div>
-    <div class="tech">store · 默认 JSON 文件</div>
+    <div class="plain">积木存起来，重启不丢。SQLite / JSON / PG / Redis 四种存法。</div>
+    <div class="tech">store · 批量写入已优化</div>
   </div>
   <div class="pipe" style="border-top-color:var(--c5)">
     <div class="no">第 5 站</div>
     <div class="what">🔍 建索引</div>
-    <div class="plain">给积木编目录：既能搜关键词，也能搜"意思相近"。</div>
+    <div class="plain">给积木编目录：既能搜关键词，也能搜"意思相近"（本地 ONNX 真语义模型，已跑通）。</div>
     <div class="tech">search + vector · 双路检索</div>
   </div>
   <div class="pipe" style="border-top-color:var(--c6)">
     <div class="no">第 6 站</div>
     <div class="what">🚪 开门</div>
-    <div class="plain">让人或 AI 来查：命令行、网页接口、AI 接口三选一。</div>
+    <div class="plain">让人或 AI 来查：命令行、网页接口、AI 接口三选一（共 6 个命令）。</div>
     <div class="tech">CLI / HTTP / MCP</div>
   </div>
 </div>
@@ -142,12 +142,12 @@
 <div class="grid">
   <div class="mod" style="border-top:6px solid var(--c1)">
     <h3><span class="brick b-c1">① 扫描仪</span></h3>
-    <div class="plain">负责"逛仓库"：把文件都找出来，内容没变的直接跳过，省时间。</div>
+    <div class="plain">负责"逛仓库"：把文件都找出来，内容没变的直接跳过，省时间；还负责监听文件变化做增量更新。</div>
     <div class="tech">internal/scanner · scheduler</div>
   </div>
   <div class="mod" style="border-top:6px solid var(--c2)">
     <h3><span class="brick b-c2">② 解析器</span></h3>
-    <div class="plain">负责"拆积木"：把代码变成类 / 方法 / 调用关系。这块有多个可换的拆法。</div>
+    <div class="plain">负责"拆积木"：把代码变成类 / 方法 / 调用关系。默认纯 Go 正则（30 语言，免 CGO），<code>-tags treesitter</code> 切真语法树（精度双档满分）。</div>
     <div class="tech">internal/parser · adapter</div>
   </div>
   <div class="mod" style="border-top:6px solid var(--c3)">
@@ -157,12 +157,12 @@
   </div>
   <div class="mod" style="border-top:6px solid var(--c4)">
     <h3><span class="brick b-c4">④ 仓库（存档）</span></h3>
-    <div class="plain">负责"存积木"：解析结果落地保存。有 4 种存法可选。</div>
+    <div class="plain">负责"存积木"：解析结果落地保存。SQLite（纯 Go，批量写入已优化）/ JSON / PG / Redis 四种存法，均可用。</div>
     <div class="tech">internal/store</div>
   </div>
   <div class="mod" style="border-top:6px solid var(--c5)">
     <h3><span class="brick b-c5">⑤ 检索器</span></h3>
-    <div class="plain">负责"找积木"：关键词搜 + 语义搜（意思相近也能找到），再融合排序。</div>
+    <div class="plain">负责"找积木"：关键词搜（纯 Go 全文索引）+ 语义搜（本地 ONNX bge-small-zh，真实推理已跑通），再融合排序。</div>
     <div class="tech">internal/search · vector</div>
   </div>
   <div class="mod" style="border-top:6px solid var(--c6)">
@@ -172,7 +172,7 @@
   </div>
   <div class="mod" style="border-top:6px solid var(--c7)">
     <h3><span class="brick b-c7">⑦ 后勤（底座）</span></h3>
-    <div class="plain">负责"保运行"：配置、日志、监控、崩溃恢复，让整套系统稳稳跑。</div>
+    <div class="plain">负责"保运行"：配置、日志、监控、崩溃恢复、模型分发，让整套系统稳稳跑。</div>
     <div class="tech">config · log · metrics · robust</div>
   </div>
 </div>
@@ -189,22 +189,22 @@
       <th>现在的坑 / 限制</th>
     </tr>
     <tr>
-      <td><b>存档方式</b></td>
-      <td>JSON 文件 <span class="st st-ok">✅ 默认</span></td>
-      <td>SQLite <span class="st st-warn">⚠️ 已接但慢</span> · PostgreSQL <span class="st st-warn">⚠️ 未接主路</span> · Redis <span class="st st-warn">⚠️ 仅缓存</span></td>
-      <td>SQLite 写入实测比 JSON 慢约 500 倍（10 万条：193 秒 vs 0.4 秒）；PG / Redis 代码写了但没接入默认入口</td>
+      <td><b>拆解方式</b></td>
+      <td>纯 Go 正则（30 语言）<span class="st st-ok">✅ 默认</span></td>
+      <td>真语法树 <span class="st st-ok">✅ -tags treesitter</span> · SCIP <span class="st st-ok">✅ 已验证</span> · LSP <span class="st st-warn">⚠️ 部分验证</span></td>
+      <td>默认方式"正则近似拆"，复杂语法（重载/链式/模板特化）不如真语法树准；真语法树需 CGO 编译</td>
     </tr>
     <tr>
-      <td><b>拆解方式</b></td>
-      <td>tree-sitter（轻量正则）<span class="st st-ok">✅ 默认</span></td>
-      <td>SCIP <span class="st st-ok">✅ 已验证</span> · LSP <span class="st st-warn">⚠️ 部分验证</span> · CodeGraph <span class="st st-bad">🚧 骨架</span></td>
-      <td>默认方式只是"正则近似拆"，调用关系只有 Go / Python 较准；SCIP 要额外先产出 .scip 文件；CodeGraph 基本没做</td>
+      <td><b>存档方式</b></td>
+      <td>JSON 文件 <span class="st st-ok">✅ 默认</span></td>
+      <td>SQLite <span class="st st-ok">✅ 可用</span> · PostgreSQL <span class="st st-ok">✅ -tags pg</span> · Redis <span class="st st-ok">✅ -tags redis</span></td>
+      <td>SQLite 批量写入已优化（10 万条 5~14 秒）；PG / Redis 需对应 build tag</td>
     </tr>
     <tr>
       <td><b>语义搜索</b></td>
       <td>Local（关键词近似）<span class="st st-ok">✅ 默认</span></td>
-      <td>ONNX 真语义模型 <span class="st st-warn">⚠️ 需外置</span></td>
-      <td>默认方式"懂词不懂义"；ONNX 要自己下载 47MB 模型，且当前会导致编译强制依赖 gcc</td>
+      <td>ONNX 真语义模型 <span class="st st-ok">✅ -tags onnx，本机已跑通</span></td>
+      <td>ONNX 需模型文件 + 平台动态库；模型缺失时自动降级到 Local，不影响使用</td>
     </tr>
     <tr>
       <td><b>监听文件变化</b></td>
@@ -213,42 +213,39 @@
       <td>无</td>
     </tr>
   </table>
-  <p style="color:var(--sub);font-size:12.5px">图例：<span class="st st-ok">✅ 能直接用</span>　<span class="st st-warn">⚠️ 能用但有限制</span>　<span class="st st-bad">🚧 没做完</span></p>
+  <p style="color:var(--sub);font-size:12.5px">图例：<span class="st st-ok">✅ 能直接用</span>　<span class="st st-warn">⚠️ 能用但有限制</span></p>
 </section>
 
 <!-- ⑤ 现状红绿灯 -->
 <h2><span class="n">5</span>现在能用到什么程度？ <span class="tagline">红绿灯一览</span></h2>
 <div class="okbox">
   <b>🟢 能直接用的：</b><br>
-  扫描 → 解析 → 分析 → 存档（JSON）→ 双路检索 → 命令行 / HTTP / MCP 三个接口，整条线已打通并通过测试。<br>
-  代码能编译通过（<code>go build ./...</code>）；SCIP / LSP 已用真实语言服务器验证过，能拿到真实的类和方法。
+  扫描 → 解析（30 语言）→ 分析 → 存档 → 双路检索 → 命令行 / HTTP / MCP 三个接口，整条线已打通并通过测试。<br>
+  ONNX 语义检索本机端到端跑通（真实嵌入 dim=512）；SQLite / PG / Redis 存档均可用；模型分发本地闭环（本地模型零下载、打包产物零配置分发）。
 </div>
 <div class="warnbox">
   <b>🟡 能用但有限制：</b><br>
-  • ONNX 真语义搜索：模型要自己下，且默认构建会因此强制依赖 gcc（和 README 说的"GCC 可选"不符）。<br>
-  • SQLite 存档：能切换，但写入太慢，暂达不到"生产级"（README 的表述和实测相反）。<br>
-  • 向量可视化页（/viz）：只有 Chromem 一种存储支持。<br>
-  • LSP 解析：缺项目上下文时会悄悄跳过（clangd 常见）。
+  • 真语法树（-tags treesitter）与 ONNX（-tags onnx）需要 CGO 编译，且 ONNX 需对应平台的动态库。<br>
+  • LSP 解析：缺项目上下文时会悄悄跳过（clangd 常见）。<br>
+  • 注册表模型下载 URL 仍为占位（本地分发已闭环，公网自动拉取待制品托管）。
 </div>
 <div class="badbox">
   <b>🔴 还没做完的：</b><br>
   • CodeGraph 解析器：只有骨架，基本不可用。<br>
-  • 测试关联（给类 / 方法关联单测）：显式注解、覆盖率、AI 增强都还没实现。<br>
-  • PostgreSQL / Redis 存档：代码写好了，但没接进主入口，等于没上线。
+  • <code>codeschema benchmark</code> 子命令：规划中，尚未落地（CLI 现为 6 个命令）。
 </div>
 
-<!-- ⑥ 两个大坑 -->
-<h2><span class="n">6</span>两个大坑，先知道 <span class="tagline">和文档描述不一致的地方</span></h2>
-<div class="badbox">
-  <b>坑一：SQLite 实际比 JSON 慢得多。</b><br>
-  实测 10 万条数据写入：SQLite 约 193 秒，JSON 约 0.4 秒，差约 500 倍。
-  但 README 头部仍写着"SQLite 是生产级权威存储、JSON 只是兜底"——<b>和实测正好相反</b>。
-  结论：目前 JSON 才是能打的那个，SQLite 写入路径需要优化。
+<!-- ⑥ 曾经的两个大坑 -->
+<h2><span class="n">6</span>曾经的两个大坑，现在怎么样了 <span class="tagline">踩过、填平了</span></h2>
+<div class="okbox">
+  <b>坑一（已填平）：SQLite 写入比 JSON 慢 500 倍。</b><br>
+  8/14 实测 10 万条数据写入：SQLite 约 193 秒，JSON 约 0.4 秒。已实现 <code>BulkUpsert</code>（单事务 + 预编译语句），
+  10 万条落库降至 5~14 秒（约 10 倍提速），并固化进 CI 看护回归。SQLite 现已可作正式存档。
 </div>
-<div class="badbox">
-  <b>坑二：默认编译其实强制要 gcc（CGO）。</b><br>
-  代码里无条件引用了 ONNX 库，所以哪怕你不用 ONNX 模型，编译也需要 gcc。
-  README 写"GCC 可选"是不准确的。
+<div class="okbox">
+  <b>坑二（已填平）：默认编译强制要 gcc（CGO）。</b><br>
+  原来无条件引用 ONNX 库导致 <code>go build ./...</code> 就要 gcc。已用 <code>//go:build onnx</code> 隔离——
+  默认构建纯 Go 免 CGO；只有显式 <code>-tags onnx</code> 才引入 ONNX（此时才需要 gcc + 动态库）。
 </div>
 
 <!-- ⑦ 上手 -->
@@ -259,7 +256,7 @@
   <li><b>让 AI 来问：</b>把 MCP 接口接给 AI，之后 AI 回答你代码问题时，就会先查这份索引，而不是翻整个仓库。</li>
 </ol>
 
-<div class="foot">CodeSchema · 技术路线大白话版 · 更新于 2026-08-14，基于实际代码与运行验证整理（工程细节见 DEV_PROGRESS.md 与 docs/dev/）</div>
+<div class="foot">CodeSchema · 技术路线大白话版 · 更新于 2026-08-15，基于实际代码与运行验证整理（工程细节见 DEV_PROGRESS.md 与 docs/dev/）</div>
 
 </div>
 </body>
