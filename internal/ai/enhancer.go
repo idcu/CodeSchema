@@ -73,6 +73,15 @@ func NewEnhancer(client LLMClient, budget *Budget) *Enhancer {
 // SetPhase 切换作用域（扫描 / 查询），决定消耗哪类预算。
 func (e *Enhancer) SetPhase(p Phase) { e.phase = p }
 
+// BudgetRemaining 返回当前作用域剩余可用预算（不限时返回 -1）。
+// 供编排层在调用前做低开销预检，避免空调用 LLM。
+func (e *Enhancer) BudgetRemaining() int {
+	if e.phase == PhaseQuery {
+		return e.budget.QueryRemaining()
+	}
+	return e.budget.ScanRemaining()
+}
+
 // EnhanceTag 对实体推导并补全标签。预算超限返回 errors.ErrBudgetExceeded。
 func (e *Enhancer) EnhanceTag(ctx context.Context, ent IRable) ([]string, error) {
 	if !e.consume() {

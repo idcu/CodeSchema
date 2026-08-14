@@ -42,11 +42,11 @@ type ProjectConfig struct {
 
 // StorageConfig 存储配置。
 type StorageConfig struct {
-	Driver string        `yaml:"driver" json:"driver"`
-	DSN    string        `yaml:"dsn" json:"dsn"`
-	KV     string        `yaml:"kv" json:"kv"`
-	Vector VectorConfig  `yaml:"vector" json:"vector"`
-	Search SearchConfig  `yaml:"search" json:"search"`
+	Driver string       `yaml:"driver" json:"driver"`
+	DSN    string       `yaml:"dsn" json:"dsn"`
+	KV     string       `yaml:"kv" json:"kv"`
+	Vector VectorConfig `yaml:"vector" json:"vector"`
+	Search SearchConfig `yaml:"search" json:"search"`
 }
 
 // VectorConfig 向量库配置。
@@ -93,8 +93,14 @@ type JCodeIndexerConfig struct {
 
 // AIConfig AI 增强配置。
 type AIConfig struct {
-	Provider       string `yaml:"provider" json:"provider"`
-	Model          string `yaml:"model" json:"model"`
+	Provider string `yaml:"provider" json:"provider"`
+	Model    string `yaml:"model" json:"model"`
+	// BaseURL OpenAI 兼容 Chat Completions API 根地址。
+	// 为空则使用官方默认（https://api.openai.com/v1）。
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	// APIKey 鉴权密钥（也可通过环境变量 CODESCHEMA_AI_API_KEY 注入，
+	// 优先读取环境变量；两者都为空时 AI 增强被禁用，主流程零影响）。
+	APIKey         string `yaml:"api_key" json:"api_key"`
 	BudgetPerScan  int    `yaml:"budget_per_scan" json:"budget_per_scan"`
 	BudgetPerQuery int    `yaml:"budget_per_query" json:"budget_per_query"`
 }
@@ -108,18 +114,18 @@ type ServerConfig struct {
 
 // WatcherConfig 文件监听配置。
 type WatcherConfig struct {
-	Enabled    bool     `yaml:"enabled" json:"enabled"`
-	DebounceMs int      `yaml:"debounce_ms" json:"debounce_ms"`
-	IgnoreDirs []string `yaml:"ignore_dirs" json:"ignore_dirs"`
-	BatchSize  int      `yaml:"batch_size" json:"batch_size"`
-	UseFsnotify bool   `yaml:"use_fsnotify" json:"use_fsnotify"` // 是否使用 fsnotify 原生监听（默认 false，使用 PollWatcher）
+	Enabled     bool     `yaml:"enabled" json:"enabled"`
+	DebounceMs  int      `yaml:"debounce_ms" json:"debounce_ms"`
+	IgnoreDirs  []string `yaml:"ignore_dirs" json:"ignore_dirs"`
+	BatchSize   int      `yaml:"batch_size" json:"batch_size"`
+	UseFsnotify bool     `yaml:"use_fsnotify" json:"use_fsnotify"` // 是否使用 fsnotify 原生监听（默认 false，使用 PollWatcher）
 }
 
 // ScannerConfig 扫描器配置。
 type ScannerConfig struct {
-	Workers          int `yaml:"workers" json:"workers"`
-	FileSizeLimitMB  int `yaml:"file_size_limit_mb" json:"file_size_limit_mb"`
-	LineCountLimit   int `yaml:"line_count_limit" json:"line_count_limit"`
+	Workers         int `yaml:"workers" json:"workers"`
+	FileSizeLimitMB int `yaml:"file_size_limit_mb" json:"file_size_limit_mb"`
+	LineCountLimit  int `yaml:"line_count_limit" json:"line_count_limit"`
 }
 
 // DefaultConfig 返回带默认值的 Config。
@@ -165,6 +171,8 @@ func DefaultConfig() *Config {
 		AI: AIConfig{
 			Provider:       "openai",
 			Model:          "gpt-4o-mini",
+			BaseURL:        "https://api.openai.com/v1",
+			APIKey:         "",
 			BudgetPerScan:  100,
 			BudgetPerQuery: 10,
 		},
@@ -181,9 +189,9 @@ func DefaultConfig() *Config {
 			UseFsnotify: false, // 默认使用 PollWatcher（零外部依赖）
 		},
 		Scanner: ScannerConfig{
-			Workers:          4,
-			FileSizeLimitMB:  10,
-			LineCountLimit:   50000,
+			Workers:         4,
+			FileSizeLimitMB: 10,
+			LineCountLimit:  50000,
 		},
 	}
 }
@@ -294,12 +302,13 @@ func Validate(cfg *Config) []error {
 //
 // 环境变量命名规则：CODESCHEMA_<SECTION>_<KEY>（全大写，下划线分隔）
 // 例如：
-//   CODESCHEMA_PROJECT_ROOT="/home/user/repo"
-//   CODESCHEMA_STORAGE_DRIVER="sqlite"
-//   CODESCHEMA_SERVER_MCP_ADDR=":9090"
-//   CODESCHEMA_SCANNER_WORKERS="8"
-//   CODESCHEMA_WATCHER_DEBOUNCE_MS="500"
-//   CODESCHEMA_AI_BUDGET_PER_SCAN="200"
+//
+//	CODESCHEMA_PROJECT_ROOT="/home/user/repo"
+//	CODESCHEMA_STORAGE_DRIVER="sqlite"
+//	CODESCHEMA_SERVER_MCP_ADDR=":9090"
+//	CODESCHEMA_SCANNER_WORKERS="8"
+//	CODESCHEMA_WATCHER_DEBOUNCE_MS="500"
+//	CODESCHEMA_AI_BUDGET_PER_SCAN="200"
 //
 // LoadFromEnv 会直接修改传入的 cfg 实例，优先级高于配置文件但低于 CLI 参数。
 func LoadFromEnv(cfg *Config) {
@@ -374,6 +383,12 @@ func LoadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODESCHEMA_AI_MODEL"); v != "" {
 		cfg.AI.Model = v
+	}
+	if v := os.Getenv("CODESCHEMA_AI_BASE_URL"); v != "" {
+		cfg.AI.BaseURL = v
+	}
+	if v := os.Getenv("CODESCHEMA_AI_API_KEY"); v != "" {
+		cfg.AI.APIKey = v
 	}
 	if v := os.Getenv("CODESCHEMA_AI_BUDGET_PER_SCAN"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -474,6 +489,12 @@ func Merge(base, overlay *Config) *Config {
 	}
 	if overlay.AI.Model != "" {
 		merged.AI.Model = overlay.AI.Model
+	}
+	if overlay.AI.BaseURL != "" {
+		merged.AI.BaseURL = overlay.AI.BaseURL
+	}
+	if overlay.AI.APIKey != "" {
+		merged.AI.APIKey = overlay.AI.APIKey
 	}
 	if overlay.AI.BudgetPerScan > 0 {
 		merged.AI.BudgetPerScan = overlay.AI.BudgetPerScan
@@ -650,10 +671,10 @@ type OnReload func(oldCfg, newCfg *Config)
 //
 // 线程安全：reloadCfg 和 cfgMu 保护配置的原子切换。
 type ConfigWatcher struct {
-	path    string
-	cfg     *Config
-	cfgMu   sync.RWMutex
-	onReload OnReload
+	path         string
+	cfg          *Config
+	cfgMu        sync.RWMutex
+	onReload     OnReload
 	pollInterval time.Duration
 	lastModTime  time.Time
 	lastSize     int64

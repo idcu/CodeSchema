@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
@@ -273,9 +274,9 @@ func TestResolveSymbol_Class(t *testing.T) {
 	}
 	classes := []parser.ClassIR{
 		{
-			Name: "IndexBuilder",
+			Name:     "IndexBuilder",
 			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
-			Type: "CLASS",
+			Type:     "CLASS",
 		},
 	}
 	err = st.UpsertClasses(ctx, fileID, classes)
@@ -301,9 +302,9 @@ func TestResolveSymbol_ClassWithInterfaceType(t *testing.T) {
 	fileID, _ := st.UpsertFile(ctx, "pkg/search/fts.go", "hashabc", 180, 8000)
 	classes := []parser.ClassIR{
 		{
-			Name: "FTSEngine",
+			Name:     "FTSEngine",
 			FullName: "github.com/idcu/codeschema/internal/search.FTSEngine",
-			Type: "INTERFACE",
+			Type:     "INTERFACE",
 		},
 	}
 	st.UpsertClasses(ctx, fileID, classes)
@@ -326,9 +327,9 @@ func TestResolveSymbol_Method(t *testing.T) {
 	}
 	classes := []parser.ClassIR{
 		{
-			Name: "IndexBuilder",
+			Name:     "IndexBuilder",
 			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
-			Type: "CLASS",
+			Type:     "CLASS",
 		},
 	}
 	err = st.UpsertClasses(ctx, fileID, classes)
@@ -337,7 +338,7 @@ func TestResolveSymbol_Method(t *testing.T) {
 	}
 	methods := []parser.MethodIR{
 		{
-			Name: "BuildFromStore",
+			Name:      "BuildFromStore",
 			Signature: "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
 		},
 	}
@@ -449,5 +450,98 @@ func TestEnrichResults_AlreadyFilled(t *testing.T) {
 
 	if results[0].Kind != "method" || results[0].File != "test.go" {
 		t.Errorf("should keep existing values, got kind=%q file=%q", results[0].Kind, results[0].File)
+	}
+}
+func TestGetImpact_WithAnalyzer_IncludesRelatedTests(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	svc := NewService(st)
+	// 注入 analyzer，启用真实影响面
+	an := analyzer.NewAnalyzer(st)
+	svc.WithImpactAnalyzer(an)
+
+	// 写入调用关系数据：handler.Handle → service.GetUser
+	ir := &parser.IRDocument{
+		Source:    "test",
+		Language:  "go",
+		FilePath:  "/proj/handler.go",
+		FileHash:  "h1",
+		LineCount: 30,
+		ByteSize:  1024,
+		Classes:   []parser.ClassIR{{Name: "Handler", FullName: "com.example.Handler", Type: "CLASS"}},
+		Methods: []parser.MethodIR{
+			{Name: "Handle", ClassFQN: "com.example.Handler"},
+		},
+	}
+	if err := st.UpsertIR(context.Background(), ir); err != nil {
+		t.Fatalf("upsert handler: %v", err)
+	}
+
+	ir2 := &parser.IRDocument{
+		Source:    "test",
+		Language:  "go",
+		FilePath:  "/proj/service.go",
+		FileHash:  "h2",
+		LineCount: 50,
+		ByteSize:  2048,
+		Classes:   []parser.ClassIR{{Name: "Service", FullName: "com.example.Service", Type: "CLASS"}},
+		Methods: []parser.MethodIR{
+			{Name: "GetUser", ClassFQN: "com.example.Service"},
+		},
+		Calls: []parser.CallIR{
+			{CallerFQN: "com.example.Handler.Handle", CalleeFQN: "com.example.Service.GetUser", CallType: "direct", LineNumber: 10},
+		},
+	}
+	if err := st.UpsertIR(context.Background(), ir2); err != nil {
+		t.Fatalf("upsert service: %v", err)
+	}
+
+	// 注入 coverage：HandlerTest.testHandle 覆盖 Handle → 应出现在 caller 的 related_tests 中
+	svc.SetCoverage(map[string][]string{
+		"com.example.HandlerTest.testHandle": {"com.example.Handler.Handle"},
+	})
+
+	result, err := svc.GetImpact(context.Background(), "com.example.Service.GetUser", 1)
+	if err != nil {
+		t.Fatalf("GetImpact: %v", err)
+	}
+	if result.Method != "com.example.Service.GetUser" {
+		t.Errorf("expected method, got %s", result.Method)
+	}
+	if len(result.Callers) != 1 {
+		t.Fatalf("expected 1 caller, got %d: %v", len(result.Callers), result.Callers)
+	}
+	if result.Callers[0].Method != "com.example.Handler.Handle" {
+		t.Errorf("expected caller Handler.Handle, got %s", result.Callers[0].Method)
+	}
+	// 关联单测应通过 coverage 策略出现在 caller 节点上（改动一处能列出受影响单测）
+	found := false
+	for _, tm := range result.Callers[0].RelatedTests {
+		if tm == "com.example.HandlerTest.testHandle" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected related test in caller node, got %v", result.Callers[0].RelatedTests)
+	}
+}
+
+func TestGetImpact_WithoutAnalyzer_EmptyBackwardCompat(t *testing.T) {
+	svc := newTestService(t)
+	result, err := svc.GetImpact(context.Background(), "com.example.MyClass.myMethod", 2)
+	if err != nil {
+		t.Fatalf("GetImpact: %v", err)
+	}
+	if result.Callers == nil || result.Callees == nil {
+		t.Error("expected non-nil (empty) callers/callees without analyzer")
+	}
+	if len(result.Callers) != 0 || len(result.Callees) != 0 {
+		t.Errorf("expected empty impact without analyzer, got callers=%v callees=%v", result.Callers, result.Callees)
 	}
 }

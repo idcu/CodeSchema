@@ -4,35 +4,64 @@ import (
 	"context"
 	"testing"
 
+	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
 
 // mockStore 实现 store.Store 接口，用于分析器测试。
 type mockStore struct {
-	files   []*store.FileRecord
-	classes map[int64][]store.ClassRecord  // fileID -> classes
-	methods map[int64][]store.MethodRecord // classID -> methods
-	calls   map[int64][]store.CallRecord   // fileID -> calls
+	files      []*store.FileRecord
+	classes    map[int64][]store.ClassRecord  // fileID -> classes
+	methods    map[int64][]store.MethodRecord // classID -> methods
+	calls      map[int64][]store.CallRecord   // fileID -> calls
+	classTags  map[int64][]string             // classID -> tags
+	methodTags map[int64][]string             // methodID -> tags
 }
 
-func (m *mockStore) Open(_ context.Context, _ string) error      { return nil }
-func (m *mockStore) Close() error                                 { return nil }
-func (m *mockStore) HealthCheck(_ context.Context) error          { return nil }
-func (m *mockStore) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) { return 0, nil }
-func (m *mockStore) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) { return nil, nil }
-func (m *mockStore) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error)    { return nil, nil }
-func (m *mockStore) DeleteFile(_ context.Context, _ int64) error                          { return nil }
-func (m *mockStore) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error   { return nil }
-func (m *mockStore) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
-func (m *mockStore) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
-func (m *mockStore) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
-func (m *mockStore) UpsertTags(_ context.Context, _ int64, _ []string) error              { return nil }
-func (m *mockStore) UpsertMethodTags(_ context.Context, _ int64, _ []string) error         { return nil }
-func (m *mockStore) GetTagsByClassID(_ context.Context, _ int64) ([]string, error)         { return nil, nil }
-func (m *mockStore) GetTagsByMethodID(_ context.Context, _ int64) ([]string, error)        { return nil, nil }
-func (m *mockStore) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error)     { return nil, nil, nil }
-func (m *mockStore) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) { return nil, nil }
+func (m *mockStore) Open(_ context.Context, _ string) error { return nil }
+func (m *mockStore) Close() error                           { return nil }
+func (m *mockStore) HealthCheck(_ context.Context) error    { return nil }
+func (m *mockStore) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockStore) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStore) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStore) DeleteFile(_ context.Context, _ int64) error                         { return nil }
+func (m *mockStore) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error  { return nil }
+func (m *mockStore) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error { return nil }
+func (m *mockStore) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error     { return nil }
+func (m *mockStore) UpsertIR(_ context.Context, _ *parser.IRDocument) error              { return nil }
+func (m *mockStore) UpsertTags(_ context.Context, classID int64, tags []string) error {
+	if m.classTags == nil {
+		m.classTags = make(map[int64][]string)
+	}
+	m.classTags[classID] = tags
+	return nil
+}
+func (m *mockStore) UpsertMethodTags(_ context.Context, methodID int64, tags []string) error {
+	if m.methodTags == nil {
+		m.methodTags = make(map[int64][]string)
+	}
+	m.methodTags[methodID] = tags
+	return nil
+}
+func (m *mockStore) GetTagsByClassID(_ context.Context, classID int64) ([]string, error) {
+	return m.classTags[classID], nil
+}
+func (m *mockStore) GetTagsByMethodID(_ context.Context, methodID int64) ([]string, error) {
+	return m.methodTags[methodID], nil
+}
+func (m *mockStore) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) {
+	return nil, nil, nil
+}
+func (m *mockStore) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) {
+	return nil, nil
+}
 
 func (m *mockStore) GetAllFiles(_ context.Context) ([]*store.FileRecord, error) {
 	return m.files, nil
@@ -1090,8 +1119,8 @@ func TestJavaResolver_EmptySourceRoots(t *testing.T) {
 func TestCompositeResolver_Priority(t *testing.T) {
 	// 构建一个模拟的 import 索引
 	idx := map[string][]string{
-		"internal/store": {"/project/store.go"},
-		"store":          {"/project/store.go"},
+		"internal/store":  {"/project/store.go"},
+		"store":           {"/project/store.go"},
 		"com/example/Foo": {"/project/Foo.java"},
 	}
 
@@ -1585,5 +1614,172 @@ func TestJavaResolver_SetStdlibPrefixesViaAnalyzer(t *testing.T) {
 	targets = a.resolveImport("com.example.service.UserService", idx)
 	if len(targets) == 0 {
 		t.Error("expected 'com.example.service.UserService' to resolve")
+	}
+}
+func TestCallGraph_GetCallersWithDepth(t *testing.T) {
+	cg := NewCallGraph()
+	cg.AddEdge("A", "X")
+	cg.AddEdge("B", "X")
+	cg.AddEdge("C", "Y")
+	cg.AddEdge("Y", "X")
+
+	// 深度 1：直接调用者 A, B, Y，层级均为 1
+	callers := cg.GetCallersWithDepth("X", 1)
+	if len(callers) != 3 {
+		t.Fatalf("expected 3 direct callers, got %d: %v", len(callers), callers)
+	}
+	for _, n := range callers {
+		if n.Depth != 1 {
+			t.Errorf("expected depth 1 for direct caller %s, got %d", n.Method, n.Depth)
+		}
+	}
+
+	// 深度 2：A, B, Y（depth 1）+ C（depth 2，经 Y）
+	callers = cg.GetCallersWithDepth("X", 2)
+	byName := make(map[string]int, len(callers))
+	for _, n := range callers {
+		byName[n.Method] = n.Depth
+	}
+	if len(byName) != 4 {
+		t.Fatalf("expected 4 callers at depth 2, got %d", len(byName))
+	}
+	if byName["A"] != 1 || byName["B"] != 1 || byName["Y"] != 1 {
+		t.Errorf("expected A/B/Y depth 1, got %v", byName)
+	}
+	if byName["C"] != 2 {
+		t.Errorf("expected C depth 2, got %d", byName["C"])
+	}
+}
+
+func TestCallGraph_GetCalleesWithDepth(t *testing.T) {
+	cg := NewCallGraph()
+	cg.AddEdge("A", "B")
+	cg.AddEdge("A", "C")
+	cg.AddEdge("B", "D")
+
+	callees := cg.GetCalleesWithDepth("A", 2)
+	byName := make(map[string]int, len(callees))
+	for _, n := range callees {
+		byName[n.Method] = n.Depth
+	}
+	if byName["B"] != 1 || byName["C"] != 1 {
+		t.Errorf("expected B/C depth 1, got %v", byName)
+	}
+	if byName["D"] != 2 {
+		t.Errorf("expected D depth 2, got %d", byName["D"])
+	}
+}
+
+func TestCallGraph_GetCallersWithDepth_EmptyDepth(t *testing.T) {
+	cg := NewCallGraph()
+	if got := cg.GetCallersWithDepth("X", 0); got != nil {
+		t.Errorf("expected nil for depth 0, got %v", got)
+	}
+	if got := cg.GetCalleesWithDepth("X", 0); got != nil {
+		t.Errorf("expected nil for depth 0, got %v", got)
+	}
+}
+
+func TestAnalyzer_FindImpactNodesWithDepth(t *testing.T) {
+	an := NewAnalyzer(newTestStore())
+
+	// mock 调用图数据：
+	//   Service.GetUser  ← ServiceImpl.Process（直接）
+	//   Service.GetUser  ← Handler.Handle（直接）
+	//   Service.GetUser  → Repository.FindByID（直接）
+	callers, callees, err := an.FindImpactNodesWithDepth(context.Background(), "com.example.Service.GetUser", 1)
+	if err != nil {
+		t.Fatalf("FindImpactNodesWithDepth: %v", err)
+	}
+
+	callerSet := make(map[string]int, len(callers))
+	for _, n := range callers {
+		callerSet[n.Method] = n.Depth
+	}
+	if callerSet["com.example.ServiceImpl.Process"] != 1 || callerSet["com.example.Handler.Handle"] != 1 {
+		t.Errorf("expected direct callers at depth 1, got %v", callerSet)
+	}
+	if len(callers) != 2 {
+		t.Errorf("expected 2 direct callers, got %d: %v", len(callers), callers)
+	}
+
+	calleeSet := make(map[string]int, len(callees))
+	for _, n := range callees {
+		calleeSet[n.Method] = n.Depth
+	}
+	if calleeSet["com.example.Repository.FindByID"] != 1 {
+		t.Errorf("expected direct callee at depth 1, got %v", calleeSet)
+	}
+	if len(callees) != 1 {
+		t.Errorf("expected 1 direct callee, got %d: %v", len(callees), callees)
+	}
+}
+
+// mockLLM 模拟 LLMClient：Complete 返回固定标签，Choose 返回 0。
+type mockLLM struct{}
+
+func (m mockLLM) Complete(_ context.Context, _ string) ([]string, error) {
+	return []string{"biz:ai", "tech:enhanced"}, nil
+}
+func (m mockLLM) Choose(_ context.Context, _ string) (int, error) { return 0, nil }
+
+func TestAnalyzer_TagAll_WithEnhancer_AppendsAITags(t *testing.T) {
+	st := newTestStore()
+	an := NewAnalyzer(st)
+	// 注入 AI 增强层：预算充足（100 次扫描预算）
+	budget := ai.NewBudget(100, 10)
+	an.SetEnhancer(ai.NewEnhancer(mockLLM{}, budget))
+
+	if err := an.TagAll(context.Background()); err != nil {
+		t.Fatalf("TagAll: %v", err)
+	}
+
+	// 规则标签（layer: service）+ AI 标签（biz:ai / tech:enhanced）应合并存在
+	tags, err := st.GetTagsByClassID(context.Background(), 1) // com.example.Service
+	if err != nil {
+		t.Fatalf("GetTagsByClassID: %v", err)
+	}
+	hasAITag := false
+	hasLayerTag := false
+	for _, tag := range tags {
+		if tag == "biz:ai" || tag == "tech:enhanced" {
+			hasAITag = true
+		}
+		if tag == "service" {
+			hasLayerTag = true
+		}
+	}
+	if !hasAITag {
+		t.Errorf("expected AI tags appended, got %v", tags)
+	}
+	if !hasLayerTag {
+		t.Errorf("expected rule layer tag preserved, got %v", tags)
+	}
+}
+
+func TestAnalyzer_TagAll_WithExhaustedBudget_SkipsEnhance(t *testing.T) {
+	st := newTestStore()
+	an := NewAnalyzer(st)
+	// 预算为 0：AI 增强应全部跳过，但规则标签照常产出（主流程不受影响）
+	budget := ai.NewBudget(0, 0)
+	an.SetEnhancer(ai.NewEnhancer(mockLLM{}, budget))
+
+	if err := an.TagAll(context.Background()); err != nil {
+		t.Fatalf("TagAll: %v", err)
+	}
+
+	tags, err := st.GetTagsByClassID(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetTagsByClassID: %v", err)
+	}
+	hasLayerTag := false
+	for _, tag := range tags {
+		if tag == "service" {
+			hasLayerTag = true
+			break
+		}
+	}
+	if !hasLayerTag {
+		t.Errorf("expected rule tags still produced with exhausted budget, got %v", tags)
 	}
 }

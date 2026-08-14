@@ -29,12 +29,13 @@ func init() {
 //   - 反向引用索引（ReverseIndex）：文件被哪些文件引用
 //   - 文件依赖图（FileGraph）：文件间的依赖关系
 type Analyzer struct {
-	store    store.Store
-	resolver *CompositeResolver  // 多语言 import 解析器
-	goResolver *GoResolver      // Go 模块路径解析器
-	javaResolver *JavaResolver  // Java 包路径解析器
-	gradleResolver *GradleResolver // Gradle 多模块路径解析器
-	logger   *log.Logger
+	store          store.Store
+	resolver       *CompositeResolver // 多语言 import 解析器
+	goResolver     *GoResolver        // Go 模块路径解析器
+	javaResolver   *JavaResolver      // Java 包路径解析器
+	gradleResolver *GradleResolver    // Gradle 多模块路径解析器
+	logger         *log.Logger
+	enhancer       *ai.Enhancer // AI 增强层（可选，TagAll 时叠加 AI 标签/文档补全）
 }
 
 // NewAnalyzer 创建分析器实例。
@@ -57,6 +58,15 @@ func NewAnalyzer(st store.Store) *Analyzer {
 		gradleResolver: gradleR,
 		logger:         log.WithModule("analyzer"),
 	}
+}
+
+// SetEnhancer 注入 AI 增强层（可选）。
+//
+// 注入后 TagAll 会在规则标签之上叠加 AI 标签/文档补全，受 Budget 硬限管控，
+// LLM 失败或预算超限时跳过增强、不影响主流程（索引与规则标签始终可用）。
+func (a *Analyzer) SetEnhancer(e *ai.Enhancer) *Analyzer {
+	a.enhancer = e
+	return a
 }
 
 // SetModulePath 设置 Go 模块路径，用于精确 import 解析。
@@ -94,6 +104,10 @@ func (a *Analyzer) SetGradleModuleNames(names []string) {
 // 使用 ai.Tagger 的规则引擎，基于类名、方法名、目录路径、
 // 文档注释和文件语言推导六类标签（layer/biz/tech/risk/test/lang）。
 // 标签通过 Store 接口持久化。
+//
+// 若已注入 AI 增强层（SetEnhancer），在规则标签之上叠加 AI 标签补全
+// （EnhanceTag）与文档补全（EnhanceDoc，仅当原 Doc 为空时），受 Budget 硬限管控；
+// LLM 失败 / 预算超限时跳过增强并记录日志，不影响主流程。
 func (a *Analyzer) TagAll(ctx context.Context) error {
 	span := trace.Start("tag_all")
 	defer span.End()
@@ -101,15 +115,119 @@ func (a *Analyzer) TagAll(ctx context.Context) error {
 	a.logger.Info("starting tag derivation")
 
 	tagger := ai.NewTagger(a.store)
-	err := tagger.DeriveAllTags(ctx)
-	if err != nil {
+	if err := tagger.DeriveAllTags(ctx); err != nil {
 		metrics.IncCounter("analyzer_errors_total", "tag_all")
 		a.logger.Error("tag derivation failed", "error", err)
 		return err
 	}
 
+	// AI 增强层（可选）：预算超限/LLM 失败时优雅跳过
+	if a.enhancer != nil {
+		a.enhancer.SetPhase(ai.PhaseScan)
+		a.enhanceTagsWithAI(ctx, tagger)
+	}
+
 	a.logger.Info("tag derivation completed")
 	return nil
+}
+
+// docUpdater 可选接口：支持文档注释更新的存储实现。
+//
+// 采用 Go 可选接口模式（不在 Store 主接口扩展），FileStore 等已实现的存储可写回
+// AI 补全的文档；未实现（如 sqlite/pg 当前版本）时优雅跳过 Doc 补全（标签仍可写回）。
+type docUpdater interface {
+	UpdateClassDoc(ctx context.Context, classID int64, doc string) error
+	UpdateMethodDoc(ctx context.Context, methodID int64, doc string) error
+}
+
+// enhanceTagsWithAI 在规则标签之上叠加 AI 标签与文档补全（失败隔离）。
+func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
+	files, err := a.store.GetAllFiles(ctx)
+	if err != nil {
+		a.logger.Warn("AI enhance: get all files failed", "error", err)
+		return
+	}
+
+	// 可选：Doc 补全写回能力（FileStore 支持，sqlite/pg 未实现时跳过）
+	du, _ := a.store.(docUpdater)
+
+	var aiTagged, aiDocd, skipped int
+	for _, f := range files {
+		classes, err := a.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, cls := range classes {
+			// 类级：AI 标签补全（合并已有规则标签）+ Doc 补全
+			if a.enhancer.BudgetRemaining() > 0 {
+				tags, err := a.enhancer.EnhanceTag(ctx, ai.NewClassEntity(cls))
+				if err == nil && len(tags) > 0 {
+					existing, _ := a.store.GetTagsByClassID(ctx, cls.ID)
+					if merged := mergeUnique(existing, tags); len(merged) > 0 {
+						_ = a.store.UpsertTags(ctx, cls.ID, merged)
+						aiTagged++
+					}
+				}
+			} else {
+				skipped++
+			}
+			if cls.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
+				if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewClassEntity(cls)); err == nil && doc != "" {
+					_ = du.UpdateClassDoc(ctx, cls.ID, doc)
+					aiDocd++
+				}
+			}
+
+			methods, err := a.store.GetMethodsByClassID(ctx, cls.ID)
+			if err != nil {
+				continue
+			}
+			for _, m := range methods {
+				if a.enhancer.BudgetRemaining() > 0 {
+					tags, err := a.enhancer.EnhanceTag(ctx, ai.NewMethodEntity(m))
+					if err == nil && len(tags) > 0 {
+						existing, _ := a.store.GetTagsByMethodID(ctx, m.ID)
+						if merged := mergeUnique(existing, tags); len(merged) > 0 {
+							_ = a.store.UpsertMethodTags(ctx, m.ID, merged)
+							aiTagged++
+						}
+					}
+				} else {
+					skipped++
+				}
+				if m.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
+					if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewMethodEntity(m)); err == nil && doc != "" {
+						_ = du.UpdateMethodDoc(ctx, m.ID, doc)
+						aiDocd++
+					}
+				}
+			}
+		}
+	}
+
+	a.logger.Info("AI enhancement completed",
+		"ai_tagged", aiTagged, "ai_doc_completed", aiDocd, "skipped_budget", skipped)
+}
+
+// mergeUnique 合并两组标签并去重（保持顺序：先已有、后新增）。
+func mergeUnique(existing, added []string) []string {
+	seen := make(map[string]bool, len(existing)+len(added))
+	merged := make([]string, 0, len(existing)+len(added))
+	for _, t := range existing {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		merged = append(merged, t)
+	}
+	for _, t := range added {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		merged = append(merged, t)
+	}
+	return merged
 }
 
 // BuildAll 构建所有代码图（单次遍历）。
@@ -468,6 +586,40 @@ func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth 
 	return callers, callees, nil
 }
 
+// ImpactNode 影响面节点（带深度层级，供编排层直接消费）。
+type ImpactNode struct {
+	Method string `json:"method"`
+	Depth  int    `json:"depth"`
+}
+
+// FindImpactNodesWithDepth 查找指定方法的影响面，返回带深度的调用者与被调用者。
+//
+// 与 FindImpactNodes 的区别：每个节点附带其距目标方法的层级距离（深度 1 为直接调用者/被调用者），
+// 供影响面 API 直接渲染，避免编排层二次 BFS。
+func (a *Analyzer) FindImpactNodesWithDepth(ctx context.Context, methodFQN string, depth int) (callers, callees []ImpactNode, err error) {
+	span := trace.Start("find_impact_nodes_with_depth", "method", methodFQN)
+	defer span.End()
+
+	a.logger.Debug("finding impact nodes with depth", "method", methodFQN, "depth", depth)
+
+	cg, err := a.BuildCallGraph(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build call graph: %w", err)
+	}
+
+	if depth <= 0 {
+		depth = 10 // 默认深度
+	}
+
+	callers = cg.GetCallersWithDepth(methodFQN, depth)
+	callees = cg.GetCalleesWithDepth(methodFQN, depth)
+
+	a.logger.Debug("impact analysis (depth) complete", "method", methodFQN,
+		"callers", len(callers), "callees", len(callees))
+
+	return callers, callees, nil
+}
+
 // ShortestPath 查找两个方法之间的最短调用路径（BFS）。
 //
 // 返回路径上的方法 FQN 列表（含起点和终点），
@@ -551,7 +703,7 @@ type ModuleSummary struct {
 	TotalClasses  int            `json:"total_classes"`
 	TotalMethods  int            `json:"total_methods"`
 	TotalCalls    int            `json:"total_calls"`
-	Languages     map[string]int `json:"languages"`      // language -> count
+	Languages     map[string]int `json:"languages"` // language -> count
 	FileGraph     *FileGraph     `json:"file_graph"`
 	OrphanMethods []string       `json:"orphan_methods"` // 无调用者的方法
 	HotMethods    []string       `json:"hot_methods"`    // 调用者最多的方法
@@ -633,4 +785,3 @@ func sortByCallers(items []hotItem) []hotItem {
 	}
 	return items
 }
-

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -22,6 +23,9 @@ type Service struct {
 	startTime    time.Time
 	searcher     *search.Searcher
 	indexBuilder *search.IndexBuilder // P8.3 自动索引构建
+
+	// analyzer 供影响面分析（GetImpact）使用；未注入时 GetImpact 返回空（向后兼容）。
+	analyzer *analyzer.Analyzer
 
 	// coverage 保存「测试方法 FQN → 其覆盖的生产方法 FQN 列表」的映射，
 	// 由 SetCoverage / LoadCoverageJSON 注入，供 coverage 测试关联策略反查。
@@ -47,6 +51,12 @@ func (s *Service) WithSearcher(searcher *search.Searcher) *Service {
 // WithIndexBuilder 设置自动索引构建器，在扫描后自动更新搜索索引。
 func (s *Service) WithIndexBuilder(b *search.IndexBuilder) *Service {
 	s.indexBuilder = b
+	return s
+}
+
+// WithImpactAnalyzer 注入代码图分析器，启用真实调用图影响面分析（含关联单测）。
+func (s *Service) WithImpactAnalyzer(a *analyzer.Analyzer) *Service {
+	s.analyzer = a
 	return s
 }
 
@@ -140,8 +150,9 @@ func (s *Service) GetContext(ctx context.Context, symbol string, contextLines in
 
 // ImpactNode 影响面分析节点。
 type ImpactNode struct {
-	Method string `json:"method"`
-	Depth  int    `json:"depth"`
+	Method       string   `json:"method"`
+	Depth        int      `json:"depth"`
+	RelatedTests []string `json:"related_tests,omitempty"`
 }
 
 // ImpactResult 影响面分析响应。
@@ -151,7 +162,13 @@ type ImpactResult struct {
 	Callees []ImpactNode `json:"callees"`
 }
 
-// GetImpact 获取指定方法的影响面（P0 骨架，返回占位数据）。
+// GetImpact 获取指定方法的影响面（基于真实调用图 + 关联单测）。
+//
+// 依赖注入的 analyzer（见 WithImpactAnalyzer）：
+//   - 有 analyzer 时：按调用图递归查找 callers/callees（带深度），
+//     并利用 FindTestLinks 五策略为每个受影响节点关联对应单测
+//     （改动一处可列出受影响的单测，即 T4-2 验收口径）；
+//   - 无 analyzer 时：返回空影响面（不报错），保持向后兼容。
 func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*ImpactResult, error) {
 	if method == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "method is required"}
@@ -159,11 +176,40 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 	if depth <= 0 {
 		depth = 1
 	}
-	return &ImpactResult{
+
+	result := &ImpactResult{
 		Method:  method,
 		Callers: []ImpactNode{},
 		Callees: []ImpactNode{},
-	}, nil
+	}
+
+	if s.analyzer == nil {
+		return result, nil
+	}
+
+	callers, callees, err := s.analyzer.FindImpactNodesWithDepth(ctx, method, depth)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact nodes: %v", err)}
+	}
+
+	result.Callers = s.enrichImpactNodes(ctx, callers)
+	result.Callees = s.enrichImpactNodes(ctx, callees)
+	return result, nil
+}
+
+// enrichImpactNodes 为影响面节点关联对应单测（复用 FindTestLinks 五策略，minConfidence=60）。
+func (s *Service) enrichImpactNodes(ctx context.Context, nodes []analyzer.ImpactNode) []ImpactNode {
+	out := make([]ImpactNode, 0, len(nodes))
+	for _, n := range nodes {
+		node := ImpactNode{Method: n.Method, Depth: n.Depth}
+		if links, err := s.FindTestLinks(ctx, n.Method, 60); err == nil {
+			for _, l := range links {
+				node.RelatedTests = append(node.RelatedTests, l.TestMethod)
+			}
+		}
+		out = append(out, node)
+	}
+	return out
 }
 
 // TestResult 关联单测结果。
@@ -483,8 +529,8 @@ type TagSearchResult struct {
 	Tag       string   `json:"tag"`
 	ClassIDs  []int64  `json:"class_ids,omitempty"`
 	MethodIDs []int64  `json:"method_ids,omitempty"`
-	Classes   []string `json:"classes,omitempty"`   // 类名列表
-	Methods   []string `json:"methods,omitempty"`   // 方法名列表
+	Classes   []string `json:"classes,omitempty"` // 类名列表
+	Methods   []string `json:"methods,omitempty"` // 方法名列表
 }
 
 // SearchByTag 按标签搜索类和方法的 ID 和名称。
@@ -537,8 +583,8 @@ func (s *Service) SearchByTag(ctx context.Context, tag string) (*TagSearchResult
 
 // AllTagsResult 所有标签及其分类。
 type AllTagsResult struct {
-	Tags       map[string]string `json:"tags"`        // tag -> category
-	Categories map[string]int    `json:"categories"`  // category -> count
+	Tags       map[string]string `json:"tags"`       // tag -> category
+	Categories map[string]int    `json:"categories"` // category -> count
 }
 
 // GetAllTags 返回所有已知标签及其分类统计。

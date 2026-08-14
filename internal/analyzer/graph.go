@@ -79,6 +79,81 @@ func (cg *CallGraph) GetCallees(methodFQN string, depth int) []string {
 	return result
 }
 
+// GetCallersWithDepth 返回指定方法的所有调用者（带距目标的层级距离）。
+//
+// 返回节点按深度升序排列（深度 1 = 直接调用者），每层内保持收集顺序。
+// 与 GetCallers 的区别：节点携带 Depth 字段，供影响面 API 直接渲染。
+func (cg *CallGraph) GetCallersWithDepth(methodFQN string, depth int) []ImpactNode {
+	if depth <= 0 {
+		return nil
+	}
+	type qItem struct {
+		fqn   string
+		depth int
+	}
+	visited := make(map[string]bool)
+	result := make([]ImpactNode, 0)
+	queue := []qItem{{fqn: methodFQN, depth: depth}}
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+		if visited[item.fqn] {
+			continue
+		}
+		visited[item.fqn] = true
+		node, ok := cg.Nodes[item.fqn]
+		if !ok || item.depth <= 0 {
+			continue
+		}
+		curDepth := depth - item.depth + 1 // 距目标的层级（1 = 直接调用者）
+		for _, caller := range node.Callers {
+			if !visited[caller] {
+				result = append(result, ImpactNode{Method: caller, Depth: curDepth})
+			}
+			queue = append(queue, qItem{fqn: caller, depth: item.depth - 1})
+		}
+	}
+	return result
+}
+
+// GetCalleesWithDepth 返回指定方法的所有被调用者（带距目标的层级距离）。
+//
+// 返回节点按深度升序排列（深度 1 = 直接被调用者）。
+func (cg *CallGraph) GetCalleesWithDepth(methodFQN string, depth int) []ImpactNode {
+	if depth <= 0 {
+		return nil
+	}
+	type qItem struct {
+		fqn   string
+		depth int
+	}
+	visited := make(map[string]bool)
+	result := make([]ImpactNode, 0)
+	queue := []qItem{{fqn: methodFQN, depth: depth}}
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+		if visited[item.fqn] {
+			continue
+		}
+		visited[item.fqn] = true
+		node, ok := cg.Nodes[item.fqn]
+		if !ok || item.depth <= 0 {
+			continue
+		}
+		curDepth := depth - item.depth + 1
+		for _, callee := range node.Callees {
+			if !visited[callee] {
+				result = append(result, ImpactNode{Method: callee, Depth: curDepth})
+			}
+			queue = append(queue, qItem{fqn: callee, depth: item.depth - 1})
+		}
+	}
+	return result
+}
+
 func (cg *CallGraph) collectCallers(fqn string, depth int, visited map[string]bool, result *[]string) {
 	if depth <= 0 || visited[fqn] {
 		return
@@ -221,13 +296,13 @@ func (ri *ReverseIndex) GetImports(importer string) []string {
 
 // FileGraphNode 文件依赖图节点。
 type FileGraphNode struct {
-	FilePath   string   // 文件路径
-	FileID     int64    // 文件 ID
-	Language   string   // 语言
-	Imports    []string // 导入的文件路径
-	ImportedBy []string // 被哪些文件导入
-	ClassCount int      // 类数量
-	MethodCount int     // 方法数量
+	FilePath    string   // 文件路径
+	FileID      int64    // 文件 ID
+	Language    string   // 语言
+	Imports     []string // 导入的文件路径
+	ImportedBy  []string // 被哪些文件导入
+	ClassCount  int      // 类数量
+	MethodCount int      // 方法数量
 }
 
 // FileGraph 是文件级别的依赖图。

@@ -15,49 +15,49 @@ import (
 // FileStore 基于 JSON 文件的轻量存储实现。
 // 数据以 JSON 文件形式存储在指定目录下，适用于 P0 MVP 原型阶段。
 type FileStore struct {
-	mu       sync.RWMutex
-	rootDir  string
-	files    map[string]*FileRecord   // absolute_path -> FileRecord
-	classes  map[int64][]ClassRecord  // fileID -> classes
-	methods  map[int64][]MethodRecord // classID -> methods
-	calls    map[int64][]CallRecord   // fileID -> calls
-	classTags map[int64][]string      // classID -> tags
-	methodTags map[int64][]string     // methodID -> tags
-	tagCategories map[string]string   // tag name -> category
-	nextID   int64
+	mu            sync.RWMutex
+	rootDir       string
+	files         map[string]*FileRecord   // absolute_path -> FileRecord
+	classes       map[int64][]ClassRecord  // fileID -> classes
+	methods       map[int64][]MethodRecord // classID -> methods
+	calls         map[int64][]CallRecord   // fileID -> calls
+	classTags     map[int64][]string       // classID -> tags
+	methodTags    map[int64][]string       // methodID -> tags
+	tagCategories map[string]string        // tag name -> category
+	nextID        int64
 }
 
 // ClassRecord 对应解析后的类信息。
 type ClassRecord struct {
-	ID       int64    `json:"id"`
-	FileID   int64    `json:"file_id"`
-	Name     string   `json:"name"`
-	FullName string   `json:"full_name"`
-	Type     string   `json:"type"`
+	ID         int64    `json:"id"`
+	FileID     int64    `json:"file_id"`
+	Name       string   `json:"name"`
+	FullName   string   `json:"full_name"`
+	Type       string   `json:"type"`
 	ParentFQNs []string `json:"parent_fqns,omitempty"`
-	StartLine int     `json:"start_line"`
-	StartCol  int     `json:"start_col"`
-	EndLine   int     `json:"end_line"`
-	EndCol    int     `json:"end_col"`
-	Modifier  string  `json:"modifier,omitempty"`
-	Doc      string   `json:"doc,omitempty"`
-	Source   string   `json:"source,omitempty"`
+	StartLine  int      `json:"start_line"`
+	StartCol   int      `json:"start_col"`
+	EndLine    int      `json:"end_line"`
+	EndCol     int      `json:"end_col"`
+	Modifier   string   `json:"modifier,omitempty"`
+	Doc        string   `json:"doc,omitempty"`
+	Source     string   `json:"source,omitempty"`
 }
 
 // MethodRecord 对应解析后的方法信息。
 type MethodRecord struct {
-	ID       int64  `json:"id"`
-	ClassID  int64  `json:"class_id"`
-	Name     string `json:"name"`
-	FullName string `json:"full_name"`
-	Signature string `json:"signature,omitempty"`
+	ID         int64  `json:"id"`
+	ClassID    int64  `json:"class_id"`
+	Name       string `json:"name"`
+	FullName   string `json:"full_name"`
+	Signature  string `json:"signature,omitempty"`
 	ReturnType string `json:"return_type,omitempty"`
-	StartLine int   `json:"start_line"`
-	StartCol  int   `json:"start_col"`
-	EndLine   int   `json:"end_line"`
-	EndCol    int   `json:"end_col"`
-	Doc      string `json:"doc,omitempty"`
-	Source   string `json:"source,omitempty"`
+	StartLine  int    `json:"start_line"`
+	StartCol   int    `json:"start_col"`
+	EndLine    int    `json:"end_line"`
+	EndCol     int    `json:"end_col"`
+	Doc        string `json:"doc,omitempty"`
+	Source     string `json:"source,omitempty"`
 }
 
 // CallRecord 对应解析后的调用关系。
@@ -120,12 +120,12 @@ func (fs *FileStore) UpsertFile(ctx context.Context, filePath string, contentHas
 	}
 
 	rec := &FileRecord{
-		ID:          fs.nextID,
+		ID:           fs.nextID,
 		AbsolutePath: filePath,
-		ContentHash: contentHash,
-		LineCount:   lineCount,
-		ByteSize:    byteSize,
-		ParseStatus: "parse_ok",
+		ContentHash:  contentHash,
+		LineCount:    lineCount,
+		ByteSize:     byteSize,
+		ParseStatus:  "parse_ok",
 	}
 	fs.nextID++
 	fs.files[filePath] = rec
@@ -189,18 +189,18 @@ func (fs *FileStore) UpsertClasses(ctx context.Context, fileID int64, classes []
 	var records []ClassRecord
 	for _, c := range classes {
 		records = append(records, ClassRecord{
-			ID:       fs.nextID,
-			FileID:   fileID,
-			Name:     c.Name,
-			FullName: c.FullName,
-			Type:     c.Type,
+			ID:         fs.nextID,
+			FileID:     fileID,
+			Name:       c.Name,
+			FullName:   c.FullName,
+			Type:       c.Type,
 			ParentFQNs: c.ParentFQNs,
-			StartLine: c.StartLine,
-			StartCol:  c.StartCol,
-			EndLine:   c.EndLine,
-			EndCol:    c.EndCol,
-			Modifier:  c.Modifier,
-			Doc:      c.Doc,
+			StartLine:  c.StartLine,
+			StartCol:   c.StartCol,
+			EndLine:    c.EndLine,
+			EndCol:     c.EndCol,
+			Modifier:   c.Modifier,
+			Doc:        c.Doc,
 		})
 		fs.nextID++
 	}
@@ -216,17 +216,17 @@ func (fs *FileStore) UpsertMethods(ctx context.Context, classID int64, methods [
 	var records []MethodRecord
 	for _, m := range methods {
 		records = append(records, MethodRecord{
-			ID:       fs.nextID,
-			ClassID:  classID,
-			Name:     m.Name,
-			FullName: m.ClassFQN + "." + m.Name,
-			Signature: m.Signature,
+			ID:         fs.nextID,
+			ClassID:    classID,
+			Name:       m.Name,
+			FullName:   m.ClassFQN + "." + m.Name,
+			Signature:  m.Signature,
 			ReturnType: m.ReturnType,
-			StartLine: m.StartLine,
-			StartCol:  m.StartCol,
-			EndLine:   m.EndLine,
-			EndCol:    m.EndCol,
-			Doc:      m.Doc,
+			StartLine:  m.StartLine,
+			StartCol:   m.StartCol,
+			EndLine:    m.EndLine,
+			EndCol:     m.EndCol,
+			Doc:        m.Doc,
 		})
 		fs.nextID++
 	}
@@ -453,6 +453,40 @@ func (fs *FileStore) GetTagsByMethodID(ctx context.Context, methodID int64) ([]s
 	return tags, nil
 }
 
+// UpdateClassDoc 更新类文档注释（可选接口 docUpdater：供 AI 增强层写回补全文档）。
+func (fs *FileStore) UpdateClassDoc(ctx context.Context, classID int64, doc string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	for fileID, classes := range fs.classes {
+		for i := range classes {
+			if classes[i].ID == classID {
+				classes[i].Doc = doc
+				fs.classes[fileID] = classes
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+// UpdateMethodDoc 更新方法文档注释（可选接口 docUpdater：供 AI 增强层写回补全文档）。
+func (fs *FileStore) UpdateMethodDoc(ctx context.Context, methodID int64, doc string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	for classID, methods := range fs.methods {
+		for i := range methods {
+			if methods[i].ID == methodID {
+				methods[i].Doc = doc
+				fs.methods[classID] = methods
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 // SearchByTag 按标签搜索类和方法的 ID 列表。
 func (fs *FileStore) SearchByTag(ctx context.Context, tag string) ([]int64, []int64, error) {
 	fs.mu.RLock()
@@ -514,25 +548,25 @@ func deriveTagCategory(tag string) string {
 // saveToDisk 将内存数据持久化到磁盘。
 func (fs *FileStore) saveToDisk() error {
 	data := struct {
-		Files    map[string]*FileRecord   `json:"files"`
-		Classes  map[int64][]ClassRecord  `json:"classes"`
-		Methods  map[int64][]MethodRecord `json:"methods"`
-		Calls    map[int64][]CallRecord   `json:"calls"`
-		ClassTags map[int64][]string      `json:"class_tags,omitempty"`
-		MethodTags map[int64][]string     `json:"method_tags,omitempty"`
-		TagCats  map[string]string        `json:"tag_categories,omitempty"`
-		NextID   int64                    `json:"next_id"`
-		Updated  string                   `json:"updated"`
+		Files      map[string]*FileRecord   `json:"files"`
+		Classes    map[int64][]ClassRecord  `json:"classes"`
+		Methods    map[int64][]MethodRecord `json:"methods"`
+		Calls      map[int64][]CallRecord   `json:"calls"`
+		ClassTags  map[int64][]string       `json:"class_tags,omitempty"`
+		MethodTags map[int64][]string       `json:"method_tags,omitempty"`
+		TagCats    map[string]string        `json:"tag_categories,omitempty"`
+		NextID     int64                    `json:"next_id"`
+		Updated    string                   `json:"updated"`
 	}{
-		Files:    fs.files,
-		Classes:  fs.classes,
-		Methods:  fs.methods,
-		Calls:    fs.calls,
-		ClassTags: fs.classTags,
+		Files:      fs.files,
+		Classes:    fs.classes,
+		Methods:    fs.methods,
+		Calls:      fs.calls,
+		ClassTags:  fs.classTags,
 		MethodTags: fs.methodTags,
-		TagCats:  fs.tagCategories,
-		NextID:   fs.nextID,
-		Updated:  time.Now().UTC().Format(time.RFC3339),
+		TagCats:    fs.tagCategories,
+		NextID:     fs.nextID,
+		Updated:    time.Now().UTC().Format(time.RFC3339),
 	}
 
 	b, err := json.MarshalIndent(data, "", "  ")
@@ -561,14 +595,14 @@ func (fs *FileStore) loadFromDisk() error {
 	}
 
 	var loaded struct {
-		Files    map[string]*FileRecord   `json:"files"`
-		Classes  map[int64][]ClassRecord  `json:"classes"`
-		Methods  map[int64][]MethodRecord `json:"methods"`
-		Calls    map[int64][]CallRecord   `json:"calls"`
-		ClassTags map[int64][]string      `json:"class_tags,omitempty"`
-		MethodTags map[int64][]string     `json:"method_tags,omitempty"`
-		TagCats  map[string]string        `json:"tag_categories,omitempty"`
-		NextID   int64                    `json:"next_id"`
+		Files      map[string]*FileRecord   `json:"files"`
+		Classes    map[int64][]ClassRecord  `json:"classes"`
+		Methods    map[int64][]MethodRecord `json:"methods"`
+		Calls      map[int64][]CallRecord   `json:"calls"`
+		ClassTags  map[int64][]string       `json:"class_tags,omitempty"`
+		MethodTags map[int64][]string       `json:"method_tags,omitempty"`
+		TagCats    map[string]string        `json:"tag_categories,omitempty"`
+		NextID     int64                    `json:"next_id"`
 	}
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return fmt.Errorf("unmarshal store: %w", err)

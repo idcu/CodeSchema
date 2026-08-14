@@ -6,6 +6,59 @@
 
 ## 提交记录
 
+### Commit 55: feat(ai+service): Enhancer 生产编排接入 + 影响面分析含关联单测（T4-1 剩余 + T4-2/PHASE_09）
+
+**核心改动点（T4-1 剩余·Enhancer 编排接入）**：
+- `internal/ai/http_client.go`：新增 OpenAI 兼容 Chat Completions LLMClient（`NewOpenAICompatClient`）——`Complete` 按行切分补全结果、`Choose` 容忍 `[3]`/`索引: 3`/`3。`/`（1）` 等格式提取首个数字；缺 BaseURL/APIKey/Model 任一返回 nil（AI 增强禁用、主流程零影响）；非 200 / 网络失败包装 `ErrLLMUnavailable`/`ErrEnhanceFailed`；超时默认 30s。
+- `internal/analyzer/analyzer.go`：`Analyzer` 新增 `enhancer` 字段 + `SetEnhancer`；`TagAll` 规则标签之上叠加 AI 增强——类/方法 `EnhanceTag` 与已有标签合并去重（`mergeUnique`）写回，空 Doc 时 `EnhanceDoc` 补全经**可选接口 `docUpdater`**（`UpdateClassDoc`/`UpdateMethodDoc`）写回；预算耗尽跳过增强不影响规则标签（`Enhancer.BudgetRemaining` 预检）。
+- `internal/store/filestore.go`：实现 `docUpdater` 可选接口（`UpdateClassDoc`/`UpdateMethodDoc`）；sqlite/pg 未实现时优雅跳过（可选接口模式，不扩展主 Store 接口）。
+- `internal/config/config.go`：`AIConfig` 新增 `BaseURL`（默认 api.openai.com/v1）与 `APIKey` 字段 + 环境变量 `CODESCHEMA_AI_BASE_URL`/`CODESCHEMA_AI_API_KEY`（含校验/合并）。
+
+**核心改动点（T4-2·影响面分析含单测）**：
+- `internal/analyzer/graph.go`：新增 `GetCallersWithDepth`/`GetCalleesWithDepth`——BFS 遍历并携带**距目标的层级距离**（深度 1 = 直接调用者/被调用者，返回 `ImpactNode{Method, Depth}`），与既有扁平 `GetCallers`/`GetCallees` 并存。
+- `internal/analyzer/analyzer.go`：新增 `FindImpactNodesWithDepth`，返回带深度的影响面节点。
+- `internal/service/service.go`：`Service` 新增 `analyzer` 字段 + `WithImpactAnalyzer`；`GetImpact` 由 P0 骨架（恒空）改为**真实调用图影响面 + 关联单测**——每个受影响节点经 `enrichImpactNodes` 复用 `FindTestLinks` 五策略关联对应单测（`ImpactNode.RelatedTests` 字段），满足「改动一处能列出受影响的单测」验收；未注入 analyzer 时返回空（向后兼容）。
+- `cmd/codeschema/main.go`：`newAIEnhancer(cfg)` 按 `config.ai` 构造（不完整即 nil + 日志提示）；`scanCmd` 扫描后调 `runTagAll`（规则 + 可选 AI 增强）；四处 Service 构造点统一 `withImpactAnalyzer` 注入。
+
+**验证**：`go build ./...` / `go vet ./...` / `go build -tags pg/redis/onnx` 全绿；`go test -race ./internal/ai/ ./internal/analyzer/ ./internal/service/` 全绿；全仓 23 包测试通过（排除 scalebench 慢测试）。
+**新增测试**：`internal/ai/http_client_test.go` 6 项（禁用/Complete/Choose/格式变体/非200/网络错误）；`internal/analyzer/analyzer_test.go` mockStore 标签方法改为内存实现 + TagAll 编排 2 项（预算充足叠加 AI 标签且保留规则标签 / 预算耗尽仅规则标签）+ WithDepth 3 项 + FindImpactNodesWithDepth 1 项；`internal/service/service_test.go` 2 项（注入 analyzer 后 GetImpact 返回真实 caller 且 caller 节点含 coverage 关联单测 / 未注入向后兼容空结果）。
+**遗留**：查询期同名方法消歧（`Enhancer.Disambiguate`）尚未接入搜索处理器（接口已就绪）；真实 provider 需配置 `ai.base_url/api_key/model`；`GetImpact` 每次调用重建调用图，高频调用可后续加缓存。
+
+### Commit 54: feat(parser): SCIP 流式加载——json.Decoder 增量解析 + 文档背压（T2-2/PHASE_09）
+
+**核心改动点**：
+- `internal/parser/adapter/scip/adapter.go`：
+  - `loadIndex` 由 `os.ReadFile` 全量读入改为 **`json.Decoder` 流式解析**——`dec.Token()` 遍历顶层对象，命中 `documents` 数组后逐元素 `Decode` 增量载入；metadata 等非 documents 字段用 `json.RawMessage` 流式丢弃，不再整体驻留内存。
+  - 新增 **文档背压**：`SetMaxDocs(n)` 设置加载上限，超过即停止解析并置 `truncated=true`（可观测，不静默丢信息）；`Init` 支持 `max_docs` 配置项。
+  - `loadIndex` 重复调用幂等（先清空 `documents`/`truncated` 再重载）。
+- 测试：新增流式背压截断（5 文档限 2）+ 重复加载幂等 2 项。
+
+**验证**：`go test ./internal/parser/adapter/scip/...` 全绿；`go build ./...` / `go vet` 通过。
+**遗留**：无（超大 .scip 文件内存占用由背压上限约束；默认不限流保持全量能力）。
+
+### Commit 53: feat(vector): ONNX 嵌入器加固——层名/精度/维度可配 + 并发安全单例（T3-1/PHASE_09）
+
+**核心改动点**：
+- `internal/vector/embedder_onnx.go`（`//go:build onnx`）：
+  - `ONNXEmbedderConfig` 新增 `OutputLayer`（默认 `sentence_embedding`）、`InputNames`（默认 input_ids/attention_mask/token_type_ids）、`Dim`（默认 512）、`Precision`（默认 fp16 / fp32 / any）。
+  - `initRuntime` 使用可配输入输出层名；`ONNXModelAvailableWithPrecision` 按精度重排模型文件候选（fp32 优先 model.onnx，默认优先 model_fp16.onnx）。
+  - 全局单例由 `sync.Once`（Close 后重置存在竞态窗口）重构为 **互斥锁 get-or-create**：`GetONNXEmbedderGlobalWithConfig` + `LastGlobalONNXInitError`（初始化失败可观测）、`CloseGlobalONNXEmbedder` 后可重建；新增 `NewONNXEmbedderOrFallbackWithConfig`。
+- `internal/vector/embedder_onnx_stub.go`（`//go:build !onnx`）：同步补齐同名 API 桩（config 字段 + 5 个函数），默认构建免 CGO 不受影响。
+- 测试：新增精度候选测试（fp32/默认/any 的文件选择）。
+
+**验证**：`go build ./...`（桩）与 `go build -tags onnx ./...`（真实）双路径通过；`go vet -tags onnx ./internal/vector/` 通过。
+**遗留**：真实 ONNX 推理（换模型层名）需模型文件 + onnxruntime 动态库；模型分发策略（本地 down/models 优先，远程下载为后续项）。
+
+### Commit 52: feat(scalebench): 嵌入质量评测——Local vs ONNX 召回率基准（T3-3/PHASE_09）
+
+**核心改动点**：
+- `internal/scalebench/embedding_quality_test.go`：新增 `TestEmbeddingQuality`——12 代码实体黄金语料 + 12 混合语义查询（词面接近与语义改写各半，含词面重叠干扰项），分别用 LocalEmbedder（先 Observe 建 IDF）与 ONNXEmbedder（bge-small-zh）建 MemoryStore 索引，测 top-5 检索的 Recall@1/3/5 与 avgTop1 相似度。
+- ONNX 可用性：默认构建走桩返回 nil → 自动跳过并写清原因（需 `-tags onnx` + down/models 模型文件）；产出 `build/embedding-quality.json` + `analysis/2026-08-14-embedding-quality.md`（analysis/build 目录为 gitignore 产物，不入库）。
+- 新增 `NewONNXEmbedderOrFallbackWithConfig`/`ONNXModelAvailableWithPrecision` 供评测与生产共用。
+
+**验证**：本机 Local(TF-IDF) R@1=0.42 / R@3=0.42 / R@5=0.67 / avgTop1=0.23（词面接近查询命中、语义改写困难，符合词袋预期）；ONNX 因模型未下载跳过（报告已标注补跑命令）；`go vet` 通过。
+**遗留**：ONNX 模型就绪后补跑以获得语义召回对照；评测语料可按需扩展语言/场景。
+
 ### Commit 51: feat(ai): AI 增强层落地——Enhancer + 预算管控 + LLMClient 接口（T4-1/PHASE_09）
 
 **核心改动点**：

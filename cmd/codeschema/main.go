@@ -16,17 +16,58 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/idcu/codeschema/internal/ai"
+	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/robust"
-	"github.com/idcu/codeschema/internal/scheduler"
 	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/scheduler"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/server"
 	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/vector"
 	"github.com/idcu/codeschema/internal/watcher"
 )
+
+// withImpactAnalyzer 注入代码图分析器，启用真实调用图影响面分析（含关联单测）。
+func withImpactAnalyzer(svc *service.Service, st store.Store) *service.Service {
+	an := analyzer.NewAnalyzer(st)
+	return svc.WithImpactAnalyzer(an)
+}
+
+// newAIEnhancer 按 config.ai 构造 AI 增强层（可选）。
+//
+// 配置不完整（缺 BaseURL/APIKey/Model 任一）时返回 nil——AI 增强被禁用，
+// 主流程零影响（规则标签 / 索引始终可用）。
+func newAIEnhancer(cfg *config.Config) *ai.Enhancer {
+	client := ai.NewOpenAICompatClient(ai.HTTPClientConfig{
+		BaseURL: cfg.AI.BaseURL,
+		APIKey:  cfg.AI.APIKey,
+		Model:   cfg.AI.Model,
+	})
+	if client == nil {
+		log.Printf("ai: enhancement disabled (set ai.base_url/api_key/model to enable)")
+		return nil
+	}
+	budget := ai.NewBudget(cfg.AI.BudgetPerScan, cfg.AI.BudgetPerQuery)
+	return ai.NewEnhancer(client, budget)
+}
+
+// runTagAll 对已入库数据执行标签推导（规则 + 可选 AI 增强）。
+func runTagAll(ctx context.Context, st store.Store, cfg *config.Config) error {
+	an := analyzer.NewAnalyzer(st)
+	if enh := newAIEnhancer(cfg); enh != nil {
+		an.SetEnhancer(enh)
+		log.Printf("ai: enhancement enabled (provider=%s model=%s budget_scan=%d)",
+			cfg.AI.Provider, cfg.AI.Model, cfg.AI.BudgetPerScan)
+	}
+	if err := an.TagAll(ctx); err != nil {
+		return fmt.Errorf("tag all: %w", err)
+	}
+	return nil
+}
 
 var (
 	version = "0.1.0"
@@ -198,6 +239,7 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	searcher, builder := newSearcher(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
+	withImpactAnalyzer(svc, st)
 	if result, err := svc.BuildIndex(ctx); err != nil {
 		fmt.Printf("WARN: build index: %v\n", err)
 	} else {
@@ -210,6 +252,11 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		if err := builder.SaveIDF(idfFile); err != nil {
 			fmt.Printf("WARN: save IDF dictionary: %v\n", err)
 		}
+	}
+
+	// 标签推导（规则 + 可选 AI 增强）
+	if err := runTagAll(ctx, st, cfg); err != nil {
+		fmt.Printf("WARN: tag all: %v\n", err)
 	}
 
 	return nil
@@ -254,6 +301,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	searcher, builder := newSearcher(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
+	withImpactAnalyzer(svc, st)
 
 	// 启动异步索引队列（2 个 worker，64 缓冲区）
 	builder.StartAsync(ctx, 64, 2)
@@ -325,6 +373,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	svc := service.NewService(st)
 	s, builder := newSearcher(cfg)
 	svc.WithSearcher(s).WithIndexBuilder(builder)
+	withImpactAnalyzer(svc, st)
 
 	// 启动时全量构建索引
 	if result, err := svc.BuildIndex(ctx); err != nil {
@@ -369,6 +418,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	svc := service.NewService(st)
 	s, builder, vecStore := newSearcherWithStore(cfg)
 	svc.WithSearcher(s).WithIndexBuilder(builder)
+	withImpactAnalyzer(svc, st)
 
 	// 启动时全量构建索引
 	if result, err := svc.BuildIndex(ctx); err != nil {
