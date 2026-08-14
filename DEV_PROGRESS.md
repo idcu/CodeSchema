@@ -70,7 +70,7 @@ P18      [████████████████████] 100%
 
 ### P0 MVP — 适配器 + 增量更新 + 接口层
 - [x] `internal/parser/adapter/adapter.go` — 适配器模块公共工具（文件过滤/语言检测/IR 转换）
-- [x] `internal/parser/adapter/treesitter/adapter.go` — tree-sitter 适配器（6 种语言正则解析）
+- [x] `internal/parser/adapter/treesitter/adapter.go` — tree-sitter 适配器（30 种语言正则解析，`-tags treesitter` 可切换真语法树）
 - [x] `internal/parser/adapter/treesitter/adapter_test.go` — tree-sitter 单测（18 个测试）
 - [x] `internal/parser/adapter/codegraph/adapter.go` — CodeGraph 直读适配器骨架
 - [x] `internal/parser/adapter/codegraph/adapter_test.go` — CodeGraph 单测（4 个测试）
@@ -296,7 +296,7 @@ P18      [████████████████████] 100%
   - **LSP**：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS；`clangd` 真实服务器传输层验证（JSON-RPC 实际连通，clangd 因缺少 compile-commands/project 上下文拒绝登记独立文件，已改为优雅跳过并记录缺口）。三处**生产修复**：①`Parse` 的 `didOpen` 改为携带真实文件内容（clangd 等要求，gopls/mock 不受影响）；②新增 `lspPathToOSPath` / `readLSPFileContent` 辅助；③**关键修复**——`addSymbolInfo` / `addDocumentSymbol` 的 `SymbolKind` 映射原仅覆盖 5(Class)/6(Method)/9(Constructor)，漏掉 Go 的 Struct(23)/Interface(24)/Function(12)，导致 gopls 对 Go 源码解析出 0 类 0 方法；补齐 `case 23→STRUCT / 24→INTERFACE / 6,12→方法` 后，gopls 真实返回类与方法（验证由 `TestLSPAdapter_RealGopls` 从 FAIL 转为 PASS）。
   - **多语言验证/基准框架**：`internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、刻意不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），对 SCIP（fixture，始终可用）+ LSP（gopls/clangd/jdtls，按工具可用性）逐语言真实解析并记录符号数与延迟，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
   - **架构调整（绕开 cgo 慢编译）**：原 `internal/integration/adapter_validation_test.go` 因 `package integration` 传递引入完整 scan/index/vector 流水线的 `onnxruntime_go` cgo 依赖，在本机 MinGW 下编译极慢（>50min）。将适配器验证测试迁移到独立包 `internal/adapterbench`（只 import lsp+scip），编译+运行降至 ~1min 且真实验证 gopls（classes=1/methods=2）。旧文件已从索引移除（磁盘锁定副本待杀软释放后清理）。
-- [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 6 语言正则解析实现（非 CGO 版 go-tree-sitter）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
+- [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 30 语言正则解析实现（非 CGO 版 go-tree-sitter，`-tags treesitter` 切真语法树）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
 - [x] **优先级④ 超大仓瓶颈验证 + PG/Redis 迁移路径** —
   - **超大仓基准框架** `internal/scalebench/scale_bench_test.go`：纯 Go 无 cgo，合成每文件 1 类/3 方法/2 调用 IR，压测 N=1k/5k/10k/50k/100k 的插入/落盘/内存；SQLite 每 N 独立 dsn 隔离累积干扰；产物 `build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md`。
   - **实测结论（推翻原假设）**：SQLite(UpsertIR) 是主导瓶颈——100k 文件（≈700k 行）单批插入 **77~237s**（本机波动，≈560× chromem），根因为 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；FileStore 为内存 O(n)（100k≈1.08GB）、chromem 线性（100k≈169MB）均远快于 SQLite。**已实现 `BulkUpsert`（单事务 + 预编译语句）消除提交放大**：100k 落库降至 **约 5~14s（约一个数量级 / 跨 N 点位稳定 5~14× 提速）**，生产化应使用它（analyzer 整仓重索引时批量灌入）。
@@ -310,9 +310,9 @@ P18      [████████████████████] 100%
 
 ## 已知问题
 
-1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 6 语言正则解析（非 CGO 语法树）。
+1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
 2. ~~**轮询监听性能**~~ **已解决**：FsWatcher 已实现。
-3. ~~**tree-sitter C 绑定**~~ **已解决（实现方式已更正）**：`internal/parser/adapter/treesitter` 为基于正则表达式的轻量解析（6 语言：Go/Java/TypeScript/Python/Rust/C++），**并非 CGO 版 go-tree-sitter 语法树**，因此解析层不依赖 `go-tree-sitter` 与 C 编译器；调用关系检测仅 Go/Python 较准，其余语言为启发式。
+3. ~~**tree-sitter C 绑定**~~ **已解决（实现方式已更正）**：`internal/parser/adapter/treesitter` 为基于正则表达式的轻量解析（30 语言：go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html/hcl/svelte/markdown/dockerfile/elm/cue），**默认构建非 CGO 版 go-tree-sitter 语法树（`-tags treesitter` 可切换真语法树）**，因此解析层不依赖 `go-tree-sitter` 与 C 编译器；调用关系检测仅 Go/Python 较准，其余语言为启发式。
 4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`bge-small-zh-v1.5` 模型已预转换为 ONNX 格式（FP16 量化，512 维），位于 `down/models/bge-small-zh-v1.5/`。`onnxruntime.dll`（v1.28.0）位于 `down/onnxruntime/`，`make build-cgo` 自动复制到输出目录。应用启动时自动检测 ONNX 模型，优先使用 ONNXEmbedder，失败时降级到 LocalEmbedder。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
 
