@@ -548,30 +548,18 @@ docker compose down
 
 ### 6.2 性能调优
 
-| 场景 | 建议 |
-|------|------|
-| **大仓库（10万+文件）** | 增加 `--workers 8-16`，使用 `--fsnotify` 原生监听 |
-| **小仓库** | 默认配置即可，`workers=4` 足够 |
-| **生产环境** | 使用 Docker 部署，配置 `auth_token` 开启认证 |
-| **低内存环境** | 设置 `vector_dim: 128` 降低向量维度 |
-| **高速增量** | 使用 `--fsnotify` + `--debounce 200` |
+不同规模仓库的并发、向量维度、内存与监听配置建议，以及基准测试数据，已汇总到运维文档 [性能调优](docs/ops/04-性能调优.md)。要点速览：
+
+- **大仓库（10万+文件）**：`--workers 8-16` + `--fsnotify` 原生监听
+- **低内存环境**：`vector_dim: 128` 降低向量维度，或 `semantic: false` 关闭语义搜索
+- **高速增量**：`--fsnotify` + `--debounce 200`
+- **生产环境**：Docker 部署并配置 `auth_token` 开启认证
 
 ### 6.3 监控与可观测性
 
-CodeSchema 内置了完整的可观测性支持：
+CodeSchema 内置结构化日志（`log/slog`）、Prometheus 格式指标（`/metrics` 端点）与请求链路追踪。完整的 Prometheus 配置、Grafana 仪表盘、告警规则与日志采集方案，见运维文档 [监控与告警](docs/ops/03-监控与告警.md)。
 
-- 结构化日志（`log/slog`）
-- Prometheus 格式指标（`/metrics` 端点）
-- 请求链路追踪
-
-```bash
-# 查看指标
-curl http://localhost:8081/metrics
-# 输出示例：
-# # HELP http_requests_total Total HTTP requests
-# # TYPE http_requests_total counter
-# http_requests_total{method="GET",path="/health",status="200"} 42
-```
+> 快速验证：`curl http://localhost:8081/metrics` 可查看 `http_requests_total` 等指标。
 
 ---
 
@@ -614,8 +602,8 @@ docker compose up -d
 1. **启动扫描**：首次部署时先执行 `--profile scan` 完成全量扫描，再启动主服务
 2. **设置认证**：务必配置 `auth_token`，防止未授权访问
 3. **配置反向代理**：生产环境建议使用 Nginx 反向代理，配置 HTTPS
-4. **定期备份**：每日备份 `./data` 目录，保留最近 7 天
-5. **监控告警**：配置 Prometheus + Grafana 监控关键指标
+4. **定期备份**：每日备份 `./data` 目录，保留最近 7 天（操作见 [备份与恢复](docs/ops/02-备份与恢复.md)）
+5. **监控告警**：配置 Prometheus + Grafana 监控关键指标（规则见 [监控与告警](docs/ops/03-监控与告警.md)）
 
 ---
 
