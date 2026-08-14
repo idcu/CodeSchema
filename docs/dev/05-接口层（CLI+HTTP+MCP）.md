@@ -23,10 +23,10 @@
 | `scan` | 扫描并入库 | `codeschema scan ./repo --lang go,java` |
 | `watch` | 文件监听增量 | `codeschema watch ./repo` |
 | `rebuild-kv` | 重建 KV 缓存 | `codeschema rebuild-kv` |
-| `rebuild-refs` | 重建反向引用索引 | `codeschema rebuild-refs` |
+| `rebuild-kv` | 重建 KV 缓存 | `codeschema rebuild-kv` |
 | `mcp` | 启动 MCP Server | `codeschema mcp --addr :8080` |
 | `serve` | 启动 HTTP API Server | `codeschema serve --http :8081` |
-| `benchmark` | 运行 benchmark | `codeschema benchmark ./repo` |
+| ~~`benchmark`~~（未落地） | 运行 benchmark（规划中，尚未实现） | `codeschema benchmark ./repo` |
 | `version` | 显示版本信息 | `codeschema version` |
 
 ---
@@ -84,7 +84,7 @@ MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph
 | `get_call_graph` | `symbol: string`, `depth?: number` | 调用图（双向），返回节点 + 边列表 | JCodeIndexer | P0 |
 | `search_config` | `pattern: string` | 配置项/注解搜索 | JCodeIndexer | P0 |
 | `find_dependencies` | `symbol: string` | 依赖关系列表 | JCodeIndexer | P0 |
-| `search_symbols` | `q: string`, `mode?: string`, `limit?: number` | 符号搜索（FTS5 + 向量） | code-context-mcp | P0 |
+| `search_symbols` | `q: string`, `mode?: string`, `limit?: number` | 符号搜索（全文 + 向量） | code-context-mcp | P0 |
 | `get_tags` | `symbol: string`（类/方法全限定名） | 指定符号的标签列表 | P5 新增 | P5 |
 | `search_by_tag` | `tag: string`（如 `controller`） | 按标签搜索类和方法 | P5 新增 | P5 |
 | `get_all_tags` | — | 所有已知标签及分类统计 | P5 新增 | P5 |
@@ -97,8 +97,8 @@ MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph
 
 1. **实现 CLI 框架**
    - 使用 `cobra` 库，在 `cmd/codeschema/` 下定义根命令和子命令。
-   - 实现 `scan` / `watch` / `rebuild-kv` / `rebuild-refs` / `mcp` / `serve` / `benchmark` / `version` 共 8 个子命令。
-   - 集成 viper 配置加载（config.yaml 路径、环境变量覆盖）。
+   - 实际实现 6 个子命令：`scan` / `watch` / `rebuild-kv` / `mcp` / `serve` / `version`（早期规划的 `rebuild-refs`/`benchmark` 未落地）。
+   - 配置加载：自研 config 包（config.yaml + 环境变量覆盖，未用 viper）。
 
 2. **实现 HTTP 路由**
    - 在 `internal/server/http.go` 中实现路由注册。

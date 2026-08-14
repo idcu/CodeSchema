@@ -105,7 +105,7 @@ docs/dev/
 ```
 ┌─────────────────────────────────────────────────────┐
 │                      CLI (cmd/codeschema)            │
-│     scan    watch    mcp    serve    version         │
+│  scan  watch  rebuild-kv  mcp  serve  version       │
 └──────────┬────────────────────────────────┬──────────┘
            │                                │
      ┌─────▼──────┐                  ┌──────▼───────┐
@@ -191,7 +191,7 @@ make clean
 
 - **包数量**：实际 **27** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
-- **SQLite 实测并非生产级写入**：`docs/dev/12` 记录的 scalebench 显示，N=10万 单批 upsert SQLite 约 **193s**，JSON FileStore 约 **0.4s**（慢约 500 倍）。当前 SQLite 写入路径有严重瓶颈，「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反——超大仓写入建议走 `BulkUpsert`/PG 或 chromem。
+- **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/dev/12` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。
 - **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」仅列到 `11`，缺 `12-存储扩展与大规模迁移路径.md`。
 
@@ -214,7 +214,7 @@ make bench
 | Go | 1.25+ | 编译运行 |
 | GCC/MinGW | 任一 C 编译器 | **仅 ONNX 语义检索需要**：默认 `go build ./...` 已免 CGO/gcc。`go build -tags onnx` 启用 ONNX 嵌入器（bge-small-zh）时需 gcc 与 onnxruntime 动态库；不使用 ONNX 时纯 Go 构建即可（modernc.org/sqlite 亦为纯 Go）。 |
 | Docker | 24+ | 容器化部署 |
-| onnxruntime | 1.28+ | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`） |
+| onnxruntime | 1.23.2（本机已验证） | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`；本机 x86_64 经 `third_party/onnxruntime_go_patch` 适配 API v23，真实嵌入推理 dim=512 已验证） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |
 
 ## 许可证
