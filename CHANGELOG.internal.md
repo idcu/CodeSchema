@@ -8,7 +8,7 @@
 
 ### Commit 42: docs(deploy): 同步 ONNX 集成文档 + 清理旧版本包
 
-**Commit Hash**: `待提交`
+**Commit Hash**: `9e4ea51`
 
 **核心改动点**：
 - `DEV_PROGRESS.md` — 更新已知问题 #4（ONNX 模型集成细节），更新最新提交信息为 899e7ec
