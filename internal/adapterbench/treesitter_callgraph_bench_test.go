@@ -280,6 +280,30 @@ return OrderService
 		Golden: []string{}, // 配置类语言无函数调用
 	},
 	{
+		Lang: "protobuf", Ext: ".proto",
+		Code: `syntax = "proto3";
+
+service OrderService {
+  rpc CreateOrder(CreateOrderReq) returns (CreateOrderResp);
+}
+message CreateOrderReq {
+  string order_id = 1;
+}
+`,
+		Golden: []string{}, // 接口定义语言无函数调用
+	},
+	{
+		Lang: "html", Ext: ".html",
+		Code: `<html>
+<body>
+  <div class="container"></div>
+  <button onclick="submit()">Go</button>
+</body>
+</html>
+`,
+		Golden: []string{}, // 标记语言无函数调用
+	},
+	{
 		Lang: "toml", Ext: ".toml",
 		Code: `[server]
 host = "localhost"

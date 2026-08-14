@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 69: feat(parser): 继续扩展 protobuf/html → 24 语言（PHASE_09）
+
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.proto`→protobuf、`.html`/`.htm`→html
+- 正则：proto message/service/enum + rpc 方法；html 元素标签 + script 检测
+- AST：proto message/service/enum + rpc；html element→start_tag→tag_name 名称提取；astClassType 增 service/enum/element 分支
+- 验证：**AST 24 语言双档 P=1.00/R=1.00（TP=72）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+
 ### Commit 68: feat(parser+ops): AST 基准精度门槛 + css/toml/yaml 扩展（PHASE_09）
 
 **① AST 基准精度门槛守护**

@@ -267,6 +267,10 @@ func detectLang(path string) string {
 		return "toml"
 	case ".yml", ".yaml":
 		return "yaml"
+	case ".proto":
+		return "protobuf"
+	case ".html", ".htm":
+		return "html"
 	default:
 		return "unknown"
 	}

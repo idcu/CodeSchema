@@ -216,6 +216,22 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`\b\B`), // YAML 无函数调用(永不匹配)
 			commentTrim:    "#",
 		},
+		"protobuf": {
+			// service 作为「类」，rpc 作为「方法」
+			classPattern:   regexp.MustCompile(`^\s*(message|service|enum)\s+(\w+)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^\s*rpc\s+(\w+)\s*\(`),
+			callPattern:    regexp.MustCompile(`\b\B`), // proto 无函数调用(永不匹配)
+			commentTrim:    "//",
+		},
+		"html": {
+			// 元素标签作为「类」登记
+			classPattern:   regexp.MustCompile(`^\s*<([a-zA-Z][\w-]*)(?:\s[^>]*)?>`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^\s*<script\b`),
+			callPattern:    regexp.MustCompile(`\b\B`), // HTML 标签非调用(永不匹配)
+			commentTrim:    "<!--",
+		},
 	}
 }
 
@@ -519,6 +535,18 @@ func detectClassType(matches []string, lang string) string {
 		return "MODULE"
 	case "lua":
 		return "CLASS"
+	case "protobuf":
+		for _, m := range matches {
+			if m == "service" {
+				return "INTERFACE"
+			}
+			if m == "enum" {
+				return "ENUM"
+			}
+		}
+		return "CLASS"
+	case "html":
+		return "ELEMENT"
 	case "groovy":
 		for _, m := range matches {
 			switch m {

@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -980,5 +980,61 @@ func TestTreeSitterAdapter_Parse_YAML(t *testing.T) {
 	}
 	if doc.Language != "yaml" {
 		t.Errorf("expected yaml, got %s", doc.Language)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Protobuf 验证 protobuf service/rpc 解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Protobuf(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "order_service.proto")
+	content := `syntax = "proto3";
+
+service OrderService {
+  rpc CreateOrder(CreateOrderReq) returns (CreateOrderResp);
+}
+message CreateOrderReq {
+  string order_id = 1;
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "protobuf" {
+		t.Errorf("expected protobuf, got %s", doc.Language)
+	}
+	if len(doc.Classes) < 2 {
+		t.Errorf("expected service+message classes, got %d", len(doc.Classes))
+	}
+}
+
+// TestTreeSitterAdapter_Parse_HTML 验证 HTML 元素解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_HTML(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "index.html")
+	content := `<html>
+<body>
+  <div class="container"></div>
+  <button onclick="submit()">Go</button>
+</body>
+</html>
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "html" {
+		t.Errorf("expected html, got %s", doc.Language)
+	}
+	if len(doc.Classes) < 3 {
+		t.Errorf("expected html/body/div/button elements, got %d", len(doc.Classes))
 	}
 }

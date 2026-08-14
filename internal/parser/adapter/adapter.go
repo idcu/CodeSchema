@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html"}
 }
 
 // FileExists 检查文件是否存在。
@@ -72,6 +72,10 @@ func ExtToLang(ext string) string {
 		return "toml"
 	case ".yml", ".yaml":
 		return "yaml"
+	case ".proto":
+		return "protobuf"
+	case ".html", ".htm":
+		return "html"
 	default:
 		return "unknown"
 	}
@@ -135,6 +139,10 @@ func LangToExtensions(lang string) []string {
 		return []string{".toml"}
 	case "yaml":
 		return []string{".yml", ".yaml"}
+	case "protobuf":
+		return []string{".proto"}
+	case "html":
+		return []string{".html", ".htm"}
 	default:
 		return nil
 	}

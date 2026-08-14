@@ -33,12 +33,14 @@ import (
 	"github.com/smacker/go-tree-sitter/elixir"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/groovy"
+	"github.com/smacker/go-tree-sitter/html"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
 	"github.com/smacker/go-tree-sitter/lua"
 	"github.com/smacker/go-tree-sitter/ocaml"
 	"github.com/smacker/go-tree-sitter/php"
+	"github.com/smacker/go-tree-sitter/protobuf"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
@@ -62,29 +64,31 @@ type TreeSitterAdapter struct {
 func NewTreeSitterAdapter() *TreeSitterAdapter {
 	return &TreeSitterAdapter{
 		langs: map[string]*ts.Language{
-			"go":     golang.GetLanguage(),
-			"java":   java.GetLanguage(),
-			"ts":     tslang.GetLanguage(),
-			"js":     javascript.GetLanguage(),
-			"py":     python.GetLanguage(),
-			"rust":   rust.GetLanguage(),
-			"cpp":    cpp.GetLanguage(),
-			"c":      c.GetLanguage(),
-			"kotlin": kotlin.GetLanguage(),
-			"swift":  swift.GetLanguage(),
-			"php":    php.GetLanguage(),
-			"csharp": csharp.GetLanguage(),
-			"ruby":   ruby.GetLanguage(),
-			"bash":   bash.GetLanguage(),
-			"scala":  scala.GetLanguage(),
-			"sql":    sql.GetLanguage(),
-			"elixir": elixir.GetLanguage(),
-			"ocaml":  ocaml.GetLanguage(),
-			"lua":    lua.GetLanguage(),
-			"groovy": groovy.GetLanguage(),
-			"css":    css.GetLanguage(),
-			"toml":   toml.GetLanguage(),
-			"yaml":   yaml.GetLanguage(),
+			"go":       golang.GetLanguage(),
+			"java":     java.GetLanguage(),
+			"ts":       tslang.GetLanguage(),
+			"js":       javascript.GetLanguage(),
+			"py":       python.GetLanguage(),
+			"rust":     rust.GetLanguage(),
+			"cpp":      cpp.GetLanguage(),
+			"c":        c.GetLanguage(),
+			"kotlin":   kotlin.GetLanguage(),
+			"swift":    swift.GetLanguage(),
+			"php":      php.GetLanguage(),
+			"csharp":   csharp.GetLanguage(),
+			"ruby":     ruby.GetLanguage(),
+			"bash":     bash.GetLanguage(),
+			"scala":    scala.GetLanguage(),
+			"sql":      sql.GetLanguage(),
+			"elixir":   elixir.GetLanguage(),
+			"ocaml":    ocaml.GetLanguage(),
+			"lua":      lua.GetLanguage(),
+			"groovy":   groovy.GetLanguage(),
+			"css":      css.GetLanguage(),
+			"toml":     toml.GetLanguage(),
+			"yaml":     yaml.GetLanguage(),
+			"protobuf": protobuf.GetLanguage(),
+			"html":     html.GetLanguage(),
 		},
 	}
 }
@@ -110,83 +114,89 @@ func (a *TreeSitterAdapter) Close() error {
 
 // astClassNodeTypes 各语言「类/接口/结构体/枚举声明」的 AST 节点类型集合。
 var astClassNodeTypes = map[string]map[string]bool{
-	"go":     {"type_declaration": true},
-	"java":   {"class_declaration": true, "interface_declaration": true, "enum_declaration": true, "record_declaration": true},
-	"ts":     {"class_declaration": true, "interface_declaration": true, "enum_declaration": true},
-	"js":     {"class_declaration": true},
-	"py":     {"class_definition": true},
-	"rust":   {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
-	"cpp":    {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
-	"c":      {"struct_specifier": true, "enum_specifier": true, "union_specifier": true},
-	"kotlin": {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
-	"swift":  {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
-	"php":    {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
-	"csharp": {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
-	"ruby":   {"class": true, "module": true},
-	"bash":   {},
-	"scala":  {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
-	"sql":    {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
-	"elixir": {},
-	"ocaml":  {"module_definition": true},
-	"lua":    {},
-	"groovy": {"class_definition": true},
-	"css":    {"rule_set": true, "media_statement": true, "keyframes_statement": true},
-	"toml":   {"table": true},
-	"yaml":   {},
+	"go":       {"type_declaration": true},
+	"java":     {"class_declaration": true, "interface_declaration": true, "enum_declaration": true, "record_declaration": true},
+	"ts":       {"class_declaration": true, "interface_declaration": true, "enum_declaration": true},
+	"js":       {"class_declaration": true},
+	"py":       {"class_definition": true},
+	"rust":     {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
+	"cpp":      {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
+	"c":        {"struct_specifier": true, "enum_specifier": true, "union_specifier": true},
+	"kotlin":   {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
+	"swift":    {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
+	"php":      {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
+	"csharp":   {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
+	"ruby":     {"class": true, "module": true},
+	"bash":     {},
+	"scala":    {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
+	"sql":      {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
+	"elixir":   {},
+	"ocaml":    {"module_definition": true},
+	"lua":      {},
+	"groovy":   {"class_definition": true},
+	"css":      {"rule_set": true, "media_statement": true, "keyframes_statement": true},
+	"toml":     {"table": true},
+	"yaml":     {},
+	"protobuf": {"message": true, "service": true, "enum": true},
+	"html":     {"element": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
 var astMethodNodeTypes = map[string]map[string]bool{
-	"go":     {"method_declaration": true, "function_declaration": true},
-	"java":   {"method_declaration": true, "constructor_declaration": true},
-	"ts":     {"method_definition": true, "function_declaration": true},
-	"js":     {"method_definition": true, "function_declaration": true},
-	"py":     {"function_definition": true},
-	"rust":   {"function_item": true},
-	"cpp":    {"function_definition": true},
-	"c":      {"function_definition": true},
-	"kotlin": {"function_declaration": true},
-	"swift":  {"function_declaration": true},
-	"php":    {"function_definition": true, "method_declaration": true},
-	"csharp": {"method_declaration": true, "constructor_declaration": true},
-	"ruby":   {"method": true, "singleton_method": true},
-	"bash":   {"function_definition": true},
-	"scala":  {"function_definition": true},
-	"sql":    {"create_function": true, "create_procedure": true},
-	"elixir": {},
-	"ocaml":  {"value_definition": true},
-	"lua":    {"function_statement": true},
-	"groovy": {"function_definition": true},
-	"css":    {},
-	"toml":   {},
-	"yaml":   {},
+	"go":       {"method_declaration": true, "function_declaration": true},
+	"java":     {"method_declaration": true, "constructor_declaration": true},
+	"ts":       {"method_definition": true, "function_declaration": true},
+	"js":       {"method_definition": true, "function_declaration": true},
+	"py":       {"function_definition": true},
+	"rust":     {"function_item": true},
+	"cpp":      {"function_definition": true},
+	"c":        {"function_definition": true},
+	"kotlin":   {"function_declaration": true},
+	"swift":    {"function_declaration": true},
+	"php":      {"function_definition": true, "method_declaration": true},
+	"csharp":   {"method_declaration": true, "constructor_declaration": true},
+	"ruby":     {"method": true, "singleton_method": true},
+	"bash":     {"function_definition": true},
+	"scala":    {"function_definition": true},
+	"sql":      {"create_function": true, "create_procedure": true},
+	"elixir":   {},
+	"ocaml":    {"value_definition": true},
+	"lua":      {"function_statement": true},
+	"groovy":   {"function_definition": true},
+	"css":      {},
+	"toml":     {},
+	"yaml":     {},
+	"protobuf": {"rpc": true},
+	"html":     {},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
 var astCallNodeTypes = map[string]map[string]bool{
-	"go":     {"call_expression": true},
-	"java":   {"method_invocation": true},
-	"ts":     {"call_expression": true},
-	"js":     {"call_expression": true},
-	"py":     {"call": true},
-	"rust":   {"call_expression": true},
-	"cpp":    {"call_expression": true},
-	"c":      {"call_expression": true},
-	"kotlin": {"call_expression": true},
-	"swift":  {"call_expression": true},
-	"php":    {"function_call_expression": true, "member_call_expression": true},
-	"csharp": {"invocation_expression": true},
-	"ruby":   {"call": true},
-	"bash":   {"command": true, "command_call": true},
-	"scala":  {"call_expression": true, "method_invocation": true},
-	"sql":    {"invocation": true, "function_call": true, "call_statement": true},
-	"elixir": {"call": true},
-	"ocaml":  {"application_expression": true},
-	"lua":    {"function_call": true},
-	"groovy": {"function_call": true},
-	"css":    {},
-	"toml":   {},
-	"yaml":   {},
+	"go":       {"call_expression": true},
+	"java":     {"method_invocation": true},
+	"ts":       {"call_expression": true},
+	"js":       {"call_expression": true},
+	"py":       {"call": true},
+	"rust":     {"call_expression": true},
+	"cpp":      {"call_expression": true},
+	"c":        {"call_expression": true},
+	"kotlin":   {"call_expression": true},
+	"swift":    {"call_expression": true},
+	"php":      {"function_call_expression": true, "member_call_expression": true},
+	"csharp":   {"invocation_expression": true},
+	"ruby":     {"call": true},
+	"bash":     {"command": true, "command_call": true},
+	"scala":    {"call_expression": true, "method_invocation": true},
+	"sql":      {"invocation": true, "function_call": true, "call_statement": true},
+	"elixir":   {"call": true},
+	"ocaml":    {"application_expression": true},
+	"lua":      {"function_call": true},
+	"groovy":   {"function_call": true},
+	"css":      {},
+	"toml":     {},
+	"yaml":     {},
+	"protobuf": {},
+	"html":     {},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -380,6 +390,20 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 			}
 		}
 	}
+	// HTML element → start_tag → tag_name（`<div ...>` → `div`）
+	if n.Type() == "element" {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			st := n.NamedChild(i)
+			if st.Type() != "start_tag" {
+				continue
+			}
+			for j := 0; j < int(st.NamedChildCount()); j++ {
+				if c := st.NamedChild(j); c.Type() == "tag_name" {
+					return string(c.Content(src))
+				}
+			}
+		}
+	}
 	if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
 		if s := string(name.Content(src)); s != "" {
 			return s
@@ -409,12 +433,14 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 // astClassType 从 AST 节点类型映射 IR 类类型。
 func astClassType(nodeType, lang string) string {
 	switch nodeType {
-	case "interface_declaration", "trait_item":
+	case "interface_declaration", "trait_item", "service":
 		return "INTERFACE"
-	case "enum_declaration", "enum_item", "enum_specifier":
+	case "enum_declaration", "enum_item", "enum_specifier", "enum":
 		return "ENUM"
 	case "object_declaration":
 		return "OBJECT"
+	case "element":
+		return "ELEMENT"
 	default:
 		return "CLASS"
 	}

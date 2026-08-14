@@ -25,7 +25,7 @@
 ## 技术栈
 
 - 语言：Go 1.25.2
-- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（**可选**：仅在 `go build -tags onnx` 时引入）；解析适配器为 22 语言（go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml）正则启发式，无 CGO 依赖（`-tags treesitter` 可切换真语法树）；ONNX 语义模型支持远程分发（`storage.vector.model_download_url` 自动下载 + SHA-256 校验）
+- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（**可选**：仅在 `go build -tags onnx` 时引入）；解析适配器为 24 语言（go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html）正则启发式，无 CGO 依赖（`-tags treesitter` 可切换真语法树）；ONNX 语义模型支持远程分发（`storage.vector.model_download_url` 自动下载 + SHA-256 校验）
 - 存储：JSON 文件（默认 fallback）+ SQLite（modernc.org/sqlite 纯 Go 免 CGO，已接线，`storage.driver=sqlite` 启用）；PostgreSQL（`storage.driver=pg|postgres`，需 `go build -tags pg`）+ Redis 热点缓存层（`storage.kv=redis://host:6379/0`，需 `go build -tags redis`）经 `cmd/codeschema` 统一分发接入
 - 协议：MCP Server（JSON-RPC 2.0 + SSE）+ HTTP API（RESTful）
 - 部署：单二进制 / Docker 容器 / 多平台交叉编译
