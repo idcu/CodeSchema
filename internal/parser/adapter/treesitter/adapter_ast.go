@@ -30,8 +30,10 @@ import (
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
+	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/rust"
+	"github.com/smacker/go-tree-sitter/swift"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
 
 	"github.com/idcu/codeschema/internal/parser"
@@ -55,6 +57,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"rust":   rust.GetLanguage(),
 			"cpp":    cpp.GetLanguage(),
 			"kotlin": kotlin.GetLanguage(),
+			"swift":  swift.GetLanguage(),
+			"php":    php.GetLanguage(),
 		},
 	}
 }
@@ -88,6 +92,8 @@ var astClassNodeTypes = map[string]map[string]bool{
 	"rust":   {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
 	"cpp":    {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
 	"kotlin": {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
+	"swift":  {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
+	"php":    {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
@@ -100,6 +106,8 @@ var astMethodNodeTypes = map[string]map[string]bool{
 	"rust":   {"function_item": true},
 	"cpp":    {"function_definition": true},
 	"kotlin": {"function_declaration": true},
+	"swift":  {"function_declaration": true},
+	"php":    {"function_definition": true, "method_declaration": true},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
@@ -112,6 +120,8 @@ var astCallNodeTypes = map[string]map[string]bool{
 	"rust":   {"call_expression": true},
 	"cpp":    {"call_expression": true},
 	"kotlin": {"call_expression": true},
+	"swift":  {"call_expression": true},
+	"php":    {"function_call_expression": true, "member_call_expression": true},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
@@ -254,18 +264,112 @@ func astClassType(nodeType, lang string) string {
 	}
 }
 
+// cppCtorTypes C++ 常见标准库/内置类型名：`std::string(x)` 这类函数式转换是类型构造，
+// 不是函数调用（区别于 `std::to_string(x)` 真调用）。
+var cppCtorTypes = map[string]bool{
+	"string": true, "wstring": true, "vector": true, "list": true, "map": true,
+	"set": true, "pair": true, "tuple": true, "optional": true, "unique_ptr": true,
+	"shared_ptr": true, "array": true, "deque": true, "queue": true, "stack": true,
+	"string_view": true, "function": true, "unordered_map": true, "unordered_set": true,
+}
+
 // astCalleeName 提取调用表达式的被调方名。
 //
-// 通用策略：取调用表达式文本中第一个 '(' 之前的部分（如 `paymentService.pay(order)`
-// → `paymentService.pay`；`repository.findById(id)` → `repository.findById`），
-// 覆盖 Java method_invocation / Kotlin·Go call_expression / Python call 等所有语言的
-// 对象方法调用与命名空间调用形式。
+// 处理三类 AST 形态：
+//  1. 简单调用 `foo(x)` / `obj.method(x)` → function 字段文本（`foo` / `obj.method`）；
+//  2. 链式调用 `a().b().c()` → 取 selector 链最后一段的标识符（`c`），
+//     避免嵌套 call 都截到第一个 `(` 变成 `a`；
+//  3. 泛型调用 `http.get<T[]>(x)` → 剥离 `<...>` 泛型参数（`http.get`）；
+//  4. C++/TS 类型构造 `std::string(x)` / `Foo<T>(x)`：function 字段为类型节点时跳过
+//     （类型转换/构造不是函数调用）；
+//  5. PHP `member_call_expression`：取最后一个 name 子节点（`$payment->pay` → `pay`），
+//     与正则路径口径一致（方法名）。
 func astCalleeName(n *ts.Node, src []byte) string {
+	fn := n.ChildByFieldName("function")
+	if fn != nil && !fn.IsNull() {
+		// 类型构造 / 类型转换调用（C++ std::string(x)、TS 类型断言）跳过
+		if isTypeNode(fn.Type()) || isCppCtorCall(fn, src) {
+			return ""
+		}
+		// 成员选择表达式：区分「普通 obj.method」与「链式 a().b().c()」
+		if isMemberExprType(fn.Type()) {
+			// 操作数是调用 → 链式调用，取最后一段标识符（c）
+			if first := fn.NamedChild(0); first != nil && !first.IsNull() && isCallNodeType(first.Type()) {
+				if last := fn.NamedChild(int(fn.NamedChildCount()) - 1); last != nil && !last.IsNull() {
+					return stripTypeArgs(string(last.Content(src)))
+				}
+			}
+			// 普通 obj.method / obj.field 调用 → 保留完整成员表达式文本
+			return stripTypeArgs(string(fn.Content(src)))
+		}
+		return stripTypeArgs(string(fn.Content(src)))
+	}
+	// PHP member_call_expression：无 function 字段，取最后一个 name 子节点（方法名）
+	if n.Type() == "member_call_expression" {
+		for i := int(n.NamedChildCount()) - 1; i >= 0; i-- {
+			if c := n.NamedChild(i); c != nil && !c.IsNull() && c.Type() == "name" {
+				return string(c.Content(src))
+			}
+		}
+	}
+	// Python call 等：直接取调用表达式文本（`(` 前）
 	text := string(n.Content(src))
 	if idx := strings.Index(text, "("); idx >= 0 {
-		return strings.TrimSpace(text[:idx])
+		return stripTypeArgs(strings.TrimSpace(text[:idx]))
 	}
 	return ""
+}
+
+// isCppCtorCall 判断 C++ 类型构造调用（如 `std::string(key)`）。
+func isCppCtorCall(fn *ts.Node, src []byte) bool {
+	if fn.Type() != "qualified_identifier" {
+		return false
+	}
+	text := string(fn.Content(src))
+	idx := strings.LastIndex(text, "::")
+	if idx < 0 {
+		return false
+	}
+	return cppCtorTypes[text[idx+2:]]
+}
+
+// isTypeNode 判断节点类型是否为「类型」节点（用于跳过类型构造/转换调用）。
+func isTypeNode(t string) bool {
+	switch t {
+	case "type_identifier", "qualified_type", "primitive_type",
+		"generic_type", "template_type", "type_arguments", "type_expression":
+		return true
+	}
+	return false
+}
+
+// isMemberExprType 判断节点类型是否为「成员选择/字段访问」表达式。
+func isMemberExprType(t string) bool {
+	switch t {
+	case "selector_expression", "field_expression", "member_expression", "select_expression", "nav_expression", "attribute":
+		return true
+	}
+	return false
+}
+
+// isCallNodeType 判断节点类型是否为「调用表达式」（链式调用的操作数）。
+func isCallNodeType(t string) bool {
+	switch t {
+	case "call_expression", "method_invocation", "call":
+		return true
+	}
+	return false
+}
+
+// stripTypeArgs 剥离泛型/模板实参（`http.get<T[]>` → `http.get`；`foo<int>` → `foo`）。
+// 同时剥离 PHP 变量前缀（`$payment->pay` → `payment->pay`）。
+func stripTypeArgs(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "$")
+	if idx := strings.Index(s, "<"); idx >= 0 {
+		return strings.TrimSpace(s[:idx])
+	}
+	return s
 }
 
 // firstIdentifierText 在子树中找第一个 identifier/type_identifier/name 节点文本（名称提取兜底）。

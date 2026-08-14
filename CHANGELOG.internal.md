@@ -6,7 +6,29 @@
 
 ## 提交记录
 
-### Commit 59: feat(parser): T2-1 方案 C 全量落地——伪调用剔除 + 调用图基准 + `-tags treesitter` 真语法树（PHASE_09）
+### Commit 61: feat(parser): T2-1 可选项全量——AST 语言细分 + 两档基准 + CI treesitter job + Swift/PHP 扩展（PHASE_09）
+
+**核心改动点（可选项①·AST 语言细分）**：
+- `internal/parser/adapter/treesitter/adapter_ast.go`：`astCalleeName` 重构——链式调用取 selector 最后一段（`a().b().c()` → `c`）、普通 `obj.method` 保留完整成员文本、泛型剥离 `<...>`（`http.get<T[]>` → `http.get`）、C++ 类型构造跳过（`std::string(x)`，新增 `cppCtorTypes` + `isCppCtorCall`）、PHP `member_call_expression` 取最后一个 name（方法名口径与正则一致）；新增 `isCallNodeType`/`stripTypeArgs` 辅助。
+
+**核心改动点（可选项②·两档调用图基准）**：
+- `internal/adapterbench/treesitter_callgraph_bench_test.go`：扩为「简单 + 复杂」两档（复杂档覆盖重载/泛型/注解/多行签名/嵌套/链式调用），按档统计 P/R（`simple_overall`/`complex_overall`）；修正 golden（链式中间段 `Next`/`Then`/`then`/`or_else`/`get` 是真实调用）。
+- **实证结果**：正则 SIMPLE P=1.00/R=1.00、COMPLEX P=0.95/R=0.81；**AST 9 语言双档 P=1.00/R=1.00（TP=44 FP=0 FN=0）**——真语法树在真实复杂度下的价值实证（对照：复杂档正则 R=0.81 vs AST R=1.00）。
+
+**核心改动点（可选项③·CI treesitter job）**：
+- `.github/workflows/ci.yml`：新增 `treesitter` job（ubuntu，needs: test）——`-tags treesitter` 构建/vet/测试（AST 适配器 + adapterbench）+ 默认路径（正则）回归守护。
+
+**核心改动点（可选项④·T6-2 扩展 Swift/PHP）**：
+- `internal/parser/adapter/adapter.go` / `internal/scanner/scanner.go`：`ExtToLang`/`SupportedLanguages`/`LangToExtensions`/`detectLang` 增加 `.swift`/`.php`。
+- 正则版 `adapter.go`：`initPatterns` 增加 swift（class/struct/enum/protocol/extension + `func` 方法）/ php（class/interface/trait/enum + `function` 方法）模式；PHP callPattern 用**非捕获组**支持 `$obj->method(...)`/`$obj::method(...)`；`detectClassType`/`isKeyword` 同步。
+- AST 版 `adapter_ast.go`：注册 swift/php grammar + 类/方法/调用节点类型表（php `member_call_expression`）。
+- 测试：Swift/PHP 解析测试（正则版）+ 基准样本扩充至 9 语言。
+
+**验证**：默认/`-tags treesitter` 双路径构建+测试全绿；全仓 23 包通过；`go mod tidy` 后仍绿。
+**文档同步**：`docs/dev/02`/`docs/dev/07`/`README.md`（7 语言 → 9 语言）；`analysis/2026-08-14-t2-1-parser-precision-eval.md`、`analysis/2026-08-14-treesitter-callgraph-bench.md`、任务清单。
+**遗留**：C#/Ruby 语言扩展（go-tree-sitter 已支持，按需）；基准扩充模板特化/反射等更复杂样本。
+
+### Commit 60: feat(parser): T2-1 方案 C 全量落地——伪调用剔除 + 调用图基准 + `-tags treesitter` 真语法树（PHASE_09）
 
 **核心改动点（补强①·字符串/注释剔除状态机）**：
 - `internal/parser/adapter/treesitter/adapter.go`：新增 `codeSanitizer` **跨行状态机**——剔除字符串/注释内的伪调用：

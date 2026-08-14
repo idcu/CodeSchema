@@ -85,6 +85,44 @@ jobs:
       - name: Test with race detector
         run: go test -race -count=1 -timeout 180s ./...
 
+  # === 真语法树路径（-tags treesitter，需 gcc） ===
+  treesitter:
+    name: TreeSitter AST (CGO)
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-gotreesitter-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-gotreesitter-
+
+      # 真语法树路径守护：构建 + AST 适配器测试 + 调用图基准（复杂档需精确解析）
+      - name: Build with -tags treesitter
+        run: go build -tags treesitter ./...
+
+      - name: Vet with -tags treesitter
+        run: go vet -tags treesitter ./internal/parser/adapter/treesitter/...
+
+      - name: Test with -tags treesitter
+        run: go test -tags treesitter -count=1 -timeout 300s ./internal/parser/adapter/treesitter/... ./internal/adapterbench/...
+
+      # 默认路径（正则，免 CGO）不回归
+      - name: Test default (regex) path
+        run: go test -count=1 -timeout 120s ./internal/parser/adapter/treesitter/... ./internal/adapterbench/...
+
   # === 交叉编译（无 CGO） ===
   cross:
     name: Cross-Compile

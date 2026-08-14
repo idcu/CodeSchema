@@ -239,6 +239,10 @@ func detectLang(path string) string {
 		return "cpp"
 	case ".kt", ".kts":
 		return "kotlin"
+	case ".swift":
+		return "swift"
+	case ".php":
+		return "php"
 	default:
 		return "unknown"
 	}
@@ -280,14 +284,14 @@ func statSize(path string) int64 {
 func listFiles(root string) ([]string, error) {
 	var files []string
 	ignoreDirs := map[string]bool{
-		".git":        true,
+		".git":         true,
 		"node_modules": true,
-		"target":      true,
-		"build":       true,
-		"vendor":      true,
-		".idea":       true,
-		".vscode":     true,
-		"__pycache__": true,
+		"target":       true,
+		"build":        true,
+		"vendor":       true,
+		".idea":        true,
+		".vscode":      true,
+		"__pycache__":  true,
 	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

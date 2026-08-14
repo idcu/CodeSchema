@@ -16,8 +16,8 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin"}
-	unsupported := []string{"ruby", "php", "swift", "unknown"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "kotlin", "swift", "php"}
+	unsupported := []string{"ruby", "unknown"}
 
 	for _, lang := range supported {
 		if !a.Supports(lang) {
@@ -457,5 +457,83 @@ func (s *Svc) Run() {
 	}
 	if !foundReal {
 		t.Errorf("expected realCall detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Swift 验证 Swift 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Swift(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "UserService.swift")
+	content := `import Foundation
+
+class UserService {
+    func getUser(id: Int) -> User {
+        let s = "fakeCall(1)"
+        return repository.findById(id)
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "swift" {
+		t.Errorf("expected swift, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 class (UserService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "repository.findById" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected repository.findById detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_PHP 验证 PHP 类/方法/调用解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_PHP(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OrderService.php")
+	content := `<?php
+
+class OrderService {
+    public function createOrder($order) {
+        $s = "fakeCall(1)";
+        return $this->payment->pay($order);
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "php" {
+		t.Errorf("expected php, got %s", doc.Language)
+	}
+	if len(doc.Classes) != 1 {
+		t.Errorf("expected 1 class (OrderService), got %d", len(doc.Classes))
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "pay" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected pay detected, got calls: %+v", doc.Calls)
 	}
 }

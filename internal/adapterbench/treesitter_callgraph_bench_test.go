@@ -26,6 +26,7 @@ import (
 // callSample 单语言黄金样本：代码 + 期望检出的调用（CalleeFQN 集合）。
 type callSample struct {
 	Lang   string   `json:"lang"`
+	Tier   string   `json:"tier"` // simple / complex（测试运行时注入）
 	Ext    string   `json:"ext"`
 	Code   string   `json:"-"`
 	Golden []string `json:"golden"` // 期望检出的 callee 名（去重后比较）
@@ -118,11 +119,150 @@ public:
 `,
 		Golden: []string{"repository.findById", "notify.push"},
 	},
+	{
+		Lang: "swift", Ext: ".swift",
+		Code: `class UserService {
+    func run() {
+        repository.findById(1)
+        let s = "fakeCall(1)"
+        notify.push() // fakeB(2)
+    }
+}
+`,
+		Golden: []string{"repository.findById", "notify.push"},
+	},
+	{
+		Lang: "php", Ext: ".php",
+		Code: `<?php
+
+class OrderService {
+    public function run($order) {
+        $payment->pay($order);
+        $s = "fakeCall(1)";
+        $notify->send($order); // fakeB(2)
+    }
+}
+`,
+		Golden: []string{"pay", "send"},
+	},
+}
+
+// complexCallSamples 复杂场景黄金样本：覆盖重载、泛型、注解、多行签名、嵌套/链式调用。
+// 与 callSamples（简单档）分开统计，暴露启发式与真语法树在真实复杂度下的差距。
+var complexCallSamples = []callSample{
+	{
+		Lang: "go", Ext: ".go",
+		Code: `package main
+
+type Handler struct{}
+
+// Handle 多行签名 + 泛型参数 + 嵌套调用。
+func (h *Handler) Handle(
+	ctx context.Context,
+	req *Request,
+) (Result, error) {
+	repo.FindByID(req.ID).Then(func(r Result) {
+		notify.Send(r)
+	})
+	chain().Next().Final()
+	return Result{}, nil
+}
+`,
+		Golden: []string{"repo.FindByID", "notify.Send", "chain", "Next", "Final", "Then"},
+	},
+	{
+		Lang: "java", Ext: ".java",
+		Code: `package com.example;
+
+@Service
+public class OrderFacade {
+    // 重载 + 注解 + 泛型
+    @Transactional
+    public Order create(OrderDto dto, @Nullable User user) {
+        validator.validate(dto);
+        return mapper.toEntity(dto);
+    }
+
+    public Order create(long id) {
+        return findById(id); // 递归式内部调用
+    }
+}
+`,
+		Golden: []string{"validator.validate", "mapper.toEntity", "findById"},
+	},
+	{
+		Lang: "ts", Ext: ".ts",
+		Code: `class DataService {
+  // 泛型方法 + 链式调用
+  fetchAll<T>(filter: Filter): Promise<T[]> {
+    return http.get<T[]>('/api/items', { params: filter })
+      .then(res => res.data)
+      .catch(err => logger.error(err));
+  }
+}
+`,
+		Golden: []string{"http.get", "then", "logger.error"},
+	},
+	{
+		Lang: "py", Ext: ".py",
+		Code: `@decorator
+def process(items):
+    """docstring with fakeCall(1) inside"""
+    result = pipeline(items).filter(lambda x: x.is_valid()).map(transform)
+    if result:
+        emit(result)
+    return result
+`,
+		Golden: []string{"pipeline", "filter", "map", "emit", "x.is_valid"},
+	},
+	{
+		Lang: "rust", Ext: ".rs",
+		Code: `struct Repo;
+
+impl Repo {
+    // 泛型方法 + 链式调用
+    pub fn find<T: Into<Id>>(&self, id: T) -> Option<Record> {
+        self.cache.get(&id).or_else(|| self.db.load(id))
+    }
+}
+`,
+		Golden: []string{"self.cache.get", "or_else", "self.db.load"},
+	},
+	{
+		Lang: "cpp", Ext: ".cpp",
+		Code: `template <typename T>
+class Cache {
+public:
+    // 模板方法 + 重载
+    T get(const std::string& key) const {
+        store.find(key);
+        return fallback.load(key);
+    }
+    T get(const char* key) const {
+        return get(std::string(key));
+    }
+};
+`,
+		Golden: []string{"store.find", "fallback.load", "get"},
+	},
+	{
+		Lang: "kotlin", Ext: ".kt",
+		Code: `class OrderService {
+    // 泛型 + 链式调用 + 空安全
+    fun <T : Any> load(id: Long): T? {
+        val record = repository.findById(id) ?: return null
+        return mapper.map(record).also { audit.track(it) }
+    }
+}
+`,
+		Golden: []string{"repository.findById", "mapper.map", "audit.track"},
+	},
 }
 
 // langResult 单语言基准结果。
 type langResult struct {
 	Lang      string   `json:"lang"`
+	Tier      string   `json:"tier"` // "simple" / "complex"
 	Detected  []string `json:"detected"`
 	Golden    []string `json:"golden"`
 	TruePos   int      `json:"true_positive"`
@@ -136,8 +276,19 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 	ctx := context.Background()
 	a := treesitter.NewTreeSitterAdapter()
 
+	// 简单 + 复杂两档样本合并统计
+	allSamples := make([]callSample, 0, len(callSamples)+len(complexCallSamples))
+	for _, s := range callSamples {
+		s.Tier = "simple"
+		allSamples = append(allSamples, s)
+	}
+	for _, s := range complexCallSamples {
+		s.Tier = "complex"
+		allSamples = append(allSamples, s)
+	}
+
 	var results []langResult
-	for _, sample := range callSamples {
+	for _, sample := range allSamples {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "main"+sample.Ext)
 		if err := os.WriteFile(path, []byte(sample.Code), 0644); err != nil {
@@ -183,6 +334,7 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 
 		res := langResult{
 			Lang:      sample.Lang,
+			Tier:      sample.Tier,
 			Detected:  detected,
 			Golden:    sample.Golden,
 			TruePos:   tp,
@@ -196,35 +348,56 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 			res.Precision = 1
 		}
 		results = append(results, res)
-		t.Logf("%-7s detected=%v golden=%v P=%.2f R=%.2f", sample.Lang, detected, sample.Golden, res.Precision, res.Recall)
+		t.Logf("%-7s[%-7s] detected=%v golden=%v P=%.2f R=%.2f", sample.Lang, sample.Tier, detected, sample.Golden, res.Precision, res.Recall)
 	}
 
-	// 汇总
-	var totalTP, totalFP, totalFN int
+	// 汇总（分档统计）
+	summary := func(rs []langResult) langResult {
+		var tp, fp, fn int
+		for _, r := range rs {
+			tp += r.TruePos
+			fp += r.FalsePos
+			fn += r.FalseNeg
+		}
+		o := langResult{Lang: "ALL", TruePos: tp, FalsePos: fp, FalseNeg: fn}
+		if tp+fp > 0 {
+			o.Precision = float64(tp) / float64(tp+fp)
+		} else {
+			o.Precision = 1
+		}
+		if tp+fn > 0 {
+			o.Recall = float64(tp) / float64(tp+fn)
+		}
+		return o
+	}
+	var simpleRs, complexRs []langResult
 	for _, r := range results {
-		totalTP += r.TruePos
-		totalFP += r.FalsePos
-		totalFN += r.FalseNeg
+		if r.Tier == "complex" {
+			complexRs = append(complexRs, r)
+		} else {
+			simpleRs = append(simpleRs, r)
+		}
 	}
-	overall := langResult{
-		Lang:      "ALL",
-		TruePos:   totalTP,
-		FalsePos:  totalFP,
-		FalseNeg:  totalFN,
-		Precision: float64(totalTP) / float64(totalTP+totalFP),
-		Recall:    float64(totalTP) / float64(totalTP+totalFN),
-	}
-	if totalTP+totalFP == 0 {
-		overall.Precision = 1
-	}
-	t.Logf("OVERALL  P=%.2f R=%.2f (TP=%d FP=%d FN=%d)", overall.Precision, overall.Recall, totalTP, totalFP, totalFN)
+	simpleOverall := summary(simpleRs)
+	complexOverall := summary(complexRs)
+	overall := summary(results)
+
+	t.Logf("SIMPLE  P=%.2f R=%.2f (TP=%d FP=%d FN=%d)", simpleOverall.Precision, simpleOverall.Recall, simpleOverall.TruePos, simpleOverall.FalsePos, simpleOverall.FalseNeg)
+	t.Logf("COMPLEX P=%.2f R=%.2f (TP=%d FP=%d FN=%d)", complexOverall.Precision, complexOverall.Recall, complexOverall.TruePos, complexOverall.FalsePos, complexOverall.FalseNeg)
+	t.Logf("OVERALL P=%.2f R=%.2f (TP=%d FP=%d FN=%d)", overall.Precision, overall.Recall, overall.TruePos, overall.FalsePos, overall.FalseNeg)
 
 	// 产出报告
 	out := map[string]any{
-		"generated_at": time.Now().Format(time.RFC3339),
-		"samples":      results,
-		"overall":      overall,
-		"conclusion":   fmt.Sprintf("7 语言正则启发式调用检测总体 Precision=%.2f Recall=%.2f（TP=%d FP=%d FN=%d）；样本含字符串/注释伪调用陷阱，状态机剔除已生效；精度可度量基线建立（T2-1 补强②）。", overall.Precision, overall.Recall, totalTP, totalFP, totalFN),
+		"generated_at":    time.Now().Format(time.RFC3339),
+		"samples":         results,
+		"simple_overall":  simpleOverall,
+		"complex_overall": complexOverall,
+		"overall":         overall,
+		"conclusion": fmt.Sprintf(
+			"7 语言调用检测精度基线（两档）：简单档 P=%.2f/R=%.2f（TP=%d FP=%d FN=%d），复杂档（重载/泛型/注解/多行签名/嵌套/链式）P=%.2f/R=%.2f（TP=%d FP=%d FN=%d）；总体 P=%.2f/R=%.2f。样本含字符串/注释伪调用陷阱（状态机剔除已生效）；复杂档暴露启发式/真语法树在真实复杂度下的差距（T2-1 补强②）。",
+			simpleOverall.Precision, simpleOverall.Recall, simpleOverall.TruePos, simpleOverall.FalsePos, simpleOverall.FalseNeg,
+			complexOverall.Precision, complexOverall.Recall, complexOverall.TruePos, complexOverall.FalsePos, complexOverall.FalseNeg,
+			overall.Precision, overall.Recall),
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -243,16 +416,20 @@ func writeCallGraphMarkdown(t *testing.T, root string, out map[string]any) {
 	var b strings.Builder
 	b.WriteString("# treesitter 多语言调用检测精度基准（2026-08-14）\n\n")
 	b.WriteString(fmt.Sprintf("- 生成时间: %v\n", out["generated_at"]))
-	b.WriteString("- 口径：7 语言黄金样本（各含 ≥2 真实调用 + 字符串/注释伪调用陷阱），统计检出 vs 黄金的 Precision/Recall\n\n")
-	b.WriteString("| 语言 | 检出 | 黄金 | TP | FP | FN | Precision | Recall |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("- 口径：7 语言黄金样本（简单档 + 复杂档：重载/泛型/注解/多行签名/嵌套/链式），统计检出 vs 黄金的 Precision/Recall\n\n")
+	b.WriteString("| 档位 | 语言 | 检出 | 黄金 | TP | FP | FN | Precision | Recall |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range out["samples"].([]langResult) {
-		b.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %d | %d | %.2f | %.2f |\n",
-			r.Lang, len(r.Detected), len(r.Golden), r.TruePos, r.FalsePos, r.FalseNeg, r.Precision, r.Recall))
+		b.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %d | %d | %.2f | %.2f |\n",
+			r.Tier, r.Lang, len(r.Detected), len(r.Golden), r.TruePos, r.FalsePos, r.FalseNeg, r.Precision, r.Recall))
 	}
-	o := out["overall"].(langResult)
-	b.WriteString(fmt.Sprintf("| **ALL** | - | - | %d | %d | %d | **%.2f** | **%.2f** |\n",
-		o.TruePos, o.FalsePos, o.FalseNeg, o.Precision, o.Recall))
+	writeOverall := func(label string, o langResult) {
+		b.WriteString(fmt.Sprintf("| **%s** | - | - | - | %d | %d | %d | **%.2f** | **%.2f** |\n",
+			label, o.TruePos, o.FalsePos, o.FalseNeg, o.Precision, o.Recall))
+	}
+	writeOverall("SIMPLE", out["simple_overall"].(langResult))
+	writeOverall("COMPLEX", out["complex_overall"].(langResult))
+	writeOverall("ALL", out["overall"].(langResult))
 	b.WriteString("\n## 结论\n\n")
 	b.WriteString(out["conclusion"].(string))
 	b.WriteString("\n\n> 注：Precision=检出∩golden/检出；Recall=检出∩golden/golden。无检出时 Precision 记为 1（无假阳性）。\n")

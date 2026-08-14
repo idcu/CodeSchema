@@ -98,6 +98,21 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
 			commentTrim:    "//",
 		},
+		"swift": {
+			classPattern:   regexp.MustCompile(`^(public\s+|private\s+|internal\s+|fileprivate\s+)?(final\s+|open\s+)?(class|struct|enum|protocol|extension)\s+(\w+)`),
+			classNameIndex: 4,
+			methodPattern:  regexp.MustCompile(`^\s*(public|private|internal|fileprivate|static|final|override|mutating|\s)*\s*func\s+(\w[\w]*)\s*\(`),
+			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:    "//",
+		},
+		"php": {
+			classPattern:   regexp.MustCompile(`^(final\s+|abstract\s+)?(class|interface|trait|enum)\s+(\w+)`),
+			classNameIndex: 3,
+			methodPattern:  regexp.MustCompile(`^\s*(public|private|protected|static|final|abstract|function|\s)+\s*(function\s+)?(\w[\w]*)\s*\(`),
+			// 支持 $obj->method(...) / $obj::method(...) / func(...) 形式；非捕获组消费前缀，m[1] 为方法名
+			callPattern: regexp.MustCompile(`(?:\$?[\w]*\s*(?:->|::)\s*)?(\w[\w:]*)\s*\([^)]*\)`),
+			commentTrim: "//",
+		},
 	}
 }
 
@@ -310,6 +325,30 @@ func detectClassType(matches []string, lang string) string {
 			}
 		}
 		return "CLASS"
+	case "swift":
+		for _, m := range matches {
+			switch m {
+			case "protocol":
+				return "INTERFACE"
+			case "enum":
+				return "ENUM"
+			case "extension":
+				return "CLASS"
+			}
+		}
+		return "CLASS"
+	case "php":
+		for _, m := range matches {
+			switch m {
+			case "interface":
+				return "INTERFACE"
+			case "trait":
+				return "CLASS"
+			case "enum":
+				return "ENUM"
+			}
+		}
+		return "CLASS"
 	default:
 		return "CLASS"
 	}
@@ -468,6 +507,12 @@ func isKeyword(name string) bool {
 		// C/C++
 		"sizeof": true, "static_cast": true, "dynamic_cast": true,
 		"reinterpret_cast": true, "const_cast": true, "printf": true,
+		// Swift
+		"func": true, "guard": true, "repeat": true, "where": true,
+		"associatedtype": true, "fatalError": true,
+		// PHP
+		"echo": true, "print_r": true, "var_dump": true, "isset": true,
+		"empty": true, "unset": true, "die": true, "exit": true,
 	}
 	return keywords[name]
 }
