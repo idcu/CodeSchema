@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 51: feat(ai): AI 增强层落地——Enhancer + 预算管控 + LLMClient 接口（T4-1/PHASE_09）
+
+**核心改动点**：
+- `internal/ai/client.go`：新增 `LLMClient` 接口（`Complete(ctx, prompt) ([]string, error)` 标签/文档补全 + `Choose(ctx, prompt) (int, error)` 同名消歧选择），隔离具体 LLM 后端，便于测试注入 mock。
+- `internal/ai/budget.go`：新增 `Budget` 预算管控——perScan/perQuery **双作用域独立计数**（`tryConsumeScan`/`tryConsumeQuery`），`ResetScan`/`ResetQuery` 每次扫描/查询开始时重置，`ScanRemaining`/`QueryRemaining`/`ScanExhausted`/`QueryExhausted` 观测；limit 为负表示不限。
+- `internal/ai/enhancer.go`：新增 `Enhancer`——`EnhanceTag`（标签补全）、`EnhanceDoc`（残缺 doc 生成描述，多行拼接）、`Disambiguate`（同名方法消歧，返回候选索引）；`IRable` 接口（Name/QualifiedName/DocComment/Kind）+ `NewClassEntity`/`NewMethodEntity` 适配 `store.ClassRecord`/`MethodRecord`；`SetPhase` 在扫描/查询期切换消耗对应预算；预算超限返回 `errors.ErrBudgetExceeded`（不调用 LLM），LLM 失败包装 `errors.ErrEnhanceFailed`——失败隔离，不影响主流程。
+- `internal/ai/budget_test.go` + `enhancer_test.go`：新增 10 项测试（scan 限额/查询不限/双作用域独立、EnhanceTag 成功与超预算不触 LLM、EnhanceDoc 拼接、Disambiguate 索引、LLM 失败包装、phase 切换预算、store 记录适配），`go test -race` 全绿。
+
+**验证**：`go vet ./...` / `go build ./...` / `go test -race ./internal/ai/...` 全绿（10 项新增）。
+**遗留**：Enhancer 尚未接入生产编排（扫描器/查询处理器未调用）；真实 LLM provider（OpenAI/本地模型）与 `config.ai` 配置接线为后续项。
+
 ### Commit 50: feat(testlink): 测试关联补齐 explicit + coverage 策略（T4-1/PHASE_09）
 
 **核心改动点**：
