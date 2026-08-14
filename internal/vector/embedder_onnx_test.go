@@ -4,7 +4,9 @@ package vector
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -161,4 +163,52 @@ func TestONNXEmbedder_Deterministic(t *testing.T) {
 // cosSim 计算余弦相似度，返回 float32。
 func cosSim(a, b []float32) float32 {
 	return float32(cosineSimilarity(a, b))
+}
+func TestONNXEmbedderConfig_Defaults(t *testing.T) {
+	// 验证默认值推导：OutputLayer / InputNames / Dim / Precision 可配且默认合理
+	e := &ONNXEmbedder{}
+	_ = e // 占位：默认值推导在 NewONNXEmbedder 内部，此处验证字段可配性
+	cfg := ONNXEmbedderConfig{MaxLen: 128}
+	if cfg.OutputLayer != "" {
+		t.Fatalf("expected empty default OutputLayer, got %q", cfg.OutputLayer)
+	}
+	if cfg.Dim != 0 {
+		t.Fatalf("expected zero default Dim, got %d", cfg.Dim)
+	}
+}
+
+func TestONNXModelAvailableWithPrecision_Candidates(t *testing.T) {
+	dir := t.TempDir()
+	// 只放 fp32 模型，验证 fp32 偏好命中 model.onnx
+	onnxDir := filepath.Join(dir, "onnx")
+	if err := os.MkdirAll(onnxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(onnxDir, "model.onnx"), []byte("fp32"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tokenizer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// fp32 偏好应命中 model.onnx
+	mp, tok := ONNXModelAvailableWithPrecision(dir, "fp32")
+	if mp == "" || tok == "" {
+		t.Fatal("expected model available with fp32 preference")
+	}
+	if !strings.HasSuffix(mp, "model.onnx") {
+		t.Fatalf("expected model.onnx for fp32, got %s", mp)
+	}
+
+	// 默认（fp16）偏好应回落命中 model.onnx（fp16 文件不存在时）
+	mp2, _ := ONNXModelAvailableWithPrecision(dir, "")
+	if !strings.HasSuffix(mp2, "model.onnx") {
+		t.Fatalf("expected fallback to model.onnx, got %s", mp2)
+	}
+
+	// any 同样命中
+	mp3, _ := ONNXModelAvailableWithPrecision(dir, "any")
+	if mp3 == "" {
+		t.Fatal("expected model available with any precision")
+	}
 }

@@ -17,6 +17,10 @@ type ONNXEmbedderConfig struct {
 	TokenizerPath string
 	MaxLen        int
 	LibraryDir    string
+	OutputLayer   string
+	InputNames    []string
+	Dim           int
+	Precision     string
 }
 
 // ONNXEmbedder 是禁用 onnx tag 时的占位类型，仅用于满足类型与接口要求。
@@ -46,6 +50,11 @@ func ONNXModelAvailable(_ string) (modelPath, tokenizerPath string) {
 	return "", ""
 }
 
+// ONNXModelAvailableWithPrecision 占位。
+func ONNXModelAvailableWithPrecision(_ string, _ string) (modelPath, tokenizerPath string) {
+	return "", ""
+}
+
 // IsONNXModelAvailable 占位。
 func IsONNXModelAvailable(_ string) bool { return false }
 
@@ -54,10 +63,23 @@ func NewONNXEmbedderOrFallback(_ string, _ int, _ string) *ONNXEmbedder {
 	return nil
 }
 
+// NewONNXEmbedderOrFallbackWithConfig 占位。
+func NewONNXEmbedderOrFallbackWithConfig(_ string, _ int, _ string, _ ONNXEmbedderConfig) *ONNXEmbedder {
+	return nil
+}
+
 // GetONNXEmbedderGlobal 占位。
 func GetONNXEmbedderGlobal(_ string, _ int, _ string) *ONNXEmbedder {
 	return nil
 }
+
+// GetONNXEmbedderGlobalWithConfig 占位。
+func GetONNXEmbedderGlobalWithConfig(_ string, _ int, _ string, _ ONNXEmbedderConfig) *ONNXEmbedder {
+	return nil
+}
+
+// LastGlobalONNXInitError 占位。
+func LastGlobalONNXInitError() error { return nil }
 
 // CloseGlobalONNXEmbedder 占位。
 func CloseGlobalONNXEmbedder() error { return nil }

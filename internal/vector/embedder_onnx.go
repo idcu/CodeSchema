@@ -17,22 +17,24 @@ import (
 
 // ONNXEmbedder 基于 ONNX Runtime 的 BGE 系列 Embedding 模型。
 //
-// 默认加载 bge-small-zh-v1.5 模型（FP16 量化，512 维输出）。
+// 默认加载 bge-small-zh-v1.5 模型（512 维输出）。
 // 需要：
 //   - onnxruntime 动态库（onnxruntime.dll / libonnxruntime.so / libonnxruntime.dylib）
 //   - 模型文件：model.onnx + model.onnx_data（或 model_fp16.onnx + model_fp16.onnx_data）
 //   - 分词器文件：tokenizer.json
 type ONNXEmbedder struct {
-	dim     int
-	model   *ort.DynamicAdvancedSession
-	vocab   map[string]int32 // token -> id
-	unkID   int32
-	clsID   int32
-	sepID   int32
-	padID   int32
-	maxLen  int
-	mu      sync.Mutex
-	initErr error
+	dim         int
+	outputLayer string
+	inputNames  []string
+	model       *ort.DynamicAdvancedSession
+	vocab       map[string]int32 // token -> id
+	unkID       int32
+	clsID       int32
+	sepID       int32
+	padID       int32
+	maxLen      int
+	mu          sync.Mutex
+	initErr     error
 }
 
 // ONNXEmbedderConfig 配置 ONNXEmbedder。
@@ -46,6 +48,18 @@ type ONNXEmbedderConfig struct {
 	// LibraryDir ONNX Runtime 共享库所在目录（可选）。
 	// 如果为空，使用系统默认搜索路径（PATH / LD_LIBRARY_PATH）。
 	LibraryDir string
+	// OutputLayer 输出张量层名，默认 "sentence_embedding"。
+	// 更换模型（如 bge-m3 输出层名不同）时无需改代码，仅配置即可。
+	OutputLayer string
+	// InputNames 输入张量层名，默认 ["input_ids","attention_mask","token_type_ids"]。
+	// 空则使用默认；更换输入约定不同的模型时按需覆盖。
+	InputNames []string
+	// Dim 输出向量维度，默认 512。与模型实际输出维度不一致时推理会报错，
+	// 按模型实际维度配置即可（如 bge-m3 为 1024）。
+	Dim int
+	// Precision 模型精度偏好：""/fp16（默认，优先 fp16 量化）、fp32（优先 FP32 原始精度）、
+	// any（不偏好）。影响 ONNXModelAvailableWithPrecision 的模型文件选择顺序。
+	Precision string
 }
 
 // NewONNXEmbedder 创建 ONNX Embedder，自动初始化 ONNX Runtime 环境。
@@ -65,14 +79,28 @@ func NewONNXEmbedder(cfg ONNXEmbedderConfig) (*ONNXEmbedder, error) {
 	if maxLen <= 0 {
 		maxLen = 512
 	}
+	dim := cfg.Dim
+	if dim <= 0 {
+		dim = 512
+	}
+	outputLayer := cfg.OutputLayer
+	if outputLayer == "" {
+		outputLayer = "sentence_embedding"
+	}
+	inputNames := cfg.InputNames
+	if len(inputNames) == 0 {
+		inputNames = []string{"input_ids", "attention_mask", "token_type_ids"}
+	}
 
 	e := &ONNXEmbedder{
-		dim:    512,
-		maxLen: maxLen,
-		unkID:  100,
-		clsID:  101,
-		sepID:  102,
-		padID:  0,
+		dim:         dim,
+		outputLayer: outputLayer,
+		inputNames:  inputNames,
+		maxLen:      maxLen,
+		unkID:       100,
+		clsID:       101,
+		sepID:       102,
+		padID:       0,
 	}
 
 	// 加载分词器
@@ -173,12 +201,8 @@ func (e *ONNXEmbedder) initRuntime(modelPath, libDir string) error {
 		}
 	}
 
-	// 输入输出名称
-	inputNames := []string{"input_ids", "attention_mask", "token_type_ids"}
-	outputNames := []string{"sentence_embedding"}
-
 	session, err := ort.NewDynamicAdvancedSession(
-		modelPath, inputNames, outputNames, nil,
+		modelPath, e.inputNames, []string{e.outputLayer}, nil,
 	)
 	if err != nil {
 		// 尝试销毁环境（部分初始化失败时清理）
@@ -425,17 +449,48 @@ func (e *ONNXEmbedder) Close() error {
 // 确保 ONNXEmbedder 实现 Embedder 接口。
 var _ Embedder = (*ONNXEmbedder)(nil)
 
-// ONNXModelAvailable 检查 ONNX 模型是否可用。
+// ONNXModelAvailable 检查 ONNX 模型是否可用（默认精度偏好 fp16）。
 //
 // 如果模型文件存在，返回模型路径和 tokenizer 路径。
 // 如果不存在，返回空字符串（可用于降级到 LocalEmbedder）。
 func ONNXModelAvailable(modelDir string) (modelPath, tokenizerPath string) {
-	// 尝试多种可能的 ONNX 文件名
-	candidates := []string{
-		"model_fp16.onnx",
-		"model.onnx",
-		"model_quantized.onnx",
-		"model_q4.onnx",
+	return ONNXModelAvailableWithPrecision(modelDir, "")
+}
+
+// ONNXModelAvailableWithPrecision 检查 ONNX 模型是否可用，支持精度偏好。
+//
+// precision 取值：
+//   - "fp16" 或 ""（默认）：优先 fp16 量化模型（体积小、速度快的生产默认）；
+//   - "fp32"：优先 FP32 原始精度模型（召回精度更高，体积大）；
+//   - "any"：不偏好，按候选顺序取第一个可用的。
+//
+// 模型文件候选（按目录 onnx/ 下）：model_fp16.onnx / model.onnx /
+// model_quantized.onnx / model_q4.onnx。返回最先命中的路径与 tokenizer.json。
+func ONNXModelAvailableWithPrecision(modelDir, precision string) (modelPath, tokenizerPath string) {
+	// 按精度偏好重排候选：fp32 优先 FP32 文件；fp16/默认 优先 FP16 文件；any 保持原顺序
+	var candidates []string
+	switch strings.ToLower(precision) {
+	case "fp32":
+		candidates = []string{
+			"model.onnx",
+			"model_fp32.onnx",
+			"model_fp16.onnx",
+			"model_quantized.onnx",
+		}
+	case "any":
+		candidates = []string{
+			"model.onnx",
+			"model_fp16.onnx",
+			"model_quantized.onnx",
+			"model_q4.onnx",
+		}
+	default: // fp16 / 空
+		candidates = []string{
+			"model_fp16.onnx",
+			"model.onnx",
+			"model_quantized.onnx",
+			"model_q4.onnx",
+		}
 	}
 	modelPath = ""
 	for _, name := range candidates {
@@ -495,29 +550,89 @@ func NewONNXEmbedderOrFallback(modelDir string, maxLen int, libDir string) *ONNX
 	return embedder
 }
 
-// ONNXEmbedderPool 池化 ONNX Embedder（全局单例）。
+// NewONNXEmbedderOrFallbackWithConfig 按完整配置创建 ONNX Embedder，失败时返回 nil。
 //
-// 由于 ONNX Runtime 环境是全局的，只能有一个 Embedder 实例。
-var onnxEmbedderOnce sync.Once
-var onnxEmbedderGlobal *ONNXEmbedder
+// 相比 NewONNXEmbedderOrFallback，支持精度偏好（Precision）、输出层名（OutputLayer）、
+// 输入层名（InputNames）与输出维度（Dim）的可配，便于更换不同模型的部署而无需改代码。
+// modelDir 是包含模型文件（onnx/ 子目录和 tokenizer.json）的目录；
+// maxLen/libDir 与 OrFallback 同名参数一致；cfg 中未显式设置的字段使用模型目录推导默认值。
+func NewONNXEmbedderOrFallbackWithConfig(modelDir string, maxLen int, libDir string, cfg ONNXEmbedderConfig) *ONNXEmbedder {
+	modelPath, tokenizerPath := ONNXModelAvailableWithPrecision(modelDir, cfg.Precision)
+	if modelPath == "" {
+		return nil
+	}
+	cfg.ModelPath = modelPath
+	cfg.TokenizerPath = tokenizerPath
+	cfg.MaxLen = maxLen
+	cfg.LibraryDir = libDir
 
-// GetONNXEmbedderGlobal 获取全局 ONNX Embedder 单例。
-//
-// 如果模型可用则返回，否则返回 nil。
-// 调用方不再需要时调用 CloseGlobalONNXEmbedder 释放资源。
-func GetONNXEmbedderGlobal(modelDir string, maxLen int, libDir string) *ONNXEmbedder {
-	onnxEmbedderOnce.Do(func() {
-		onnxEmbedderGlobal = NewONNXEmbedderOrFallback(modelDir, maxLen, libDir)
-	})
-	return onnxEmbedderGlobal
+	embedder, err := NewONNXEmbedder(cfg)
+	if err != nil {
+		return nil
+	}
+	return embedder
 }
 
-// CloseGlobalONNXEmbedder 释放全局 ONNX Embedder 资源。
+// ONNXEmbedderPool 池化 ONNX Embedder（全局单例）。
+//
+// 由于 ONNX Runtime 环境是全局的，通常只有一个 Embedder 实例；
+// 使用互斥锁保护 get-or-create，保证并发初始化安全且 Close 后可按需重建
+// （旧版 sync.Once 在 Close 后重置存在竞态窗口）。
+type onnxGlobalState struct {
+	mu       sync.Mutex
+	embedder *ONNXEmbedder
+	initErr  error
+}
+
+var onnxGlobal onnxGlobalState
+
+// GetONNXEmbedderGlobal 获取全局 ONNX Embedder 单例（并发安全，可重建）。
+//
+// 如果模型可用则返回（首次调用时初始化），否则返回 nil。
+// 初始化失败时返回 nil，可用 LastGlobalONNXInitError 查询失败原因。
+// 调用方不再需要时调用 CloseGlobalONNXEmbedder 释放资源；之后再次调用
+// GetONNXEmbedderGlobal 会重新初始化（而非旧版 Once 的一次性语义）。
+func GetONNXEmbedderGlobal(modelDir string, maxLen int, libDir string) *ONNXEmbedder {
+	return GetONNXEmbedderGlobalWithConfig(modelDir, maxLen, libDir, ONNXEmbedderConfig{})
+}
+
+// GetONNXEmbedderGlobalWithConfig 获取全局 ONNX Embedder 单例，支持完整配置。
+func GetONNXEmbedderGlobalWithConfig(modelDir string, maxLen int, libDir string, cfg ONNXEmbedderConfig) *ONNXEmbedder {
+	onnxGlobal.mu.Lock()
+	defer onnxGlobal.mu.Unlock()
+
+	if onnxGlobal.embedder != nil {
+		return onnxGlobal.embedder
+	}
+	onnxGlobal.embedder = NewONNXEmbedderOrFallbackWithConfig(modelDir, maxLen, libDir, cfg)
+	if onnxGlobal.embedder == nil {
+		modelPath, _ := ONNXModelAvailableWithPrecision(modelDir, cfg.Precision)
+		if modelPath == "" {
+			onnxGlobal.initErr = fmt.Errorf("ONNX model not available under %s", modelDir)
+		} else {
+			onnxGlobal.initErr = fmt.Errorf("ONNX embedder init failed (model %s)", modelPath)
+		}
+	}
+	return onnxGlobal.embedder
+}
+
+// LastGlobalONNXInitError 返回全局 ONNX Embedder 最近一次初始化的失败原因。
+// 若从未失败或已成功初始化，返回 nil。
+func LastGlobalONNXInitError() error {
+	onnxGlobal.mu.Lock()
+	defer onnxGlobal.mu.Unlock()
+	return onnxGlobal.initErr
+}
+
+// CloseGlobalONNXEmbedder 释放全局 ONNX Embedder 资源（并发安全）。
 func CloseGlobalONNXEmbedder() error {
-	if onnxEmbedderGlobal != nil {
-		err := onnxEmbedderGlobal.Close()
-		onnxEmbedderGlobal = nil
-		onnxEmbedderOnce = sync.Once{}
+	onnxGlobal.mu.Lock()
+	defer onnxGlobal.mu.Unlock()
+
+	if onnxGlobal.embedder != nil {
+		err := onnxGlobal.embedder.Close()
+		onnxGlobal.embedder = nil
+		onnxGlobal.initErr = nil
 		_ = ort.DestroyEnvironment()
 		return err
 	}
