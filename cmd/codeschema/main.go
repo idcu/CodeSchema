@@ -555,8 +555,8 @@ func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
 
 // vectorVizStore 适配 vector.VectorStore（默认栈 Persistent/Memory）到 server.VizStore 接口。
 //
-// 默认向量索引仅持久化 id→向量，不含原文，故文档 Content 留空；
-// 可视化以索引元数据（文档数、维度、模式）与文本检索为主。
+// 文档原文来自向量索引的 DocContentStore 可选能力（IndexBuilder 写入）；
+// 不支持的后端（chromem 等）Content 为空，以索引元数据 + 文本检索为主。
 type vectorVizStore struct {
 	vector.VectorStore
 }
@@ -568,7 +568,11 @@ func (s *vectorVizStore) ListDocuments(ctx context.Context) ([]server.VizDocInfo
 	}
 	docs := make([]server.VizDocInfo, len(ids))
 	for i, id := range ids {
-		docs[i] = server.VizDocInfo{ID: id, Content: ""}
+		content := ""
+		if cs, ok := s.VectorStore.(vector.DocContentStore); ok {
+			content, _ = cs.Content(ctx, id)
+		}
+		docs[i] = server.VizDocInfo{ID: id, Content: content}
 	}
 	return docs, nil
 }

@@ -196,6 +196,14 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 	}
 	fmt.Println(" OK")
 
+	// 保存文档原文（/viz 可视化展示；底层不支持的后端静默跳过）
+	for _, d := range docs {
+		if err := b.indexer.SetDocContent(ctx, d.id, d.text); err != nil {
+			// 原文保存失败不影响索引主流程（仅可视化缺失）
+			log.WithModule("search.index_builder").Warn("set doc content failed", "id", d.id, "error", err.Error())
+		}
+	}
+
 	result.IndexedDocs = len(docs)
 	result.Duration = time.Since(start)
 	fmt.Printf("  index build complete: %d docs in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
@@ -216,6 +224,10 @@ func (b *IndexBuilder) IndexDocument(ctx context.Context, id, text string) error
 
 	if err := b.indexer.BuildIndex(ctx, &docEmbeddable{id: id, text: text}); err != nil {
 		return fmt.Errorf("index vector %s: %w", id, err)
+	}
+	// 保存文档原文（/viz 可视化；不支持的后端静默跳过）
+	if err := b.indexer.SetDocContent(ctx, id, text); err != nil {
+		log.WithModule("search.index_builder").Warn("set doc content failed", "id", id, "error", err.Error())
 	}
 
 	return nil

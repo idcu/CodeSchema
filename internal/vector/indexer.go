@@ -85,6 +85,15 @@ func (idx *Indexer) RemoveDocument(ctx context.Context, id string) error {
 	return idx.store.Delete(ctx, id)
 }
 
+// SetDocContent 保存文档原文到向量存储（若底层实现 DocContentStore）。
+// 用于 /viz 可视化展示原文；不支持的后端（chromem 等）静默跳过。
+func (idx *Indexer) SetDocContent(ctx context.Context, id, content string) error {
+	if cs, ok := idx.store.(DocContentStore); ok {
+		return cs.SetContent(ctx, id, content)
+	}
+	return nil
+}
+
 // Enqueue 异步入队一个实体的索引构建任务。
 func (idx *Indexer) Enqueue(ctx context.Context, ent TextEmbeddable) <-chan error {
 	errC := make(chan error, 1)

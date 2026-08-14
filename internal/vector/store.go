@@ -43,20 +43,50 @@ type VectorStore interface {
 	Close() error
 }
 
+// DocContentStore 可选接口：向量存储额外保存文档原文（用于 /viz 可视化展示）。
+//
+// 默认栈（PersistentStore / MemoryStore）实现；chromem 通过 ListDocuments 自带
+// Content 字段（但 Add 只存向量、原文为空）。IndexBuilder 写入索引时同步保存原文，
+// cmd 层 viz 适配器读取展示。
+type DocContentStore interface {
+	// SetContent 保存指定文档的原文。
+	SetContent(ctx context.Context, id, content string) error
+	// Content 读取指定文档的原文；不存在返回 ("", false)。
+	Content(ctx context.Context, id string) (string, bool)
+}
+
 // MemoryStore 纯内存向量存储，用于测试和开发。
 //
 // 使用余弦相似度计算向量相似性。
 // 不依赖任何外部库，通过 math 包手写余弦相似度。
 type MemoryStore struct {
-	mu   sync.RWMutex
-	vecs map[string][]float32
+	mu       sync.RWMutex
+	vecs     map[string][]float32
+	contents map[string]string // id → 原文（DocContentStore 可选能力）
 }
 
 // NewMemoryStore 创建内存向量存储。
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		vecs: make(map[string][]float32),
+		vecs:     make(map[string][]float32),
+		contents: make(map[string]string),
 	}
+}
+
+// SetContent 保存文档原文（DocContentStore 实现）。
+func (m *MemoryStore) SetContent(_ context.Context, id, content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.contents[id] = content
+	return nil
+}
+
+// Content 读取文档原文（DocContentStore 实现）。
+func (m *MemoryStore) Content(_ context.Context, id string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.contents[id]
+	return c, ok
 }
 
 // Add 添加向量。

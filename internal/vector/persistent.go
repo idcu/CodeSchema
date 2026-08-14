@@ -18,13 +18,15 @@ import (
 type PersistentStore struct {
 	mu       sync.RWMutex
 	vecs     map[string][]float32
+	contents map[string]string // id → 原文（DocContentStore 可选能力，持久化）
 	filePath string
 	dirties  int // 自上次保存以来的变更计数
 }
 
-// persistentData 序列化结构。
+// persistentData 序列化结构（向后兼容：旧文件仅含 vectors，contents 缺失时初始化为空 map）。
 type persistentData struct {
-	Vectors map[string][]float32 `json:"vectors"`
+	Vectors  map[string][]float32 `json:"vectors"`
+	Contents map[string]string    `json:"contents,omitempty"`
 }
 
 // NewPersistentStore 创建持久化向量存储。
@@ -34,6 +36,7 @@ type persistentData struct {
 func NewPersistentStore(filePath string) (*PersistentStore, error) {
 	ps := &PersistentStore{
 		vecs:     make(map[string][]float32),
+		contents: make(map[string]string),
 		filePath: filePath,
 	}
 
@@ -132,6 +135,23 @@ func (ps *PersistentStore) ListIDs(_ context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// SetContent 保存文档原文（DocContentStore 实现）。
+func (ps *PersistentStore) SetContent(_ context.Context, id, content string) error {
+	ps.mu.Lock()
+	ps.contents[id] = content
+	ps.dirties++
+	ps.mu.Unlock()
+	return ps.maybeSave()
+}
+
+// Content 读取文档原文（DocContentStore 实现）。
+func (ps *PersistentStore) Content(_ context.Context, id string) (string, bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	c, ok := ps.contents[id]
+	return c, ok
+}
+
 // Save 强制保存数据到磁盘。
 func (ps *PersistentStore) Save() error {
 	ps.mu.Lock()
@@ -147,7 +167,7 @@ func (ps *PersistentStore) save() error {
 	if err := os.MkdirAll(filepath.Dir(ps.filePath), 0755); err != nil {
 		return fmt.Errorf("persistent: mkdir: %w", err)
 	}
-	data := persistentData{Vectors: ps.vecs}
+	data := persistentData{Vectors: ps.vecs, Contents: ps.contents}
 	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("persistent: marshal: %w", err)
@@ -177,6 +197,9 @@ func (ps *PersistentStore) load() error {
 	}
 	if data.Vectors != nil {
 		ps.vecs = data.Vectors
+	}
+	if data.Contents != nil {
+		ps.contents = data.Contents
 	}
 	return nil
 }
