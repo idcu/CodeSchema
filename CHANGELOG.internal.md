@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 47: fix(parser): CodeGraph 适配器去骨架，不再静默返回空 IR（T2-4/PHASE_09）
+
+**核心改动点**：
+- `internal/parser/adapter/codegraph/adapter.go`：`ParseAll` 改为用纯 Go `modernc.org/sqlite` 打开数据库并校验 `symbols`/`edges` 契约表；DB 缺失/非 SQLite/缺表 → 显式 `ErrSourceUnavailable` 降级；表存在时按文档化契约（symbols: name/qualified_name/kind/file_path/language；edges: caller/callee/type）尽力读取真实类/调用 IR，列漂移显式报错——消除原「DB 存在即静默吐空 IR 文档」的假可用行为。
+- `internal/parser/adapter/codegraph/adapter_test.go`：新增 `TestCodeGraphAdapter_ParseAll_RealSymbols`（真实读取）、`ParseAll_InvalidDB`/`ParseAll_MissingTable`（显式降级）；原 `ParseAll_GroupByExt`/`ParseAll_EmptyPaths` 改为基于有效 CodeGraph DB 断言。
+
+**验证数据**：`go test ./internal/parser/adapter/codegraph/...` 全绿；`go build ./...` + `go vet` 通过。
+**遗留风险**：CodeGraph 真实 schema 未在本仓确认，契约为假设列名；若真实列名不同，读取会显式报错并降级到 tree-sitter，需后续按真实 schema 校准列名。
+
 ### Commit 46: test(ci): 固化 scalebench 基准进 CI，看护 BulkUpsert 回归（T6-1/PHASE_09）
 
 **核心改动点**：

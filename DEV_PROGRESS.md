@@ -303,6 +303,7 @@ P18      [████████████████████] 100%
   - **PG 适配器骨架** `internal/store/pg/pg.go`（`//go:build pg`）：完整 `store.Store` 接口 + PG DDL；**Redis 缓存骨架** `internal/store/redis/redis.go`（`//go:build redis`）：热点类 HASH + 调用反查 SET + 文件→类索引。均 `go get` 即启用。
   - **文档** `docs/dev/12-存储扩展与大规模迁移路径.md`：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
   - **环境状态（已解决）**：本机已将仓库加入杀软信任目录——`go.mod` 恢复可写、`go build ./...` 由 50min+ 降至 ~4s、生成目录可写。已 `go get` 拉入 `lib/pq` + `go-redis/v9`，PG/Redis 骨架（`go build -tags pg/redis`）均编译通过；`build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md` 已落盘。
+  - **优先级 T2-4 CodeGraph 适配器去骨架（不静默空 IR）** `internal/parser/adapter/codegraph/adapter.go`：原 `ParseAll` 在 DB 存在时**静默吐空 IR 文档**（与「不静默返回空结果」目标相悖，原测试甚至断言「吐了 3 个空文档」）；改为用纯 Go `modernc.org/sqlite` 打开并校验 `symbols`/`edges` 契约表，缺表或非 SQLite 显式返 `ErrSourceUnavailable` 降级，表存在时按文档化契约（symbols: name/qualified_name/kind/file_path/language；edges: caller/callee/type）尽力读取真实类/调用 IR（调用边按 caller 前缀归属文件），列漂移则显式报错——**绝不静默空 IR**。`go test ./internal/parser/adapter/codegraph/...` 全绿（含真实读取 + 显式降级用例）。注：CodeGraph 真实列名未在本仓确认，当前契约为假设列名；若真实列名不同，读取会显式报错并降级到 tree-sitter，需后续按真实 schema 校准列名。
 
 ## 已知问题
 

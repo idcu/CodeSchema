@@ -2,11 +2,15 @@ package codegraph
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 func TestCodeGraphAdapter_Name(t *testing.T) {
@@ -66,12 +70,42 @@ func TestCodeGraphAdapter_ParseAll_NoDatabase(t *testing.T) {
 	}
 }
 
-func TestCodeGraphAdapter_ParseAll_EmptyPaths(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "codegraph.db")
-	// 创建空文件模拟数据库
-	os.WriteFile(dbPath, []byte{}, 0644)
+// setupCodeGraphDB 创建一个符合 CodeGraph 契约（symbols/edges 表）的临时 SQLite 数据库。
+func setupCodeGraphDB(t *testing.T, symbols []symbolRow, edges []edgeRow) string {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE symbols (name TEXT, qualified_name TEXT, kind TEXT, file_path TEXT, language TEXT)`); err != nil {
+		t.Fatalf("create symbols: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE edges (caller TEXT, callee TEXT, type TEXT)`); err != nil {
+		t.Fatalf("create edges: %v", err)
+	}
+	for _, s := range symbols {
+		if _, err := db.Exec(`INSERT INTO symbols (name, qualified_name, kind, file_path, language) VALUES (?,?,?,?,?)`,
+			s.name, s.qname, s.kind, s.filePath, s.lang); err != nil {
+			t.Fatalf("insert symbol: %v", err)
+		}
+	}
+	for _, e := range edges {
+		if _, err := db.Exec(`INSERT INTO edges (caller, callee, type) VALUES (?,?,?)`, e.caller, e.callee, e.etype); err != nil {
+			t.Fatalf("insert edge: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return dbPath
+}
 
+type symbolRow struct{ name, qname, kind, filePath, lang string }
+type edgeRow struct{ caller, callee, etype string }
+
+func TestCodeGraphAdapter_ParseAll_EmptyPaths(t *testing.T) {
+	dbPath := setupCodeGraphDB(t, nil, nil) // 有效但空数据库
 	a := NewCodeGraphAdapter(dbPath)
 	ctx := context.Background()
 
@@ -85,39 +119,96 @@ func TestCodeGraphAdapter_ParseAll_EmptyPaths(t *testing.T) {
 		count++
 	}
 	if count != 0 {
-		t.Errorf("expected 0 docs for empty paths, got %d", count)
+		t.Errorf("expected 0 docs for empty db, got %d", count)
 	}
 }
 
-func TestCodeGraphAdapter_ParseAll_GroupByExt(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "codegraph.db")
-	os.WriteFile(dbPath, []byte("test"), 0644)
-
+func TestCodeGraphAdapter_ParseAll_RealSymbols(t *testing.T) {
+	dbPath := setupCodeGraphDB(t, []symbolRow{
+		{"Svc", "pkg.Svc", "CLASS", "repo/svc.go", "go"},
+		{"Run", "pkg.Svc.Run", "METHOD", "repo/svc.go", "go"},
+		{"Util", "pkg.Util", "CLASS", "repo/util.java", "java"},
+	}, []edgeRow{
+		{"pkg.Svc.Run", "pkg.Util.Help", "direct"},
+	})
 	a := NewCodeGraphAdapter(dbPath)
 	ctx := context.Background()
 
-	paths := []string{
-		filepath.Join(dir, "main.go"),
-		filepath.Join(dir, "util.go"),
-		filepath.Join(dir, "service.java"),
-		filepath.Join(dir, "README.md"),
-	}
-
-	ch, err := a.ParseAll(ctx, paths)
+	ch, err := a.ParseAll(ctx, []string{"repo/svc.go", "repo/util.java"})
 	if err != nil {
 		t.Fatalf("ParseAll: %v", err)
 	}
+	docs := map[string]*parser.IRDocument{}
+	for d := range ch {
+		docs[d.FilePath] = d
+	}
+	if len(docs) != 2 {
+		t.Fatalf("expected 2 docs, got %d", len(docs))
+	}
+	svc := docs["repo/svc.go"]
+	if svc == nil || len(svc.Classes) != 2 {
+		t.Errorf("svc.go: expected 2 classes, got %d", lenSafe(svc))
+	}
+	// 调用关系按 caller 前缀归属到 svc.go
+	if svc == nil || len(svc.Calls) != 1 {
+		t.Errorf("svc.go: expected 1 call, got %d", callsSafe(svc))
+	} else if c := svc.Calls[0]; c.CallerFQN != "pkg.Svc.Run" || c.CalleeFQN != "pkg.Util.Help" {
+		t.Errorf("call mismatch: %+v", c)
+	}
+	util := docs["repo/util.java"]
+	if util == nil || len(util.Classes) != 1 {
+		t.Errorf("util.java: expected 1 class, got %d", lenSafe(util))
+	}
+}
 
-	count := 0
-	for doc := range ch {
-		count++
-		_ = doc
+// TestCodeGraphAdapter_ParseAll_InvalidDB 验证：非 SQLite 文件不再被静默当作空 IR，
+// 而是显式返回 ErrSourceUnavailable 触发降级。
+func TestCodeGraphAdapter_ParseAll_InvalidDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codegraph.db")
+	os.WriteFile(dbPath, []byte("this is not a sqlite db"), 0644)
+
+	a := NewCodeGraphAdapter(dbPath)
+	_, err := a.ParseAll(context.Background(), []string{"x.go"})
+	if err == nil {
+		t.Fatal("expected error for non-sqlite file, got nil")
 	}
-	// README.md 应被跳过（unknown 扩展名）
-	if count != 3 {
-		t.Errorf("expected 3 docs (skipping README.md), got %d", count)
+}
+
+// TestCodeGraphAdapter_ParseAll_MissingTable 验证：缺 symbols/edges 表时显式报错（不静默空 IR）。
+func TestCodeGraphAdapter_ParseAll_MissingTable(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE other (id INTEGER)`); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	a := NewCodeGraphAdapter(dbPath)
+	_, err = a.ParseAll(context.Background(), []string{"x.go"})
+	if err == nil {
+		t.Fatal("expected error for missing symbols/edges tables, got nil")
+	}
+}
+
+func lenSafe(d *parser.IRDocument) int {
+	if d == nil {
+		return 0
+	}
+	return len(d.Classes)
+}
+
+func callsSafe(d *parser.IRDocument) int {
+	if d == nil {
+		return 0
+	}
+	return len(d.Calls)
 }
 
 func TestCodeGraphAdapter_InitClose(t *testing.T) {
