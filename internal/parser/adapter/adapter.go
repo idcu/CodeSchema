@@ -8,7 +8,7 @@ import (
 
 // SupportedLanguages 返回适配器层支持的所有语言列表。
 func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte"}
+	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte", "markdown", "dockerfile", "elm", "cue"}
 }
 
 // FileExists 检查文件是否存在。
@@ -80,6 +80,14 @@ func ExtToLang(ext string) string {
 		return "hcl"
 	case ".svelte":
 		return "svelte"
+	case ".md", ".markdown":
+		return "markdown"
+	case "Dockerfile":
+		return "dockerfile"
+	case ".elm":
+		return "elm"
+	case ".cue":
+		return "cue"
 	default:
 		return "unknown"
 	}
@@ -151,6 +159,14 @@ func LangToExtensions(lang string) []string {
 		return []string{".tf", ".hcl"}
 	case "svelte":
 		return []string{".svelte"}
+	case "markdown":
+		return []string{".md", ".markdown"}
+	case "dockerfile":
+		return []string{"Dockerfile"}
+	case "elm":
+		return []string{".elm"}
+	case "cue":
+		return []string{".cue"}
 	default:
 		return nil
 	}

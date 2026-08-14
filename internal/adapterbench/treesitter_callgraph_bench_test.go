@@ -327,6 +327,42 @@ variable "region" {
 		Golden: []string{}, // 组件内 JS 为 raw_text,AST 不覆盖
 	},
 	{
+		Lang: "markdown", Ext: ".md",
+		Code: `# Title
+Some text.
+## Section
+- item
+`,
+		Golden: []string{}, // 文档语言无函数调用
+	},
+	{
+		Lang: "dockerfile", Ext: "Dockerfile",
+		Code: `FROM golang:1.22
+RUN go build -o app .
+`,
+		Golden: []string{}, // 构建指令无函数调用
+	},
+	{
+		Lang: "elm", Ext: ".elm",
+		Code: `module Main exposing (main)
+
+main =
+    text "Hello"
+`,
+		Golden: []string{}, // 纯函数式无调用检出要求
+	},
+	{
+		Lang: "cue", Ext: ".cue",
+		Code: `package config
+
+server: {
+  host: "localhost"
+  port: 8080
+}
+`,
+		Golden: []string{}, // 配置语言无函数调用
+	},
+	{
 		Lang: "toml", Ext: ".toml",
 		Code: `[server]
 host = "localhost"
@@ -587,6 +623,9 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 		// 无检出时 Precision 记为 1（无假阳性），Recall 为 0
 		if tp+fp == 0 {
 			res.Precision = 1
+		}
+		if tp+fn == 0 {
+			res.Recall = 1 // 无期望检出 → 无需召回，记为 1 避免 0/0=NaN
 		}
 		results = append(results, res)
 		t.Logf("%-7s[%-7s] detected=%v golden=%v P=%.2f R=%.2f", sample.Lang, sample.Tier, detected, sample.Golden, res.Precision, res.Recall)

@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 71: feat(parser): 最终补齐 markdown/dockerfile/elm/cue → 30 语言（PHASE_09）
+
+- ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.md`→markdown、`Dockerfile`→dockerfile（无扩展名按文件名识别，scanner + Parse + AST 三处）、`.elm`→elm、`.cue`→cue
+- 正则：markdown 标题、dockerfile 指令、elm module、cue 结构
+- AST：markdown section（atx_heading 标题提取）、dockerfile instruction、elm module_declaration/value_declaration、cue struct_lit
+- 修复：① Go 原始字符串内三反引号报错（markdown methodPattern）；② 基准 NaN bug（配置语言样本 golden/detected 均空 → 0/0=NaN 致 JSON 失败，tp+fn==0 时 Recall 记为 1）；③ 2 处历史测试用 readme.md 当 unsupported 的过时用例
+- 验证：**AST 30 语言双档 P=1.00/R=1.00（TP=72）**；正则 SIMPLE P=0.97（唯一 FP 为既有 SQL DECIMAL 构造）
+
 ### Commit 70: feat(parser): 继续扩展 hcl/svelte → 26 语言（PHASE_09）
 
 - ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.tf`/`.hcl`→hcl、`.svelte`→svelte

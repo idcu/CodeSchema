@@ -248,6 +248,38 @@ func initPatterns() map[string]langPatterns {
 			callPattern:    regexp.MustCompile(`([\w.]+)\s*\([^)]*\)`),
 			commentTrim:    "<!--",
 		},
+		"markdown": {
+			// 标题/代码块作为「声明」登记（文档语言，无类/调用语义）
+			classPattern:   regexp.MustCompile(`^#{1,6}\s+(.+)`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`\b\B`), // Markdown 无方法(永不匹配),
+			callPattern:    regexp.MustCompile(`\b\B`), // Markdown 无函数调用(永不匹配)
+			commentTrim:    "<!--",
+		},
+		"dockerfile": {
+			// 构建指令作为「声明」登记（FROM/RUN/COPY 等）
+			classPattern:   regexp.MustCompile(`^(FROM|STAGE)\s+([\w./:-]+)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^(RUN|COPY|ADD|CMD|ENTRYPOINT|ENV|LABEL|WORKDIR|EXPOSE)\b`),
+			callPattern:    regexp.MustCompile(`\b\B`), // Dockerfile 指令非调用(永不匹配)
+			commentTrim:    "#",
+		},
+		"elm": {
+			// module 声明 + 顶层函数
+			classPattern:   regexp.MustCompile(`^\s*module\s+([\w.]+)`),
+			classNameIndex: 1,
+			methodPattern:  regexp.MustCompile(`^([\w.]+)\s*:\s*[\w\s->]+$`),
+			callPattern:    regexp.MustCompile(`([\w.]+)\s+[\w]+`),
+			commentTrim:    "--",
+		},
+		"cue": {
+			// package/import + 结构定义作为「声明」登记
+			classPattern:   regexp.MustCompile(`^(package|import)\s+([\w./]+)`),
+			classNameIndex: 2,
+			methodPattern:  regexp.MustCompile(`^[\w#]+\s*:\s*[\w{}"#]+`),
+			callPattern:    regexp.MustCompile(`\b\B`), // CUE 配置无函数调用(永不匹配)
+			commentTrim:    "//",
+		},
 	}
 }
 
@@ -273,9 +305,20 @@ func (a *TreeSitterAdapter) Close() error {
 // Parse 解析单个源文件，返回归一化 IR。
 // 支持 Go/Java/TypeScript/Python/Rust/C++ 六种语言。
 // 无法识别的文件扩展名返回空 IR（非错误）。
+// parseLang 识别文件语言：扩展名优先，Dockerfile 按文件名识别。
+func (a *TreeSitterAdapter) parseLang(path string) string {
+	lang := adapter.ExtToLang(strings.ToLower(filepath.Ext(path)))
+	if lang == "unknown" {
+		if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+			return "dockerfile"
+		}
+	}
+	return lang
+}
+
 func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	patterns, ok := a.patterns[adapter.ExtToLang(ext)]
+	lang := a.parseLang(path)
+	patterns, ok := a.patterns[lang]
 	if !ok {
 		// 不支持的扩展名返回空 IR
 		return &parser.IRDocument{Source: "treesitter", FilePath: path}, nil
@@ -287,7 +330,6 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	}
 	defer file.Close()
 
-	lang := adapter.ExtToLang(ext)
 	doc := &parser.IRDocument{
 		Source:   "treesitter",
 		Language: lang,
@@ -567,6 +609,10 @@ func detectClassType(matches []string, lang string) string {
 		return "BLOCK"
 	case "svelte":
 		return "COMPONENT"
+	case "markdown", "dockerfile", "cue":
+		return "BLOCK"
+	case "elm":
+		return "MODULE"
 	case "groovy":
 		for _, m := range matches {
 			switch m {

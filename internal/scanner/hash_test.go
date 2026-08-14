@@ -100,7 +100,7 @@ func TestDetectLang(t *testing.T) {
 		{"main.cc", "cpp"},
 		{"main.c", "c"},
 		{"header.h", "cpp"},
-		{"readme.md", "unknown"},
+		{"readme.unknown_ext", "unknown"},
 		{"Makefile", "unknown"},
 	}
 	for _, tt := range tests {

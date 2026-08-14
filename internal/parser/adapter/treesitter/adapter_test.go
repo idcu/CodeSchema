@@ -17,7 +17,7 @@ func TestTreeSitterAdapter_Name(t *testing.T) {
 
 func TestTreeSitterAdapter_Supports(t *testing.T) {
 	a := NewTreeSitterAdapter()
-	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte"}
+	supported := []string{"go", "java", "ts", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte", "markdown", "dockerfile", "elm", "cue"}
 	unsupported := []string{"unknown"}
 
 	for _, lang := range supported {
@@ -276,7 +276,7 @@ func TestTreeSitterAdapter_Parse_EmptyFile(t *testing.T) {
 func TestTreeSitterAdapter_Parse_UnsupportedExt(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "readme.md")
+	path := filepath.Join(dir, "readme.unknown_ext")
 	os.WriteFile(path, []byte("# Hello"), 0644)
 
 	ctx := context.Background()
@@ -1091,5 +1091,93 @@ func TestTreeSitterAdapter_Parse_Svelte(t *testing.T) {
 	}
 	if len(doc.Classes) == 0 {
 		t.Error("expected at least 1 svelte component (script)")
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Markdown 验证 Markdown 解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Markdown(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "readme.md")
+	content := `# Title
+Some text.
+## Section
+- item
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "markdown" {
+		t.Errorf("expected markdown, got %s", doc.Language)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Dockerfile 验证 Dockerfile 解析（T6-2 扩展，无扩展名按文件名识别）。
+func TestTreeSitterAdapter_Parse_Dockerfile(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Dockerfile")
+	content := `FROM golang:1.22
+RUN go build -o app .
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "dockerfile" {
+		t.Errorf("expected dockerfile, got %s", doc.Language)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_Elm 验证 Elm 模块解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_Elm(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Main.elm")
+	content := `module Main exposing (main)
+
+main =
+    text "Hello"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "elm" {
+		t.Errorf("expected elm, got %s", doc.Language)
+	}
+}
+
+// TestTreeSitterAdapter_Parse_CUE 验证 CUE 配置解析（T6-2 扩展）。
+func TestTreeSitterAdapter_Parse_CUE(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.cue")
+	content := `package config
+
+server: {
+  host: "localhost"
+  port: 8080
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "cue" {
+		t.Errorf("expected cue, got %s", doc.Language)
 	}
 }

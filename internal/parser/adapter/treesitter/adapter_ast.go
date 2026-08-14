@@ -30,7 +30,10 @@ import (
 	"github.com/smacker/go-tree-sitter/cpp"
 	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/css"
+	"github.com/smacker/go-tree-sitter/cue"
+	"github.com/smacker/go-tree-sitter/dockerfile"
 	"github.com/smacker/go-tree-sitter/elixir"
+	"github.com/smacker/go-tree-sitter/elm"
 	"github.com/smacker/go-tree-sitter/golang"
 	"github.com/smacker/go-tree-sitter/groovy"
 	"github.com/smacker/go-tree-sitter/hcl"
@@ -39,6 +42,7 @@ import (
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
 	"github.com/smacker/go-tree-sitter/lua"
+	"github.com/smacker/go-tree-sitter/markdown/tree-sitter-markdown"
 	"github.com/smacker/go-tree-sitter/ocaml"
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/protobuf"
@@ -66,33 +70,37 @@ type TreeSitterAdapter struct {
 func NewTreeSitterAdapter() *TreeSitterAdapter {
 	return &TreeSitterAdapter{
 		langs: map[string]*ts.Language{
-			"go":       golang.GetLanguage(),
-			"java":     java.GetLanguage(),
-			"ts":       tslang.GetLanguage(),
-			"js":       javascript.GetLanguage(),
-			"py":       python.GetLanguage(),
-			"rust":     rust.GetLanguage(),
-			"cpp":      cpp.GetLanguage(),
-			"c":        c.GetLanguage(),
-			"kotlin":   kotlin.GetLanguage(),
-			"swift":    swift.GetLanguage(),
-			"php":      php.GetLanguage(),
-			"csharp":   csharp.GetLanguage(),
-			"ruby":     ruby.GetLanguage(),
-			"bash":     bash.GetLanguage(),
-			"scala":    scala.GetLanguage(),
-			"sql":      sql.GetLanguage(),
-			"elixir":   elixir.GetLanguage(),
-			"ocaml":    ocaml.GetLanguage(),
-			"lua":      lua.GetLanguage(),
-			"groovy":   groovy.GetLanguage(),
-			"css":      css.GetLanguage(),
-			"toml":     toml.GetLanguage(),
-			"yaml":     yaml.GetLanguage(),
-			"protobuf": protobuf.GetLanguage(),
-			"html":     html.GetLanguage(),
-			"hcl":      hcl.GetLanguage(),
-			"svelte":   svelte.GetLanguage(),
+			"go":         golang.GetLanguage(),
+			"java":       java.GetLanguage(),
+			"ts":         tslang.GetLanguage(),
+			"js":         javascript.GetLanguage(),
+			"py":         python.GetLanguage(),
+			"rust":       rust.GetLanguage(),
+			"cpp":        cpp.GetLanguage(),
+			"c":          c.GetLanguage(),
+			"kotlin":     kotlin.GetLanguage(),
+			"swift":      swift.GetLanguage(),
+			"php":        php.GetLanguage(),
+			"csharp":     csharp.GetLanguage(),
+			"ruby":       ruby.GetLanguage(),
+			"bash":       bash.GetLanguage(),
+			"scala":      scala.GetLanguage(),
+			"sql":        sql.GetLanguage(),
+			"elixir":     elixir.GetLanguage(),
+			"ocaml":      ocaml.GetLanguage(),
+			"lua":        lua.GetLanguage(),
+			"groovy":     groovy.GetLanguage(),
+			"css":        css.GetLanguage(),
+			"toml":       toml.GetLanguage(),
+			"yaml":       yaml.GetLanguage(),
+			"protobuf":   protobuf.GetLanguage(),
+			"html":       html.GetLanguage(),
+			"hcl":        hcl.GetLanguage(),
+			"svelte":     svelte.GetLanguage(),
+			"markdown":   tree_sitter_markdown.GetLanguage(),
+			"dockerfile": dockerfile.GetLanguage(),
+			"elm":        elm.GetLanguage(),
+			"cue":        cue.GetLanguage(),
 		},
 	}
 }
@@ -118,101 +126,123 @@ func (a *TreeSitterAdapter) Close() error {
 
 // astClassNodeTypes 各语言「类/接口/结构体/枚举声明」的 AST 节点类型集合。
 var astClassNodeTypes = map[string]map[string]bool{
-	"go":       {"type_declaration": true},
-	"java":     {"class_declaration": true, "interface_declaration": true, "enum_declaration": true, "record_declaration": true},
-	"ts":       {"class_declaration": true, "interface_declaration": true, "enum_declaration": true},
-	"js":       {"class_declaration": true},
-	"py":       {"class_definition": true},
-	"rust":     {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
-	"cpp":      {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
-	"c":        {"struct_specifier": true, "enum_specifier": true, "union_specifier": true},
-	"kotlin":   {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
-	"swift":    {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
-	"php":      {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
-	"csharp":   {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
-	"ruby":     {"class": true, "module": true},
-	"bash":     {},
-	"scala":    {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
-	"sql":      {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
-	"elixir":   {},
-	"ocaml":    {"module_definition": true},
-	"lua":      {},
-	"groovy":   {"class_definition": true},
-	"css":      {"rule_set": true, "media_statement": true, "keyframes_statement": true},
-	"toml":     {"table": true},
-	"yaml":     {},
-	"protobuf": {"message": true, "service": true, "enum": true},
-	"html":     {"element": true},
-	"hcl":      {"block": true},
-	"svelte":   {"script_element": true},
+	"go":         {"type_declaration": true},
+	"java":       {"class_declaration": true, "interface_declaration": true, "enum_declaration": true, "record_declaration": true},
+	"ts":         {"class_declaration": true, "interface_declaration": true, "enum_declaration": true},
+	"js":         {"class_declaration": true},
+	"py":         {"class_definition": true},
+	"rust":       {"struct_item": true, "enum_item": true, "trait_item": true, "impl_item": true},
+	"cpp":        {"class_specifier": true, "struct_specifier": true, "enum_specifier": true},
+	"c":          {"struct_specifier": true, "enum_specifier": true, "union_specifier": true},
+	"kotlin":     {"class_declaration": true, "interface_declaration": true, "object_declaration": true},
+	"swift":      {"class_declaration": true, "protocol_declaration": true, "enum_declaration": true, "struct_declaration": true, "extension_declaration": true},
+	"php":        {"class_declaration": true, "interface_declaration": true, "trait_declaration": true, "enum_declaration": true},
+	"csharp":     {"class_declaration": true, "interface_declaration": true, "struct_declaration": true, "enum_declaration": true, "record_declaration": true},
+	"ruby":       {"class": true, "module": true},
+	"bash":       {},
+	"scala":      {"class_definition": true, "object_definition": true, "trait_definition": true, "enum_definition": true},
+	"sql":        {"create_table": true, "create_view": true, "create_function": true, "create_procedure": true},
+	"elixir":     {},
+	"ocaml":      {"module_definition": true},
+	"lua":        {},
+	"groovy":     {"class_definition": true},
+	"css":        {"rule_set": true, "media_statement": true, "keyframes_statement": true},
+	"toml":       {"table": true},
+	"yaml":       {},
+	"protobuf":   {"message": true, "service": true, "enum": true},
+	"html":       {"element": true},
+	"hcl":        {"block": true},
+	"svelte":     {"script_element": true},
+	"markdown":   {"section": true},
+	"dockerfile": {"instruction": true},
+	"elm":        {"module_declaration": true, "value_declaration": true},
+	"cue":        {"struct_lit": true},
 }
 
 // astMethodNodeTypes 各语言「方法/函数声明」的 AST 节点类型集合。
 var astMethodNodeTypes = map[string]map[string]bool{
-	"go":       {"method_declaration": true, "function_declaration": true},
-	"java":     {"method_declaration": true, "constructor_declaration": true},
-	"ts":       {"method_definition": true, "function_declaration": true},
-	"js":       {"method_definition": true, "function_declaration": true},
-	"py":       {"function_definition": true},
-	"rust":     {"function_item": true},
-	"cpp":      {"function_definition": true},
-	"c":        {"function_definition": true},
-	"kotlin":   {"function_declaration": true},
-	"swift":    {"function_declaration": true},
-	"php":      {"function_definition": true, "method_declaration": true},
-	"csharp":   {"method_declaration": true, "constructor_declaration": true},
-	"ruby":     {"method": true, "singleton_method": true},
-	"bash":     {"function_definition": true},
-	"scala":    {"function_definition": true},
-	"sql":      {"create_function": true, "create_procedure": true},
-	"elixir":   {},
-	"ocaml":    {"value_definition": true},
-	"lua":      {"function_statement": true},
-	"groovy":   {"function_definition": true},
-	"css":      {},
-	"toml":     {},
-	"yaml":     {},
-	"protobuf": {"rpc": true},
-	"html":     {},
-	"hcl":      {},
-	"svelte":   {},
+	"go":         {"method_declaration": true, "function_declaration": true},
+	"java":       {"method_declaration": true, "constructor_declaration": true},
+	"ts":         {"method_definition": true, "function_declaration": true},
+	"js":         {"method_definition": true, "function_declaration": true},
+	"py":         {"function_definition": true},
+	"rust":       {"function_item": true},
+	"cpp":        {"function_definition": true},
+	"c":          {"function_definition": true},
+	"kotlin":     {"function_declaration": true},
+	"swift":      {"function_declaration": true},
+	"php":        {"function_definition": true, "method_declaration": true},
+	"csharp":     {"method_declaration": true, "constructor_declaration": true},
+	"ruby":       {"method": true, "singleton_method": true},
+	"bash":       {"function_definition": true},
+	"scala":      {"function_definition": true},
+	"sql":        {"create_function": true, "create_procedure": true},
+	"elixir":     {},
+	"ocaml":      {"value_definition": true},
+	"lua":        {"function_statement": true},
+	"groovy":     {"function_definition": true},
+	"css":        {},
+	"toml":       {},
+	"yaml":       {},
+	"protobuf":   {"rpc": true},
+	"html":       {},
+	"hcl":        {},
+	"svelte":     {},
+	"markdown":   {},
+	"dockerfile": {},
+	"elm":        {},
+	"cue":        {},
 }
 
 // astCallNodeTypes 各语言「调用表达式」的 AST 节点类型集合。
 var astCallNodeTypes = map[string]map[string]bool{
-	"go":       {"call_expression": true},
-	"java":     {"method_invocation": true},
-	"ts":       {"call_expression": true},
-	"js":       {"call_expression": true},
-	"py":       {"call": true},
-	"rust":     {"call_expression": true},
-	"cpp":      {"call_expression": true},
-	"c":        {"call_expression": true},
-	"kotlin":   {"call_expression": true},
-	"swift":    {"call_expression": true},
-	"php":      {"function_call_expression": true, "member_call_expression": true},
-	"csharp":   {"invocation_expression": true},
-	"ruby":     {"call": true},
-	"bash":     {"command": true, "command_call": true},
-	"scala":    {"call_expression": true, "method_invocation": true},
-	"sql":      {"invocation": true, "function_call": true, "call_statement": true},
-	"elixir":   {"call": true},
-	"ocaml":    {"application_expression": true},
-	"lua":      {"function_call": true},
-	"groovy":   {"function_call": true},
-	"css":      {},
-	"toml":     {},
-	"yaml":     {},
-	"protobuf": {},
-	"html":     {},
-	"hcl":      {},
-	"svelte":   {},
+	"go":         {"call_expression": true},
+	"java":       {"method_invocation": true},
+	"ts":         {"call_expression": true},
+	"js":         {"call_expression": true},
+	"py":         {"call": true},
+	"rust":       {"call_expression": true},
+	"cpp":        {"call_expression": true},
+	"c":          {"call_expression": true},
+	"kotlin":     {"call_expression": true},
+	"swift":      {"call_expression": true},
+	"php":        {"function_call_expression": true, "member_call_expression": true},
+	"csharp":     {"invocation_expression": true},
+	"ruby":       {"call": true},
+	"bash":       {"command": true, "command_call": true},
+	"scala":      {"call_expression": true, "method_invocation": true},
+	"sql":        {"invocation": true, "function_call": true, "call_statement": true},
+	"elixir":     {"call": true},
+	"ocaml":      {"application_expression": true},
+	"lua":        {"function_call": true},
+	"groovy":     {"function_call": true},
+	"css":        {},
+	"toml":       {},
+	"yaml":       {},
+	"markdown":   {},
+	"dockerfile": {},
+	"elm":        {},
+	"cue":        {},
+	"protobuf":   {},
+	"html":       {},
+	"hcl":        {},
+	"svelte":     {},
 }
 
 // Parse 解析单个源文件，返回归一化 IR（基于 AST 语法级提取）。
+// parseLang 识别文件语言：扩展名优先，Dockerfile 按文件名识别。
+func (a *TreeSitterAdapter) parseLang(path string) string {
+	lang := adapter.ExtToLang(strings.ToLower(filepath.Ext(path)))
+	if lang == "unknown" {
+		if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+			return "dockerfile"
+		}
+	}
+	return lang
+}
+
 func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	lang := adapter.ExtToLang(ext)
+	lang := a.parseLang(path)
 	langPtr, ok := a.langs[lang]
 	if !ok {
 		return &parser.IRDocument{Source: "treesitter", FilePath: path}, nil
@@ -397,6 +427,21 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 		for i := 0; i < int(n.NamedChildCount()); i++ {
 			if c := n.NamedChild(i); c.Type() == "selectors" {
 				return string(c.Content(src))
+			}
+		}
+	}
+	// Markdown section：取首个 atx_heading 标题文本（`# Title` → `Title`）
+	if n.Type() == "section" {
+		for i := 0; i < int(n.NamedChildCount()); i++ {
+			c := n.NamedChild(i)
+			if c.Type() == "atx_heading" || c.Type() == "setext_heading" {
+				s := string(c.Content(src))
+				// 剥离 # 前缀
+				s = strings.TrimLeft(s, "# ")
+				s = strings.TrimSpace(s)
+				if s != "" {
+					return s
+				}
 			}
 		}
 	}

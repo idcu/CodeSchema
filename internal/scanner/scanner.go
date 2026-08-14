@@ -217,6 +217,9 @@ func (s *Scanner) ScanAll(ctx context.Context, root string) error {
 
 // detectLang 根据文件扩展名检测语言。
 func detectLang(path string) string {
+	if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+		return "dockerfile"
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".go":
@@ -275,6 +278,14 @@ func detectLang(path string) string {
 		return "hcl"
 	case ".svelte":
 		return "svelte"
+	case ".md", ".markdown":
+		return "markdown"
+	case "Dockerfile":
+		return "dockerfile"
+	case ".elm":
+		return "elm"
+	case ".cue":
+		return "cue"
 	default:
 		return "unknown"
 	}
