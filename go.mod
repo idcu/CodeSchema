@@ -28,3 +28,5 @@ require (
 )
 
 replace github.com/philippgille/chromem-go => ./down/chromem-go/chromem-go-main
+
+replace github.com/yalue/onnxruntime_go => ./third_party/onnxruntime_go_patch

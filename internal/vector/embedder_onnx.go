@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"unicode"
@@ -182,17 +183,31 @@ func (e *ONNXEmbedder) initRuntime(modelPath, libDir string) error {
 	if !ort.IsInitialized() {
 		// 如果指定了共享库目录，优先使用该路径
 		if libDir != "" {
-			dllPath := filepath.Join(libDir, "onnxruntime.dll")
-			if _, err := os.Stat(dllPath); err == nil {
-				ort.SetSharedLibraryPath(dllPath)
+			// 按平台选择动态库（与 Makefile 的 GOOS 分支一致），
+			// 避免在 macOS/Linux 上误加载 Windows 的 onnxruntime.dll。
+			var libName string
+			switch runtime.GOOS {
+			case "windows":
+				libName = "onnxruntime.dll"
+			case "darwin":
+				libName = "libonnxruntime.dylib"
+			default:
+				libName = "libonnxruntime.so"
+			}
+			libPath := filepath.Join(libDir, libName)
+			if _, err := os.Stat(libPath); err == nil {
+				ort.SetSharedLibraryPath(libPath)
 			} else {
-				// 也尝试 .so / .dylib
-				soPath := filepath.Join(libDir, "libonnxruntime.so")
-				dylibPath := filepath.Join(libDir, "libonnxruntime.dylib")
-				if _, err := os.Stat(soPath); err == nil {
-					ort.SetSharedLibraryPath(soPath)
-				} else if _, err := os.Stat(dylibPath); err == nil {
-					ort.SetSharedLibraryPath(dylibPath)
+				// 兜底：尝试平台内其他常见命名（跨平台目录分发场景）
+				for _, alt := range []string{"onnxruntime.dll", "libonnxruntime.so", "libonnxruntime.dylib"} {
+					if alt == libName {
+						continue
+					}
+					p := filepath.Join(libDir, alt)
+					if _, err := os.Stat(p); err == nil {
+						ort.SetSharedLibraryPath(p)
+						break
+					}
 				}
 			}
 		}

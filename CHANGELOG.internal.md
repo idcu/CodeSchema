@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 72: fix(vector): 本地端到端跑通真实 ONNX 推理（PHASE_09）
+
+**本地闭环验证（x86_64 mac）**
+- `down/models/bge-small-zh-v1.5/` 真实模型 + `down/onnxruntime/libonnxruntime.dylib`（x86_64）→ `-tags onnx` 真实嵌入推理成功（dim=512），固化 `TestLocalONNXEmbedE2E`
+- 修复①平台库选择：initRuntime 按 runtime.GOOS 选 dll/so/dylib（原无条件先试 onnxruntime.dll，macOS 误载 Windows dll）
+- 修复②ORT API 版本：绑定 v1.32.1 头文件 ORT_API_VERSION=28 vs 本机库 1.23.2 仅支持 v1..23 → third_party/onnxruntime_go_patch（28→23）+ go.mod replace 适配
+- 架构：本机 x86_64，原 dylib 为 arm64（incompatible architecture），经 pip onnxruntime==1.23.2 提取替换
+
 ### Commit 71: feat(parser): 最终补齐 markdown/dockerfile/elm/cue → 30 语言（PHASE_09）
 
 - ExtToLang/scanner/SupportedLanguages/LangToExtensions：`.md`→markdown、`Dockerfile`→dockerfile（无扩展名按文件名识别，scanner + Parse + AST 三处）、`.elm`→elm、`.cue`→cue
