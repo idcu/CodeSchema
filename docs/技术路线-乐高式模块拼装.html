@@ -226,13 +226,14 @@
 <div class="warnbox">
   <b>🟡 能用但有限制：</b><br>
   • 真语法树（-tags treesitter）与 ONNX（-tags onnx）需要 CGO 编译，且 ONNX 需对应平台的动态库。<br>
-  • LSP 解析：缺项目上下文时会悄悄跳过（clangd 常见）。<br>
-  • 注册表模型下载 URL 仍为占位（本地分发已闭环，公网自动拉取待制品托管）。
+  • LSP 解析：缺项目上下文时会悄悄跳过（clangd 常见）；已接入 Registry 编排主路（失败自动回退 tree-sitter）。<br>
+  • 模型公网分发已闭环（注册表 URL 回填 + make models-serve）；Docker 实构建 / PG- Redis 实跑待网络恢复。
 </div>
 <div class="badbox">
   <b>🔴 还没做完的：</b><br>
-  • CodeGraph 解析器：只有骨架，基本不可用。<br>
-  • <code>codeschema benchmark</code> 子命令：规划中，尚未落地（CLI 现为 6 个命令）。
+  ✅ 已全部清零（2026-08-15）——<br>
+  • CodeGraph 解析器：已校准真实 schema（nodes/edges 真实 DDL 双契约自适应），可当正式数据源；<br>
+  • <code>codeschema benchmark</code> 子命令：已落地（CLI 6→7 命令，多仓库对比报告）。
 </div>
 
 <!-- ⑥ 曾经的两个大坑 -->

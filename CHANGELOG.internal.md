@@ -6,6 +6,73 @@
 
 ## 提交记录
 
+### Commit 86: feat(service): 测试关联真实采集——go coverprofile 自动导入覆盖率映射（PHASE_09/开发计划T4-4）
+
+- `LoadGoCoverProfile/ParseGoCoverProfile`：解析 `go test -coverprofile` 产物（mode: set/count），按行号区间匹配 store 方法记录 → 测试类（命名约定）关联其源类被覆盖方法，注入 coverage 策略；路径后缀匹配兼容相对/绝对路径；合并不覆盖注入式 JSON
+- 测试 5 项：格式解析（含 mode-only/未覆盖块）、端到端命中 coverage、缺失文件报错、路径启发式
+- 验证：真实 coverprofile（204 行）解析正常；`go test ./internal/service/` 全绿
+
+### Commit 85: feat(ci): 制品发布流水线——tag 触发 5 平台 Release + SHA-256 校验（PHASE_09/开发计划T4-3）
+
+- `.github/workflows/release.yml`：v* tag 推送 → `make cross` 构建 5 平台 → SHA-256SUMS → action-gh-release 发布
+- 验证：`make cross VERSION=v0.2.0` 本机 5 平台全部构建成功（13-15MB）
+
+### Commit 84: feat(server): HTTP API OpenAPI 3.0 完整化（PHASE_09/开发计划T4-2）
+
+- `/openapi.json`（13 端点完整规范）+ `/docs`（内嵌 swagger-ui）；测试 2 项
+
+### Commit 83: feat(server): MCP stdio 传输支持（PHASE_09/开发计划T4-1）
+
+- 抽取 `handleRequest` 纯逻辑（HTTP/stdio 复用）；`StartStdio` LSP 风格 Content-Length 帧；`codeschema mcp --stdio`
+- 验证：CLI 端到端返回 11 工具帧；测试 4 项全绿
+
+### Commit 82: feat(ops+store): PG/Redis 真实实例集成测试 + Dockerfile 免 CGO 优化（PHASE_09/开发计划T3-2+T3-3）
+
+- docker-compose 新增 postgres:16-alpine（profile pg）/ redis:7-alpine（profile redis）
+- PG 端到端（InitSchema→UpsertIR→查询）与 Redis 缓存读写集成测试（-tags pg/redis，无实例优雅 SKIP）
+- Dockerfile 默认 CGO_ENABLED=0（纯 Go 免 gcc），ONNX 场景传 --build-arg CGO_ENABLED=1
+- **遗留**：Docker 实构建 / PG·Redis 实跑待本机 Docker 网络恢复（registry 层下载超时）
+
+### Commit 81: feat(cli+docs): MCP 一键接入——mcp --print-config + 配置模板入库（PHASE_09/开发计划T2-5）
+
+- `codeschema mcp --print-config` 输出 VS Code/JetBrains/Claude Code/Cursor/stdio 五类配置；docs/MCP接入指南.md；README 快速开始
+
+### Commit 80: feat(vector): 语义检索质量定案——ONNX 真实复测 Recall@1=1.00（PHASE_09/开发计划T2-3）
+
+- **实测：ONNX(bge-small-zh) R@1/@3/@5 = 1.00/1.00/1.00 vs Local(TF-IDF) 0.42/0.58/0.83**
+- 修复 third_party/onnxruntime_go_patch 缺失 go.mod（-tags onnx 可独立构建）；默认策略定案（Local 兜底 / 语义敏感场景启用 ONNX）
+
+### Commit 79: feat(scale+ci): 10万+ 文件真实全链路压测 + 夜间规模回归看护（PHASE_09/开发计划T3-1+T3-4）
+
+- `TestScaleEndToEnd`：真实 .go 文件 → Scanner(正则) → UpsertIR → BuildFromStore → Searcher 全链路
+- **实测 N=10万：扫描 8.18s / 索引 9.55s / P95 搜索 1.97s / 内存 1079MB（≈10.8KB/文件）** → 规模决策表（<1万 默认栈 / 1万~10万 SQLite+chromem / >10万 PG+Redis）
+- CI nightly-scale job（N=10万 + 趋势 JSONL 归档）
+
+### Commit 78: feat(store): FileStore 进程锁 + 原子写加固（PHASE_09/开发计划T2-4）
+
+- flock 进程锁（Unix）/ 独占创建（Windows），同目录二次 Open 显式失败；scanner 忽略 store 数据文件
+
+### Commit 77: feat(vector+viz): 向量索引原文持久化（PHASE_09/开发计划T2-2）
+
+- DocContentStore 可选接口（Persistent/Memory 实现，旧文件向后兼容）；IndexBuilder 写入原文；/viz 展示类/方法原文
+
+### Commit 76: feat(vector+ops): 模型公网分发闭环（PHASE_09/开发计划T2-1）
+
+- 注册表 URL 回填 GitHub Releases 约定路径；`make models-serve` 本地 HTTP 分发；真实制品（43MB）HTTP 端到端 PASS
+
+### Commit 75: feat(parser+cli): LSP 接入 Registry 编排主路（PHASE_09/开发计划T1-3）
+
+- FallbackParser 降级回退包装器；newParserRegistry 统一工厂（tree-sitter 兜底 + LSP/SCIP/CodeGraph 高精度优先）
+- **修复隐藏缺陷**：scan/watch 此前创建空 Registry 导致 CLI 扫描 classes/methods 永远为空
+
+### Commit 74: feat(parser): CodeGraph 适配器校准真实 schema（PHASE_09/开发计划T1-2）
+
+- 真实 CodeGraph DDL（nodes/edges + source_id/target_id/kind）检测优先，旧 symbols/edges 契约兼容；缺表显式降级
+
+### Commit 73: feat(cli): 落地 codeschema benchmark 子命令（PHASE_09/开发计划T1-1）
+
+- internal/benchmark 包（全链路指标采集）+ CLI 子命令（--repos 多仓/单仓，Markdown+JSON 报告）；CLI 命令数 6→7
+
 ### Commit 72: fix(vector): 本地端到端跑通真实 ONNX 推理（PHASE_09）
 
 **本地闭环验证（x86_64 mac）**
