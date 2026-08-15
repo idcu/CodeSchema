@@ -148,6 +148,39 @@ services:
     command: ["scan", "/repo"]
     restart: "no"
 
+  # =========================================================================
+  # 多租户模式（单实例多仓库，可选）
+  # 使用方式：docker compose --profile mt up -d
+  # 说明：复用同一镜像，挂载一份带 tenants: 的配置文件；各租户仓库分别挂载为只读卷，
+  #       各租户 storage.dsn 指向容器内独立目录（索引目录默认按 dsn 自动派生隔离）。
+  #       可运行的最小配置示例见仓库 build/mt-demo.yaml；设计见 docs/dev/13-多租户设计文档.md。
+  # =========================================================================
+  codeschema-mt:
+    profiles:
+      - "mt"
+    build:
+      context: .
+      args:
+        VERSION: ${CODESCHEMA_VERSION:-latest}
+    image: codeschema:${CODESCHEMA_VERSION:-latest}
+    container_name: codeschema-mt
+    restart: unless-stopped
+    ports:
+      - "${CODESCHEMA_MT_HTTP:-18099}:18099"
+      - "${CODESCHEMA_MT_MCP:-18098}:18098"
+    volumes:
+      - codeschema-mt-data:/app/data
+      - ${MT_REPO_A:-./repo-a}:/repo-a:ro
+      - ${MT_REPO_B:-./repo-b}:/repo-b:ro
+      - ${MT_CONFIG:-./config.mt.yaml}:/app/config.mt.yaml:ro
+    command: ["serve", "--config", "/app/config.mt.yaml"]
+    healthcheck:
+      test: ["CMD", "/app/codeschema", "version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 volumes:
   codeschema-data:
     name: codeschema-data
@@ -155,3 +188,5 @@ volumes:
     name: codeschema-pg-data
   codeschema-redis-data:
     name: codeschema-redis-data
+  codeschema-mt-data:
+    name: codeschema-mt-data

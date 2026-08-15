@@ -101,11 +101,17 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 
 > 注意：stdio 模式会打印索引构建日志到 stderr（不影响 stdout 协议帧）；首次启动会先全量构建索引。
 
-## 可用工具一览（11 个）
+## 可用工具一览（12 个）
 
 `context`（精准裁剪）· `impact`（影响面）· `tests`（关联单测）· `affected`（受影响方法）·
 `get_call_graph`（调用图）· `search_config`（配置检索）· `find_dependencies`（依赖查询）·
-`search_symbols`（双路检索）· `get_tags` · `search_by_tag` · `get_all_tags`（六类标签）
+`search_symbols`（双路检索）· `get_tags` · `search_by_tag` · `get_all_tags`（六类标签）·
+`list_projects`（枚举当前实例服务的全部仓库/租户）
+
+> 多租户（单实例多仓库）模式下，上述 11 个检索类工具均额外接受 `project` 参数用于指定目标仓库；
+> 省略时路由到默认租户（注册表首个，无 `tenants` 配置时为 `"default"`）。`list_projects` 返回
+> 当前实例服务的所有租户元信息（`id` / `name` / `root`），便于客户端发现可用仓库。完整设计见
+> [docs/dev/13-多租户设计文档.md](dev/13-多租户设计文档.md)。
 
 ## 备注
 

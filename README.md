@@ -43,6 +43,16 @@
 
 > 默认 `go build ./...` 不含 pg/redis 代码；启用对应后端时加 `-tags pg` / `-tags redis` 并拉取驱动依赖即可，详见 `docs/dev/12-存储扩展与大规模迁移路径.md`。
 
+## 多租户（单实例多仓库）
+
+多个项目都需要 CodeSchema 时，**推荐「单实例多租户」**：一个进程同时服务多个隔离的仓库，按 `project` 标识路由，无需为每个项目各起一个进程。
+
+- 每个租户持有**完全独立的** store + 全文/向量/IDF 索引（索引目录默认按各自 store 目录派生，绝不共享），隔离彻底且不修改 `Store` 接口；
+- 接入方式统一：`serve` / `mcp` 共用同一份 `--config`（写 `tenants:` 列表）；HTTP 用 `X-Tenant` 头或 `?tenant=`，MCP 工具用 `project` 参数，`list_projects` / `GET /projects` 枚举全部租户；
+- 向后兼容：不写 `tenants` 即为单「default」租户，行为与此前完全一致。
+
+可运行示例见 `build/mt-demo.yaml`，设计细节见 [docs/dev/13-多租户设计文档.md](docs/dev/13-多租户设计文档.md)。
+
 ## 快速开始
 
 ```bash
@@ -195,6 +205,7 @@ make clean
 
 ### 最新进展（2026-08-14）
 
+- **多租户（单实例多仓库）已落地**：新增 `internal/tenant`（管理器 + 路由）与 `internal/runtime`（单租户运行期装配），`serve` / `mcp` 通过一份 `--config` 的 `tenants:` 列表同时服务多个隔离仓库；每租户独立 store + 独立 FTS/向量/IDF 索引（默认按各自 `storage.dsn` 目录派生隔离）。HTTP 用 `X-Tenant`/`?tenant=`，MCP 工具用 `project` 参数，`list_projects` / `GET /projects` 枚举租户；无 `tenants` 配置时退化为单「default」租户，完全向后兼容。设计见 [docs/dev/13-多租户设计文档.md](docs/dev/13-多租户设计文档.md)，可运行示例见 `build/mt-demo.yaml`。
 - **SQLite 权威存储已接线**：新增 `internal/store/sqlite`（基于纯 Go 的 `modernc.org/sqlite`，免 CGO），完整实现 `store.Store` 接口（文件/类/方法/调用/标签 + 反向查询 + `UpsertIR` 增量入库），`storage.driver=sqlite` 即启用，默认仍 JSON 文件存储作 fallback。消除了「文档声称 SQLite、现实仅 JSON」的实现落差。
 - **SCIP / LSP 适配器生产验证**：
   - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。

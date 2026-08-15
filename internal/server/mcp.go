@@ -11,6 +11,7 @@ import (
 
 	"github.com/idcu/codeschema/internal/robust"
 	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/tenant"
 )
 
 // MCP 工具定义
@@ -55,20 +56,49 @@ type rpcError struct {
 
 // MCPServer MCP 协议服务器，使用 SSE（Server-Sent Events）传输。
 type MCPServer struct {
-	service   *service.Service
-	addr      string
-	server    *http.Server
-	tools     []mcpTool
-	authToken string
+	service      *service.Service
+	addr         string
+	server       *http.Server
+	tools        []mcpTool
+	authToken    string
+	manager      *tenant.Manager
+	resolver     TenantResolver
+	defaultTenant string
+	projects     []tenant.Info
 }
 
-// NewMCPServer 创建 MCP Server 实例。
+// TenantResolver 按租户 ID 解析出对应的运行期 Service。
+// 单项目模式下忽略 id，始终返回唯一实例。
+type TenantResolver func(ctx context.Context, id string) (*service.Service, error)
+
+// NewMCPServer 创建 MCP Server 实例（单项目模式）。
 func NewMCPServer(svc *service.Service, addr string) *MCPServer {
 	return &MCPServer{
-		service: svc,
-		addr:    addr,
-		tools:   defineTools(),
+		service:      svc,
+		addr:         addr,
+		tools:        defineTools(),
+		resolver:     func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
+		defaultTenant: "default",
+		projects:     []tenant.Info{{ID: "default"}},
 	}
+}
+
+// SetTenantManager 注入多租户管理器，使本服务器以单实例服务多个隔离仓库。
+// 调用后所有工具按请求中的 project 参数（缺省用默认租户）路由到对应实例。
+func (m *MCPServer) SetTenantManager(mgr *tenant.Manager) {
+	m.manager = mgr
+	m.resolver = mgr.Service
+	m.defaultTenant = mgr.DefaultID()
+	m.projects = mgr.List()
+}
+
+// resolveTenant 从工具参数中解析租户 ID 并返回对应 Service。
+func (m *MCPServer) resolveTenant(ctx context.Context, args map[string]any) (*service.Service, error) {
+	id, _ := args["project"].(string)
+	if id == "" {
+		id = m.defaultTenant
+	}
+	return m.resolver(ctx, id)
 }
 
 // SetAuthToken 设置 Bearer token 认证。
@@ -77,7 +107,11 @@ func (m *MCPServer) SetAuthToken(token string) {
 }
 
 // defineTools 定义 MCP 工具列表。
+//
+// 所有面向仓库的工具均接受可选的 project 参数（多租户模式下用于选择目标仓库，
+// 缺省使用默认租户）。list_projects 用于枚举当前实例服务的所有仓库。
 func defineTools() []mcpTool {
+	projectProp := toolProperty{Type: "string", Description: "租户/项目 ID（多租户模式下选择目标仓库，缺省用默认租户）"}
 	return []mcpTool{
 		{
 			Name:        "context",
@@ -87,6 +121,7 @@ func defineTools() []mcpTool {
 				Properties: map[string]toolProperty{
 					"symbol":        {Type: "string", Description: "类/方法全限定名"},
 					"context_lines": {Type: "number", Description: "上下文行数", Default: 5},
+					"project":       projectProp,
 				},
 				Required: []string{"symbol"},
 			},
@@ -97,8 +132,9 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"method": {Type: "string", Description: "方法全限定名"},
-					"depth":  {Type: "number", Description: "分析深度", Default: 1},
+					"method":  {Type: "string", Description: "方法全限定名"},
+					"depth":   {Type: "number", Description: "分析深度", Default: 1},
+					"project": projectProp,
 				},
 				Required: []string{"method"},
 			},
@@ -111,6 +147,7 @@ func defineTools() []mcpTool {
 				Properties: map[string]toolProperty{
 					"method":         {Type: "string", Description: "方法全限定名"},
 					"min_confidence": {Type: "number", Description: "最小置信度", Default: 60},
+					"project":        projectProp,
 				},
 				Required: []string{"method"},
 			},
@@ -123,6 +160,7 @@ func defineTools() []mcpTool {
 				Properties: map[string]toolProperty{
 					"symbol":    {Type: "string", Description: "符号全限定名"},
 					"recursive": {Type: "boolean", Description: "是否递归", Default: false},
+					"project":   projectProp,
 				},
 				Required: []string{"symbol"},
 			},
@@ -133,8 +171,9 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"symbol": {Type: "string", Description: "符号全限定名"},
-					"depth":  {Type: "number", Description: "调用深度", Default: 1},
+					"symbol":  {Type: "string", Description: "符号全限定名"},
+					"depth":   {Type: "number", Description: "调用深度", Default: 1},
+					"project": projectProp,
 				},
 				Required: []string{"symbol"},
 			},
@@ -146,6 +185,7 @@ func defineTools() []mcpTool {
 				Type: "object",
 				Properties: map[string]toolProperty{
 					"pattern": {Type: "string", Description: "搜索模式"},
+					"project": projectProp,
 				},
 				Required: []string{"pattern"},
 			},
@@ -156,7 +196,8 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"symbol": {Type: "string", Description: "符号全限定名"},
+					"symbol":  {Type: "string", Description: "符号全限定名"},
+					"project": projectProp,
 				},
 				Required: []string{"symbol"},
 			},
@@ -167,9 +208,10 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"q":     {Type: "string", Description: "搜索关键词"},
-					"mode":  {Type: "string", Description: "搜索模式: exact/semantic/both", Default: "both"},
-					"limit": {Type: "number", Description: "返回结果数量限制", Default: 20},
+					"q":       {Type: "string", Description: "搜索关键词"},
+					"mode":    {Type: "string", Description: "搜索模式: exact/semantic/both", Default: "both"},
+					"limit":   {Type: "number", Description: "返回结果数量限制", Default: 20},
+					"project": projectProp,
 				},
 				Required: []string{"q"},
 			},
@@ -180,7 +222,8 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"symbol": {Type: "string", Description: "类/方法全限定名"},
+					"symbol":  {Type: "string", Description: "类/方法全限定名"},
+					"project": projectProp,
 				},
 				Required: []string{"symbol"},
 			},
@@ -191,7 +234,8 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"tag": {Type: "string", Description: "标签名，如 controller/service/cache/go"},
+					"tag":     {Type: "string", Description: "标签名，如 controller/service/cache/go"},
+					"project": projectProp,
 				},
 				Required: []string{"tag"},
 			},
@@ -201,6 +245,16 @@ func defineTools() []mcpTool {
 			Description: "获取所有已知标签及其分类统计",
 			InputSchema: toolParams{
 				Type: "object",
+				Properties: map[string]toolProperty{
+					"project": projectProp,
+				},
+			},
+		},
+		{
+			Name:        "list_projects",
+			Description: "枚举当前实例服务的所有仓库（多租户模式下列出全部租户，单项目模式下仅 default）",
+			InputSchema: toolParams{
+				Type:       "object",
 				Properties: map[string]toolProperty{},
 			},
 		},
@@ -313,11 +367,17 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	name, _ := paramsMap["name"].(string)
 	args, _ := paramsMap["arguments"].(map[string]any)
 
+	// 多租户路由：解析目标租户的 Service（project 参数缺省用默认租户）。
+	svc, rerr := m.resolveTenant(ctx, args)
+	if rerr != nil {
+		return mcpError(id, rerr)
+	}
+
 	switch name {
 	case "context":
 		symbol, _ := args["symbol"].(string)
 		contextLines, _ := toInt(args["context_lines"])
-		result, err := m.service.GetContext(ctx, symbol, contextLines)
+		result, err := svc.GetContext(ctx, symbol, contextLines)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -326,7 +386,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "impact":
 		method, _ := args["method"].(string)
 		depth, _ := toInt(args["depth"])
-		result, err := m.service.GetImpact(ctx, method, depth)
+		result, err := svc.GetImpact(ctx, method, depth)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -335,7 +395,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "tests":
 		method, _ := args["method"].(string)
 		minConfidence, _ := toInt(args["min_confidence"])
-		result, err := m.service.GetTests(ctx, method, minConfidence)
+		result, err := svc.GetTests(ctx, method, minConfidence)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -344,7 +404,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "affected":
 		symbol, _ := args["symbol"].(string)
 		recursive, _ := args["recursive"].(bool)
-		result, err := m.service.GetAffected(ctx, symbol, recursive)
+		result, err := svc.GetAffected(ctx, symbol, recursive)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -353,7 +413,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "get_call_graph":
 		symbol, _ := args["symbol"].(string)
 		depth, _ := toInt(args["depth"])
-		result, err := m.service.GetCallGraph(ctx, symbol, depth)
+		result, err := svc.GetCallGraph(ctx, symbol, depth)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -361,7 +421,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 
 	case "search_config":
 		pattern, _ := args["pattern"].(string)
-		result, err := m.service.SearchConfig(ctx, pattern)
+		result, err := svc.SearchConfig(ctx, pattern)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -369,7 +429,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 
 	case "find_dependencies":
 		symbol, _ := args["symbol"].(string)
-		result, err := m.service.FindDependencies(ctx, symbol)
+		result, err := svc.FindDependencies(ctx, symbol)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -379,7 +439,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 		query, _ := args["q"].(string)
 		mode, _ := args["mode"].(string)
 		limit, _ := toInt(args["limit"])
-		result, err := m.service.Search(ctx, query, mode, limit)
+		result, err := svc.Search(ctx, query, mode, limit)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -387,7 +447,7 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 
 	case "get_tags":
 		symbol, _ := args["symbol"].(string)
-		result, err := m.service.GetTags(ctx, symbol)
+		result, err := svc.GetTags(ctx, symbol)
 		if err != nil {
 			return mcpError(id, err)
 		}
@@ -395,18 +455,21 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 
 	case "search_by_tag":
 		tag, _ := args["tag"].(string)
-		result, err := m.service.SearchByTag(ctx, tag)
+		result, err := svc.SearchByTag(ctx, tag)
 		if err != nil {
 			return mcpError(id, err)
 		}
 		return mcpResult(id, result)
 
 	case "get_all_tags":
-		result, err := m.service.GetAllTags(ctx)
+		result, err := svc.GetAllTags(ctx)
 		if err != nil {
 			return mcpError(id, err)
 		}
 		return mcpResult(id, result)
+
+	case "list_projects":
+		return mcpResult(id, m.projects)
 
 	default:
 		return jsonRPCResponse{
@@ -497,7 +560,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

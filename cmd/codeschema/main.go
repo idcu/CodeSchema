@@ -16,68 +16,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/idcu/codeschema/internal/ai"
-	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/robust"
+	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/scheduler"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/server"
 	"github.com/idcu/codeschema/internal/service"
-	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/tenant"
 	"github.com/idcu/codeschema/internal/vector"
 	"github.com/idcu/codeschema/internal/watcher"
 )
 
-// withImpactAnalyzer 注入代码图分析器，启用真实调用图影响面分析（含关联单测）。
-func withImpactAnalyzer(svc *service.Service, st store.Store) *service.Service {
-	an := analyzer.NewAnalyzer(st)
-	return svc.WithImpactAnalyzer(an)
-}
-
-// newAIEnhancer 按 config.ai 构造 AI 增强层（可选）。
-//
-// 配置不完整（缺 BaseURL/APIKey/Model 任一）时返回 nil——AI 增强被禁用，
-// 主流程零影响（规则标签 / 索引始终可用）。
-func newAIEnhancer(cfg *config.Config) *ai.Enhancer {
-	client := ai.NewOpenAICompatClient(ai.HTTPClientConfig{
-		BaseURL: cfg.AI.BaseURL,
-		APIKey:  cfg.AI.APIKey,
-		Model:   cfg.AI.Model,
-	})
-	if client == nil {
-		log.Printf("ai: enhancement disabled (set ai.base_url/api_key/model to enable)")
-		return nil
-	}
-	budget := ai.NewBudget(cfg.AI.BudgetPerScan, cfg.AI.BudgetPerQuery)
-	return ai.NewEnhancer(client, budget)
-}
-
-// withAIEnhancer 将 AI 增强层注入 Service（查询期同名方法消歧）与 Analyzer（标签补全）。
-// 未配置 LLM 时返回 nil（调用方自行处理禁用），不视为错误。
-func withAIEnhancer(svc *service.Service, cfg *config.Config) *ai.Enhancer {
-	enh := newAIEnhancer(cfg)
-	if enh == nil {
-		return nil
-	}
-	svc.WithAIEnhancer(enh)
-	return enh
-}
-
-// runTagAll 对已入库数据执行标签推导（规则 + 可选 AI 增强）。
-func runTagAll(ctx context.Context, st store.Store, cfg *config.Config) error {
-	an := analyzer.NewAnalyzer(st)
-	if enh := newAIEnhancer(cfg); enh != nil {
-		an.SetEnhancer(enh)
-		log.Printf("ai: enhancement enabled (provider=%s model=%s budget_scan=%d)",
-			cfg.AI.Provider, cfg.AI.Model, cfg.AI.BudgetPerScan)
-	}
-	if err := an.TagAll(ctx); err != nil {
-		return fmt.Errorf("tag all: %w", err)
-	}
-	return nil
-}
+// withImpactAnalyzer / newAIEnhancer / withAIEnhancer / runTagAll 等运行期装配函数
+// 已迁移至 internal/runtime 与 internal/tenant 包，供单项目与多租户路径统一复用。
 
 var (
 	version = "0.1.0"
@@ -237,7 +190,7 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	// 初始化解析适配器注册中心（tree-sitter 兜底 + 可选 LSP/SCIP/CodeGraph 高精度优先）
 	// 注：T1-3 修复——此前此处创建空 Registry 导致 CLI 扫描从未真正解析符号。
-	reg := newParserRegistry(ctx, cfg, repoPath)
+	reg := rt.NewParserRegistry(ctx, cfg, repoPath)
 
 	// 创建 Scanner
 	s := scanner.NewScanner(st, reg, *workers)
@@ -254,10 +207,10 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fmt.Printf("scan completed in %s\n", elapsed.Round(time.Millisecond))
 
 	// 扫描完成后构建搜索索引
-	searcher, builder := newSearcher(cfg)
+	searcher, builder := rt.NewSearcher(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	withImpactAnalyzer(svc, st)
+	rt.WithImpactAnalyzer(svc, st)
 	if result, err := svc.BuildIndex(ctx); err != nil {
 		fmt.Printf("WARN: build index: %v\n", err)
 	} else {
@@ -273,7 +226,7 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	}
 
 	// 标签推导（规则 + 可选 AI 增强）
-	if err := runTagAll(ctx, st, cfg); err != nil {
+	if err := rt.RunTagAll(ctx, st, cfg); err != nil {
 		fmt.Printf("WARN: tag all: %v\n", err)
 	}
 
@@ -307,7 +260,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	defer st.Close()
 
 	// 初始化解析适配器注册中心（tree-sitter 兜底 + 可选 LSP/SCIP/CodeGraph 高精度优先）
-	reg := newParserRegistry(ctx, cfg, repoPath)
+	reg := rt.NewParserRegistry(ctx, cfg, repoPath)
 
 	// 创建 Scanner
 	s := scanner.NewScanner(st, reg, *workers)
@@ -316,10 +269,10 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	sched := scheduler.NewScheduler(*debounceMs, 1000)
 
 	// 创建搜索组件
-	searcher, builder := newSearcher(cfg)
+	searcher, builder := rt.NewSearcher(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	withImpactAnalyzer(svc, st)
+	rt.WithImpactAnalyzer(svc, st)
 
 	// 启动异步索引队列（2 个 worker，64 缓冲区）
 	builder.StartAsync(ctx, 64, 2)
@@ -390,37 +343,19 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		return nil
 	}
 
-	st, err := newStore(ctx, cfg, *storeDir)
+	if *storeDir != "" {
+		cfg.Storage.DSN = *storeDir
+	}
+
+	// 多租户：单个进程按配置服务多个隔离仓库（无 tenants 配置时退回单项目模式）。
+	mgr, err := tenant.NewManager(ctx, cfg, newStore)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return fmt.Errorf("init tenant manager: %w", err)
 	}
-	defer st.Close()
+	defer mgr.Close()
 
-	svc := service.NewService(st)
-	s, builder := newSearcher(cfg)
-	svc.WithSearcher(s).WithIndexBuilder(builder)
-	withImpactAnalyzer(svc, st)
-	withAIEnhancer(svc, cfg) // 查询期同名方法消歧（可选）
-
-	// 启动时全量构建索引
-	if result, err := svc.BuildIndex(ctx); err != nil {
-		fmt.Printf("WARN: build index: %v\n", err)
-	} else {
-		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
-		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
-			if err := builder.SaveIDF(idfFile); err != nil {
-				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
-			}
-		}
-	}
-
-	// 启动 IDF 自动持久化（60 秒间隔）
-	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
-	defer stopAutoSave()
-
-	mcpSrv := server.NewMCPServer(svc, *addr)
+	mcpSrv := server.NewMCPServer(nil, *addr)
+	mcpSrv.SetTenantManager(mgr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
 	}
@@ -441,132 +376,39 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
 
-	st, err := newStore(ctx, cfg, *storeDir)
+	if *storeDir != "" {
+		cfg.Storage.DSN = *storeDir
+	}
+
+	// 多租户：单个进程按配置服务多个隔离仓库（无 tenants 配置时退回单项目模式）。
+	mgr, err := tenant.NewManager(ctx, cfg, newStore)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return fmt.Errorf("init tenant manager: %w", err)
 	}
-	defer st.Close()
+	defer mgr.Close()
 
-	svc := service.NewService(st)
-	s, builder, vecStore := newSearcherWithStore(cfg)
-	svc.WithSearcher(s).WithIndexBuilder(builder)
-	withImpactAnalyzer(svc, st)
-	withAIEnhancer(svc, cfg) // 查询期同名方法消歧（可选）
-
-	// 启动时全量构建索引
-	if result, err := svc.BuildIndex(ctx); err != nil {
-		fmt.Printf("WARN: build index: %v\n", err)
-	} else {
-		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
-		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
-			if err := builder.SaveIDF(idfFile); err != nil {
-				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
-			}
-		}
-	}
-
-	// 启动 IDF 自动持久化（60 秒间隔）
-	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
-	defer stopAutoSave()
-
-	httpSrv := server.NewHTTPServer(svc, *addr)
+	httpSrv := server.NewHTTPServer(nil, *addr)
+	httpSrv.SetTenantManager(mgr)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
 	}
 
-	// 向量索引可视化工具（默认栈 Persistent/Memory 与 chromem 共用同一向量索引，避免 embedding 不一致）
-	if vecStore != nil {
-		vizHandler := server.NewVizHandler(
-			&vectorVizStore{VectorStore: vecStore},
-			&vectorVizSearcher{Searcher: s},
-			cfg.Storage.Search.VectorDim,
-			cfg.Storage.Search.VectorDir,
-		)
-		httpSrv.SetVizHandler(vizHandler)
-		fmt.Println("vector index visualization enabled at /viz")
+	// 向量索引可视化工具（默认栈），挂到默认租户的运行期组件上。
+	if rt0, rerr := mgr.Runtime(""); rerr == nil && rt0.VecStore != nil {
+		if cfg0, cerr := mgr.Config(""); cerr == nil {
+			vizHandler := server.NewVizHandler(
+				&vectorVizStore{VectorStore: rt0.VecStore},
+				&vectorVizSearcher{Searcher: rt0.Searcher},
+				cfg0.Storage.Search.VectorDim,
+				cfg0.Storage.Search.VectorDir,
+			)
+			httpSrv.SetVizHandler(vizHandler)
+			fmt.Println("vector index visualization enabled at /viz")
+		}
 	}
 
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
 	return httpSrv.Start(ctx)
-}
-
-// newSearcher 创建 P8.3 双路检索器 + 索引构建器，使用持久化存储 + 语义 Embedder。
-//
-// 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
-// 返回 (searcher, indexBuilder)，两者共享同一份 FTS 和向量索引。
-// newSearcherWithStore 创建 P8.3 双路检索器 + 索引构建器，并返回底层向量存储。
-//
-// 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
-// 返回 (searcher, indexBuilder, store)，store 供 /viz 可视化复用同一份索引（统一 embedding）。
-func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
-	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
-	var fts search.FTSEngine
-	pfts, err := search.NewPersistentFTS(ftsFile)
-	if err != nil {
-		log.Printf("WARN: new persistent FTS (%s): %v, fallback to memory", ftsFile, err)
-		fts = search.NewMemoryFTS()
-	} else {
-		fts = pfts
-	}
-
-	vecFile := filepath.Join(cfg.Storage.Search.VectorDir, "vector.json")
-	var store vector.VectorStore
-	pstore, err := vector.NewPersistentStore(vecFile)
-	if err != nil {
-		log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory", vecFile, err)
-		store = vector.NewMemoryStore()
-	} else {
-		store = pstore
-	}
-
-	// 优先使用 ONNX Embedder（bge-small-zh），模型在 down/ 目录下；
-	// 模型缺失且配置了 model_download_url 时自动下载（远程分发，见 vector.ModelDownloader）
-	modelDir := cfg.Storage.Vector.ModelDir
-	if modelDir == "" {
-		modelDir = filepath.Join("down", "models", cfg.Storage.Vector.EmbeddingModel)
-	}
-	libDir := filepath.Join("down", "onnxruntime")
-	var em vector.Embedder
-
-	// 远程分发：模型缺失时尝试下载（幂等；URL 未配置则查内置模型注册表回填），
-	// 失败则降级到 LocalEmbedder
-	if dl := vector.NewModelDownloader(modelDir, cfg.Storage.Vector.ModelDownloadURL, cfg.Storage.Vector.ModelSHA256); dl != nil {
-		if ok, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
-			log.Printf("WARN: ONNX model remote fetch failed (%v), falling back to LocalEmbedder", err)
-		} else if ok {
-			log.Printf("semantic: ONNX model ensured at %s", modelDir)
-		}
-	}
-
-	onnxEm := vector.NewONNXEmbedderOrFallback(modelDir, 512, libDir)
-	if onnxEm != nil {
-		log.Printf("semantic: using ONNX embedder (%s, dim=%d)", cfg.Storage.Vector.EmbeddingModel, onnxEm.Dim())
-		em = onnxEm
-	} else {
-		log.Printf("semantic: ONNX model not found, falling back to LocalEmbedder (dim=%d)",
-			cfg.Storage.Search.VectorDim)
-		model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
-		// 加载持久化的 IDF 词典（如果存在）
-		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-		if err := model.LoadIDF(idfFile); err != nil {
-			log.Printf("WARN: load IDF dictionary (%s): %v, will rebuild on build", idfFile, err)
-		}
-		em = model
-	}
-
-	indexer := vector.NewIndexer(store, em, 2)
-	adapter := search.NewVectorAdapter(indexer)
-	searcher := search.NewSearcher(fts, adapter, nil)
-	builder := search.NewIndexBuilder(fts, indexer, em)
-	return searcher, builder, store
-}
-
-// newSearcher 兼容旧签名的委托：仅返回 searcher 与 indexBuilder。
-func newSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
-	s, b, _ := newSearcherWithStore(cfg)
-	return s, b
 }
 
 // vectorVizStore 适配 vector.VectorStore（默认栈 Persistent/Memory）到 server.VizStore 接口。

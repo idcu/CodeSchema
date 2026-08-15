@@ -13,6 +13,7 @@ import (
 	"github.com/idcu/codeschema/internal/log"
 	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/tenant"
 	"github.com/idcu/codeschema/internal/trace"
 )
 
@@ -22,22 +23,32 @@ func init() {
 	metrics.RegisterGauge("http_active_requests", "Active HTTP requests")
 }
 
+// TenantResolverHTTP 按租户 ID 解析出对应的运行期 Service。
+type TenantResolverHTTP func(ctx context.Context, id string) (*service.Service, error)
+
 // HTTPServer 基于 net/http 标准库的 HTTP API 服务器。
 type HTTPServer struct {
-	service   *service.Service
-	addr      string
-	server    *http.Server
-	authToken string
-	viz       *VizHandler // 可选的可视化工具处理器
-	logger    *log.Logger
+	service      *service.Service
+	addr         string
+	server       *http.Server
+	authToken    string
+	viz          *VizHandler // 可选的可视化工具处理器
+	logger       *log.Logger
+	manager      *tenant.Manager
+	resolver     TenantResolverHTTP
+	defaultTenant string
+	projects     []tenant.Info
 }
 
-// NewHTTPServer 创建 HTTP API 服务器实例。
+// NewHTTPServer 创建 HTTP API 服务器实例（单项目模式）。
 func NewHTTPServer(svc *service.Service, addr string) *HTTPServer {
 	return &HTTPServer{
-		service: svc,
-		addr:    addr,
-		logger:  log.WithModule("http"),
+		service:      svc,
+		addr:         addr,
+		logger:       log.WithModule("http"),
+		resolver:     func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
+		defaultTenant: "default",
+		projects:     []tenant.Info{{ID: "default"}},
 	}
 }
 
@@ -46,9 +57,36 @@ func (h *HTTPServer) SetAuthToken(token string) {
 	h.authToken = token
 }
 
+// SetTenantManager 注入多租户管理器，使本服务器以单实例服务多个隔离仓库。
+// 调用后所有查询按 X-Tenant 头或 ?tenant= 参数（缺省用默认租户）路由到对应实例。
+func (h *HTTPServer) SetTenantManager(mgr *tenant.Manager) {
+	h.manager = mgr
+	h.resolver = mgr.Service
+	h.defaultTenant = mgr.DefaultID()
+	h.projects = mgr.List()
+}
+
 // SetVizHandler 设置向量索引可视化工具处理器。
 func (h *HTTPServer) SetVizHandler(viz *VizHandler) {
 	h.viz = viz
+}
+
+// serviceForRequest 从请求中解析租户 ID 并返回对应 Service。
+// 单项目模式下忽略租户标识，始终返回唯一实例。
+func (h *HTTPServer) serviceForRequest(r *http.Request) *service.Service {
+	id := r.Header.Get("X-Tenant")
+	if id == "" {
+		id = r.URL.Query().Get("tenant")
+	}
+	if id == "" {
+		id = h.defaultTenant
+	}
+	if h.resolver != nil {
+		if svc, err := h.resolver(r.Context(), id); err == nil {
+			return svc
+		}
+	}
+	return h.service
 }
 
 // Start 启动 HTTP 服务器，阻塞直到 Shutdown 被调用。
@@ -71,6 +109,9 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/tags", h.handleGetTags)
 	mux.HandleFunc("/tags/search", h.handleSearchByTag)
 	mux.HandleFunc("/tags/all", h.handleGetAllTags)
+
+	// 多租户：枚举当前实例服务的仓库
+	mux.HandleFunc("/projects", h.handleProjects)
 
 	// 可观测性端点
 	mux.HandleFunc("/metrics", h.handleMetrics)
@@ -138,7 +179,7 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
 		return
 	}
-	status := h.service.Health(r.Context())
+	status := h.serviceForRequest(r).Health(r.Context())
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -149,7 +190,7 @@ func (h *HTTPServer) handleHealthDB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	err := h.service.StoreHealthCheck(r.Context())
+	err := h.serviceForRequest(r).StoreHealthCheck(r.Context())
 	latency := time.Since(start).Milliseconds()
 
 	status := "ok"
@@ -157,9 +198,9 @@ func (h *HTTPServer) handleHealthDB(w http.ResponseWriter, r *http.Request) {
 		status = "degraded"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":    status,
+		"status":     status,
 		"latency_ms": latency,
-		"type":      "file",
+		"type":       "file",
 	})
 }
 
@@ -200,7 +241,7 @@ func (h *HTTPServer) handleContext(w http.ResponseWriter, r *http.Request) {
 	symbol := r.URL.Query().Get("symbol")
 	contextLines, _ := strconv.Atoi(r.URL.Query().Get("context_lines"))
 
-	result, err := h.service.GetContext(r.Context(), symbol, contextLines)
+	result, err := h.serviceForRequest(r).GetContext(r.Context(), symbol, contextLines)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -217,7 +258,7 @@ func (h *HTTPServer) handleImpact(w http.ResponseWriter, r *http.Request) {
 	method := r.URL.Query().Get("method")
 	depth, _ := strconv.Atoi(r.URL.Query().Get("depth"))
 
-	result, err := h.service.GetImpact(r.Context(), method, depth)
+	result, err := h.serviceForRequest(r).GetImpact(r.Context(), method, depth)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -234,7 +275,7 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 	method := r.URL.Query().Get("method")
 	minConfidence, _ := strconv.Atoi(r.URL.Query().Get("min_confidence"))
 
-	result, err := h.service.GetTests(r.Context(), method, minConfidence)
+	result, err := h.serviceForRequest(r).GetTests(r.Context(), method, minConfidence)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -252,7 +293,7 @@ func (h *HTTPServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 
-	result, err := h.service.Search(r.Context(), query, mode, limit)
+	result, err := h.serviceForRequest(r).Search(r.Context(), query, mode, limit)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -269,7 +310,7 @@ func (h *HTTPServer) handleGetTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	symbol := r.URL.Query().Get("symbol")
-	result, err := h.service.GetTags(r.Context(), symbol)
+	result, err := h.serviceForRequest(r).GetTags(r.Context(), symbol)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -284,7 +325,7 @@ func (h *HTTPServer) handleSearchByTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tag := r.URL.Query().Get("tag")
-	result, err := h.service.SearchByTag(r.Context(), tag)
+	result, err := h.serviceForRequest(r).SearchByTag(r.Context(), tag)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -298,12 +339,24 @@ func (h *HTTPServer) handleGetAllTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.GetAllTags(r.Context())
+	result, err := h.serviceForRequest(r).GetAllTags(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleProjects 返回当前实例服务的所有仓库元信息（多租户模式下列出全部租户）。
+func (h *HTTPServer) handleProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default":  h.defaultTenant,
+		"projects": h.projects,
+	})
 }
 
 // ---- 可观测性路由 ----
@@ -373,7 +426,7 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Tenant")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

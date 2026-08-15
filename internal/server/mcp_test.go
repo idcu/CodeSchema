@@ -55,8 +55,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		t.Fatalf("expected tools array, got %T", result["tools"])
 	}
 
-	if len(tools) != 11 {
-		t.Errorf("expected 11 tools, got %d", len(tools))
+	if len(tools) != 12 {
+		t.Errorf("expected 12 tools, got %d", len(tools))
 	}
 }
 

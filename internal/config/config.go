@@ -31,6 +31,136 @@ type Config struct {
 	Server  ServerConfig  `yaml:"server" json:"server"`
 	Watcher WatcherConfig `yaml:"watcher" json:"watcher"`
 	Scanner ScannerConfig `yaml:"scanner" json:"scanner"`
+	// Tenants 多租户注册表。非空时 serve/mcp 以单实例服务多个隔离仓库；
+	// 为空则沿用顶层 project/storage 等配置，保持单项目模式（向后兼容）。
+	Tenants []TenantConfig `yaml:"tenants" json:"tenants"`
+}
+
+// TenantConfig 多租户注册表中的单个项目（仓库）配置。
+//
+// 仅填写与全局默认不同的字段即可；未填写的字段由 TenantConfig.ToConfig 用全局
+// Config 兜底。因此一个租户最小只需 id + root + storage.dsn。
+type TenantConfig struct {
+	ID        string        `yaml:"id" json:"id"`
+	Name      string        `yaml:"name" json:"name"`
+	Root      string        `yaml:"root" json:"root"`
+	Languages []string      `yaml:"languages" json:"languages"`
+	Storage   StorageConfig `yaml:"storage" json:"storage"`
+	Parser    ParserConfig  `yaml:"parser" json:"parser"`
+	AI        AIConfig      `yaml:"ai" json:"ai"`
+	Watcher   WatcherConfig `yaml:"watcher" json:"watcher"`
+	Scanner   ScannerConfig `yaml:"scanner" json:"scanner"`
+	// AutoScan 启动时为该租户仓库执行一次全量扫描并入库（无需预先 scan）。
+	AutoScan bool `yaml:"auto_scan" json:"auto_scan"`
+	// Watch 启动后对该租户仓库后台增量监听（需 root 已配置）。
+	Watch bool `yaml:"watch" json:"watch"`
+}
+
+// ToConfig 将租户配置叠加到全局 base 之上，生成该租户独立的完整 Config。
+// 仅覆盖租户显式设置的字段，其余沿用 base 默认值。
+func (t TenantConfig) ToConfig(base *Config) *Config {
+	c := cloneConfig(base)
+	if t.Name != "" {
+		c.Project.Name = t.Name
+	}
+	if t.Root != "" {
+		c.Project.Root = t.Root
+	}
+	if len(t.Languages) > 0 {
+		c.Project.Languages = cloneStringSlice(t.Languages)
+	}
+	if t.Storage.Driver != "" {
+		c.Storage.Driver = t.Storage.Driver
+	}
+	if t.Storage.DSN != "" {
+		c.Storage.DSN = t.Storage.DSN
+	}
+	if t.Storage.KV != "" {
+		c.Storage.KV = t.Storage.KV
+	}
+	if t.Storage.Vector.Driver != "" {
+		c.Storage.Vector.Driver = t.Storage.Vector.Driver
+	}
+	if t.Storage.Vector.DSN != "" {
+		c.Storage.Vector.DSN = t.Storage.Vector.DSN
+	}
+	if t.Storage.Vector.EmbeddingModel != "" {
+		c.Storage.Vector.EmbeddingModel = t.Storage.Vector.EmbeddingModel
+	}
+	if t.Storage.Vector.ModelDir != "" {
+		c.Storage.Vector.ModelDir = t.Storage.Vector.ModelDir
+	}
+	if t.Storage.Vector.ModelDownloadURL != "" {
+		c.Storage.Vector.ModelDownloadURL = t.Storage.Vector.ModelDownloadURL
+	}
+	if t.Storage.Vector.ModelSHA256 != "" {
+		c.Storage.Vector.ModelSHA256 = t.Storage.Vector.ModelSHA256
+	}
+	mergeSearch(&c.Storage.Search, &t.Storage.Search)
+	if len(t.Parser.Adapters) > 0 {
+		c.Parser.Adapters = cloneStringSlice(t.Parser.Adapters)
+	}
+	if t.Parser.SCIP.IndexDir != "" {
+		c.Parser.SCIP.IndexDir = t.Parser.SCIP.IndexDir
+	}
+	if t.Parser.CodeGraph.DB != "" {
+		c.Parser.CodeGraph.DB = t.Parser.CodeGraph.DB
+	}
+	if t.Parser.JCodeIndexer.DB != "" {
+		c.Parser.JCodeIndexer.DB = t.Parser.JCodeIndexer.DB
+	}
+	if t.Parser.JCodeIndexer.ConfigFile != "" {
+		c.Parser.JCodeIndexer.ConfigFile = t.Parser.JCodeIndexer.ConfigFile
+	}
+	if len(t.Parser.JCodeIndexer.Env) > 0 {
+		c.Parser.JCodeIndexer.Env = cloneStringMap(t.Parser.JCodeIndexer.Env)
+	}
+	if t.Parser.LSP.Enabled {
+		c.Parser.LSP.Enabled = true
+	}
+	if t.AI.Provider != "" {
+		c.AI.Provider = t.AI.Provider
+	}
+	if t.AI.Model != "" {
+		c.AI.Model = t.AI.Model
+	}
+	if t.AI.BaseURL != "" {
+		c.AI.BaseURL = t.AI.BaseURL
+	}
+	if t.AI.APIKey != "" {
+		c.AI.APIKey = t.AI.APIKey
+	}
+	if t.AI.BudgetPerScan > 0 {
+		c.AI.BudgetPerScan = t.AI.BudgetPerScan
+	}
+	if t.AI.BudgetPerQuery > 0 {
+		c.AI.BudgetPerQuery = t.AI.BudgetPerQuery
+	}
+	if t.Watcher.DebounceMs > 0 {
+		c.Watcher.DebounceMs = t.Watcher.DebounceMs
+	}
+	if len(t.Watcher.IgnoreDirs) > 0 {
+		c.Watcher.IgnoreDirs = cloneStringSlice(t.Watcher.IgnoreDirs)
+	}
+	if t.Watcher.BatchSize > 0 {
+		c.Watcher.BatchSize = t.Watcher.BatchSize
+	}
+	if t.Watcher.UseFsnotify {
+		c.Watcher.UseFsnotify = true
+	}
+	if t.Watcher.Enabled {
+		c.Watcher.Enabled = true
+	}
+	if t.Scanner.Workers > 0 {
+		c.Scanner.Workers = t.Scanner.Workers
+	}
+	if t.Scanner.FileSizeLimitMB > 0 {
+		c.Scanner.FileSizeLimitMB = t.Scanner.FileSizeLimitMB
+	}
+	if t.Scanner.LineCountLimit > 0 {
+		c.Scanner.LineCountLimit = t.Scanner.LineCountLimit
+	}
+	return c
 }
 
 // ProjectConfig 项目配置。
@@ -155,6 +285,7 @@ func DefaultConfig() *Config {
 			Root:      ".",
 			Languages: []string{"go", "java", "python", "typescript", "rust", "cpp"},
 		},
+		Tenants: nil,
 		Storage: StorageConfig{
 			Driver: "file",
 			DSN:    "./data",
@@ -264,6 +395,22 @@ func Validate(cfg *Config) []error {
 
 	if cfg.Project.Root == "" {
 		errs = append(errs, fmt.Errorf("project.root must not be empty"))
+	}
+
+	// 多租户模式校验
+	seen := map[string]bool{}
+	for _, t := range cfg.Tenants {
+		if t.ID == "" {
+			errs = append(errs, fmt.Errorf("tenants: each tenant requires a non-empty id"))
+			continue
+		}
+		if seen[t.ID] {
+			errs = append(errs, fmt.Errorf("tenants: duplicate tenant id %q", t.ID))
+		}
+		seen[t.ID] = true
+		if t.Storage.DSN == "" {
+			errs = append(errs, fmt.Errorf("tenants: tenant %q requires storage.dsn", t.ID))
+		}
 	}
 
 	if cfg.Storage.Driver == "" {
@@ -625,6 +772,7 @@ func cloneConfig(cfg *Config) *Config {
 			Root:      cfg.Project.Root,
 			Languages: cloneStringSlice(cfg.Project.Languages),
 		},
+		Tenants: cloneTenantSlice(cfg.Tenants),
 		Storage: StorageConfig{
 			Driver: cfg.Storage.Driver,
 			DSN:    cfg.Storage.DSN,
@@ -703,6 +851,15 @@ func cloneStringMap(m map[string]string) map[string]string {
 	for k, v := range m {
 		out[k] = v
 	}
+	return out
+}
+
+func cloneTenantSlice(s []TenantConfig) []TenantConfig {
+	if s == nil {
+		return nil
+	}
+	out := make([]TenantConfig, len(s))
+	copy(out, s)
 	return out
 }
 
