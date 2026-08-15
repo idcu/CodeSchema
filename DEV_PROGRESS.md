@@ -342,7 +342,7 @@ P18      [████████████████████] 100%
 - [x] **`cmd`** — `serve`/`mcp` 通过 `--config` 的 `tenants:` 列表装配多租户；`scan`/`watch` 走 `runtime` 直装；全局 `--config` 须置于子命令之前。
 - [x] **关键修复：索引隔离** — 早期仅隔离主 `store` 的 DSN，FTS/向量/IDF 仍沿用 `DefaultConfig` 共享的 `./data/fts|vector|idf`，多租户按序 `auto_scan` 时后者覆盖前者索引 → 所有租户返回最后扫描者数据。修复：显式 `tenants` 在其**未显式配置**检索/向量目录时自动按各自 `storage.dsn` 派生 `<dsn>/fts|vector|idf`（仅目录型 `file/sqlite`）。判断「是否显式配置」用租户原始配置 `tc.Storage.Search.*`（merged 永远非空）。
 - [x] **向后兼容** — 无 `tenants` 配置时退化为单 `default` 租户，所有接口行为与单项目模式完全一致。
-- [x] **测试** — `internal/tenant/tenant_test.go`：6 项（deriveIndexDirs 派生/显式覆盖/非目录后端不派生 + Manager 单租户回退/多租户路由/索引目录派生隔离回归）。
+- [x] **测试** — `internal/tenant/tenant_test.go`（6 项：deriveIndexDirs 派生/显式覆盖/非目录后端不派生 + Manager 单租户回退/多租户路由/索引目录派生隔离回归）；`internal/runtime/runtime_test.go`（3 项：NewParserRegistry/NewSearcherWithStore 非空 + BuildRuntime 全链路 scan→装配→首轮索引→检索）。
 - [x] **文档** — 新增 `docs/dev/13-多租户设计文档.md`；更新 `README.md`/`docs/dev/11`/`docs/MCP接入指南.md`/`docker-compose.yml`（新增 `codeschema-mt` 服务，`--profile mt`）。
 - [x] **验证** — `build/mt-demo.yaml`（demo-a→`./cmd`、demo-b→`./internal/config`）端到端：HTTP 与 MCP 两路均正确隔离；`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...`、`go test ./...`（31 包全绿）通过。
 - commit `693bdc4`（14 files, +1253/−257）。
@@ -354,6 +354,7 @@ P18      [████████████████████] 100%
 3. ~~**tree-sitter C 绑定**~~ **已解决（实现方式已更正）**：`internal/parser/adapter/treesitter` 为基于正则表达式的轻量解析（30 语言：go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html/hcl/svelte/markdown/dockerfile/elm/cue），**默认构建非 CGO 版 go-tree-sitter 语法树（`-tags treesitter` 可切换真语法树）**，因此解析层不依赖 `go-tree-sitter` 与 C 编译器；调用关系检测仅 Go/Python 较准，其余语言为启发式。
 4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`bge-small-zh-v1.5` 模型已预转换为 ONNX 格式（FP16 量化，512 维），位于 `down/models/bge-small-zh-v1.5/`。`down/onnxruntime/` 含三平台动态库（`libonnxruntime.dylib`/`.so`/`onnxruntime.dll`），`make build-cgo` 自动复制到输出目录；**本机 x86_64 已端到端验证**——`-tags onnx` 下真实嵌入推理 dim=512（ORT 1.23.2，绑定经 `third_party/onnxruntime_go_patch` 适配 API v23）。应用启动时自动检测 ONNX 模型，优先使用 ONNXEmbedder，失败时降级到 LocalEmbedder。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
+6. **本地模型制品命名不匹配（离线必回退 LocalEmbedder）**：`resolveLocalArtifact` 按 `models-<EmbeddingModel>.tar.gz` 查找本地分发源（`<model>` = `config.Storage.Vector.EmbeddingModel`，默认 `bge-small-zh`），但仓库实际制品为 `build/models-bge-small-zh-v1.5.tar.gz`（带 `-v1.5` 后缀）；且 `NewModelDownloader` 的 `ModelDir` 由 `EmbeddingModel` 推导为 `down/models/bge-small-zh`，与真实模型目录 `down/models/bge-small-zh-v1.5` 不一致。结果：离线环境即便存在本地模型也无法命中，统一回退 LocalEmbedder（**非致命**，但损失语义精度，R@1 由 ONNX 的 1.00 降至 Local 的 0.42）。修复需让本地制品名解析兼容版本后缀，并校准 `EmbeddingModel`/`ModelDir` 与制品内部布局对齐（属独立优化项，不在多租户范围内）。
 
 ## 接手说明
 
