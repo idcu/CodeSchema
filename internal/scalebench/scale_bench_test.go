@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -295,6 +296,44 @@ func BenchmarkScaleBulk(b *testing.B) {
 		if err := st.BulkUpsert(ctx, irs); err != nil {
 			b.Fatalf("sqlite bulk upsert: %v", err)
 		}
+		if err := st.Close(); err != nil {
+			b.Fatalf("sqlite bulk close: %v", err)
+		}
+	}
+}
+
+// BenchmarkScaleBulkConcurrent 并发写回归看护：多 worker 并发 BulkUpsert 同一 SQLite
+// 实例（模拟多扫描 worker 并行灌入）。store.mu 串行化全部 SQL，故吞吐应与单 goroutine
+// 相当且不退化；本基准同时看护「并发调用不死锁/不数据竞争」（配合 -race）。
+// 运行：go test -bench=BenchmarkScaleBulkConcurrent -benchtime=1x ./internal/scalebench
+func BenchmarkScaleBulkConcurrent(b *testing.B) {
+	ctx := context.Background()
+	const workers, perWorker = 4, 2500 // 共 1 万文件
+	irs := make([]*parser.IRDocument, workers*perWorker)
+	for i := range irs {
+		irs[i] = synthIR(i)
+	}
+	for i := 0; i < b.N; i++ {
+		dsn := filepath.Join(b.TempDir(), "scale-bulk-conc.db")
+		st := sqlitestore.NewSQLiteStore()
+		if err := st.Open(ctx, dsn); err != nil {
+			b.Fatalf("sqlite bulk open: %v", err)
+		}
+		var wg sync.WaitGroup
+		start := time.Now()
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				lo, hi := w*perWorker, (w+1)*perWorker
+				if err := st.BulkUpsert(ctx, irs[lo:hi]); err != nil {
+					b.Errorf("worker %d bulk upsert: %v", w, err)
+					return
+				}
+			}(w)
+		}
+		wg.Wait()
+		b.ReportMetric(time.Since(start).Seconds(), "wall_s")
 		if err := st.Close(); err != nil {
 			b.Fatalf("sqlite bulk close: %v", err)
 		}
