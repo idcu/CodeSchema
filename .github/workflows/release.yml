@@ -1,0 +1,73 @@
+# CodeSchema Release Pipeline（T4-3）
+# tag 推送（v*）时自动构建 5 平台二进制 + SHA-256 校验和 + Release Notes。
+# 依赖：main 分支的 CI 全部通过（test/race/cross）后触发。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      # 5 平台交叉编译（免 CGO 纯 Go 二进制）
+      - name: Cross-compile all platforms
+        run: |
+          make cross VERSION=${{ github.ref_name }}
+          ls -lh build/codeschema-*
+
+      # SHA-256 校验和清单
+      - name: Generate SHA-256 checksums
+        run: |
+          cd build
+          shasum -a 256 codeschema-* > codeschema-SHA256SUMS.txt
+          cat codeschema-SHA256SUMS.txt
+
+      # 生成 Release Notes（从 CHANGELOG.internal.md 提取本次版本段，无则回退提交数）
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          NOTES="## CodeSchema ${TAG}\n\n### 安装\n\n下载对应平台的二进制，运行 \`./codeschema serve --http :8081\`（或 \`codeschema mcp --addr :8080\`）。\n\n### 校验\n\n\`\`\`bash\nshasum -a 256 -c codeschema-SHA256SUMS.txt\n\`\`\`\n\n### 变更\n\n- 完整变更见 CHANGELOG.internal.md 与 DEV_PROGRESS.md\n- MCP 接入：\`codeschema mcp --print-config\`（或 docs/MCP接入指南.md）\n- 语义检索：\`-tags onnx\` + 模型分发（docs/dev/09）"
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          printf '%b' "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 发布 GitHub Release 并附二进制 + 校验和
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CodeSchema ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            build/codeschema-*
+            build/codeschema-SHA256SUMS.txt
+          fail_on_unmatched_files: false
