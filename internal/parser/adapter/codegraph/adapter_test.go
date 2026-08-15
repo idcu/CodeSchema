@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"path/filepath"
 	"testing"
 
@@ -460,5 +461,87 @@ func TestGroupByExt(t *testing.T) {
 	}
 	if len(groups[".ts"]) != 1 {
 		t.Errorf("expected 1 .ts file, got %d", len(groups[".ts"]))
+	}
+}
+// TestCodeGraphAdapter_ParseAll_KindVariants 验证 CodeGraph kind 变体的类型映射
+// （P3_5 未做项：图 Schema 变体兼容覆盖）：interface/enum/trait/module/record
+// 应映射为对应 ClassIR.Type，constructor 应映射为方法。
+func TestCodeGraphAdapter_ParseAll_KindVariants(t *testing.T) {
+	dbPath := setupRealCodeGraphDB(t, []realNode{
+		{"ServiceAPI", "interface", "api/service.go", 1},
+		{"Color", "enum", "api/color.go", 2},
+		{"BaseService", "trait", "api/base.go", 3},
+		{"Logger", "module", "api/logger.go", 4},
+		{"UserRecord", "record", "api/user.go", 5},
+		{"Init", "constructor", "api/service.go", 20},
+	}, nil)
+	a := NewCodeGraphAdapter(dbPath)
+	ctx := context.Background()
+
+	ch, err := a.ParseAll(ctx, []string{"api/service.go", "api/color.go", "api/base.go", "api/logger.go", "api/user.go"})
+	if err != nil {
+		t.Fatalf("ParseAll: %v", err)
+	}
+	docs := map[string]*parser.IRDocument{}
+	for d := range ch {
+		docs[d.FilePath] = d
+	}
+
+	wantType := map[string]string{
+		"api/service.go": "INTERFACE",
+		"api/color.go":   "ENUM",
+		"api/base.go":    "ABSTRACT",
+		"api/logger.go":  "OBJECT",
+		"api/user.go":    "OBJECT",
+	}
+	for file, want := range wantType {
+		d := docs[file]
+		if d == nil || len(d.Classes) != 1 {
+			t.Fatalf("%s: expected 1 class, got %+v", file, d)
+		}
+		if d.Classes[0].Type != want {
+			t.Errorf("%s: kind type=%q want %q", file, d.Classes[0].Type, want)
+		}
+	}
+	// constructor → 方法
+	svc := docs["api/service.go"]
+	if len(svc.Methods) != 1 || svc.Methods[0].Name != "Init" {
+		t.Errorf("constructor should map to method: %+v", svc.Methods)
+	}
+}
+
+// TestCodeGraphAdapter_ParseAll_RealSchema_ColumnDrift 验证 schema 漂移显式报错：
+// nodes 表缺 file 列时，适配器必须显式报错（schema drift），不得静默返回空 IR。
+func TestCodeGraphAdapter_ParseAll_RealSchema_ColumnDrift(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "codegraph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// 缺 file 列（未来 CodeGraph 若改名/去列，即触发）
+	if _, err := db.Exec(`
+		CREATE TABLE nodes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, kind TEXT, line INTEGER);
+		CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER, target_id INTEGER, kind TEXT);
+		INSERT INTO nodes (name, kind, line) VALUES ('Service', 'class', 1);
+	`); err != nil {
+		t.Fatalf("create drifted schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	a := NewCodeGraphAdapter(dbPath)
+	ch, err := a.ParseAll(context.Background(), []string{"service.go"})
+	if err == nil {
+		// 若未报错，读 channel 确认没有静默产出
+		n := 0
+		for range ch {
+			n++
+		}
+		t.Fatalf("expected schema drift error, got %d docs (silent empty result)", n)
+	}
+	if !strings.Contains(err.Error(), "schema drift") {
+		t.Errorf("expected 'schema drift' in error, got %v", err)
 	}
 }
