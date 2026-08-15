@@ -199,3 +199,44 @@ func TestChromemStore_Size(t *testing.T) {
 		t.Errorf("expected Size()=0 for new chromem store, got %d", s.Size())
 	}
 }
+// TestPersistentChromemStore_RestartRestore 验证持久化 chromem 存储「重启恢复」：
+// 写入 → 用同一路径重新打开（模拟进程重启）→ 数据与检索一致性保持。
+// 覆盖 P6_1 未做项（chromem 持久化重启恢复验证）。
+func TestPersistentChromemStore_RestartRestore(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// 阶段 1：写入两个文档
+	s1, err := NewPersistentChromemStore("codeschema", dir, 4, nil)
+	if err != nil {
+		t.Fatalf("open instance 1: %v", err)
+	}
+	if err := s1.Add(ctx, "a", []float32{1, 0, 0, 0}); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	if err := s1.Add(ctx, "b", []float32{0, 1, 0, 0}); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+	if got := s1.Size(); got != 2 {
+		t.Fatalf("instance 1 size: got %d want 2", got)
+	}
+
+	// 阶段 2：同一路径重新打开（模拟重启），chromem 持久化按次写同步落盘
+	s2, err := NewPersistentChromemStore("codeschema", dir, 4, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	if got := s2.Size(); got != 2 {
+		t.Fatalf("restart lost data: size=%d want 2", got)
+	}
+	// 检索一致性：查询 a 的向量，最相似应为 a
+	res, err := s2.Search(ctx, []float32{1, 0, 0, 0}, 1)
+	if err != nil {
+		t.Fatalf("search after restart: %v", err)
+	}
+	if len(res) == 0 || res[0].ID != "a" {
+		t.Fatalf("search after restart: top=%+v want id=a", res)
+	}
+	_ = s1.Close()
+}
