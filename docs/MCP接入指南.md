@@ -84,6 +84,23 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 }
 ```
 
+## 6. 原生 stdio 直连（无需 SSE/HTTP）
+
+客户端可直接以子进程方式连接（`codeschema mcp --stdio`，LSP 风格 Content-Length 帧）：
+
+```json
+{
+  "mcpServers": {
+    "codeschema": {
+      "command": "codeschema",
+      "args": ["mcp", "--stdio", "--store", "/path/to/data"]
+    }
+  }
+}
+```
+
+> 注意：stdio 模式会打印索引构建日志到 stderr（不影响 stdout 协议帧）；首次启动会先全量构建索引。
+
 ## 可用工具一览（11 个）
 
 `context`（精准裁剪）· `impact`（影响面）· `tests`（关联单测）· `affected`（受影响方法）·

@@ -378,6 +378,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	printCfg := fs.Bool("print-config", false, "打印各客户端 MCP 接入配置片段并退出（不启动服务）")
+	stdioMode := fs.Bool("stdio", false, "以 stdio 传输模式启动（供仅支持 stdio 的 MCP 客户端直连，替代 SSE）")
 	fs.Parse(args)
 
 	// T2-5：一键打印客户端接入配置（无需启动服务即可获取）
@@ -419,6 +420,11 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	mcpSrv := server.NewMCPServer(svc, *addr)
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
+	}
+
+	// T4-1：stdio 传输模式（供仅支持 stdio 的客户端直连）
+	if *stdioMode {
+		return mcpSrv.StartStdio(ctx)
 	}
 
 	fmt.Printf("MCP Server listening on %s\n", *addr)

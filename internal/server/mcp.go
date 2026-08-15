@@ -295,35 +295,8 @@ func (m *MCPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 处理请求 ID
-	id := req.ID
-	if id == nil {
-		id = 0
-	}
-
-	var resp jsonRPCResponse
-	switch req.Method {
-	case "tools/list":
-		resp = jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Result: map[string][]mcpTool{
-				"tools": m.tools,
-			},
-		}
-
-	case "tools/call":
-		resp = m.handleToolCall(r.Context(), id, req.Params)
-
-	default:
-		resp = jsonRPCResponse{
-			JSONRPC: "2.0",
-			ID:      id,
-			Error:   &rpcError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)},
-		}
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	// 复用纯逻辑处理器（stdio 传输同路径）
+	writeJSON(w, http.StatusOK, m.handleRequest(req))
 }
 
 // handleToolCall 处理工具调用请求。
