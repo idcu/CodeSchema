@@ -1,18 +1,18 @@
 {
   "results": [
     {
-      "repo_name": "CodeSchema",
-      "repo_path": "E:\\CodeSchema",
-      "file_count": 92,
-      "scan_time_ms": 4592,
-      "index_time_ms": 15,
-      "heap_mb": 447.9140625,
-      "search_p50_ms": 1.541,
-      "search_p95_ms": 2.67,
-      "search_p99_ms": 2.67,
-      "search_avg_ms": 1.621722222222222
+      "repo_name": "code-schema",
+      "repo_path": "/Volumes/Data/code-schema",
+      "file_count": 151,
+      "scan_time_ms": 985,
+      "index_time_ms": 52,
+      "heap_mb": 100.9296875,
+      "search_p50_ms": 5.125,
+      "search_p95_ms": 6.344,
+      "search_p99_ms": 6.344,
+      "search_avg_ms": 5.055055555555556
     }
   ],
-  "baseline": "CodeSchema",
+  "baseline": "code-schema",
   "config_desc": "default config (workers=2, dim=128, memory store)"
 }
