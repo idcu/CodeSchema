@@ -38,9 +38,9 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │   ├── P6_2 嵌入器（Local / ONNX） ............. 95%
 │   └── P6_3 模型分发与下载 .................... 95%
 │
-├── P7 存储层 Store Layer ─────────────── 90%
+├── P7 存储层 Store Layer ─────────────── 92%
 │   ├── P7_1 Store 接口 + 文件存储 .............. 100%
-│   ├── P7_2 SQLite 驱动 ....................... 92%
+│   ├── P7_2 SQLite 驱动 ....................... 97%
 │   ├── P7_3 PostgreSQL 驱动（-tags pg） ......... 85%
 │   └── P7_4 Redis 热点缓存（-tags redis） ....... 85%
 │
@@ -91,14 +91,13 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 
 | # | 阻塞项 | 影响模块 | 类型 | 状态 |
 |---|---|---|---|---|
-| 1 | **modernc SQLite 并发访问死锁**：v1.56.0 + libc v1.74.4 多 goroutine 访问 SQLite（即使单连接严格串行）触发 libc 全局内存分配器死锁/自旋，查询永久卡死；单 goroutine 正常 | P7_2 | 第三方库缺陷 | 已定位+测试 Skip+文档化，待驱动升级/替换后复测 |
-| 2 | PG/Redis 驱动缺真实外部服务端到端验证 | P7_3、P7_4 | 外部依赖 | 集成测试代码已完成（优雅 skip），实跑待 Docker 网络恢复 |
-| 3 | ONNX 语义检索依赖 gcc + onnxruntime 动态库（`-tags onnx`） | P6_2 | 构建依赖 | 默认构建已隔离；Local 兜底 R@1=0.42 为已知质量取舍 |
-| 4 | LSP clangd 适配器需 compile-commands.json 上下文 | P3_4 | 场景受限 | 已优雅降级 fallback Treesitter |
-| 5 | Treesitter 少数语言（bash/sql/css）语法树质量不均 | P3_2 | 质量 | 已通过 adapterbench 量化，回退正则可接受 |
-| 6 | 第三方依赖本地化：chromem-go（`down/`）、onnxruntime_go（`third_party/` patch）上游升级需重新验证 | P6_1、P6_2 | 依赖维护 | 持续跟进 |
-| 7 | AI 标签/注释增强依赖外部 LLM，真实质量评估未做 | P4_2 | 外部依赖 | 需 API key，阻塞中 |
-| 8 | 大规模仓库向量索引内存占用 | P6_1 | 性能 | scalebench 已看护（100k≈169MB） |
+| 1 | PG/Redis 驱动缺真实外部服务端到端验证 | P7_3、P7_4 | 外部依赖 | 集成测试代码已完成（优雅 skip），实跑待 Docker 网络恢复 |
+| 2 | ONNX 语义检索依赖 gcc + onnxruntime 动态库（`-tags onnx`） | P6_2 | 构建依赖 | 默认构建已隔离；Local 兜底 R@1=0.42 为已知质量取舍 |
+| 3 | LSP clangd 适配器需 compile-commands.json 上下文 | P3_4 | 场景受限 | 已优雅降级 fallback Treesitter |
+| 4 | Treesitter 少数语言（bash/sql/css）语法树质量不均 | P3_2 | 质量 | 已通过 adapterbench 量化，回退正则可接受 |
+| 5 | 第三方依赖本地化：chromem-go（`down/`）、onnxruntime_go（`third_party/` patch）上游升级需重新验证 | P6_1、P6_2 | 依赖维护 | 持续跟进 |
+| 6 | AI 标签/注释增强依赖外部 LLM，真实质量评估未做 | P4_2 | 外部依赖 | 需 API key，阻塞中 |
+| 7 | 大规模仓库向量索引内存占用 | P6_1 | 性能 | scalebench 已看护（100k≈169MB） |
 
 ## 四、模块文档导航
 
@@ -108,9 +107,9 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | ├ P1_1 CLI | [P1_1.md](./P1_1.md) | 100% | ├ P6_1 索引核心 | [P6_1.md](./P6_1.md) | 95% |
 | ├ P1_2 MCP | [P1_2.md](./P1_2.md) | 100% | ├ P6_2 嵌入器 | [P6_2.md](./P6_2.md) | 95% |
 | └ P1_3 HTTP | [P1_3.md](./P1_3.md) | 100% | └ P6_3 模型分发 | [P6_3.md](./P6_3.md) | 95% |
-| **P2 编排层** | [P2.md](./P2.md) | 100% | **P7 存储层** | [P7.md](./P7.md) | 90% |
+| **P2 编排层** | [P2.md](./P2.md) | 100% | **P7 存储层** | [P7.md](./P7.md) | 92% |
 | ├ P2_1 Service | [P2_1.md](./P2_1.md) | 100% | ├ P7_1 接口+file | [P7_1.md](./P7_1.md) | 100% |
-| ├ P2_2 Scanner | [P2_2.md](./P2_2.md) | 100% | ├ P7_2 SQLite | [P7_2.md](./P7_2.md) | 92% |
+| ├ P2_2 Scanner | [P2_2.md](./P2_2.md) | 100% | ├ P7_2 SQLite | [P7_2.md](./P7_2.md) | 97% |
 | ├ P2_3 Watcher | [P2_3.md](./P2_3.md) | 100% | ├ P7_3 PG | [P7_3.md](./P7_3.md) | 85% |
 | └ P2_4 Scheduler | [P2_4.md](./P2_4.md) | 100% | └ P7_4 Redis | [P7_4.md](./P7_4.md) | 85% |
 | **P3 解析层** | [P3.md](./P3.md) | 94% | **P8 公共模块** | [P8.md](./P8.md) | 100% |
@@ -141,6 +140,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 对模块文档与实际代码状态做了全量对齐，并推进了未阻塞任务：
 
 - **完成度校准**：多数模块实际完成度高于初版标注（初版按目录结构保守评估，未深入核对 git 历史与测试）。CodeGraph 真实 schema 端到端（P3_5 70%→90%）、ONNX 质量定案（P6_2 85%→95%）、30 语言全扩展 + AST/调用图基准（P3_2 90%→95%）、10万+ 全链路压测（P9_2 90%→95%）等均已落地。
-- **新增验证**：为 SQLite 补写并发写压力测试（`TestSQLite_ConcurrentUpsertIR_DistinctFiles` / `TestSQLite_ConcurrentUpdateSameFile`，PASS）。
-- **重大发现（新阻塞项）**：SQLite 并发读写测试暴露 `modernc.org/sqlite v1.56.0 + libc v1.74.4` 在 macOS 多 goroutine 访问时的底层死锁 bug（libc 全局内存分配器 allocMu），已定位根因、保留最小复现、`TestSQLite_ConcurrentReadWrite` 标记 Skip 并文档化（见 P7_2 阻塞项）。落地 `SetMaxOpenConns(1)` 缓解。该 bug 由第三方库引入，非项目代码问题；升级 modernc 或替换驱动后需复测。
+- **新增验证**：SQLite 并发安全验证完成（纯写/读写/多读并发均 `-race` 通过，P7_2 → 97%）。⚠️ 期间曾把「reader 无限循环测试超时」误判为 modernc 驱动死锁（一度标记 Skip 并列为头号阻塞项），已纠正——实为测试设计缺陷（reader 需固定迭代次数），保留 `TestConcurrentFixed_*` 作回归看护。
 - **阻塞项**：PG/Redis 真实实例实跑（Docker 网络）、AI 真实 LLM 评估（API key）维持阻塞；CodeGraph/Treesitter 精度项已从阻塞移除。
