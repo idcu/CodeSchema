@@ -13,13 +13,19 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser/adapter/treesitter"
+	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
 	sqlitestore "github.com/idcu/codeschema/internal/store/sqlite"
+	"github.com/idcu/codeschema/internal/vector"
 	chromem "github.com/philippgille/chromem-go"
 )
 
@@ -292,5 +298,166 @@ func BenchmarkScaleBulk(b *testing.B) {
 		if err := st.Close(); err != nil {
 			b.Fatalf("sqlite bulk close: %v", err)
 		}
+	}
+}
+
+// ============================================================================
+// T3-1 真实全链路端到端压测：合成真实 .go 文件 → 真实 Scanner/Registry →
+// IndexBuilder → Searcher（10万+ 文件规模），验证「扫描+解析+索引+检索」全链路
+// 内存与耗时，产出「什么规模用什么后端」决策数据。
+//
+// 与 TestScaleBench（仅存储层、合成 IR 直接 Upsert）不同，本测试走完整生产路径：
+// 文件落盘 → listFiles → detectLang → Registry.Select → Parse → UpsertIR →
+// BuildFromStore → Search，是真正的端到端压测。
+// 运行：go test -run TestScaleEndToEnd ./internal/scalebench/ -v -timeout 900s
+// 说明：为控制运行时长，默认 N=10000（10 万全量可用 env CODESCHEMA_SCALE_E2E_N 覆盖，
+// 预估耗时与内存见结论表）。
+// ============================================================================
+
+type e2eResult struct {
+	N           int     `json:"n"`
+	Files       int     `json:"files"`
+	Docs        int     `json:"docs"`
+	ScanMS      float64 `json:"scan_ms"`
+	IndexMS     float64 `json:"index_ms"`
+	SearchP95MS float64 `json:"search_p95_ms"`
+	HeapMB      float64 `json:"heap_mb"`
+	IndexedDocs int     `json:"indexed_docs"`
+}
+
+// synthGoFile 生成一个真实的、可被 Go 正则解析器识别的 .go 源文件内容。
+func synthGoFile(idx int) string {
+	return fmt.Sprintf(`package pkg%d
+
+import "fmt"
+
+// Service%d 处理业务逻辑
+type Service%d struct {
+	Name string
+}
+
+// Run 执行主流程
+func (s *Service%d) Run() error {
+	fmt.Println("run %d")
+	return nil
+}
+
+// Helper%d 辅助函数
+func Helper%d(a int) int {
+	return a + %d
+}
+`, idx%50, idx, idx, idx, idx, idx, idx, idx)
+}
+
+// TestScaleEndToEnd 真实全链路端到端压测（T3-1）。
+func TestScaleEndToEnd(t *testing.T) {
+	n := 10000
+	if env := os.Getenv("CODESCHEMA_SCALE_E2E_N"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil && v > 0 {
+			n = v
+		}
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+
+	// 合成 N 个真实 .go 文件（分批写入，避免一次性占用大量内存）
+	const batch = 5000
+	for start := 0; start < n; start += batch {
+		end := start + batch
+		if end > n {
+			end = n
+		}
+		for i := start; i < end; i++ {
+			dir := filepath.Join(root, fmt.Sprintf("pkg%d", i%50))
+			_ = os.MkdirAll(dir, 0o755)
+			fp := filepath.Join(dir, fmt.Sprintf("file%d.go", i))
+			if err := os.WriteFile(fp, []byte(synthGoFile(i)), 0o644); err != nil {
+				t.Fatalf("write file %d: %v", i, err)
+			}
+		}
+		t.Logf("synthesized %d/%d files", end, n)
+	}
+
+	// 真实组件：FileStore + tree-sitter 正则适配器 + 内存检索
+	st := store.NewStore("file")
+	storeDir := t.TempDir()
+	if err := st.Open(ctx, storeDir); err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	defer st.Close()
+
+	reg := parser.NewRegistry()
+	reg.Register(treesitter.NewTreeSitterAdapter())
+	sc := scanner.NewScanner(st, reg, 4)
+
+	runtime.GC()
+	var m0 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+
+	// ① 扫描 + 解析
+	scanStart := time.Now()
+	if err := sc.ScanAll(ctx, root); err != nil {
+		t.Fatalf("ScanAll: %v", err)
+	}
+	scanMS := float64(time.Since(scanStart).Milliseconds())
+
+	// ② 索引构建
+	fts := search.NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 4)
+	builder := search.NewIndexBuilder(fts, idx, em)
+	idxStart := time.Now()
+	buildRes, err := builder.BuildFromStore(ctx, st)
+	if err != nil {
+		t.Fatalf("BuildFromStore: %v", err)
+	}
+	indexMS := float64(time.Since(idxStart).Milliseconds())
+
+	// ③ 检索延迟（与 integration 同查询集，取 P95）
+	searcher := search.NewSearcher(fts, search.NewVectorAdapter(idx), nil)
+	queries := []string{"Run", "Helper", "Service", "Name", "Println", "main"}
+	var lats []float64
+	for _, q := range queries {
+		start := time.Now()
+		_, err := searcher.Search(ctx, q, search.SearchModeBoth, 10)
+		if err != nil {
+			continue
+		}
+		lats = append(lats, float64(time.Since(start).Microseconds()))
+	}
+	p95 := 0.0
+	if len(lats) > 0 {
+		sort.Float64s(lats)
+		p95 = lats[len(lats)*95/100] / 1000
+	}
+
+	// ④ 内存
+	var m1 runtime.MemStats
+	runtime.ReadMemStats(&m1)
+	heapMB := float64(m1.HeapInuse-m0.HeapInuse) / 1024 / 1024
+
+	res := e2eResult{
+		N: n, Files: n, Docs: buildRes.TotalDocs,
+		ScanMS: scanMS, IndexMS: indexMS, SearchP95MS: p95,
+		HeapMB: heapMB, IndexedDocs: buildRes.IndexedDocs,
+	}
+	t.Logf("E2E N=%d: scan=%.0fms index=%.0fms p95=%.2fms heap=%.1fMB docs=%d/%d",
+		n, scanMS, indexMS, p95, heapMB, buildRes.IndexedDocs, buildRes.TotalDocs)
+
+	// 报告落盘
+	out := map[string]any{
+		"generated_at": time.Now().Format(time.RFC3339),
+		"n":            n,
+		"result":       res,
+		"note":         "真实文件→Scanner(正则)→UpsertIR→BuildFromStore→Searcher 全链路；N 由 CODESCHEMA_SCALE_E2E_N 覆盖",
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	_ = os.MkdirAll(filepath.Join(repoRoot(), "build"), 0o755)
+	if err := os.WriteFile(filepath.Join(repoRoot(), "build", "scale-e2e.json"), data, 0o644); err != nil {
+		t.Logf("warn: 写 build/scale-e2e.json 失败: %v", err)
 	}
 }

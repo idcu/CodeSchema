@@ -9,6 +9,9 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # 每日夜间全量规模压测（10万+ 文件端到端），产出趋势 JSONL 供跨提交对比
+  schedule:
+    - cron: '0 20 * * *'
 
 env:
   GO_VERSION: '1.25'
@@ -67,6 +70,52 @@ jobs:
       - name: Scale benchmark (BulkUpsert regression guard)
         # -run '^$' 仅跑基准，避免触发同包内超慢的 TestScaleBench（100k 逐文件 UpsertIR，分钟级）
         run: go test -run '^$' -bench=BenchmarkScaleBulk -benchmem -count=1 -timeout 300s ./internal/scalebench/...
+
+  # === 夜间全量规模压测（T3-4：10万+ 文件端到端全链路 + 趋势归档） ===
+  nightly-scale:
+    name: Nightly Scale E2E (100k)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Scale E2E benchmark (N=100000)
+        # 真实文件→Scanner→UpsertIR→BuildFromStore→Searcher 全链路，产出 build/scale-e2e.json
+        run: CODESCHEMA_SCALE_E2E_N=100000 go test -count=1 -run '^TestScaleEndToEnd$' -v -timeout 1800s ./internal/scalebench/
+
+      - name: Append e2e trend (JSONL)
+        # 每次夜间运行把结果快照（含 git SHA）追加为 JSONL，跨提交对比扫描/索引/内存漂移
+        run: |
+          mkdir -p build
+          if [ -f build/scale-e2e.json ]; then
+            echo "{\"sha\":\"${{ github.sha }}\",\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"data\":$(cat build/scale-e2e.json)}" >> build/scale-e2e-history.jsonl
+          fi
+
+      - name: Upload scale e2e artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-e2e-${{ github.sha }}
+          path: |
+            build/scale-e2e.json
+            build/scale-e2e-history.jsonl
+          if-no-files-found: warn
 
   # === 竞态检测（仅 Linux） ===
   race:
