@@ -19,11 +19,11 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │   ├── P2_3 文件监听 Watcher ................... 100%
 │   └── P2_4 调度器 Scheduler ................... 100%
 │
-├── P3 解析层 Parsing Layer ───────────── 94%
+├── P3 解析层 Parsing Layer ───────────── 96%
 │   ├── P3_1 解析核心（IR + 注册）【公共契约】.... 100%
 │   ├── P3_2 Treesitter 适配器（30 语言） ........ 95%
 │   ├── P3_3 SCIP 适配器 ....................... 95%
-│   ├── P3_4 LSP 适配器 ........................ 90%
+│   ├── P3_4 LSP 适配器 ........................ 95%
 │   └── P3_5 CodeGraph 适配器 .................. 90%
 │
 ├── P4 分析层 Analysis Layer ──────────── 96%
@@ -93,7 +93,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 |---|---|---|---|---|
 | 1 | PG/Redis 驱动缺真实外部服务端到端验证 | P7_3、P7_4 | 外部依赖 | 集成测试代码已完成（优雅 skip），实跑待 Docker 网络恢复 |
 | 2 | ONNX 语义检索依赖 gcc + onnxruntime 动态库（`-tags onnx`） | P6_2 | 构建依赖 | 默认构建已隔离；Local 兜底 R@1=0.42 为已知质量取舍 |
-| 3 | LSP clangd 适配器需 compile-commands.json 上下文 | P3_4 | 场景受限 | 已优雅降级 fallback Treesitter |
+| 3 | LSP clangd 适配器需 compile-commands.json 上下文 | P3_4 | 场景受限 | 已解决：测试自动构造工程上下文真实验证（PASS）；独立文件场景优雅降级 |
 | 4 | Treesitter 少数语言（bash/sql/css）语法树质量不均 | P3_2 | 质量 | 已通过 adapterbench 量化，回退正则可接受 |
 | 5 | 第三方依赖本地化：chromem-go（`down/`）、onnxruntime_go（`third_party/` patch）上游升级需重新验证 | P6_1、P6_2 | 依赖维护 | 持续跟进 |
 | 6 | AI 标签/注释增强依赖外部 LLM，真实质量评估未做 | P4_2 | 外部依赖 | 需 API key，阻塞中 |
@@ -112,11 +112,11 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | ├ P2_2 Scanner | [P2_2.md](./P2_2.md) | 100% | ├ P7_2 SQLite | [P7_2.md](./P7_2.md) | 97% |
 | ├ P2_3 Watcher | [P2_3.md](./P2_3.md) | 100% | ├ P7_3 PG | [P7_3.md](./P7_3.md) | 85% |
 | └ P2_4 Scheduler | [P2_4.md](./P2_4.md) | 100% | └ P7_4 Redis | [P7_4.md](./P7_4.md) | 85% |
-| **P3 解析层** | [P3.md](./P3.md) | 94% | **P8 公共模块** | [P8.md](./P8.md) | 100% |
+| **P3 解析层** | [P3.md](./P3.md) | 96% | **P8 公共模块** | [P8.md](./P8.md) | 100% |
 | ├ P3_1 解析核心 | [P3_1.md](./P3_1.md) | 100% | ├ P8_1 配置 | [P8_1.md](./P8_1.md) | 100% |
 | ├ P3_2 Treesitter | [P3_2.md](./P3_2.md) | 95% | ├ P8_2 日志 | [P8_2.md](./P8_2.md) | 100% |
 | ├ P3_3 SCIP | [P3_3.md](./P3_3.md) | 95% | ├ P8_3 指标 | [P8_3.md](./P8_3.md) | 100% |
-| ├ P3_4 LSP | [P3_4.md](./P3_4.md) | 90% | ├ P8_4 追踪 | [P8_4.md](./P8_4.md) | 100% |
+| ├ P3_4 LSP | [P3_4.md](./P3_4.md) | 95% | ├ P8_4 追踪 | [P8_4.md](./P8_4.md) | 100% |
 | └ P3_5 CodeGraph | [P3_5.md](./P3_5.md) | 90% | ├ P8_5 错误 | [P8_5.md](./P8_5.md) | 100% |
 | **P4 分析层** | [P4.md](./P4.md) | 96% | └ P8_6 健壮性 | [P8_6.md](./P8_6.md) | 100% |
 | ├ P4_1 Analyzer | [P4_1.md](./P4_1.md) | 100% | **P9 测试基准** | [P9.md](./P9.md) | 95% |
@@ -139,6 +139,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 
 对模块文档与实际代码状态做了全量对齐，并推进了未阻塞任务：
 
-- **完成度校准**：多数模块实际完成度高于初版标注（初版按目录结构保守评估，未深入核对 git 历史与测试）。CodeGraph 真实 schema 端到端（P3_5 70%→90%）、ONNX 质量定案（P6_2 85%→95%）、30 语言全扩展 + AST/调用图基准（P3_2 90%→95%）、10万+ 全链路压测（P9_2 90%→95%）等均已落地。
-- **新增验证**：SQLite 并发安全验证完成（纯写/读写/多读并发均 `-race` 通过，P7_2 → 97%）。⚠️ 期间曾把「reader 无限循环测试超时」误判为 modernc 驱动死锁（一度标记 Skip 并列为头号阻塞项），已纠正——实为测试设计缺陷（reader 需固定迭代次数），保留 `TestConcurrentFixed_*` 作回归看护。
-- **阻塞项**：PG/Redis 真实实例实跑（Docker 网络）、AI 真实 LLM 评估（API key）维持阻塞；CodeGraph/Treesitter 精度项已从阻塞移除。
+- **完成度校准**：多数模块实际完成度高于初版标注。CodeGraph 真实 schema（P3_5 70%→90%）、ONNX 质量定案（P6_2 85%→95%）、30 语言全扩展 + AST/调用图基准（P3_2 90%→95%）、10万+ 全链路压测（P9_2 90%→95%）、chromem 持久化恢复验证（P6_1 97%）等均已落地。
+- **SQLite 并发误判纠正**：曾把「reader 无限循环测试超时」误判为 modernc 驱动死锁（一度标记 Skip + 列为头号阻塞项），已纠正——实为测试设计缺陷（reader 需固定迭代次数）。正确设计的读写/多读并发均 `-race` 通过（P7_2 → 97%），并新增 `BenchmarkScaleBulkConcurrent` 固化进 CI。
+- **LSP 生产 bug 修复（clangd 场景）**：`jsonRPCRequest.ID` 缺 `omitempty` 导致 notification 携带 `"id":0`，违反 JSON-RPC 2.0；gopls 宽容未暴露，clangd 严格拒绝致 didOpen 不生效、符号提取永远失败（被测试 skip 掩盖）。已修复并新增 clangd 工程上下文真实验证（P3_4 → 95%，阻塞项 #3 解除）。
+- **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。
