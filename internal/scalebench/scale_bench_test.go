@@ -206,6 +206,13 @@ func benchChromem(ctx context.Context, n int) (storeResult, int) {
 }
 
 func TestScaleBench(t *testing.T) {
+	// 完整规模（100k SQLite ~80-240s）远超 CI test/race job 的 timeout（120s/180s）。
+	// 默认跳过；本地/CI 需要时显式开启：
+	//   CODESCHEMA_SCALE_BENCH=1 go test -run '^TestScaleBench$' ./internal/scalebench -v -timeout 600s
+	// CI 的 bench job 用 -run '^$' 跑基准、nightly job 跑 TestScaleEndToEnd，均不受影响。
+	if os.Getenv("CODESCHEMA_SCALE_BENCH") == "" {
+		t.Skip("full-scale bench disabled; set CODESCHEMA_SCALE_BENCH=1 to run (100k SQLite ~80-240s)")
+	}
 	ns := []int{1000, 5000, 10000, 50000, 100000}
 	ctx := context.Background()
 	results := make([]runResult, 0, len(ns))
