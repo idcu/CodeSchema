@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-15
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）**）
-> 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成）
+> 更新时间：2026-08-16
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）**）
+> 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成；2026-08-16 新增「单实例多租户」作为独立能力，详见下方维护优化章节）
 
 ---
 
@@ -39,7 +39,7 @@ P18      [████████████████████] 100%
 
 > 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/dev/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
 
-1. **包数量实为 29 个**（`go list ./...`），全文历史「23/24/27 个包」表述已过时；`go build ./...` 通过（exit 0）。
+1. **包数量实为 31 个**（`go list ./...`，含 2026-08-16 新增的 `internal/tenant` 与 `internal/runtime`），全文历史「23/24/27 个包」表述已过时；`go build ./...` 通过（exit 0）。
 2. **默认构建强制 CGO（已修复）**：原 `internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，即使不用 ONNX 也需 gcc。现已以 `//go:build onnx` 隔离 ONNX 实现，新增 `embedder_onnx_stub.go`（`!onnx`）提供同名 API 桩，默认 `go build ./...`（CGO 关）免 gcc；ONNX 语义检索需 `go build -tags onnx`（仍依赖 gcc + onnxruntime 动态库）。「GCC 可选」的旧表述已校正为「仅 ONNX 需要」。
 3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/dev/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
 4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 117 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）；`rebuild-kv` 命令在 `-tags redis` 下从基础存储全量重建缓存。详见 `docs/dev/12` §12.5 与 README「存储后端」小节。
@@ -331,6 +331,22 @@ P18      [████████████████████] 100%
 - [x] **T4-3 制品发布流水线**（`faef16d`）— `.github/workflows/release.yml`：v* tag → make cross 5 平台 → SHA-256SUMS → action-gh-release；本机 cross 验证通过（13-15MB/平台）
 - [x] **T4-4 测试关联真实采集**（`0b427de`）— `LoadGoCoverProfile`/`ParseGoCoverProfile` 从真实 `go test -coverprofile` 产物自动采集（行号区间匹配方法 + 测试类命名约定关联），端到端测试 PASS
 
+### 维护优化（2026-08-16）：单实例多租户（多项目共享一个 CodeSchema 进程）
+
+多项目都需要 CodeSchema 时，落地「单实例多租户」方案（设计见 `docs/dev/13-多租户设计文档.md`，可运行示例 `build/mt-demo.yaml`）：
+
+- [x] **`internal/tenant`（新包）** — 多租户管理器 `Manager`：持有 N 个隔离的单租户运行实例（每租户独立 `store.Store` + 独立 `runtime.Runtime`），按 `project` 路由请求；`OpenStoreFunc` 由 cmd 层注入以维持 `internal/store` 的循环依赖隔离；`deriveIndexDirs` 为显式 `tenants` 按各自 `storage.dsn` 派生隔离的 FTS/向量/IDF 索引目录。
+- [x] **`internal/runtime`（新包）** — 抽取单租户运行期装配（`NewParserRegistry`/`WithImpactAnalyzer`/`NewAIEnhancer`/``RunTagAll`/`NewSearcher`/`BuildRuntime`/`ScanRepository`/`StartWatchBackground`），供单项目（`scan`/`watch`）与多租户（`serve`/`mcp`）共用，消除重复装配。
+- [x] **`config`** — `Config.Tenants` + `TenantConfig`（覆盖层）+ `ToConfig(base)` 叠加 + `Validate`（id 唯一/dsn 非空）。
+- [x] **`server`（http/mcp）** — 支持 `X-Tenant`/`?tenant=`/`project` 路由；新增 `list_projects` 工具（MCP 工具数 11→12）；`GET /projects` + `handleProjects`。
+- [x] **`cmd`** — `serve`/`mcp` 通过 `--config` 的 `tenants:` 列表装配多租户；`scan`/`watch` 走 `runtime` 直装；全局 `--config` 须置于子命令之前。
+- [x] **关键修复：索引隔离** — 早期仅隔离主 `store` 的 DSN，FTS/向量/IDF 仍沿用 `DefaultConfig` 共享的 `./data/fts|vector|idf`，多租户按序 `auto_scan` 时后者覆盖前者索引 → 所有租户返回最后扫描者数据。修复：显式 `tenants` 在其**未显式配置**检索/向量目录时自动按各自 `storage.dsn` 派生 `<dsn>/fts|vector|idf`（仅目录型 `file/sqlite`）。判断「是否显式配置」用租户原始配置 `tc.Storage.Search.*`（merged 永远非空）。
+- [x] **向后兼容** — 无 `tenants` 配置时退化为单 `default` 租户，所有接口行为与单项目模式完全一致。
+- [x] **测试** — `internal/tenant/tenant_test.go`：6 项（deriveIndexDirs 派生/显式覆盖/非目录后端不派生 + Manager 单租户回退/多租户路由/索引目录派生隔离回归）。
+- [x] **文档** — 新增 `docs/dev/13-多租户设计文档.md`；更新 `README.md`/`docs/dev/11`/`docs/MCP接入指南.md`/`docker-compose.yml`（新增 `codeschema-mt` 服务，`--profile mt`）。
+- [x] **验证** — `build/mt-demo.yaml`（demo-a→`./cmd`、demo-b→`./internal/config`）端到端：HTTP 与 MCP 两路均正确隔离；`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...`、`go test ./...`（31 包全绿）通过。
+- commit `693bdc4`（14 files, +1253/−257）。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
@@ -347,5 +363,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：docs: 开发计划 16 张任务卡片全部标记 ✅ 已实施 + 技术路线同步 Docker/PG 跑通（PHASE_09 收尾）（`5bc775e`）
+7. 最新提交：单实例多租户落地 + 文档同步（`693bdc4`）；此前 PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
