@@ -6,6 +6,71 @@
 
 ## 提交记录
 
+### Commit 98: test(ai): 多 provider 配置验证——P4_2 → 87%
+
+- `TestOpenAICompatClient_BaseURLVariants`：不同 BaseURL 形态（无/带尾斜杠、带/不带版本路径前缀如 `/v1`、`/api/openai/v1`）请求路径正确拼接（`TrimSuffix` 尾斜杠 + `/chat/completions`），兼容任意 OpenAI 兼容端点
+- 验证：`go test ./internal/ai/` 全绿
+
+### Commit 97: test(parser/codegraph): Schema 变体兼容覆盖——P3_5 → 92%
+
+- `KindVariants`：interface/enum/trait/module/record/constructor kind 变体→ClassIR.Type/方法映射验证（INTERFACE/ENUM/ABSTRACT/OBJECT）
+- `ColumnDrift`：nodes 缺 file 列时显式报错（schema drift），不静默返回空 IR
+- 既有 role/confidence 额外列兼容由 RealSchema 测试覆盖（不干扰读取）
+- 验证：codegraph 包 17 项测试全绿
+
+### Commit 96: feat(scalebench): 嵌入质量多语料 recall 对比——P6_2 → 97%
+
+- `TestEmbeddingQualityMultiCorpus`：通用代码语义/电商业务/基础设施三语料分别评测 Local vs ONNX（`runQualityEval` 重构为参数化 corpus/queries）
+- 真实数据（`-tags onnx`）：ONNX Recall@1 全胜 1.00/0.80/1.00 vs Local 0.42/0.40/0.20，跨场景结论成立
+- 产物：build/embedding-quality-multi.json（gitignore 约定不跟踪）+ analysis 报告；默认构建 ONNX 优雅 skip
+
+### Commit 95: feat(vector): 模型下载断点续传——HTTP Range + .part 落盘（P6_3 → 97%）
+
+- `downloadAndExtract` 改下载到固定 `<ModelDir>/.download.part`（原临时文件中断即丢）
+- HTTP Range 续传：206 追加 / 200（服务器不支持）从头 / 其余状态报错；校验失败保留 .part
+- 完整 .part 复用：上次下载完成但未解包 → 校验通过直接解包
+- 新增测试 `ResumeDownload`（中断后半量续传）/ `ReuseCompletePart`；现有下载测试无回归
+
+### Commit 94: docs: LSP clangd 真实验证落地——P3/P3_4 完成度同步（96%/95%，阻塞项 #3 解除）
+
+- P3_4 完成度 90→95：clangd 工程上下文真实验证 + JSON-RPC id 修复记录；未做项仅剩 jdtls 等更多服务器接入
+
+### Commit 93: fix(parser/lsp): JSON-RPC notification id 泄漏——clangd 场景符号提取修复
+
+- `jsonRPCRequest.ID` 补 `omitempty`：notification（didOpen/didClose/initialized）不得携带 id，此前恒带 `"id":0` 违反 JSON-RPC 2.0
+- gopls 宽容忽略该问题；clangd 严格拒绝（-32601 method not found）→ didOpen 不生效 → documentSymbol 恒报 non-added，clangd 场景符号提取从未真正工作（被测试 skip 掩盖）
+- 新增 `TestLSPAdapter_RealClangd` 工程上下文真实验证（构造 compile_commands.json 最小 C++ 工程，clangd 22 真实提取 Calculator/Add PASS）
+- `parseWithRetry` 改为错误也重试（覆盖 clangd 异步登记期），连续失败才 skip
+
+### Commit 92: test(vector): chromem 持久化重启恢复验证 + 文档同步（P6_1 97%）
+
+- `TestPersistentChromemStore_RestartRestore`：写入→同路径重开→数据与检索一致
+
+### Commit 91: feat(scale+ci): SQLite 并发写基准 BenchmarkScaleBulkConcurrent 固化进 CI（-race 看护）
+
+- 4 worker 并发 BulkUpsert 1 万文件（1.13s，与单 goroutine 相当，并发不退化）
+- CI bench job 加 `-race` 同时看护并发写数据竞争
+
+### Commit 90: docs: 同步 SQLite 并发结论——P7_2 97%，移除 modernc 阻塞项（误判纠正）
+
+### Commit 89: fix(store): 纠正 SQLite 并发误判——modernc 驱动无并发 bug
+
+- 此前把「reader 无限循环 + stop 超时」测试超时误读为 modernc 死锁（一度标记 Skip + SetMaxOpenConns(1)）
+- 真相：reader 正常工作时不退出，wg.Wait() 永不完成，必然超时；对照实验（CGO mattn/纯 Go ncruces 同样"复现"）证明是测试逻辑 bug
+- 恢复正确设计（reader 固定迭代次数）：读写并发 + 多读并发 `-race` 均 PASS；新增 `TestConcurrentFixed_*` 回归
+- 移除 SetMaxOpenConns(1) 及错误注释
+
+### Commit 88: docs: 乐高积木模块分解全量落地——docs/modules/ 42 份文档 + 完成度校准
+
+- 9 个一级模块总述（P1~P9）+ 32 份子模块文档 + 总览 README.md
+- 固定 7 章节：用途/拆分逻辑/技术说明/替代方案/完成度/阻塞风险/模块关系；公共模块标注被依赖方
+- 完成度对照 git 历史与测试实际校准（P3_2/3/4/5、P4_2、P6_2/3、P9_2/3/4 上调）
+
+### Commit 87: fix(store): SQLite 并发写压力测试 + SetMaxOpenConns(1) 缓解（⚠️ 后续 Commit 89 纠正）
+
+- 新增纯写并发测试（DistinctFiles/SameFile，-race PASS）
+- 曾误报 modernc/libc 并发死锁（reader 无限循环测试超时），Commit 89 纠正为测试设计缺陷；SetMaxOpenConns(1) 已随纠正移除
+
 ### Commit 86: feat(service): 测试关联真实采集——go coverprofile 自动导入覆盖率映射（PHASE_09/开发计划T4-4）
 
 - `LoadGoCoverProfile/ParseGoCoverProfile`：解析 `go test -coverprofile` 产物（mode: set/count），按行号区间匹配 store 方法记录 → 测试类（命名约定）关联其源类被覆盖方法，注入 coverage 策略；路径后缀匹配兼容相对/绝对路径；合并不覆盖注入式 JSON
