@@ -70,7 +70,8 @@ jobs:
       - name: Scale benchmark (BulkUpsert regression guard)
         # -run '^$' 仅跑基准，避免触发同包内超慢的 TestScaleBench（100k 逐文件 UpsertIR，分钟级）
         # BenchmarkScaleBulkConcurrent：并发写回归看护（多 worker 并发 BulkUpsert），配合 -race 检测数据竞争
-        run: go test -race -run '^$' -bench='BenchmarkScaleBulk' -benchmem -count=1 -timeout 600s ./internal/scalebench/...
+        # BenchmarkSQLiteWALConfigs：WAL 同步参数定案看护（NORMAL/FULL/OFF 单事务耗时相当，默认 NORMAL 最优）
+        run: go test -race -run '^$' -bench='BenchmarkScaleBulk|BenchmarkSQLiteWALConfigs' -benchmem -count=1 -timeout 600s ./internal/scalebench/...
 
   # === 夜间全量规模压测（T3-4：10万+ 文件端到端全链路 + 趋势归档） ===
   nightly-scale:
