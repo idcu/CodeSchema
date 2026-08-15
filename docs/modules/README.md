@@ -54,7 +54,7 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │
 └── P9 测试与基准 Test & Bench ─────────── 96%
     ├── P9_1 Benchmark 框架 .................... 100%
-    ├── P9_2 ScaleBench 超大仓基准 .............. 95%
+    ├── P9_2 ScaleBench 超大仓基准 .............. 96%
     ├── P9_3 AdapterBench 适配器验证 ............ 95%
     └── P9_4 集成测试 .......................... 97%
 ```
@@ -121,7 +121,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | **P4 分析层** | [P4.md](./P4.md) | 96% | └ P8_6 健壮性 | [P8_6.md](./P8_6.md) | 100% |
 | ├ P4_1 Analyzer | [P4_1.md](./P4_1.md) | 100% | **P9 测试基准** | [P9.md](./P9.md) | 96% |
 | └ P4_2 AI | [P4_2.md](./P4_2.md) | 87% | ├ P9_1 Benchmark | [P9_1.md](./P9_1.md) | 100% |
-| **P5 检索层** | [P5.md](./P5.md) | 100% | ├ P9_2 ScaleBench | [P9_2.md](./P9_2.md) | 95% |
+| **P5 检索层** | [P5.md](./P5.md) | 100% | ├ P9_2 ScaleBench | [P9_2.md](./P9_2.md) | 96% |
 | └ P5_1 检索核心 | [P5_1.md](./P5_1.md) | 100% | ├ P9_3 AdapterBench | [P9_3.md](./P9_3.md) | 95% |
 | | | | └ P9_4 集成测试 | [P9_4.md](./P9_4.md) | 97% |
 
@@ -149,4 +149,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **WAL 同步参数定案（P7_2 → 98%）**：NORMAL/FULL/OFF 单事务耗时相当（fsync 被摊平），默认配置已最优。
 - **scanner symlink 边界修复 + 多语言真实仓库验证（P9_4 → 97%）**：指向目录的符号链接被误收集为文件（Walk Lstat），修复；TS/Python/Go 三语真实仓库端到端解析验证（lytd 1904 文件/5172 类、deepseek-harness 7337/22462、code-schema 355/1960）。
 - **Treesitter 标记语言精度定案（P3_2 → 96%）**：css/toml/yaml 无函数调用，调用图维度空集 precision/recall=1（语法树与正则无差异）。
+- **百万级 SQLite BulkUpsert 实测（P9_2 → 96%）**：N=100万 182.2s / 分配 6.2GB / db 660MB / 0.182ms 每文件——相对 100k ~0.05ms 呈超线性，亿级走 PG 边界更清晰。
 - **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。
