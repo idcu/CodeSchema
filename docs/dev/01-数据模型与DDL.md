@@ -218,7 +218,7 @@ CREATE INDEX idx_mtl_test ON method_test_link(test_method_id);
 2. **编写迁移脚本**：将上述 DDL 放入 `internal/store/migrations/001_init.sql`，使用 `database/sql` 执行。
 3. **实现 DAO 层**：为每张表创建 CRUD 方法（`GetFileByPath`、`InsertClass`、`UpdateMethod` 等）。
 4. **验证索引覆盖**：对照索引策略表，确保每个查询场景都有对应索引。
-5. **实现 KV Key 生成**：在 `internal/kv` 包中定义 Key 常量与生成函数，为 P2 Redis 接入做准备。
+5. **实现 KV Key 生成**：KV（Redis L2 缓存）实现见 `internal/store/redis`（Key 生成与写入在 RedisCache 内），经 `cmd/codeschema/store_redis.go` 在 `-tags redis` 下接入；`rebuild-kv` 命令从基础存储全量重建。
 
 ---
 

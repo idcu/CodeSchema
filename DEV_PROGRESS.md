@@ -39,12 +39,12 @@ P18      [████████████████████] 100%
 
 > 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/dev/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
 
-1. **包数量实为 27 个**（`go list ./...`），全文历史「23/24 个包」表述已过时；`go build ./...` 通过（exit 0）。
+1. **包数量实为 29 个**（`go list ./...`），全文历史「23/24/27 个包」表述已过时；`go build ./...` 通过（exit 0）。
 2. **默认构建强制 CGO（已修复）**：原 `internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，即使不用 ONNX 也需 gcc。现已以 `//go:build onnx` 隔离 ONNX 实现，新增 `embedder_onnx_stub.go`（`!onnx`）提供同名 API 桩，默认 `go build ./...`（CGO 关）免 gcc；ONNX 语义检索需 `go build -tags onnx`（仍依赖 gcc + onnxruntime 动态库）。「GCC 可选」的旧表述已校正为「仅 ONNX 需要」。
 3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/dev/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
-4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 106 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）。详见 `docs/dev/12` §12.5 与 README「存储后端」小节。
+4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 117 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）；`rebuild-kv` 命令在 `-tags redis` 下从基础存储全量重建缓存。详见 `docs/dev/12` §12.5 与 README「存储后端」小节。
 5. **tree-sitter 双路径**：默认构建为纯 Go 正则轻量解析（30 语言，无 CGO）；`-tags treesitter` 启用真语法树（go.mod 含 `smacker/go-tree-sitter` 各语言包，但默认 tag 隔离不编译）。依赖为 `modernc.org/sqlite` + `chromem-go` + `fsnotify` + `onnxruntime_go`（可选）。
-6. **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，README/本文此前仅列到 `11`。
+6. **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇；README「开发指南」与本文均已全部列出（`docs/dev/12` 于 2026-08-15 补入）。
 7. **阶段完成度口径**：P0–P18 的「功能实现」确已完成并通过测试；但「生产级」「权威存储」等运行期/性能声明需以上述实测为准，不能仅凭 phase 100% 推定。
 
 ## 已完成工作
@@ -272,8 +272,9 @@ P18      [████████████████████] 100%
 - [x] 验证数据：`go build` 通过 | `go test` 23 包 0 失败 | 新增 3 个文件，修改 1 个文件
 
 ### 文档
-- [x] `docs/dev/` — 12 个开发文档按开发顺序分割
+- [x] `docs/dev/` — 13 个开发文档按开发顺序分割（`00`–`12`）
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
+- [x] `docs/modules/` — 模块级文档（P1~P9 分层拆解，43 份）
 
 ## 后续优化完成项
 
@@ -325,5 +326,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：docs(deploy): 修正 macOS 平台说明，Apple Silicon 设为主目标（`899e7ec`，参见 CHANGELOG.internal.md Commit 41）
+7. 最新提交：docs: 修正 P6_1/P6_2 头部完成度（95→97，与 README 及完成度段一致）（`170c8f5`）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

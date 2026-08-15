@@ -20,13 +20,12 @@
 
 | 命令 | 用途 | 示例 |
 |---|---|---|
-| `scan` | 扫描并入库 | `codeschema scan ./repo --lang go,java` |
-| `watch` | 文件监听增量 | `codeschema watch ./repo` |
-| `rebuild-kv` | 重建 KV 缓存 | `codeschema rebuild-kv` |
-| `rebuild-kv` | 重建 KV 缓存 | `codeschema rebuild-kv` |
+| `scan` | 扫描并入库 | `codeschema scan ./repo --workers=4 --store=./data` |
+| `watch` | 文件监听增量 | `codeschema watch ./repo --fsnotify` |
+| `rebuild-kv` | 重建 Redis KV 缓存（需 `-tags redis` 构建） | `codeschema rebuild-kv` |
+| `benchmark` | 全链路基准（扫描/索引/检索指标，多仓库对比） | `codeschema benchmark ./repo --out build/bench.json` |
 | `mcp` | 启动 MCP Server | `codeschema mcp --addr :8080` |
 | `serve` | 启动 HTTP API Server | `codeschema serve --http :8081` |
-| ~~`benchmark`~~（未落地） | 运行 benchmark（规划中，尚未实现） | `codeschema benchmark ./repo` |
 | `version` | 显示版本信息 | `codeschema version` |
 
 ---
@@ -96,8 +95,8 @@ MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph
 ### 5.1 实现步骤
 
 1. **实现 CLI 框架**
-   - 使用 `cobra` 库，在 `cmd/codeschema/` 下定义根命令和子命令。
-   - 实际实现 6 个子命令：`scan` / `watch` / `rebuild-kv` / `mcp` / `serve` / `version`（早期规划的 `rebuild-refs`/`benchmark` 未落地）。
+   - 使用 Go 标准库 `flag`，在 `cmd/codeschema/` 下定义子命令分发（未用 cobra）。
+   - 实际实现 7 个子命令：`scan` / `watch` / `rebuild-kv` / `benchmark` / `mcp` / `serve` / `version`。
    - 配置加载：自研 config 包（config.yaml + 环境变量覆盖，未用 viper）。
 
 2. **实现 HTTP 路由**
@@ -149,8 +148,8 @@ func (s *MCPServer) Stop() error
 
 ## 6. 完成标准
 
-- [x] CLI 全部 8 个命令可运行，`codeschema version` 输出正确版本号。
-- [x] HTTP API 全部 8 个接口（P0 5 个 + P5 3 个）响应正确，返回 JSON 格式。
+- [x] CLI 全部 7 个命令可运行（scan/watch/rebuild-kv/benchmark/mcp/serve/version），`codeschema version` 输出正确版本号。
+- [x] HTTP API 响应正确（/health*、/context、/impact、/tests、/search、/tags*、/metrics、/viz、/openapi.json 等），返回 JSON 格式。
 - [x] 错误中间件覆盖全部 5 种错误码，响应格式统一。
 - [x] MCP Server 启动成功，所有 11 个工具（P0 8 个 + P5 3 个）注册成功。
 - [x] MCP 工具调用返回正确结果，参数校验返回友好错误。

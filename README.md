@@ -192,18 +192,18 @@ make clean
 - **SQLite 权威存储已接线**：新增 `internal/store/sqlite`（基于纯 Go 的 `modernc.org/sqlite`，免 CGO），完整实现 `store.Store` 接口（文件/类/方法/调用/标签 + 反向查询 + `UpsertIR` 增量入库），`storage.driver=sqlite` 即启用，默认仍 JSON 文件存储作 fallback。消除了「文档声称 SQLite、现实仅 JSON」的实现落差。
 - **SCIP / LSP 适配器生产验证**：
   - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。
-  - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 真实服务器传输层验证（clangd 需 compile-commands/project 上下文才登记独立文件，缺上下文时优雅跳过）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复 `SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类的**生产缺陷**。
+  - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 工程上下文真实验证（构造 compile_commands.json 最小工程，clangd 22 真实提取类/方法，`TestLSPAdapter_RealClangd` 已 PASS）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复两处生产缺陷：`SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类；`jsonRPCRequest.ID` 缺 `omitempty` 使 notification 携带 `"id":0` 违反 JSON-RPC 2.0 导致 clangd 拒绝登记文档。
   - 多语言验证/基准框架见 `internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
 
 ## 实际核查备注（2026-08-14）
 
 > 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/dev/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
 
-- **包数量**：实际 **27** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24 个包」等旧表述已过时。
+- **包数量**：实际 **29** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24/27 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/dev/12` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
-- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，507 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，106 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。
-- **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」仅列到 `11`，缺 `12-存储扩展与大规模迁移路径.md`。
+- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。
+- **开发文档索引**：`docs/dev/` 实际含 `00`–`12` 共 13 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/modules/`。
 
 ## 测试
 

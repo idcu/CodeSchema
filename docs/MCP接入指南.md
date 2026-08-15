@@ -16,7 +16,7 @@ make build            # 或 go build -o codeschema ./cmd/codeschema
 ./codeschema mcp --addr :8080 --auth-token <token>
 ```
 
-SSE 端点为 `http://<host>:8080/sse`。确认监听：`curl -s http://localhost:8080/healthz`。
+SSE 端点为 `http://<host>:8080/sse`。确认监听：`curl -s http://localhost:8080/sse`（返回 200/SSE 流即就绪；MCP Server 仅注册 `/sse`、`/message` 两个路由，无 `/health`/`/healthz` 端点）。
 
 ## 1. VS Code
 

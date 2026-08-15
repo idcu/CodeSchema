@@ -31,21 +31,25 @@ project:
 # 存储配置
 # ---------------------------------------------------------------------------
 storage:
-  # 存储驱动：file（JSON 文件，零依赖）
+  # 存储驱动：file（JSON 文件，零依赖，默认）| sqlite（modernc 纯 Go）| pg（需 -tags pg）| redis（热点缓存，需 -tags redis）
   driver: "file"
   # 数据存储目录（索引持久化路径）
   dsn: "./data"
+  # KV 层（Redis L2 缓存/反查，需 -tags redis 构建才生效；空则不启用）
+  kv: ""
 
-  # 向量库配置
+  # 向量配置
+  # 注：向量后端当前由代码固定为 PersistentStore（JSON 落盘）+ MemoryStore 语义检索，
+  # driver 字段仅作配置占位（chromem 实现存在但未接线生产路径）。
   vector:
-    # 向量库驱动：chromem（嵌入式，零依赖）
+    # 向量库驱动（占位：chromem 为可选实现，未接入生产分发）
     driver: "chromem"
     # 向量库路径
     dsn: "./vector.db"
-    # Embedding 模型（用于模型目录与远程分发占位）
-    embedding_model: "bge-small-zh"
+    # Embedding 模型（用于模型目录与远程分发占位；制品为 bge-small-zh-v1.5）
+    embedding_model: "bge-small-zh-v1.5"
     # 模型目录（含 onnx/ 子目录 + tokenizer.json）；默认 down/models/<embedding_model>
-    model_dir: "./down/models/bge-small-zh"
+    model_dir: "./down/models/bge-small-zh-v1.5"
     # ONNX 模型远程分发（可选）：模型缺失时自动下载并解包（幂等）。
     # 支持 {model} 占位符替换 embedding_model。
     model_download_url: ""
@@ -54,7 +58,7 @@ storage:
 
   # 搜索配置
   search:
-    # 启用 FTS5 全文搜索
+    # 启用全文搜索（纯 Go PersistentFTS 实现，非 SQLite FTS5）
     fts: true
     # 启用语义检索（向量搜索）
     semantic: true
@@ -95,8 +99,13 @@ parser:
 # AI 增强配置
 # ---------------------------------------------------------------------------
 ai:
-  # AI 提供商：openai | anthropic | local
+  # OpenAI 兼容客户端（BaseURL 可指向任意 OpenAI 兼容端点，含 openai/anthropic 网关/本地 vLLM 等）。
+  # 缺 base_url / api_key / model 任一即禁用 AI 增强（规则标签与索引不受影响）。
   provider: "openai"
+  # API 根地址（如 https://api.openai.com/v1）；空则禁用 AI
+  base_url: "https://api.openai.com/v1"
+  # 鉴权密钥；空则禁用 AI
+  api_key: ""
   # 模型名
   model: "gpt-4o-mini"
   # 每次扫描 AI 调用硬限

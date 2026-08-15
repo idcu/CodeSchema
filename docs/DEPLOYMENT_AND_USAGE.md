@@ -64,8 +64,10 @@ cd codeschema
 make build
 # 或：go build -o build/codeschema ./cmd/codeschema
 
-# 方式二：CGO 构建（本地调试，需要 tree-sitter 精确解析）
+# 方式二：CGO 构建（本地调试）
+# 注：build-cgo 仅启用 CGO + 拷贝 ONNX 运行时库；真语法树解析需显式 -tags treesitter 构建
 make build-cgo
+# 真语法树路径：go build -tags treesitter -o build/codeschema ./cmd/codeschema
 
 # 验证
 ./build/codeschema version
@@ -440,9 +442,10 @@ print(result)
 无论使用哪种工具，连接成功后可以通过以下方式验证：
 
 ```bash
-# 1. 确认 MCP Server 已启动
-curl http://localhost:8080/health
+# 1. 确认 HTTP API Server 已启动（serve 命令，默认 :8081）
+curl http://localhost:8081/health
 # 返回：{"status":"ok","uptime":"1m2s","store_ok":true,"store_type":"file"}
+# 注：/health 仅存在于 HTTP Server（:8081）；MCP Server（:8080）仅提供 /sse、/message 路由
 
 # 2. 直接调用 HTTP API 测试
 curl "http://localhost:8081/search?q=UserService&mode=both&limit=5"
