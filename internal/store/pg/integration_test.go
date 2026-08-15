@@ -2,21 +2,25 @@
 
 // PG 真实实例集成测试（T3-2）。
 //
-// 前提：本地已有 PostgreSQL 实例（推荐用 docker-compose：
-//   docker compose --profile pg up -d
-// 或：
-//   docker run -d --name codeschema-pg -e POSTGRES_PASSWORD=codeschema -e POSTGRES_DB=codeschema -p 5432:5432 postgres:16-alpine
+// 三档来源（按优先级）：
+//  1. CODESCHEMA_PG_DSN 环境变量指向的 PostgreSQL 实例（如 docker compose --profile pg up -d）；
+//  2. 本机 localhost:5432 已有实例（docker run 或原生 PG）；
+//  3. 以上均不可达时，自动降级为嵌入式 PostgreSQL（fergusstrange/embedded-postgres，
+//     首次运行会下载 PG 二进制，之后缓存复用）——真实 PG 内核，完整验证
+//     InitSchema → UpsertIR → 查询 → 清理 全链路。
 //
-// 实例不可达时优雅跳过（不阻塞 CI/本地无服务环境）。
+// 运行：go test -tags pg -run TestPGStore_EndToEnd ./internal/store/pg/ -v
 // Redis 集成测试见 redis_integration_test.go（需 -tags 'pg redis' 双 tag 构建）。
 package pg
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -28,24 +32,55 @@ func pgDSN() string {
 	return "postgres://codeschema:codeschema@localhost:5432/codeschema?sslmode=disable"
 }
 
-// skipIfPGUnavailable 探测 PG 可达性，不可达则跳过。
-func skipIfPGUnavailable(t *testing.T, ctx context.Context) {
+// withPG 获取可用的 PostgreSQL 实例：优先外部实例，不可达则启动嵌入式 PG。
+// 返回 (dsn, cleanup)。cleanup 停止嵌入式实例（外部实例不清理）。
+func withPG(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
+	// 探测外部实例
 	s := NewPGStore()
-	if err := s.Open(ctx, pgDSN()); err != nil {
-		t.Skipf("PostgreSQL 不可达（%v），跳过 PG 集成测试；启动方式见文件头注释", err)
+	if err := s.Open(ctx, pgDSN()); err == nil {
+		s.Close()
+		t.Logf("using external PostgreSQL at %s", pgDSN())
+		return pgDSN(), func() {}
 	}
-	defer s.Close()
+
+	// 降级嵌入式 PG（真实内核）
+	t.Log("external PostgreSQL unavailable, starting embedded PostgreSQL...")
+	port := uint32(15432)
+	ep := embeddedpostgres.NewDatabase(
+		embeddedpostgres.DefaultConfig().
+			Port(port).
+			Username("codeschema").
+			Password("codeschema").
+			Database("codeschema"),
+	)
+	if err := ep.Start(); err != nil {
+		t.Fatalf("start embedded postgres: %v", err)
+	}
+	dsn := fmt.Sprintf("postgres://codeschema:codeschema@localhost:%d/codeschema?sslmode=disable", port)
+	// 等待就绪
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		st := NewPGStore()
+		if err := st.Open(ctx, dsn); err == nil {
+			st.Close()
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return dsn, func() { _ = ep.Stop() }
 }
 
-// TestPGStore_EndToEnd 验证真实 PG 实例上 scan→store→query 全链路。
+// TestPGStore_EndToEnd 验证真实 PG 实例（外部或嵌入式）上 scan→store→query 全链路。
 func TestPGStore_EndToEnd(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	skipIfPGUnavailable(t, ctx)
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
 
 	s := NewPGStore()
-	if err := s.Open(ctx, pgDSN()); err != nil {
+	if err := s.Open(ctx, dsn); err != nil {
 		t.Fatalf("PG open: %v", err)
 	}
 	defer s.Close()
@@ -58,9 +93,11 @@ func TestPGStore_EndToEnd(t *testing.T) {
 	}
 
 	// 写入一个合成 IR（1 文件 1 类 2 方法 2 调用）
+	// 用唯一路径避免嵌入式 PG 持久化数据残留（ON CONFLICT DO NOTHING 导致重复运行不插新数据）
+	uniquePath := fmt.Sprintf("/tmp/pg-it/file-%d.go", time.Now().UnixNano())
 	ir := &parser.IRDocument{
 		Source: "pg-integration", Language: "go",
-		FilePath: "/tmp/pg-it/file1.go", FileHash: "hash-pg-1",
+		FilePath: uniquePath, FileHash: "hash-pg-1",
 		LineCount: 50, ByteSize: 1024,
 	}
 	ir.Classes = []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}
@@ -70,13 +107,14 @@ func TestPGStore_EndToEnd(t *testing.T) {
 	}
 	ir.Calls = []parser.CallIR{
 		{CallerFQN: "pkg.Svc.Run", CalleeFQN: "pkg.Svc.Stop", CallType: "direct"},
+		{CallerFQN: "pkg.Svc.Stop", CalleeFQN: "pkg.Svc.Run", CallType: "direct"},
 	}
 	if err := s.UpsertIR(ctx, ir); err != nil {
 		t.Fatalf("UpsertIR: %v", err)
 	}
 
 	// 查询验证：文件 / 类 / 方法 / 调用
-	file, err := s.GetFileByPath(ctx, "/tmp/pg-it/file1.go")
+	file, err := s.GetFileByPath(ctx, uniquePath)
 	if err != nil || file == nil {
 		t.Fatalf("GetFileByPath: %v (file=%v)", err, file)
 	}

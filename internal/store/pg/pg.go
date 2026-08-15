@@ -90,6 +90,10 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 		if err := upsertClassesTx(ctx, tx, fileID, ir.Classes, ir.Source); err != nil {
 			return err
 		}
+		// 方法随类写入（骨架历史缺陷：method 从未落库，GetMethodsByClassID 恒空）
+		if err := upsertMethodsTx(ctx, tx, ir.Classes, ir.Methods, ir.Source); err != nil {
+			return err
+		}
 	}
 	if len(ir.Calls) > 0 {
 		if err := upsertCallsTx(ctx, tx, fileID, ir.Calls, ir.Source); err != nil {
@@ -97,6 +101,33 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// upsertMethodsTx 写入类下的方法（按 ClassFQN 关联类 ID，ON CONFLICT 幂等）。
+func upsertMethodsTx(ctx context.Context, tx *sql.Tx, classes []parser.ClassIR, methods []parser.MethodIR, src string) error {
+	// 构建类 FQN → 类 ID 映射
+	classIDByFQN := make(map[string]int64)
+	for _, c := range classes {
+		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		var id int64
+		if err := tx.QueryRowContext(ctx, q, c.FullName).Scan(&id); err == nil {
+			classIDByFQN[c.FullName] = id
+		}
+	}
+	for _, m := range methods {
+		classID, ok := classIDByFQN[m.ClassFQN]
+		if !ok {
+			continue
+		}
+		const q = `INSERT INTO method (class_id, name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, source)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT DO NOTHING`
+		if _, err := tx.ExecContext(ctx, q, classID, m.Name, m.Signature, m.ReturnType,
+			m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Modifier, m.Doc, src); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func upsertFileTx(ctx context.Context, tx *sql.Tx, ir *parser.IRDocument) (int64, error) {
@@ -447,9 +478,12 @@ CREATE TABLE IF NOT EXISTS project (
 CREATE TABLE IF NOT EXISTS file (
   id SERIAL PRIMARY KEY, project_id INTEGER, absolute_path TEXT, relative_path TEXT, file_category TEXT DEFAULT 'source',
   content_hash TEXT, commit_hash TEXT, line_count INTEGER DEFAULT 0, byte_size INTEGER DEFAULT 0,
-  referenced_by_files TEXT DEFAULT '[]', language TEXT DEFAULT '', last_indexed_at TEXT, parse_status TEXT DEFAULT 'parse_ok',
+  referenced_by_files TEXT DEFAULT '[]', imports TEXT DEFAULT '[]', language TEXT DEFAULT '', last_indexed_at TEXT, parse_status TEXT DEFAULT 'parse_ok',
   updated_at TEXT DEFAULT now(), UNIQUE(absolute_path)
 );
+-- 兼容旧库：file.imports 列在早期 DDL 缺失（被误放 method 表），
+-- 查询 SQL 依赖该列，显式补列避免真实实例报 "column imports does not exist"。
+ALTER TABLE file ADD COLUMN IF NOT EXISTS imports TEXT DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS idx_file_category ON file(file_category);
 CREATE INDEX IF NOT EXISTS idx_file_language ON file(language);
 CREATE TABLE IF NOT EXISTS class (

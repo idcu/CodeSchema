@@ -22,13 +22,19 @@ FROM golang:1.25-alpine AS builder
 
 # 默认纯 Go 免 CGO；ONNX 场景传 --build-arg CGO_ENABLED=1（需 gcc musl-dev）
 ARG CGO_ENABLED=0
+# Go 模块代理：国内网络默认走 goproxy.cn（避免 proxy.golang.org 超时）；
+# 其他环境可 --build-arg GOPROXY=https://proxy.golang.org,direct 覆盖
+ARG GOPROXY=https://goproxy.cn,direct
 RUN if [ "$CGO_ENABLED" = "1" ]; then apk add --no-cache gcc musl-dev; fi
 
 WORKDIR /src
 
-# 先复制 go.mod/go.sum 和本地 replace 依赖，确保 go mod download 能解析替换路径
+# 先复制 go.mod/go.sum 和本地 replace 依赖（down/ 的 chromem-go、third_party/ 的
+# onnxruntime_go_patch），确保 go mod download 能解析替换路径
 COPY go.mod go.sum ./
 COPY down/ ./down/
+COPY third_party/ ./third_party/
+ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
 # 复制全部源码并构建
@@ -46,8 +52,6 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 COPY --from=builder /build/codeschema .
-# 可选：ONNX 运行时库（CGO 构建时由构建阶段产物提供，见上注释）
-COPY --from=builder /src/down/onnxruntime /app/down/onnxruntime 2>/dev/null || true
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
