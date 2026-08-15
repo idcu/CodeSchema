@@ -75,6 +75,11 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	// 可观测性端点
 	mux.HandleFunc("/metrics", h.handleMetrics)
 
+	// OpenAPI 3.0 规范与文档页（T4-2）
+	mux.HandleFunc("/openapi.json", handleOpenAPI)
+	mux.HandleFunc("/docs", handleAPIDocs)
+	mux.HandleFunc("/docs/", handleAPIDocs)
+
 	// 向量索引可视化工具（可选）
 	if h.viz != nil {
 		RegisterVizRoutes(mux, h.viz)
