@@ -196,6 +196,9 @@ Use "codeschema <command> -h" for more information about a command.
 	case "benchmark":
 		return benchmarkCmd(ctx, cfg, args[1:])
 
+	case "rebuild-kv":
+		return rebuildKVCmd(ctx, cfg, args[1:])
+
 	case "mcp":
 		return mcpCmd(ctx, cfg, args[1:])
 
