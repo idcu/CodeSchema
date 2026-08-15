@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 100: docs: 开发计划 16 张任务卡片全部标记 ✅ 已实施 + 技术路线同步 Docker/PG 跑通（PHASE_09 收尾）
+
+- 开发计划 HTML：16 张任务卡片插入状态标记（含 T3-2 PG 嵌入式+Redis docker 集成 PASS、T3-3 Docker 实构建跑通）；顶部 warnbox ⑥⑦ 转 ✅；div 平衡校验 155/155
+- 技术路线 HTML：黄灯段更新（Docker 实构建 / PG·Redis 真实实例均已跑通）
+- 注：commit 9b33519 的卡片标记脚本因正则捕获缺失 T 前缀未实际写入（误报），本次修正（完整 `T\d-\d` 匹配）后 16 张全部生效
+
+### Commit 99: feat(ops+store): Docker 实构建跑通 + PG/Redis 真实实例集成测试 PASS（PHASE_09/开发计划T3-3+T3-2 收尾）
+
+- **T3-3 Docker 实构建**（本机网络恢复后完成）：Dockerfile 三处修复——① GOPROXY 固化为可配置 ARG（默认 goproxy.cn，解决 proxy.golang.org 超时）；② 提前 COPY third_party/（onnxruntime_go_patch 的 go.mod 供 replace 解析）；③ 移除非法 shell 语法 `COPY ... 2>/dev/null`。验证：`docker build` 成功（codeschema:test），容器内 version/scan/serve+health+viz/mcp --stdio 全链路冒烟 PASS
+- **T3-2 PG/Redis 真实实例集成**（修复 PG 骨架 2 个历史 bug，真实测试首次暴露）：① file 表补 imports 列（原误放 method 表，查询 SQL 依赖导致 'column imports does not exist'）；② UpsertIR 补 `upsertMethodsTx`——method 从未落库，GetMethodsByClassID 恒空。集成测试三档来源（外部实例→localhost→嵌入式 fergusstrange/embedded-postgres 真实内核自动降级），唯一路径防持久化残留
+- 验证：`TestPGStore_EndToEnd` PASS（file=1 class=1 methods=2 calls=2，嵌入式 PG）；`TestRedisCache_RealInstance` PASS（类缓存 + caller/callee 反查，docker redis:7-alpine）
+- go.mod 新增 fergusstrange/embedded-postgres（GOPROXY=goproxy.cn 拉取）；全量回归：默认/-tags 'pg redis' 双路径构建 OK
+
 ### Commit 98: test(ai): 多 provider 配置验证——P4_2 → 87%
 
 - `TestOpenAICompatClient_BaseURLVariants`：不同 BaseURL 形态（无/带尾斜杠、带/不带版本路径前缀如 `/v1`、`/api/openai/v1`）请求路径正确拼接（`TrimSuffix` 尾斜杠 + `/chat/completions`），兼容任意 OpenAI 兼容端点

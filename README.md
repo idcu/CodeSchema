@@ -66,6 +66,12 @@ go build -o codeschema ./cmd/codeschema
 # 文件监听（增量更新）
 ./codeschema watch --fsnotify ./repo
 
+# 全链路基准（扫描/索引/检索指标，单仓或多仓对比）
+./codeschema benchmark ./repo --out build/bench.json
+
+# MCP 原生 stdio 直连（供仅支持 stdio 的客户端，如 Claude Desktop）
+./codeschema mcp --stdio --store ./data
+
 # 查看版本
 ./codeschema version
 ```
@@ -80,7 +86,7 @@ go build -o codeschema ./cmd/codeschema
 ### Docker 部署
 
 ```bash
-# 构建镜像
+# 构建镜像（默认免 CGO 纯 Go；模块代理默认 goproxy.cn，国内可复现构建）
 docker build -t codeschema:latest .
 
 # 运行

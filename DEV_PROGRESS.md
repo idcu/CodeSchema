@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-14
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）**）
-> 下一个阶段：无（所有 P0-P18 阶段及后续优化项已完成）
+> 更新时间：2026-08-15
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）**）
+> 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成）
 
 ---
 
@@ -306,9 +306,30 @@ P18      [████████████████████] 100%
   - **文档** `docs/dev/12-存储扩展与大规模迁移路径.md`：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
   - **环境状态（已解决）**：本机已将仓库加入杀软信任目录——`go.mod` 恢复可写、`go build ./...` 由 50min+ 降至 ~4s、生成目录可写。已 `go get` 拉入 `lib/pq` + `go-redis/v9`，PG/Redis 骨架（`go build -tags pg/redis`）均编译通过；`build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md` 已落盘。
   - **优先级 T2-4 CodeGraph 适配器去骨架（不静默空 IR）** `internal/parser/adapter/codegraph/adapter.go`：原 `ParseAll` 在 DB 存在时**静默吐空 IR 文档**（与「不静默返回空结果」目标相悖，原测试甚至断言「吐了 3 个空文档」）；改为用纯 Go `modernc.org/sqlite` 打开并校验 `symbols`/`edges` 契约表，缺表或非 SQLite 显式返 `ErrSourceUnavailable` 降级，表存在时按文档化契约（symbols: name/qualified_name/kind/file_path/language；edges: caller/callee/type）尽力读取真实类/调用 IR（调用边按 caller 前缀归属文件），列漂移则显式报错——**绝不静默空 IR**。`go test ./internal/parser/adapter/codegraph/...` 全绿（含真实读取 + 显式降级用例）。注：CodeGraph 真实列名未在本仓确认，当前契约为假设列名；若真实列名不同，读取会显式报错并降级到 tree-sitter，需后续按真实 schema 校准列名。
-  - **优先级 T2-3 LSP 适配器健壮性（可观测降级 + 失败重试）** `internal/parser/adapter/lsp/adapter.go`：消除"静默丢信息"——① clangd 在 `Init` 显式探测 `compile_commands.json`（缺失则 WARN + `lsp_missing_compile_commands_total`）；② `documentSymbol` 请求经 `requestWithRetry` 包裹（`robust.Retry` 指数退避 + `robust.RetryableError`），瞬时失败自动重试；③ 解析非空 C/C++ 文件却 0 符号时显式 WARN + `lsp_parse_empty_symbols_total{lang="cpp"}`；④ `readResponses` 中原静默丢弃的异常帧（Content-Length 解析失败 / JSON 体失败 / 孤儿响应）改为 WARN + `lsp_malformed_frames_total{kind=...}`；⑤ 子进程 stderr 由 `io.Discard` 改为按行日志（关键字 WARN，其余 DEBUG），暴露 clangd 自身降级原因。`init()` 注册 5 个 LSP 指标；`adapter_test.go` 新增 8 项测试（探测命中/缺失、空符号告警、重试失败/取消、孤儿/畸形 Content-Length/畸形 JSON 帧），`go test -race ./internal/parser/adapter/lsp/...` 全绿。**遗留**：LSP 适配器仍为独立子包，尚未接入 `parser.Registry` 编排主路（降级回退链路未在生产编排串联）。
-  - **优先级 T4-1 测试关联补齐 explicit + coverage 策略（✅ 已实施）** `internal/service/testlink.go` + `internal/service/service.go`：测试关联从 3 策略（naming/same_tag/dependency）补齐到 5 策略——新增 **explicit**（置信度 100，解析测试类/方法 `Doc` 中 `@TestFor(...)` 注解并关联目标类全部生产方法，支持 `@TestFor(OrderService.class)` / `@TestFor com.example.OrderService` / `@testfor: order.OrderService` / `@TestFor=OrderService` 及 FQN 精确/后缀/简单名三类解析，注解可类级或方法级）与 **coverage**（置信度 90，注入式覆盖率报告反查：`Service.SetCoverage` + `LoadCoverageJSON`，格式 `{"testMethodFQN": ["prod.Method", ...]}`）；`FindTestLinks` 接入两策略并按置信度排序。`go test -race ./internal/service/...` 全绿（新增 6 项：explicit 类级/方法级、coverage 反查、JSON 解析、parse/resolve 单元）。**遗留**：explicit/coverage 从真实注解/覆盖率文件自动采集的接入（当前与 naming 等一致为内存计算 + 注入式）仍为后续项。
-  - **优先级 T4-1 AI 增强层落地（✅ 已实施）** `internal/ai/enhancer.go` + `budget.go` + `client.go`：按 doc 08 §3 设计实现三件套——① `LLMClient` 接口（`Complete` 补全标签/文档 + `Choose` 同名消歧），隔离 LLM 后端便于 mock；② `Budget` 预算管控（perScan/perQuery **双作用域独立计数**，Reset/Remaining/Exhausted 观测，limit<0 不限，每次扫描/查询开始重置）；③ `Enhancer`（`EnhanceTag`/`EnhanceDoc`/`Disambiguate` + `SetPhase` 切换作用域，`IRable` 接口 + `NewClassEntity`/`NewMethodEntity` 适配 store 记录）——预算超限返 `errors.ErrBudgetExceeded`（不触 LLM），LLM 失败包装 `errors.ErrEnhanceFailed`，失败隔离不影响主流程。`go vet ./...` / `go build ./...` / `go test -race ./internal/ai/...` 全绿（新增 10 项测试）。**遗留**：Enhancer 尚未接入生产编排（扫描器/查询处理器未调用），真实 LLM provider 与 `config.ai` 接线为后续项。
+  - **优先级 T2-3 LSP 适配器健壮性（可观测降级 + 失败重试）** `internal/parser/adapter/lsp/adapter.go`：消除"静默丢信息"——① clangd 在 `Init` 显式探测 `compile_commands.json`（缺失则 WARN + `lsp_missing_compile_commands_total`）；② `documentSymbol` 请求经 `requestWithRetry` 包裹（`robust.Retry` 指数退避 + `robust.RetryableError`），瞬时失败自动重试；③ 解析非空 C/C++ 文件却 0 符号时显式 WARN + `lsp_parse_empty_symbols_total{lang="cpp"}`；④ `readResponses` 中原静默丢弃的异常帧（Content-Length 解析失败 / JSON 体失败 / 孤儿响应）改为 WARN + `lsp_malformed_frames_total{kind=...}`；⑤ 子进程 stderr 由 `io.Discard` 改为按行日志（关键字 WARN，其余 DEBUG），暴露 clangd 自身降级原因。`init()` 注册 5 个 LSP 指标；`adapter_test.go` 新增 8 项测试（探测命中/缺失、空符号告警、重试失败/取消、孤儿/畸形 Content-Length/畸形 JSON 帧），`go test -race ./internal/parser/adapter/lsp/...` 全绿。**已接入 Registry 编排主路（PHASE_09/T1-3）**：LSP 适配器经 `cmd/codeschema/parser_registry.go` 的 `newParserRegistry` 统一工厂注册（`parser.lsp.enabled=true` 且工具存在时启用 gopls/jdtls/clangd），以 `parser.FallbackParser` 包装——LSP 解析失败自动回退 tree-sitter，全链路可观测，不再阻塞扫描主路。
+  - **优先级 T4-1 测试关联补齐 explicit + coverage 策略（✅ 已实施）** `internal/service/testlink.go` + `internal/service/service.go`：测试关联从 3 策略（naming/same_tag/dependency）补齐到 5 策略——新增 **explicit**（置信度 100，解析测试类/方法 `Doc` 中 `@TestFor(...)` 注解并关联目标类全部生产方法，支持 `@TestFor(OrderService.class)` / `@TestFor com.example.OrderService` / `@testfor: order.OrderService` / `@TestFor=OrderService` 及 FQN 精确/后缀/简单名三类解析，注解可类级或方法级）与 **coverage**（置信度 90，注入式覆盖率报告反查：`Service.SetCoverage` + `LoadCoverageJSON`，格式 `{"testMethodFQN": ["prod.Method", ...]}`）；`FindTestLinks` 接入两策略并按置信度排序。`go test -race ./internal/service/...` 全绿（新增 6 项：explicit 类级/方法级、coverage 反查、JSON 解析、parse/resolve 单元）。**已补真实采集（PHASE_09/T4-4）**：`internal/service/coverprofile.go` 的 `LoadGoCoverProfile`/`ParseGoCoverProfile` 从真实 `go test -coverprofile` 产物自动解析覆盖率块，按行号区间匹配 store 方法记录 → 测试类（命名约定）关联其源类被覆盖方法并注入 coverage 策略（路径后缀匹配兼容相对/绝对路径，合并不覆盖注入式 JSON），端到端测试 PASS。
+  - **优先级 T4-1 AI 增强层落地（✅ 已实施）** `internal/ai/enhancer.go` + `budget.go` + `client.go`：按 doc 08 §3 设计实现三件套——① `LLMClient` 接口（`Complete` 补全标签/文档 + `Choose` 同名消歧），隔离 LLM 后端便于 mock；② `Budget` 预算管控（perScan/perQuery **双作用域独立计数**，Reset/Remaining/Exhausted 观测，limit<0 不限，每次扫描/查询开始重置）；③ `Enhancer`（`EnhanceTag`/`EnhanceDoc`/`Disambiguate` + `SetPhase` 切换作用域，`IRable` 接口 + `NewClassEntity`/`NewMethodEntity` 适配 store 记录）——预算超限返 `errors.ErrBudgetExceeded`（不触 LLM），LLM 失败包装 `errors.ErrEnhanceFailed`，失败隔离不影响主流程。`go vet ./...` / `go build ./...` / `go test -race ./internal/ai/...` 全绿（新增 10 项测试）。**已接入生产编排（PHASE_09）**：`cmd/codeschema/main.go` 经 `newAIEnhancer(cfg)` 构建真实 LLM client + budget，`svc.WithAIEnhancer(enh)` 接线查询期同名方法消歧（扫描器/查询处理器已调用，`config.ai` 全字段接线：provider/model/base_url/api_key + 预算）；`ai: enhancement disabled` 日志为未配置 APIKey 时的优雅降级，不影响主流程。
+
+### PHASE_09 开发计划：16 任务全部完成（2026-08-15）
+
+基于 `docs/开发计划-乐高式模块拼装.html` 的 4 阶段 16 任务（先清红再补黄，最后规模化与生态），全部实施并推送（commit `d617a77` → `5bc775e`）：
+
+- [x] **T1-1 benchmark 子命令**（`d617a77`）— `internal/benchmark` 包 + CLI `codeschema benchmark`（--repos 多仓/单仓，Markdown+JSON 报告）；CLI 命令数 6→7（scan/watch/rebuild-kv/benchmark/mcp/serve/version）
+- [x] **T1-2 CodeGraph 真实 schema 校准**（`d9aa484`）— 真实 CodeGraph DDL（nodes/edges + source_id/target_id/kind）优先，旧 symbols/edges 契约兼容；缺表显式降级（不静默空 IR）
+- [x] **T1-3 LSP 接入 Registry 编排主路**（`ec57a45`）— `parser.FallbackParser` 降级回退包装器 + `newParserRegistry` 统一工厂；**顺带修复 scan/watch 创建空 Registry 导致 CLI 扫描 classes/methods 恒空的隐藏缺陷**
+- [x] **T2-1 模型公网分发闭环**（`200a366`）— 注册表 URL 回填 GitHub Releases 约定路径 + `make models-serve` 本地 HTTP 分发 + 真实制品（43MB）HTTP 端到端
+- [x] **T2-2 向量索引原文持久化**（`2fcf551`）— `DocContentStore` 可选接口（Persistent/Memory 实现，旧文件向后兼容），IndexBuilder 写入原文，/viz 展示类/方法原文
+- [x] **T2-3 语义检索质量定案**（`72bdc93`）— 真实 ONNX 复测：**R@1/@3/@5 = 1.00/1.00/1.00 vs Local(TF-IDF) 0.42/0.58/0.83**；默认策略定案（Local 兜底 / 语义敏感场景 -tags onnx）
+- [x] **T2-4 FileStore 权威化与一致性**（`9594342`）— flock 进程锁（Unix）/独占创建（Windows），同目录二次 Open 显式失败；scanner 忽略 store 数据文件
+- [x] **T2-5 配置模板与一键体验**（`6ebb93a`）— `codeschema mcp --print-config` 输出 5 类客户端配置 + `docs/MCP接入指南.md` + README 快速开始
+- [x] **T3-1 10万+ 文件真实规模压测**（`efb548e`）— `TestScaleEndToEnd` 真实全链路（真实 .go 文件→Scanner→UpsertIR→BuildFromStore→Searcher）：**N=10万 扫描 8.18s / 索引 9.55s / P95 搜索 1.97s / 内存 1079MB** → 规模决策表（<1万 默认栈 / 1万~10万 SQLite+chromem / >10万 PG+Redis）
+- [x] **T3-2 PG/Redis 真实实例集成**（`fa6dec0`）— PG 骨架修 2 个历史 bug（file.imports 列缺失、UpsertIR 从未写 method）；集成测试三档降级（外部实例→localhost→嵌入式 fergusstrange/embedded-postgres 真实内核）；`TestPGStore_EndToEnd` + `TestRedisCache_RealInstance`（docker redis）PASS
+- [x] **T3-3 Docker 实构建 + 多平台**（`fa6dec0`）— Dockerfile 三处修复（GOPROXY 固化 goproxy.cn、提前 COPY third_party/、移除非法 shell COPY）；`codeschema:test` 构建成功，容器内 version/scan/serve+viz/mcp stdio 冒烟全 PASS
+- [x] **T3-4 CI 规模回归看护升级**（`efb548e`）— `nightly-scale` job（schedule 触发，N=10万 端到端 + 趋势 JSONL 归档）
+- [x] **T4-1 MCP stdio 传输**（`4c72dc6`）— `handleRequest` 纯逻辑抽取（HTTP/stdio 复用）+ `StartStdio` LSP 风格 Content-Length 帧 + `codeschema mcp --stdio`；测试 4 项
+- [x] **T4-2 HTTP API OpenAPI 完整化**（`13a2048`）— `/openapi.json`（13 端点规范）+ `/docs`（内嵌 swagger-ui）；测试 2 项
+- [x] **T4-3 制品发布流水线**（`faef16d`）— `.github/workflows/release.yml`：v* tag → make cross 5 平台 → SHA-256SUMS → action-gh-release；本机 cross 验证通过（13-15MB/平台）
+- [x] **T4-4 测试关联真实采集**（`0b427de`）— `LoadGoCoverProfile`/`ParseGoCoverProfile` 从真实 `go test -coverprofile` 产物自动采集（行号区间匹配方法 + 测试类命名约定关联），端到端测试 PASS
 
 ## 已知问题
 
@@ -326,5 +347,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：docs: 修正 P6_1/P6_2 头部完成度（95→97，与 README 及完成度段一致）（`170c8f5`）
+7. 最新提交：docs: 开发计划 16 张任务卡片全部标记 ✅ 已实施 + 技术路线同步 Docker/PG 跑通（PHASE_09 收尾）（`5bc775e`）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

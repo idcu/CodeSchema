@@ -38,11 +38,11 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │   ├── P6_2 嵌入器（Local / ONNX） ............. 97%
 │   └── P6_3 模型分发与下载 .................... 97%
 │
-├── P7 存储层 Store Layer ─────────────── 93%
+├── P7 存储层 Store Layer ─────────────── 95%
 │   ├── P7_1 Store 接口 + 文件存储 .............. 100%
 │   ├── P7_2 SQLite 驱动 ....................... 98%
-│   ├── P7_3 PostgreSQL 驱动（-tags pg） ......... 85%
-│   └── P7_4 Redis 热点缓存（-tags redis） ....... 85%
+│   ├── P7_3 PostgreSQL 驱动（-tags pg） ......... 92%
+│   └── P7_4 Redis 热点缓存（-tags redis） ....... 92%
 │
 ├── P8 横切公共模块 Cross-cutting 【公共模块】 ── 100%
 │   ├── P8_1 配置系统 .......................... 100%
@@ -91,7 +91,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 
 | # | 阻塞项 | 影响模块 | 类型 | 状态 |
 |---|---|---|---|---|
-| 1 | PG/Redis 驱动缺真实外部服务端到端验证 | P7_3、P7_4 | 外部依赖 | 集成测试代码已完成（优雅 skip），实跑待 Docker 网络恢复 |
+| 1 | PG/Redis 驱动缺真实外部服务端到端验证 | P7_3、P7_4 | 外部依赖 | ✅ 已解决（2026-08-15，T3-2）：PG 走嵌入式 fergusstrange/embedded-postgres 真实内核（外部实例/localhost 优先），Redis 走 docker redis:7-alpine，两测试均 PASS |
 | 2 | ONNX 语义检索依赖 gcc + onnxruntime 动态库（`-tags onnx`） | P6_2 | 构建依赖 | 默认构建已隔离；Local 兜底 R@1=0.42 为已知质量取舍 |
 | 3 | LSP clangd 适配器需 compile-commands.json 上下文 | P3_4 | 场景受限 | 已解决：测试自动构造工程上下文真实验证（PASS）；独立文件场景优雅降级 |
 | 4 | Treesitter 少数语言（bash/sql/css）语法树质量不均 | P3_2 | 质量 | 已通过 adapterbench 量化，回退正则可接受 |
@@ -107,11 +107,11 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | ├ P1_1 CLI | [P1_1.md](./P1_1.md) | 100% | ├ P6_1 索引核心 | [P6_1.md](./P6_1.md) | 97% |
 | ├ P1_2 MCP | [P1_2.md](./P1_2.md) | 100% | ├ P6_2 嵌入器 | [P6_2.md](./P6_2.md) | 97% |
 | └ P1_3 HTTP | [P1_3.md](./P1_3.md) | 100% | └ P6_3 模型分发 | [P6_3.md](./P6_3.md) | 97% |
-| **P2 编排层** | [P2.md](./P2.md) | 100% | **P7 存储层** | [P7.md](./P7.md) | 93% |
+| **P2 编排层** | [P2.md](./P2.md) | 100% | **P7 存储层** | [P7.md](./P7.md) | 95% |
 | ├ P2_1 Service | [P2_1.md](./P2_1.md) | 100% | ├ P7_1 接口+file | [P7_1.md](./P7_1.md) | 100% |
 | ├ P2_2 Scanner | [P2_2.md](./P2_2.md) | 100% | ├ P7_2 SQLite | [P7_2.md](./P7_2.md) | 98% |
-| ├ P2_3 Watcher | [P2_3.md](./P2_3.md) | 100% | ├ P7_3 PG | [P7_3.md](./P7_3.md) | 85% |
-| └ P2_4 Scheduler | [P2_4.md](./P2_4.md) | 100% | └ P7_4 Redis | [P7_4.md](./P7_4.md) | 85% |
+| ├ P2_3 Watcher | [P2_3.md](./P2_3.md) | 100% | ├ P7_3 PG | [P7_3.md](./P7_3.md) | 92% |
+| └ P2_4 Scheduler | [P2_4.md](./P2_4.md) | 100% | └ P7_4 Redis | [P7_4.md](./P7_4.md) | 92% |
 | **P3 解析层** | [P3.md](./P3.md) | 96% | **P8 公共模块** | [P8.md](./P8.md) | 100% |
 | ├ P3_1 解析核心 | [P3_1.md](./P3_1.md) | 100% | ├ P8_1 配置 | [P8_1.md](./P8_1.md) | 100% |
 | ├ P3_2 Treesitter | [P3_2.md](./P3_2.md) | 96% | ├ P8_2 日志 | [P8_2.md](./P8_2.md) | 100% |
@@ -150,4 +150,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **scanner symlink 边界修复 + 多语言真实仓库验证（P9_4 → 97%）**：指向目录的符号链接被误收集为文件（Walk Lstat），修复；TS/Python/Go 三语真实仓库端到端解析验证（lytd 1904 文件/5172 类、deepseek-harness 7337/22462、code-schema 355/1960）。
 - **Treesitter 标记语言精度定案（P3_2 → 96%）**：css/toml/yaml 无函数调用，调用图维度空集 precision/recall=1（语法树与正则无差异）。
 - **百万级 SQLite BulkUpsert 实测（P9_2 → 96%）**：N=100万 182.2s / 分配 6.2GB / db 660MB / 0.182ms 每文件——相对 100k ~0.05ms 呈超线性，亿级走 PG 边界更清晰。
-- **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。
+- **PG/Redis 真实实例集成（P7_3/P7_4 → 92%）**：PG 嵌入式真实内核端到端 PASS（修复 file.imports 列缺失 + method 未落库 2 个历史 bug）；Redis docker 实例缓存+反查 PASS（T3-2，见 dev12 §12.3）。
+- **剩余阻塞项**：AI 真实 LLM 评估（需外部 API key）。

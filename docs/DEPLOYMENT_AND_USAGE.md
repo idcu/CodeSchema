@@ -39,6 +39,8 @@ CodeSchema 是一个**代码元数据 KV/DB 系统**，面向 AI 辅助开发场
 | **监听** | `codeschema watch <path>` | 持续监听文件变更，增量更新索引 |
 | **服务** | `codeschema mcp` / `codeschema serve` | 启动 MCP/HTTP 服务，供 AI 工具查询 |
 
+> 附加运维命令：`codeschema benchmark <path>`（全链路基准，多仓库对比）、`codeschema rebuild-kv`（-tags redis 下重建缓存）、`codeschema mcp --stdio`（原生 stdio 直连）、`codeschema mcp --print-config`（打印各客户端 MCP 接入配置）。
+
 ---
 
 ## 2. 快速部署

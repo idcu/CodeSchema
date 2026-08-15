@@ -44,6 +44,10 @@
 | `GET /tags` | GET | 获取指定符号的标签列表 | `symbol`（必需，全限定名） | `{symbol, kind, tags, categories}` | P5 |
 | `GET /tags/search` | GET | 按标签搜索类和方法 | `tag`（必需，如 `controller`） | `{tag, class_ids: [{id, name}], method_ids: [{id, name}]}` | P5 |
 | `GET /tags/all` | GET | 获取所有已知标签及分类统计 | — | `{tags: {tag_name: category}}` | P5 |
+| `GET /metrics` | GET | Prometheus 文本格式指标 | — | text/plain | P6 |
+| `GET /viz/*` | GET | 向量索引可视化仪表盘（概览/文档列表/搜索） | — | HTML/JSON | P17 |
+| `GET /openapi.json` | GET | OpenAPI 3.0 规范（全部端点 + 参数定义） | — | JSON | T4-2 |
+| `GET /docs` | GET | API 文档页（内嵌 swagger-ui，加载 /openapi.json） | — | HTML | T4-2 |
 
 ### 3.2 错误响应格式
 
@@ -71,6 +75,11 @@
 ## 4. MCP Server
 
 MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph 与 JCodeIndexer 事实标准，降低 Agent 迁移成本。
+
+**双传输（2026-08-15，T4-1）**：
+- **SSE（默认）**：`codeschema mcp --addr :8080`，端点为 `/sse`（HTTP SSE），`/message` 收 JSON-RPC 消息。
+- **stdio（原生直连）**：`codeschema mcp --stdio`，LSP 风格 `Content-Length` 帧读 stdin / 写 stdout，EOF 优雅退出——供仅支持 stdio 的客户端（如 Claude Desktop）以子进程方式连接；JSON-RPC 处理逻辑经 `handleRequest` 纯函数抽取，两传输复用。
+- **一键配置**：`codeschema mcp --print-config` 输出 VS Code / JetBrains / Claude Code / Cursor / npx 桥接五类接入配置片段（见 `docs/MCP接入指南.md`）。
 
 ### 4.1 工具表
 
