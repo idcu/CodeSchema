@@ -336,6 +336,13 @@ func listFiles(root string) ([]string, error) {
 		".vscode":      true,
 		"__pycache__":  true,
 	}
+	// 数据文件：当 store 目录位于仓库根（默认 ./data）时，避免将 store.json /
+	// store.lock 等持久化文件当作源码收录（无语言识别，会污染文件清单与集成测试断言）。
+	ignoreFiles := map[string]bool{
+		"store.json": true,
+		"store.lock": true,
+		"store.db":   true,
+	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -344,7 +351,7 @@ func listFiles(root string) ([]string, error) {
 		if info.IsDir() && ignoreDirs[info.Name()] {
 			return filepath.SkipDir
 		}
-		if !info.IsDir() {
+		if !info.IsDir() && !ignoreFiles[info.Name()] {
 			files = append(files, path)
 		}
 		return nil

@@ -17,6 +17,7 @@ import (
 type FileStore struct {
 	mu            sync.RWMutex
 	rootDir       string
+	lock          *fileLock // 进程锁（防止多进程并发写坏 store.json）
 	files         map[string]*FileRecord   // absolute_path -> FileRecord
 	classes       map[int64][]ClassRecord  // fileID -> classes
 	methods       map[int64][]MethodRecord // classID -> methods
@@ -83,6 +84,13 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
+	// 获取进程锁：防止多进程（scan + serve 同目录）并发写坏 store.json
+	lock, err := acquireLock(fs.rootDir)
+	if err != nil {
+		return err
+	}
+	fs.lock = lock
+
 	fs.files = make(map[string]*FileRecord)
 	fs.classes = make(map[int64][]ClassRecord)
 	fs.methods = make(map[int64][]MethodRecord)
@@ -98,11 +106,16 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 	return nil
 }
 
-// Close 保存数据到磁盘。
+// Close 保存数据到磁盘并释放进程锁。
 func (fs *FileStore) Close() error {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	return fs.saveToDisk()
+	err := fs.saveToDisk()
+	if fs.lock != nil {
+		fs.lock.release()
+		fs.lock = nil
+	}
+	fs.mu.Unlock()
+	return err
 }
 
 // UpsertFile 插入或更新文件记录。
