@@ -227,7 +227,7 @@
   <b>🟡 能用但有限制：</b><br>
   • 真语法树（-tags treesitter）与 ONNX（-tags onnx）需要 CGO 编译，且 ONNX 需对应平台的动态库。<br>
   • LSP 解析：缺项目上下文时会悄悄跳过（clangd 常见）；已接入 Registry 编排主路（失败自动回退 tree-sitter）。<br>
-  • 模型公网分发已闭环（注册表 URL 回填 + make models-serve）；Docker 实构建 / PG- Redis 实跑待网络恢复。
+  • 模型公网分发已闭环（注册表 URL 回填 + make models-serve）；Docker 实构建 / PG·Redis 真实实例集成均已跑通（2026-08-15）。
 </div>
 <div class="badbox">
   <b>🔴 还没做完的：</b><br>
