@@ -28,7 +28,7 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │
 ├── P4 分析层 Analysis Layer ──────────── 96%
 │   ├── P4_1 代码图与影响面分析 ................. 100%
-│   └── P4_2 AI 标签推导与测试关联 .............. 85%
+│   └── P4_2 AI 标签推导与测试关联 .............. 87%
 │
 ├── P5 检索层 Search Layer ────────────── 100%
 │   └── P5_1 全文检索与融合重排 ................. 100%
@@ -120,7 +120,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | └ P3_5 CodeGraph | [P3_5.md](./P3_5.md) | 92% | ├ P8_5 错误 | [P8_5.md](./P8_5.md) | 100% |
 | **P4 分析层** | [P4.md](./P4.md) | 96% | └ P8_6 健壮性 | [P8_6.md](./P8_6.md) | 100% |
 | ├ P4_1 Analyzer | [P4_1.md](./P4_1.md) | 100% | **P9 测试基准** | [P9.md](./P9.md) | 95% |
-| └ P4_2 AI | [P4_2.md](./P4_2.md) | 85% | ├ P9_1 Benchmark | [P9_1.md](./P9_1.md) | 100% |
+| └ P4_2 AI | [P4_2.md](./P4_2.md) | 87% | ├ P9_1 Benchmark | [P9_1.md](./P9_1.md) | 100% |
 | **P5 检索层** | [P5.md](./P5.md) | 100% | ├ P9_2 ScaleBench | [P9_2.md](./P9_2.md) | 95% |
 | └ P5_1 检索核心 | [P5_1.md](./P5_1.md) | 100% | ├ P9_3 AdapterBench | [P9_3.md](./P9_3.md) | 95% |
 | | | | └ P9_4 集成测试 | [P9_4.md](./P9_4.md) | 95% |
@@ -144,4 +144,6 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **LSP 生产 bug 修复（clangd 场景）**：`jsonRPCRequest.ID` 缺 `omitempty` 导致 notification 携带 `"id":0`，违反 JSON-RPC 2.0；gopls 宽容未暴露，clangd 严格拒绝致 didOpen 不生效、符号提取永远失败（被测试 skip 掩盖）。已修复并新增 clangd 工程上下文真实验证（P3_4 → 95%，阻塞项 #3 解除）。
 - **模型下载断点续传（P6_3 → 97%）**：HTTP Range 续传 + `.download.part` 落盘 + 206/200 自适应 + 完整 `.part` 复用，中断重下不浪费已下载部分。
 - **嵌入质量多语料对比（P6_2 → 97%）**：`TestEmbeddingQualityMultiCorpus` 在通用代码语义/电商业务/基础设施三语料上评测，ONNX Recall@1 全胜（1.00/0.80/1.00 vs 0.42/0.40/0.20），跨场景结论成立。
+- **CodeGraph Schema 变体兼容（P3_5 → 92%）**：kind 变体映射、role/confidence 额外列不干扰、缺列 schema 漂移显式报错。
+- **AI 多 provider 配置验证（P4_2 → 87%）**：BaseURL 形态（尾斜杠/版本路径前缀）请求路径正确拼接。
 - **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。

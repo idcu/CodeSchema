@@ -124,3 +124,39 @@ func TestOpenAICompatClient_NetworkError(t *testing.T) {
 		t.Fatal("expected error on network failure")
 	}
 }
+
+// TestOpenAICompatClient_BaseURLVariants 验证多 provider 配置（P4_2 未做项）：
+// 不同 BaseURL 形态（无/带尾斜杠、带/不带版本路径前缀）时，请求路径正确拼接
+// （baseURL TrimSuffix 尾斜杠后 + "/chat/completions"），兼容任意 OpenAI 兼容端点。
+func TestOpenAICompatClient_BaseURLVariants(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	cases := []struct {
+		base string
+		want string
+	}{
+		{srv.URL, "/chat/completions"},
+		{srv.URL + "/", "/chat/completions"},
+		{srv.URL + "/v1", "/v1/chat/completions"},
+		{srv.URL + "/v1/", "/v1/chat/completions"},
+		{srv.URL + "/api/openai/v1", "/api/openai/v1/chat/completions"},
+	}
+	for _, c := range cases {
+		client := NewOpenAICompatClient(HTTPClientConfig{BaseURL: c.base, APIKey: "k", Model: "m"})
+		if client == nil {
+			t.Fatalf("base=%q: expected non-nil client", c.base)
+		}
+		if _, err := client.Complete(context.Background(), "hi"); err != nil {
+			t.Fatalf("base=%q: Complete err: %v", c.base, err)
+		}
+		if gotPath != c.want {
+			t.Errorf("base=%q: request path=%q want %q", c.base, gotPath, c.want)
+		}
+	}
+}
