@@ -25,23 +25,16 @@ func toLSPPath(p string) string {
 	return abs
 }
 
-// writeTempSource 在包目录下的临时子目录写源文件并返回其 LSP 路径。
+// writeTempSource 在系统临时目录（t.TempDir，绝对长路径、无 8.3 短名问题）写源文件并返回其 LSP 路径。
 //
-// 注意：必须避开系统临时目录（如 C:\Users\ADMINI~1\... 的 8.3 短路径），
-// 否则 clangd 会把 URI 规范化为长路径存储，导致 documentSymbol 用短路径查不到
-// （报 "non-added document"）。当前包目录路径均为长名，可规避该问题。
+// 注意：此前实现写入仓库根的 ./cs_lsp_tmp，会与「扫描整个仓库根」的集成测试
+// （TestRealRepo_CollectMetrics）在并行执行时竞态——集成扫描途中该临时工程正被
+// 创建/清理，读到已消失的 compile_commands.json 导致 ScanAll 失败。改用 t.TempDir()
+// 后临时工程完全落在仓库外，根除了该竞态，且 t.TempDir 自动清理。
+// LSP 的 rootUri 需为绝对 file URI，t.TempDir 返回的已是绝对长路径（无 8.3），clangd/gopls 不会因规范化失配。
 func writeTempSource(t *testing.T, ext, content string) string {
 	t.Helper()
-	dir := filepath.Join(".", "cs_lsp_tmp")
-	// 转为绝对路径：LSP 的 rootUri 必须是绝对 file URI，否则 gopls 等无法建立 view；
-	// 当前包目录路径均为长名（无 8.3），clangd 也不会因规范化而失配。
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir temp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	dir := t.TempDir()
 	f, err := os.CreateTemp(dir, "*"+ext)
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
@@ -124,15 +117,14 @@ func TestLSPAdapter_RealClangd(t *testing.T) {
 // 使 clangd 能将文件登记进工程上下文并产出符号。
 // 返回 (源文件 LSP 路径, 工程根目录绝对路径)。
 //
+// 工程目录落在 t.TempDir()（系统临时目录，绝对长路径，仓库外），不再写入仓库根
+// ./cs_lsp_tmp——避免与扫描整仓的集成测试并行竞态（详见 writeTempSource 注释）。
 // 关键：用 EvalSymlinks 解析真实路径（macOS 上 /tmp→/private/tmp、/Volumes→真实挂载），
 // 否则 clangd 会把源文件路径规范化为真实路径，与 compile_commands 中的 file 失配，
 // 报 "trying to get AST for non-added document"。
 func writeClangdProject(t *testing.T) (string, string) {
 	t.Helper()
-	abs, err := filepath.Abs(filepath.Join(".", "cs_lsp_tmp", "clangd_proj"))
-	if err != nil {
-		t.Fatalf("abs proj dir: %v", err)
-	}
+	abs := filepath.Join(t.TempDir(), "clangd_proj")
 	if err := os.MkdirAll(abs, 0o755); err != nil {
 		t.Fatalf("mkdir proj: %v", err)
 	}
@@ -190,10 +182,10 @@ func (c *Calculator) Sub(a, b int) int {
 	path := writeTempSource(t, ".go", src)
 
 	// gopls 需要 module（go.mod）才能建立 view 并提供符号；clangd/jdtls 忽略之。
-	// writeTempSource 将文件写入 ./cs_lsp_tmp 目录，此处补一个最小 go.mod。
-	modDir := "cs_lsp_tmp"
-	if d := filepath.Dir(lspPathToOSPath(path)); d != "" && d != "." {
-		modDir = d
+	// writeTempSource 将文件写入 t.TempDir() 目录，此处补一个最小 go.mod。
+	modDir := filepath.Dir(lspPathToOSPath(path))
+	if modDir == "" || modDir == "." {
+		t.Fatalf("cannot derive go.mod dir from LSP path %q", path)
 	}
 	if err := os.WriteFile(filepath.Join(modDir, "go.mod"), []byte("module cs_lsp_tmp_go\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)

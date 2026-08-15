@@ -293,7 +293,7 @@ func DefaultConfig() *Config {
 			Vector: VectorConfig{
 				Driver:         "chromem",
 				DSN:            "./vector.db",
-				EmbeddingModel: "bge-small-zh",
+				EmbeddingModel: "bge-small-zh-v1.5", // 与真实本地制品/注册表键一致；旧短名 bge-small-zh 仅作注册表远程别名
 			},
 			Search: SearchConfig{
 				FTS:       true,

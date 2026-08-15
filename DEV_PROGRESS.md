@@ -347,6 +347,13 @@ P18      [████████████████████] 100%
 - [x] **验证** — `build/mt-demo.yaml`（demo-a→`./cmd`、demo-b→`./internal/config`）端到端：HTTP 与 MCP 两路均正确隔离；`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...`、`go test ./...`（31 包全绿）通过。
 - commit `693bdc4`（14 files, +1253/−257）。
 
+### 维护优化（2026-08-16）：模型制品命名对齐 + 测试隔离竞态修复
+
+- [x] **模型制品命名对齐（已知问题 #6 修复）** — `internal/config/config.go`：`DefaultConfig().Storage.Vector.EmbeddingModel` 由 `bge-small-zh` 改为 `bge-small-zh-v1.5`（与 `config.yaml.example`、真实本地制品 `build/models-bge-small-zh-v1.5.tar.gz`、真实模型目录 `down/models/bge-small-zh-v1.5`、注册表键一致）。`internal/vector/model_download.go`：`resolveLocalArtifact` 精确名未命中时再试 `<model>-v1.5` 后缀（与注册表别名同思路），使显式写旧短名 `embedding_model: bge-small-zh` 也能命中本地打包产物。修复后离线环境默认命中本地 ONNX 模型，语义检索精度由 LocalEmbedder（R@1 0.42）恢复到 ONNX（R@1 1.00）。
+- [x] **测试隔离竞态修复** — `internal/parser/adapter/lsp/e2e_test.go`：`writeTempSource`/`writeClangdProject` 原把临时工程写到仓库根 `./cs_lsp_tmp`，与扫描整个仓库根的 `internal/integration/TestRealRepo_CollectMetrics` 在 `go test ./...` 并行（`-p`）执行时竞态——集成扫描途中读到正在被清理的 `compile_commands.json` 导致 `ScanAll failed`。改为使用 `t.TempDir()`（系统临时目录、绝对长路径、仓库外、自动清理），根除竞态。并行复现 3 次稳定通过。
+- [x] **测试** — `internal/vector/model_download_test.go` 新增 `TestResolveLocalArtifact_VersionSuffix`；`internal/config/config_test.go` 的 `TestDefaultConfig` 新增默认 `EmbeddingModel` 断言。
+- [x] **验证** — `go build ./...`、`go vet ./...`、`gofmt` 干净；`go test ./...` 全绿（此前并行竞态已消除）；`-race` 历史 26 内部包无竞态。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
@@ -354,7 +361,7 @@ P18      [████████████████████] 100%
 3. ~~**tree-sitter C 绑定**~~ **已解决（实现方式已更正）**：`internal/parser/adapter/treesitter` 为基于正则表达式的轻量解析（30 语言：go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html/hcl/svelte/markdown/dockerfile/elm/cue），**默认构建非 CGO 版 go-tree-sitter 语法树（`-tags treesitter` 可切换真语法树）**，因此解析层不依赖 `go-tree-sitter` 与 C 编译器；调用关系检测仅 Go/Python 较准，其余语言为启发式。
 4. ~~**语义检索精度**~~ **已解决**：onnxruntime_go 已安装，`bge-small-zh-v1.5` 模型已预转换为 ONNX 格式（FP16 量化，512 维），位于 `down/models/bge-small-zh-v1.5/`。`down/onnxruntime/` 含三平台动态库（`libonnxruntime.dylib`/`.so`/`onnxruntime.dll`），`make build-cgo` 自动复制到输出目录；**本机 x86_64 已端到端验证**——`-tags onnx` 下真实嵌入推理 dim=512（ORT 1.23.2，绑定经 `third_party/onnxruntime_go_patch` 适配 API v23）。应用启动时自动检测 ONNX 模型，优先使用 ONNXEmbedder，失败时降级到 LocalEmbedder。
 5. ~~**向量索引为空**：启动时 MemoryStore 和 PersistentFTS 里没有数据，需要 P10 自动构建流程。~~ **已解决**：mcp/serve 命令启动时自动调用 BuildIndex 全量构建索引并持久化 IDF 词典。
-6. **本地模型制品命名不匹配（离线必回退 LocalEmbedder）**：`resolveLocalArtifact` 按 `models-<EmbeddingModel>.tar.gz` 查找本地分发源（`<model>` = `config.Storage.Vector.EmbeddingModel`，默认 `bge-small-zh`），但仓库实际制品为 `build/models-bge-small-zh-v1.5.tar.gz`（带 `-v1.5` 后缀）；且 `NewModelDownloader` 的 `ModelDir` 由 `EmbeddingModel` 推导为 `down/models/bge-small-zh`，与真实模型目录 `down/models/bge-small-zh-v1.5` 不一致。结果：离线环境即便存在本地模型也无法命中，统一回退 LocalEmbedder（**非致命**，但损失语义精度，R@1 由 ONNX 的 1.00 降至 Local 的 0.42）。修复需让本地制品名解析兼容版本后缀，并校准 `EmbeddingModel`/`ModelDir` 与制品内部布局对齐（属独立优化项，不在多租户范围内）。
+6. ~~**本地模型制品命名不匹配（离线必回退 LocalEmbedder）**~~ **已解决（2026-08-16）**：根因是 `DefaultConfig().Storage.Vector.EmbeddingModel` 默认值为 `bge-small-zh`，而真实本地制品 `build/models-bge-small-zh-v1.5.tar.gz`、真实模型目录 `down/models/bge-small-zh-v1.5`、注册表键 `bge-small-zh-v1.5` 均为 `v1.5`；叠加 `resolveLocalArtifact` 仅按精确名 `models-<model>.tar.gz` 查找，无法命中带 `-v1.5` 后缀的本地制品。修复：① 默认 `EmbeddingModel` 对齐为 `bge-small-zh-v1.5`（与 `config.yaml.example` 一致）；② `resolveLocalArtifact` 精确名未命中时再试 `<model>-v1.5` 后缀（与注册表别名同思路，覆盖显式旧短名 `bge-small-zh` 配置）。修复后离线环境默认即可命中本地 ONNX 模型，语义检索精度恢复到 ONNX 水平（R@1 1.00）。新增回归测试 `TestResolveLocalArtifact_VersionSuffix`（vector）+ `TestDefaultConfig` 默认值断言（config）。
 
 ## 接手说明
 

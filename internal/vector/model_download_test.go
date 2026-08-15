@@ -499,3 +499,29 @@ func TestModelDownloader_ReuseCompletePart(t *testing.T) {
 		t.Fatalf("model not extracted from .part: %v", err)
 	}
 }
+
+// TestResolveLocalArtifact_VersionSuffix 回归已知问题 #6：
+// 默认 EmbeddingModel 为 bge-small-zh（旧短名）时，resolveLocalArtifact 必须能
+// 命中 make models-pack 生成的真实本地制品 models-bge-small-zh-v1.5.tar.gz
+// （精确名 bge-small-zh-v1.5 亦应命中；完全未知名返回 false）。
+func TestResolveLocalArtifact_VersionSuffix(t *testing.T) {
+	artifactDir := t.TempDir()
+	v15 := filepath.Join(artifactDir, "models-bge-small-zh-v1.5.tar.gz")
+	if err := os.WriteFile(v15, []byte("fake-artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dl := &ModelDownloader{LocalArtifactDirs: []string{artifactDir}}
+
+	// 旧短名 → 应回退命中 -v1.5 制品
+	if p, ok := dl.resolveLocalArtifact("bge-small-zh"); !ok || p != v15 {
+		t.Fatalf("resolveLocalArtifact(bge-small-zh) = (%q,%v), want (%q,true)", p, ok, v15)
+	}
+	// 精确名 → 直接命中
+	if p, ok := dl.resolveLocalArtifact("bge-small-zh-v1.5"); !ok || p != v15 {
+		t.Fatalf("resolveLocalArtifact(bge-small-zh-v1.5) = (%q,%v), want (%q,true)", p, ok, v15)
+	}
+	// 完全未知名 → 不命中
+	if _, ok := dl.resolveLocalArtifact("unknown-model"); ok {
+		t.Fatalf("resolveLocalArtifact(unknown-model) unexpectedly hit")
+	}
+}

@@ -70,11 +70,21 @@ func NewModelDownloader(modelDir, url, sha256 string) *ModelDownloader {
 
 // resolveLocalArtifact 在本地产物目录中查找 models-<model>.tar.gz；
 // 命中返回 (本地路径, true)，未命中返回 ("", false)。
+//
+// 精确名优先；再试常见版本后缀（如 bge-small-zh → bge-small-zh-v1.5 制品），
+// 与内置注册表别名思路一致——使显式配置旧短名 embedding_model 时也能命中
+// make models-pack 生成的本地打包产物（build/models-bge-small-zh-v1.5.tar.gz）。
 func (d *ModelDownloader) resolveLocalArtifact(modelName string) (string, bool) {
+	candidates := []string{modelName}
+	if !strings.HasSuffix(modelName, "-v1.5") {
+		candidates = append(candidates, modelName+"-v1.5")
+	}
 	for _, dir := range d.LocalArtifactDirs {
-		p := filepath.Join(dir, "models-"+modelName+".tar.gz")
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p, true
+		for _, name := range candidates {
+			p := filepath.Join(dir, "models-"+name+".tar.gz")
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				return p, true
+			}
 		}
 	}
 	return "", false

@@ -15,6 +15,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Storage.Driver != "file" {
 		t.Errorf("expected default storage driver 'file', got %q", cfg.Storage.Driver)
 	}
+	// 默认 EmbeddingModel 必须与真实本地制品 / 注册表键一致（bge-small-zh-v1.5），
+	// 否则离线环境无法命中本地模型而静默降级到 LocalEmbedder（已知问题 #6）。
+	if cfg.Storage.Vector.EmbeddingModel != "bge-small-zh-v1.5" {
+		t.Errorf("expected default embedding_model 'bge-small-zh-v1.5', got %q", cfg.Storage.Vector.EmbeddingModel)
+	}
 	if cfg.Server.MCPAddr != ":8080" {
 		t.Errorf("expected default mcp addr ':8080', got %q", cfg.Server.MCPAddr)
 	}
@@ -490,7 +495,7 @@ func TestMerge_BaseNil(t *testing.T) {
 	overlay := &Config{
 		Project: ProjectConfig{
 			Name: "test",
-			Root:  "/test",
+			Root: "/test",
 		},
 	}
 	merged := Merge(nil, overlay)
