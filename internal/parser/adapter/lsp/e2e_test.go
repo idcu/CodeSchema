@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,21 +55,27 @@ func writeTempSource(t *testing.T, ext, content string) string {
 }
 
 // parseWithRetry 对真实语言服务器重试 Parse，直到解析出符号或耗尽重试次数。
-// 真实 LSP 在 didOpen 后需短暂时间完成首轮解析，立即 documentSymbol 可能返回空结果。
-// 若语言服务器持续报错（如缺少工程上下文），以 skip 形式记录缺口而非让 CI 变红。
+// 真实 LSP 在 didOpen 后需短暂时间完成首轮解析（clangd 还需异步加载 compile_commands
+// 并登记文档，期间 documentSymbol 会报 "non-added document"），因此**错误也重试**
+// 而非立即跳过；连续失败（如环境缺工程上下文）在耗尽次数后以 skip 记录缺口，CI 保持绿色。
 func parseWithRetry(t *testing.T, a *LSPAdapter, path string, wantMin int) *parser.IRDocument {
 	t.Helper()
 	var last *parser.IRDocument
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 20; i++ {
 		ir, err := a.Parse(context.Background(), path)
 		if err != nil {
-			t.Skipf("real LSP Parse failed (likely missing project context): %v", err)
+			t.Logf("LSP Parse attempt %d/%d failed (waiting for server index/registration): %v", i+1, 20, err)
+			time.Sleep(500 * time.Millisecond)
+			continue
 		}
 		last = ir
 		if len(ir.Classes) >= wantMin {
 			return ir
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if last == nil {
+		t.Skipf("real LSP Parse failed after retries (missing project context or server not registering document)")
 	}
 	return last
 }
@@ -76,41 +83,30 @@ func parseWithRetry(t *testing.T, a *LSPAdapter, path string, wantMin int) *pars
 // TestLSPAdapter_RealClangd 使用真实 clangd 验证 LSP 适配器端到端。
 //
 // 这是 LSP 适配器的「生产验证」：真实 JSON-RPC 传输 + 真实语言服务器符号解析。
-// clangd 通常要求文件处于含 compile_commands.json / 工程上下文的项目中才会登记文档，
-// 独立文件可能报 "non-added document"。因此本测试为「尽力验证」：
+// clangd 只登记「处于工程上下文（compile_commands.json）中」的文件，独立文件会报
+// "non-added document" 并返回空。因此本测试构造一个含 compile_commands.json 的最小
+// C++ 工程（main.cpp + 编译命令）驱动 clangd 真实提取类与方法：
 //   - 无 clangd → 跳过；
-//   - clangd 未能登记文档/返回符号 → 记录缺口并跳过（CI 保持绿色，缺口写入报告）。
-//
-// 传输层与符号解析逻辑已由 mock 服务器测试 + gopls 真实测试覆盖。
+//   - clangd 在工程上下文下仍无法登记/返回符号 → 记录缺口并跳过（CI 保持绿色）。
 func TestLSPAdapter_RealClangd(t *testing.T) {
 	if _, err := exec.LookPath("clangd"); err != nil {
 		t.Skip("clangd not found in PATH; skipping real LSP validation")
 	}
 
-	src := `class Calculator {
-public:
-    int Add(int a, int b) {
-        return a + b;
-    }
-    int Sub(int a, int b) {
-        return a - b;
-    }
-};
-`
-	path := writeTempSource(t, ".cpp", src)
+	path, rootAbs := writeClangdProject(t)
 
-	a := NewClangdAdapter()
-	if err := a.Init(context.Background(), map[string]any{"rootUri": dirURI(path)}); err != nil {
+	// --compile-commands-dir 显式指定工程上下文位置（clangd 默认按 rootUri 探测，
+	// 显式指定加载更确定）；--background-index 开启后台索引加速符号可用。
+	a := NewLSPAdapter("clangd", "clangd",
+		[]string{"--compile-commands-dir=" + rootAbs, "--background-index"}, "cpp", 60*time.Second)
+	if err := a.Init(context.Background(), map[string]any{"rootUri": "file://" + toLSPPath(rootAbs)}); err != nil {
 		t.Fatalf("clangd Init failed: %v", err)
 	}
 	defer a.Close()
 
-	ir, err := a.Parse(context.Background(), path)
-	if err != nil {
-		t.Skipf("clangd could not serve symbols for a standalone file (needs compile-commands/project context): %v", err)
-	}
+	ir := parseWithRetry(t, a, path, 1)
 	if len(ir.Classes) < 1 || len(ir.Methods) < 1 {
-		t.Skipf("clangd returned no symbols for standalone file (classes=%d methods=%d); needs project context", len(ir.Classes), len(ir.Methods))
+		t.Skipf("clangd returned no symbols under compile-commands project (classes=%d methods=%d)", len(ir.Classes), len(ir.Methods))
 	}
 	if ir.Classes[0].Name != "Calculator" {
 		t.Errorf("expected class 'Calculator', got %q", ir.Classes[0].Name)
@@ -122,6 +118,51 @@ public:
 	if !containsName(names, "Add") {
 		t.Errorf("expected method 'Add' in %v", names)
 	}
+}
+
+// writeClangdProject 构造一个最小 C++ 工程（main.cpp + compile_commands.json），
+// 使 clangd 能将文件登记进工程上下文并产出符号。
+// 返回 (源文件 LSP 路径, 工程根目录绝对路径)。
+//
+// 关键：用 EvalSymlinks 解析真实路径（macOS 上 /tmp→/private/tmp、/Volumes→真实挂载），
+// 否则 clangd 会把源文件路径规范化为真实路径，与 compile_commands 中的 file 失配，
+// 报 "trying to get AST for non-added document"。
+func writeClangdProject(t *testing.T) (string, string) {
+	t.Helper()
+	abs, err := filepath.Abs(filepath.Join(".", "cs_lsp_tmp", "clangd_proj"))
+	if err != nil {
+		t.Fatalf("abs proj dir: %v", err)
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		t.Fatalf("mkdir proj: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(abs) })
+	// 注意：不使用 EvalSymlinks 解析符号链接。实测 macOS 上 /Volumes/Data 为符号链接，
+	// 若 compile_commands 用解析后的真实路径，而 didOpen 的 URI 用符号链接路径，二者失配
+	// 会让 clangd 报 "non-added document"。保持 filepath.Abs 原始路径在两侧一致即可。
+
+	src := `class Calculator {
+public:
+    int Add(int a, int b) {
+        return a + b;
+    }
+    int Sub(int a, int b) {
+        return a - b;
+    }
+};
+`
+	mainCPP := filepath.Join(abs, "main.cpp")
+	if err := os.WriteFile(mainCPP, []byte(src), 0o644); err != nil {
+		t.Fatalf("write main.cpp: %v", err)
+	}
+	// compile_commands.json：clangd 在根目录或子目录自动发现；
+	// directory/file 使用解析后的真实路径，确保与 clangd 规范化路径一致
+	cc := fmt.Sprintf(`[{"directory":%q,"command":"clang++ -std=c++17 -c main.cpp -o main.o","file":%q}]`,
+		abs, mainCPP)
+	if err := os.WriteFile(filepath.Join(abs, "compile_commands.json"), []byte(cc), 0o644); err != nil {
+		t.Fatalf("write compile_commands.json: %v", err)
+	}
+	return toLSPPath(mainCPP), abs
 }
 
 // TestLSPAdapter_RealGopls 使用真实 gopls 验证 LSP 适配器端到端（Go 为本项目主语言）。

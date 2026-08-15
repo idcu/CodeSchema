@@ -62,9 +62,11 @@ type LSPAdapter struct {
 }
 
 // jsonRPCRequest JSON-RPC 2.0 请求结构。
+// 注意：ID 必须 omitempty——notification（didOpen/didClose/initialized）不允许携带 id，
+// 否则 clangd 等严格实现会把通知当请求处理（-32601 method not found）并拒绝登记文档。
 type jsonRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
+	ID      int    `json:"id,omitempty"`
 	Method  string `json:"method"`
 	Params  any    `json:"params"`
 }
