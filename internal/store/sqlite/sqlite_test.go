@@ -317,13 +317,47 @@ func TestSQLite_ConcurrentUpdateSameFile(t *testing.T) {
 
 // TestSQLite_ConcurrentReadWrite 写的同时并发读（配合 -race 检测数据竞争与死锁）。
 //
-// ⚠️ 已知缺陷（Skip）：modernc.org/sqlite v1.56.0 + libc v1.74.4 在 macOS 上，
-// 多 goroutine 访问 SQLite（即使通过 database/sql 单连接 + store.mu 严格串行）会触发
-// libc 全局内存分配器（allocMu 保护 Xmalloc/Xfree）死锁/CPU 自旋，查询永久卡死。
-// 原生 database/sql 最小复现：`SELECT 1` 不触发，访问表的 SELECT + 另一 goroutine
-// 活跃（channel 交互）即触发；runtime.LockOSThread 仅对单 goroutine 有效，多 goroutine 无效。
-// 单 goroutine 使用完全正常（TestSQLite_ConcurrentUpsertIR_DistinctFiles 等纯写并发通过）。
-// 该 bug 由第三方库引入，项目代码无法规避，列为 P7_2 阻塞项；升级 modernc 或换驱动后应复测。
+// 设计注意：reader 必须用固定迭代次数（而非 select stop 的无限循环）——
+// 无限循环的 reader 正常工作时不退出，会让 wg.Wait() 永不完成，误判为死锁
+// （曾因此误报 modernc 并发 bug，见 concurrent_fix_test.go 注释）。
 func TestSQLite_ConcurrentReadWrite(t *testing.T) {
-	t.Skip("known modernc.org/sqlite v1.56.0 + libc v1.74.4 concurrent access deadlock bug (macOS); see docs/modules/P7_2.md")
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	const readIters = 500
+	var wg sync.WaitGroup
+
+	// 读者：固定次数 GetAllFiles + GetClassesByFileID
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < readIters; i++ {
+			files, err := s.GetAllFiles(ctx)
+			if err != nil {
+				t.Errorf("reader: %v", err)
+				return
+			}
+			for _, f := range files {
+				if _, err := s.GetClassesByFileID(ctx, f.ID); err != nil {
+					t.Errorf("reader classes: %v", err)
+					return
+				}
+			}
+		}
+	}()
+
+	// 写者：持续写入不同文件
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				if err := s.UpsertIR(ctx, concurrentIR(w*10+i)); err != nil {
+					t.Errorf("writer %d: %v", w, err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
 }

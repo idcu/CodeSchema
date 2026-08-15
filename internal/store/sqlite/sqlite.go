@@ -121,15 +121,6 @@ func (s *SQLiteStore) Open(ctx context.Context, dsn string) error {
 	if err != nil {
 		return fmt.Errorf("open sqlite %s: %w", path, err)
 	}
-	// 串行化 SQL 连接（单连接）：store.mu 已保证所有 SQL 操作互斥，多连接无并发收益。
-	//
-	// ⚠️ 已知缺陷（modernc.org/sqlite v1.56.0 + libc v1.74.4，macOS 实测）：
-	// 多 goroutine 访问 SQLite 时（即使通过 database/sql 单连接严格串行），libc 的
-	// 全局内存分配器（allocMu 保护 Xmalloc/Xfree）会发生死锁/CPU 自旋，导致查询永久卡死。
-	// 单 goroutine 使用完全正常；同进程并发查询（serve 多请求 + 后台扫描）存在卡死风险。
-	// 详见 sqlite_test.go TestSQLite_ConcurrentReadWrite 与 docs/modules/P7_2.md 阻塞项。
-	// 单连接（SetMaxOpenConns(1)）不能修复该 bug，但可避免多连接场景进一步放大。
-	db.SetMaxOpenConns(1)
 	// 提升并发与写入健壮性。WAL + synchronous=NORMAL：仅 WAL 检查点时 fsync，
 	// 而非每事务 fsync，批量写入（索引大仓）吞吐显著提升；电源故障最多丢最近一次
 	// 检查点内的提交，对“可重建的索引缓存”是可接受权衡。
