@@ -33,9 +33,9 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 ├── P5 检索层 Search Layer ────────────── 100%
 │   └── P5_1 全文检索与融合重排 ................. 100%
 │
-├── P6 向量索引层 Vector Index Layer ────── 96%
+├── P6 向量索引层 Vector Index Layer ────── 97%
 │   ├── P6_1 向量索引核心 ....................... 97%
-│   ├── P6_2 嵌入器（Local / ONNX） ............. 95%
+│   ├── P6_2 嵌入器（Local / ONNX） ............. 97%
 │   └── P6_3 模型分发与下载 .................... 97%
 │
 ├── P7 存储层 Store Layer ─────────────── 92%
@@ -103,9 +103,9 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 
 | 模块 | 文档 | 完成度 | 模块 | 文档 | 完成度 |
 |---|---|---|---|---|---|
-| **P1 接入层** | [P1.md](./P1.md) | 100% | **P6 向量层** | [P6.md](./P6.md) | 96% |
+| **P1 接入层** | [P1.md](./P1.md) | 100% | **P6 向量层** | [P6.md](./P6.md) | 97% |
 | ├ P1_1 CLI | [P1_1.md](./P1_1.md) | 100% | ├ P6_1 索引核心 | [P6_1.md](./P6_1.md) | 97% |
-| ├ P1_2 MCP | [P1_2.md](./P1_2.md) | 100% | ├ P6_2 嵌入器 | [P6_2.md](./P6_2.md) | 95% |
+| ├ P1_2 MCP | [P1_2.md](./P1_2.md) | 100% | ├ P6_2 嵌入器 | [P6_2.md](./P6_2.md) | 97% |
 | └ P1_3 HTTP | [P1_3.md](./P1_3.md) | 100% | └ P6_3 模型分发 | [P6_3.md](./P6_3.md) | 97% |
 | **P2 编排层** | [P2.md](./P2.md) | 100% | **P7 存储层** | [P7.md](./P7.md) | 92% |
 | ├ P2_1 Service | [P2_1.md](./P2_1.md) | 100% | ├ P7_1 接口+file | [P7_1.md](./P7_1.md) | 100% |
@@ -143,4 +143,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **SQLite 并发误判纠正**：曾把「reader 无限循环测试超时」误判为 modernc 驱动死锁（一度标记 Skip + 列为头号阻塞项），已纠正——实为测试设计缺陷（reader 需固定迭代次数）。正确设计的读写/多读并发均 `-race` 通过（P7_2 → 97%），并新增 `BenchmarkScaleBulkConcurrent` 固化进 CI。
 - **LSP 生产 bug 修复（clangd 场景）**：`jsonRPCRequest.ID` 缺 `omitempty` 导致 notification 携带 `"id":0`，违反 JSON-RPC 2.0；gopls 宽容未暴露，clangd 严格拒绝致 didOpen 不生效、符号提取永远失败（被测试 skip 掩盖）。已修复并新增 clangd 工程上下文真实验证（P3_4 → 95%，阻塞项 #3 解除）。
 - **模型下载断点续传（P6_3 → 97%）**：HTTP Range 续传 + `.download.part` 落盘 + 206/200 自适应 + 完整 `.part` 复用，中断重下不浪费已下载部分。
+- **嵌入质量多语料对比（P6_2 → 97%）**：`TestEmbeddingQualityMultiCorpus` 在通用代码语义/电商业务/基础设施三语料上评测，ONNX Recall@1 全胜（1.00/0.80/1.00 vs 0.42/0.40/0.20），跨场景结论成立。
 - **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。

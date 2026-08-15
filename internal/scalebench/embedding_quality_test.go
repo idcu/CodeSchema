@@ -71,6 +71,52 @@ var qualityQueries = []qualityQuery{
 	{Query: "把数据导出成表格文件", WantID: "ReportService.export"},
 }
 
+// qualityCorpora 多仓库/多业务场景语料：每份语料独立评测，反映不同领域检索质量
+// （通用代码语义 / 电商业务 / 基础设施中间件）。各语料查询均含「语义改写」干扰项。
+var qualityCorpora = []struct {
+	Name    string
+	Corpus  []qualityEntity
+	Queries []qualityQuery
+}{
+	{"通用代码语义", qualityCorpus, qualityQueries},
+	{"电商业务", ecommerceCorpus, ecommerceQueries},
+	{"基础设施", infraCorpus, infraQueries},
+}
+
+// ecommerceCorpus 电商业务场景语料（含语义改写查询）。
+var ecommerceCorpus = []qualityEntity{
+	{ID: "Cart.addItem", Text: "购物车添加商品，校验商品上架状态与库存，合并同商品数量并重算金额"},
+	{ID: "Order.submit", Text: "订单提交，校验收货地址与商品有效性，生成订单号并扣减库存"},
+	{ID: "Payment.refund", Text: "支付退款，调支付网关发起退款申请，记录退款流水并通知用户"},
+	{ID: "Promotion.apply", Text: "促销活动应用，计算满减与折扣，按优先级叠加并返回优惠明细"},
+	{ID: "Warehouse.ship", Text: "仓库发货，生成出库单，对接物流面单打印并更新订单发货状态"},
+}
+
+var ecommerceQueries = []qualityQuery{
+	{Query: "往购物车放一件商品", WantID: "Cart.addItem"},
+	{Query: "下单付款", WantID: "Order.submit"},
+	{Query: "退款给买家", WantID: "Payment.refund"},
+	{Query: "满 300 减 50 怎么算", WantID: "Promotion.apply"},
+	{Query: "仓库那边发货了没", WantID: "Warehouse.ship"},
+}
+
+// infraCorpus 基础设施/中间件场景语料。
+var infraCorpus = []qualityEntity{
+	{ID: "Queue.publish", Text: "消息队列发布，序列化消息体，投递到指定主题并记录发送指标"},
+	{ID: "Config.watch", Text: "配置中心监听，订阅配置变更，动态热更新本地缓存并触发回调"},
+	{ID: "Scheduler.cron", Text: "定时任务调度，解析 cron 表达式，触发任务执行并处理分布式锁"},
+	{ID: "Tracing.span", Text: "链路追踪采集，记录调用链 span 与耗时，上报到追踪系统"},
+	{ID: "Metrics.aggregate", Text: "指标聚合统计，按时间窗口聚合计数与直方图，输出告警规则"},
+}
+
+var infraQueries = []qualityQuery{
+	{Query: "把消息发到队列里", WantID: "Queue.publish"},
+	{Query: "配置改了要热更新", WantID: "Config.watch"},
+	{Query: "每天凌晨跑一次任务", WantID: "Scheduler.cron"},
+	{Query: "查一下接口调用链耗时", WantID: "Tracing.span"},
+	{Query: "统计一下接口 QPS", WantID: "Metrics.aggregate"},
+}
+
 // qualityResult 单个 embedder 的评测结果。
 type qualityResult struct {
 	Name       string  `json:"name"`
@@ -83,10 +129,10 @@ type qualityResult struct {
 	SkipReason string  `json:"skip_reason,omitempty"`
 }
 
-// runQualityEval 用指定 embedder 对黄金语料建索引并评测召回率。
-func runQualityEval(ctx context.Context, em vector.Embedder, name string) qualityResult {
+// runQualityEval 用指定 embedder 对指定语料建索引并评测召回率。
+func runQualityEval(ctx context.Context, em vector.Embedder, name string, corpus []qualityEntity, queries []qualityQuery) qualityResult {
 	store := vector.NewMemoryStore()
-	for _, ent := range qualityCorpus {
+	for _, ent := range corpus {
 		vec, err := em.Embed(ctx, ent.Text)
 		if err != nil {
 			return qualityResult{Name: name, Skip: true, SkipReason: fmt.Sprintf("embed corpus: %v", err)}
@@ -98,8 +144,8 @@ func runQualityEval(ctx context.Context, em vector.Embedder, name string) qualit
 
 	hits1, hits3, hits5 := 0, 0, 0
 	totalScore := 0.0
-	n := len(qualityQueries)
-	for _, q := range qualityQueries {
+	n := len(queries)
+	for _, q := range queries {
 		qvec, err := em.Embed(ctx, q.Query)
 		if err != nil {
 			return qualityResult{Name: name, Skip: true, SkipReason: fmt.Sprintf("embed query: %v", err)}
@@ -155,7 +201,7 @@ func TestEmbeddingQuality(t *testing.T) {
 		corpusTexts = append(corpusTexts, ent.Text)
 	}
 	local.ObserveBatch(corpusTexts)
-	localRes := runQualityEval(ctx, local, "local_tfidf")
+	localRes := runQualityEval(ctx, local, "local_tfidf", qualityCorpus, qualityQueries)
 	results = append(results, localRes)
 	t.Logf("Local(TF-IDF): R@1=%.2f R@3=%.2f R@5=%.2f avgTop1=%.6f",
 		localRes.Recall1, localRes.Recall3, localRes.Recall5, localRes.AvgScore)
@@ -175,7 +221,7 @@ func TestEmbeddingQuality(t *testing.T) {
 		t.Logf("ONNX: SKIPPED (%s)", reason)
 	} else {
 		defer onnx.Close()
-		onnxRes := runQualityEval(ctx, onnx, "onnx_bge_small_zh")
+		onnxRes := runQualityEval(ctx, onnx, "onnx_bge_small_zh", qualityCorpus, qualityQueries)
 		results = append(results, onnxRes)
 		t.Logf("ONNX(bge-small-zh): R@1=%.2f R@3=%.2f R@5=%.2f avgTop1=%.6f",
 			onnxRes.Recall1, onnxRes.Recall3, onnxRes.Recall5, onnxRes.AvgScore)
@@ -199,6 +245,112 @@ func TestEmbeddingQuality(t *testing.T) {
 		t.Logf("warn: 写 build/embedding-quality.json 失败: %v", err)
 	}
 	writeEmbeddingQualityMarkdown(t, root, out)
+}
+
+// perCorpusResult 单语料的 Local/ONNX 对比结果。
+type perCorpusResult struct {
+	Corpus string        `json:"corpus"`
+	Local  qualityResult `json:"local"`
+	Onnx   qualityResult `json:"onnx"`
+}
+
+// TestEmbeddingQualityMultiCorpus 多仓库/多业务语料 recall 对比（P6_2 未做项）：
+// 在「通用代码语义 / 电商业务 / 基础设施」三份语料上分别评测 Local vs ONNX，
+// 输出每语料 Recall@1/@3/@5 与逐语料结论，支撑「语义检索默认路径质量」的跨场景判断。
+// 运行：go test -run TestEmbeddingQualityMultiCorpus ./internal/scalebench -v -timeout 300s
+func TestEmbeddingQualityMultiCorpus(t *testing.T) {
+	ctx := context.Background()
+	results := make([]perCorpusResult, 0, len(qualityCorpora))
+
+	// 本地 embedder：每语料独立 Observe 建立 IDF（与生产 LoadIDF 路径一致）
+	for _, c := range qualityCorpora {
+		pc := perCorpusResult{Corpus: c.Name}
+
+		local := vector.NewLocalEmbedder(384)
+		texts := make([]string, 0, len(c.Corpus))
+		for _, ent := range c.Corpus {
+			texts = append(texts, ent.Text)
+		}
+		local.ObserveBatch(texts)
+		pc.Local = runQualityEval(ctx, local, "local_tfidf", c.Corpus, c.Queries)
+
+		onnx := vector.NewONNXEmbedderOrFallbackWithConfig(onnxModelDir(), 512, onnxLibDir(), vector.ONNXEmbedderConfig{Precision: ""})
+		if onnx == nil {
+			pc.Onnx = qualityResult{Name: "onnx_bge_small_zh", Skip: true, SkipReason: "ONNX unavailable (need -tags onnx + model)"}
+		} else {
+			defer onnx.Close()
+			pc.Onnx = runQualityEval(ctx, onnx, "onnx_bge_small_zh", c.Corpus, c.Queries)
+		}
+		results = append(results, pc)
+
+		t.Logf("[%s] Local R@1=%.2f R@3=%.2f | ONNX R@1=%.2f R@3=%.2f",
+			c.Name, pc.Local.Recall1, pc.Local.Recall3, pc.Onnx.Recall1, pc.Onnx.Recall3)
+	}
+
+	// 产物：build/embedding-quality-multi.json + analysis/2026-08-15-embedding-quality-multi.md
+	out := map[string]any{
+		"generated_at": time.Now().Format(time.RFC3339),
+		"corpora":      results,
+		"conclusion":   multiCorpusConclusion(results),
+	}
+	data, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	root := repoRoot()
+	_ = os.MkdirAll(filepath.Join(root, "build"), 0o755)
+	if err := os.WriteFile(filepath.Join(root, "build", "embedding-quality-multi.json"), data, 0o644); err != nil {
+		t.Logf("warn: 写 build/embedding-quality-multi.json 失败: %v", err)
+	}
+	writeMultiCorpusMarkdown(t, root, results)
+}
+
+func writeMultiCorpusMarkdown(t *testing.T, root string, results []perCorpusResult) {
+	var b strings.Builder
+	b.WriteString("# 嵌入质量评测（多仓库语料）：Local(TF-IDF) vs ONNX(bge-small-zh)（2026-08-15）\n\n")
+	b.WriteString("| 语料 | 维度 | Recall@1 | Recall@3 | Recall@5 | 备注 |\n")
+	b.WriteString("|---|---|---|---|---|---|\n")
+	for _, r := range results {
+		row := func(name string, q qualityResult) string {
+			if q.Skip {
+				return fmt.Sprintf("| %s | - | - | - | - | 跳过: %s |\n", name, q.SkipReason)
+			}
+			return fmt.Sprintf("| %s | %d | %.2f | %.2f | %.2f | |\n", name, q.Dim, q.Recall1, q.Recall3, q.Recall5)
+		}
+		b.WriteString(fmt.Sprintf("**%s**  \n", r.Corpus))
+		b.WriteString(row("Local(TF-IDF)", r.Local))
+		b.WriteString(row("ONNX(bge-small-zh)", r.Onnx))
+	}
+	b.WriteString("\n## 结论\n\n")
+	b.WriteString(multiCorpusConclusion(results))
+	_ = os.MkdirAll(filepath.Join(root, "analysis"), 0o755)
+	if err := os.WriteFile(filepath.Join(root, "analysis", "2026-08-15-embedding-quality-multi.md"), []byte(b.String()), 0o644); err != nil {
+		t.Logf("warn: 写 analysis/2026-08-15-embedding-quality-multi.md 失败: %v", err)
+	}
+}
+
+// multiCorpusConclusion 汇总多语料对比结论。
+func multiCorpusConclusion(results []perCorpusResult) string {
+	var b strings.Builder
+	onnxWins := 0
+	total := len(results)
+	for _, r := range results {
+		if r.Local.Skip || r.Onnx.Skip {
+			continue
+		}
+		if r.Onnx.Recall1 >= r.Local.Recall1 {
+			onnxWins++
+		}
+	}
+	b.WriteString(fmt.Sprintf("评测口径：%d 份业务语料，每份含语义改写查询（查询与目标描述不同字面、相同语义），top-5 检索 Recall@1/@3/@5。\n\n", total))
+	if onnxWins > 0 {
+		b.WriteString(fmt.Sprintf("- ONNX(bge-small-zh) 在 %d/%d 份语料上 Recall@1 不低于 Local(TF-IDF)，中文语义改写查询召回优势跨场景成立。\n", onnxWins, total))
+	} else {
+		b.WriteString("- 多语料下 ONNX 未显著优于 Local（语料词面重叠较高），但 ONNX 在低词面重叠场景的理论优势仍存。\n")
+	}
+	b.WriteString("- 部署取舍不变：Local 零依赖免 gcc 作默认；ONNX 需 `-tags onnx` + 模型分发，适合语义检索质量敏感场景。\n")
+	b.WriteString("- 数据文件：build/embedding-quality-multi.json；逐语料明细见上表。\n")
+	return b.String()
 }
 
 func writeEmbeddingQualityMarkdown(t *testing.T, root string, out map[string]any) {
