@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -162,40 +161,67 @@ func (d *ModelDownloader) modelFilesPresent() bool {
 
 // downloadAndExtract 获取 tar.gz 压缩包、可选校验、解包到 ModelDir。
 //
+// 断点续传：下载写入固定 `<ModelDir>/.download.part` 文件，而非临时文件——
+// 下载中断/校验失败时保留 .part，下次重试从断点继续（HTTP Range），避免浪费已下载部分。
+// 本地源（file:// / 本地路径）拷贝本身快，不续传。
+//
 // 分发源支持三类：
-//   - http(s)://...：HTTP 下载；
+//   - http(s)://...：HTTP 下载（支持 Range 续传）；
 //   - file:///abs/path：本地文件直读（无网络环境可分发 make models-pack 产物）；
 //   - 相对/绝对本地路径：直接作为 tar.gz 路径。
 func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName string) error {
 	url := strings.ReplaceAll(d.URL, "{model}", modelName)
-
-	// 下载到临时文件
-	tmpFile, err := os.CreateTemp("", "codeschema-model-*.tar.gz")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
+	if err := os.MkdirAll(d.ModelDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", d.ModelDir, err)
 	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-	}()
+	partPath := filepath.Join(d.ModelDir, ".download.part")
 
-	var hasher io.Writer = sha256.New()
-	var body io.Reader
-	var needHash bool = d.SHA256 != ""
+	// 场景：上次下载已完整（校验通过）但未解包（如解包前中断）→ 直接复用
+	if d.SHA256 != "" {
+		if sum, err := sha256File(partPath); err == nil && strings.EqualFold(sum, d.SHA256) {
+			d.logger.Debug("reusing complete .part archive, skipping download", "path", partPath)
+			if err := extractTarGz(partPath, d.ModelDir); err != nil {
+				return fmt.Errorf("extract archive: %w", err)
+			}
+			_ = os.Remove(partPath)
+			return nil
+		}
+	}
 
-	// 本地源（file:// 或本地路径）→ 直接拷贝文件
+	// 本地源（file:// 或本地路径）→ 直接拷贝（无需续传）
 	if localPath := localSourcePath(url); localPath != "" {
 		src, err := os.Open(localPath)
 		if err != nil {
 			return fmt.Errorf("open local model archive %s: %w", localPath, err)
 		}
 		defer src.Close()
-		body = src
+		out, err := os.OpenFile(partPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			return fmt.Errorf("create part file: %w", err)
+		}
+		if _, err := io.Copy(out, src); err != nil {
+			out.Close()
+			return fmt.Errorf("copy local archive: %w", err)
+		}
+		if err := out.Sync(); err != nil {
+			out.Close()
+			return fmt.Errorf("sync part file: %w", err)
+		}
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("close part file: %w", err)
+		}
 	} else {
+		// HTTP 源：支持 Range 断点续传
+		offset := int64(0)
+		if st, err := os.Stat(partPath); err == nil {
+			offset = st.Size()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return fmt.Errorf("new request: %w", err)
+		}
+		if offset > 0 {
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 		}
 		client := &http.Client{Timeout: d.Timeout}
 		resp, err := client.Do(req)
@@ -203,40 +229,66 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 			return fmt.Errorf("http get %s: %w", url, err)
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
+
+		flag := os.O_CREATE | os.O_WRONLY
+		switch resp.StatusCode {
+		case http.StatusPartialContent: // 206：服务器接受续传，追加
+			flag |= os.O_APPEND
+		case http.StatusOK: // 200：服务器忽略 Range（不支持续传），从头下载
+			flag |= os.O_TRUNC
+		default:
 			return fmt.Errorf("http status %d for %s", resp.StatusCode, url)
 		}
-		body = resp.Body
-	}
-
-	// 边拷贝边算 SHA-256（如需校验）
-	if needHash {
-		body = io.TeeReader(body, hasher)
-	}
-	if _, err := io.Copy(tmpFile, body); err != nil {
-		return fmt.Errorf("copy model archive: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("sync temp: %w", err)
-	}
-
-	// 校验和
-	if needHash {
-		got := hex.EncodeToString(hasher.(hash.Hash).Sum(nil))
-		if !strings.EqualFold(got, d.SHA256) {
-			return fmt.Errorf("sha256 mismatch: got %s want %s", got, d.SHA256)
+		out, err := os.OpenFile(partPath, flag, 0o644)
+		if err != nil {
+			return fmt.Errorf("open part file: %w", err)
 		}
-		d.logger.Info("model sha256 verified", "sha256", got)
+		if _, err := io.Copy(out, resp.Body); err != nil {
+			out.Close()
+			return fmt.Errorf("copy model archive: %w", err)
+		}
+		if err := out.Sync(); err != nil {
+			out.Close()
+			return fmt.Errorf("sync part file: %w", err)
+		}
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("close part file: %w", err)
+		}
 	}
 
-	// 解包到 ModelDir（先清空残留）
-	if err := os.MkdirAll(d.ModelDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", d.ModelDir, err)
+	// 校验和：从 .part 重新读取计算（覆盖续传场景的完整内容）。
+	// 校验失败保留 .part 供下次续传（可能是上一轮下载残留的不完整数据）。
+	if d.SHA256 != "" {
+		sum, err := sha256File(partPath)
+		if err != nil {
+			return fmt.Errorf("hash part file: %w", err)
+		}
+		if !strings.EqualFold(sum, d.SHA256) {
+			return fmt.Errorf("sha256 mismatch: got %s want %s", sum, d.SHA256)
+		}
+		d.logger.Info("model sha256 verified", "sha256", sum)
 	}
-	if err := extractTarGz(tmpPath, d.ModelDir); err != nil {
+
+	// 解包到 ModelDir（成功后清理 .part）
+	if err := extractTarGz(partPath, d.ModelDir); err != nil {
 		return fmt.Errorf("extract archive: %w", err)
 	}
+	_ = os.Remove(partPath)
 	return nil
+}
+
+// sha256File 计算文件的 SHA-256 十六进制摘要。
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // extractTarGz 解包 tar.gz 到目标目录（防路径穿越：拒绝绝对路径与 .. 段）。

@@ -6,11 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -393,5 +395,107 @@ func TestModelDownloader_Ensure_RealArtifactOverHTTP(t *testing.T) {
 	ok2, err := dl.Ensure(context.Background(), "bge-small-zh-v1.5")
 	if err != nil || !ok2 {
 		t.Fatalf("idempotent Ensure after HTTP download: ok=%v err=%v", ok2, err)
+	}
+}
+
+// parseRangeStart 解析 "bytes=N-" → N；非法返回 0。
+func parseRangeStart(header string) int64 {
+	if !strings.HasPrefix(header, "bytes=") {
+		return 0
+	}
+	v := strings.TrimPrefix(header, "bytes=")
+	if i := strings.Index(v, "-"); i >= 0 {
+		n, _ := strconv.ParseInt(v[:i], 10, 64)
+		return n
+	}
+	return 0
+}
+
+// TestModelDownloader_ResumeDownload 验证 HTTP Range 断点续传：
+// 首次下载中途返回不完整内容（校验失败、.part 保留）→ 二次 Ensure 带 Range 续传剩余 → 成功。
+func TestModelDownloader_ResumeDownload(t *testing.T) {
+	archive, sha := buildTarGz(t, map[string]string{
+		"onnx/model.onnx": "fake-model",
+		"tokenizer.json":  "{}",
+	})
+	half := len(archive) / 2
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if rg := r.Header.Get("Range"); rg != "" {
+			start := parseRangeStart(rg)
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(archive)-1, len(archive)))
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(archive[start:])
+			return
+		}
+		// 首次完整请求：模拟中断——只返回前一半（连接正常结束，内容不完整）
+		_, _ = w.Write(archive[:half])
+	}))
+	defer srv.Close()
+
+	dest := t.TempDir()
+	dl := NewModelDownloader(dest, srv.URL+"/models-{model}.tar.gz", sha)
+
+	// 第一次：内容不完整 → SHA-256 校验失败，.part 保留（断点）
+	ok, err := dl.Ensure(context.Background(), "bge-small-zh")
+	if err == nil {
+		t.Fatal("expected first attempt to fail on sha mismatch")
+	}
+	if ok {
+		t.Fatal("expected ok=false on first attempt")
+	}
+	if !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Errorf("expected sha256 mismatch, got %v", err)
+	}
+	part := filepath.Join(dest, ".download.part")
+	if st, serr := os.Stat(part); serr != nil || st.Size() != int64(half) {
+		t.Fatalf(".part should retain %d bytes for resume, got size=%v err=%v", half, st, serr)
+	}
+
+	// 第二次：带 Range 续传剩余部分 → 完整 → 校验通过 → 解包
+	ok, err = dl.Ensure(context.Background(), "bge-small-zh")
+	if err != nil || !ok {
+		t.Fatalf("resume Ensure failed: ok=%v err=%v", ok, err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 HTTP requests (full + range), got %d", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("model not extracted after resume: %v", err)
+	}
+	if _, err := os.Stat(part); !os.IsNotExist(err) {
+		t.Fatal(".part should be removed after successful extract")
+	}
+}
+
+// TestModelDownloader_ReuseCompletePart 验证完整 .part 复用：
+// 上次下载已完成但未解包（.part 校验通过）→ Ensure 直接解包，不再发起下载请求。
+func TestModelDownloader_ReuseCompletePart(t *testing.T) {
+	archive, sha := buildTarGz(t, map[string]string{
+		"onnx/model.onnx": "fake-model",
+		"tokenizer.json":  "{}",
+	})
+	dest := t.TempDir()
+	part := filepath.Join(dest, ".download.part")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(part, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 服务器不应被调用
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("server should not be called when .part is already complete")
+	}))
+	defer srv.Close()
+
+	dl := NewModelDownloader(dest, srv.URL+"/models-{model}.tar.gz", sha)
+	ok, err := dl.Ensure(context.Background(), "bge-small-zh")
+	if err != nil || !ok {
+		t.Fatalf("Ensure with complete .part: ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "onnx", "model.onnx")); err != nil {
+		t.Fatalf("model not extracted from .part: %v", err)
 	}
 }
