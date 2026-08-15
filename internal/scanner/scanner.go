@@ -352,6 +352,13 @@ func listFiles(root string) ([]string, error) {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && !ignoreFiles[info.Name()] {
+			// 符号链接：Walk 用 Lstat 不把链接视为目录，指向目录的链接会被误收集，
+			// 后续 os.ReadFile 跟随链接读目录会报 "is a directory"。解析真实类型跳过目录链接。
+			if info.Mode()&os.ModeSymlink != 0 {
+				if st, err := os.Stat(path); err == nil && st.IsDir() {
+					return nil
+				}
+			}
 			files = append(files, path)
 		}
 		return nil

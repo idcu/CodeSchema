@@ -185,3 +185,44 @@ func TestListFiles_IgnoreDirs(t *testing.T) {
 		t.Errorf("expected 1 file, got %d: %v", len(files), files)
 	}
 }
+// TestListFiles_SymlinkDir 验证：指向目录的符号链接不被收集为文件
+// （此前 Walk 用 Lstat 不识别为目录，导致 os.ReadFile 读目录报 "is a directory"）。
+func TestListFiles_SymlinkDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "real_dir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "links"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real_dir", "a.go"), []byte("p"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "links", "b.go"), []byte("p"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// 符号链接 → 目录
+	if err := os.Symlink(filepath.Join(dir, "real_dir"), filepath.Join(dir, "links", "dir_link")); err != nil {
+		t.Fatal(err)
+	}
+	// 符号链接 → 普通文件（应保留）
+	if err := os.Symlink(filepath.Join(dir, "links", "b.go"), filepath.Join(dir, "links", "file_link.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := listFiles(dir)
+	if err != nil {
+		t.Fatalf("listFiles: %v", err)
+	}
+
+	for _, f := range files {
+		rel, _ := filepath.Rel(dir, f)
+		if rel == "links/dir_link" {
+			t.Errorf("symlink-to-dir should NOT be listed: %s", rel)
+		}
+	}
+	// a.go + b.go + file_link.go 三个真实文件
+	if len(files) != 3 {
+		t.Errorf("expected 3 files, got %d: %v", len(files), files)
+	}
+}
