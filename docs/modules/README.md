@@ -21,7 +21,7 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │
 ├── P3 解析层 Parsing Layer ───────────── 96%
 │   ├── P3_1 解析核心（IR + 注册）【公共契约】.... 100%
-│   ├── P3_2 Treesitter 适配器（30 语言） ........ 95%
+│   ├── P3_2 Treesitter 适配器（30 语言） ........ 96%
 │   ├── P3_3 SCIP 适配器 ....................... 95%
 │   ├── P3_4 LSP 适配器 ........................ 95%
 │   └── P3_5 CodeGraph 适配器 .................. 92%
@@ -114,7 +114,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | └ P2_4 Scheduler | [P2_4.md](./P2_4.md) | 100% | └ P7_4 Redis | [P7_4.md](./P7_4.md) | 85% |
 | **P3 解析层** | [P3.md](./P3.md) | 96% | **P8 公共模块** | [P8.md](./P8.md) | 100% |
 | ├ P3_1 解析核心 | [P3_1.md](./P3_1.md) | 100% | ├ P8_1 配置 | [P8_1.md](./P8_1.md) | 100% |
-| ├ P3_2 Treesitter | [P3_2.md](./P3_2.md) | 95% | ├ P8_2 日志 | [P8_2.md](./P8_2.md) | 100% |
+| ├ P3_2 Treesitter | [P3_2.md](./P3_2.md) | 96% | ├ P8_2 日志 | [P8_2.md](./P8_2.md) | 100% |
 | ├ P3_3 SCIP | [P3_3.md](./P3_3.md) | 95% | ├ P8_3 指标 | [P8_3.md](./P8_3.md) | 100% |
 | ├ P3_4 LSP | [P3_4.md](./P3_4.md) | 95% | ├ P8_4 追踪 | [P8_4.md](./P8_4.md) | 100% |
 | └ P3_5 CodeGraph | [P3_5.md](./P3_5.md) | 92% | ├ P8_5 错误 | [P8_5.md](./P8_5.md) | 100% |
@@ -148,4 +148,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **AI 多 provider 配置验证（P4_2 → 87%）**：BaseURL 形态（尾斜杠/版本路径前缀）请求路径正确拼接。
 - **WAL 同步参数定案（P7_2 → 98%）**：NORMAL/FULL/OFF 单事务耗时相当（fsync 被摊平），默认配置已最优。
 - **scanner symlink 边界修复 + 多语言真实仓库验证（P9_4 → 97%）**：指向目录的符号链接被误收集为文件（Walk Lstat），修复；TS/Python/Go 三语真实仓库端到端解析验证（lytd 1904 文件/5172 类、deepseek-harness 7337/22462、code-schema 355/1960）。
+- **Treesitter 标记语言精度定案（P3_2 → 96%）**：css/toml/yaml 无函数调用，调用图维度空集 precision/recall=1（语法树与正则无差异）。
 - **剩余阻塞项**：PG/Redis 真实实例实跑（Docker 网络，镜像拉取仍超时）、AI 真实 LLM 评估（API key）。
