@@ -4,13 +4,13 @@
       "repo_name": "code-schema",
       "repo_path": "/Volumes/Data/code-schema",
       "file_count": 151,
-      "scan_time_ms": 985,
-      "index_time_ms": 52,
-      "heap_mb": 100.9296875,
-      "search_p50_ms": 5.125,
-      "search_p95_ms": 6.344,
-      "search_p99_ms": 6.344,
-      "search_avg_ms": 5.055055555555556
+      "scan_time_ms": 807,
+      "index_time_ms": 48,
+      "heap_mb": 100.9921875,
+      "search_p50_ms": 4.598,
+      "search_p95_ms": 5.701,
+      "search_p99_ms": 5.701,
+      "search_avg_ms": 4.621555555555556
     }
   ],
   "baseline": "code-schema",

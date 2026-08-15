@@ -2,11 +2,11 @@
   "repo_name": "codeschema",
   "repo_path": "/Volumes/Data/code-schema",
   "file_count": 151,
-  "scan_time_ms": 728,
-  "index_time_ms": 52,
-  "heap_mb": 100.8671875,
-  "search_p50_ms": 4.623,
-  "search_p95_ms": 6.157,
-  "search_p99_ms": 6.752,
-  "search_avg_ms": 4.6385
+  "scan_time_ms": 761,
+  "index_time_ms": 45,
+  "heap_mb": 89.7421875,
+  "search_p50_ms": 4.602,
+  "search_p95_ms": 5.256,
+  "search_p99_ms": 5.572,
+  "search_avg_ms": 4.544909090909091
 }
