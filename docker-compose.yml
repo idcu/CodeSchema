@@ -83,6 +83,51 @@ services:
           memory: 128M
 
   # =========================================================================
+  # PostgreSQL（可选：storage.driver=pg 时启用，亿级横向扩展）
+  # 使用方式：docker compose --profile pg up -d
+  # =========================================================================
+  postgres:
+    profiles:
+      - "pg"
+    image: postgres:16-alpine
+    container_name: codeschema-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CODESCHEMA_PG_USER:-codeschema}
+      POSTGRES_PASSWORD: ${CODESCHEMA_PG_PASSWORD:-codeschema}
+      POSTGRES_DB: ${CODESCHEMA_PG_DB:-codeschema}
+    ports:
+      - "${CODESCHEMA_PG_PORT:-5432}:5432"
+    volumes:
+      - codeschema-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CODESCHEMA_PG_USER:-codeschema}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =========================================================================
+  # Redis（可选：storage.kv=redis:// 时启用，热点缓存层）
+  # 使用方式：docker compose --profile redis up -d
+  # =========================================================================
+  redis:
+    profiles:
+      - "redis"
+    image: redis:7-alpine
+    container_name: codeschema-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${CODESCHEMA_REDIS_PORT:-6379}:6379"
+    volumes:
+      - codeschema-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =========================================================================
   # 一次性扫描任务（可选）
   # 在启动主服务前，先执行一次全量扫描
   # =========================================================================
@@ -106,3 +151,7 @@ services:
 volumes:
   codeschema-data:
     name: codeschema-data
+  codeschema-pg-data:
+    name: codeschema-pg-data
+  codeschema-redis-data:
+    name: codeschema-redis-data

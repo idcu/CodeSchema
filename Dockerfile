@@ -13,15 +13,16 @@
 # 运行容器（扫描指定目录）：
 #   docker run --rm -v /host/path:/repo codeschema:latest scan /repo
 #
-# 如需 ONNX 运行时加速（可选）：
-#   1. 下载 libonnxruntime.so 到 down/onnxruntime/
-#   2. 取消下方 RUN apk add ... onnxruntime 行的注释
-#   3. 重新构建镜像
+# ONNX 语义检索（可选）：默认构建为纯 Go 免 CGO（与 make build 一致）；
+# 需要 ONNX 时构建时传 --build-arg CGO_ENABLED=1 并确保 down/onnxruntime/libonnxruntime.so
+# 存在（构建阶段会把 .so 复制进镜像 /app/down/onnxruntime/）。
 
 # === 构建阶段 ===
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev
+# 默认纯 Go 免 CGO；ONNX 场景传 --build-arg CGO_ENABLED=1（需 gcc musl-dev）
+ARG CGO_ENABLED=0
+RUN if [ "$CGO_ENABLED" = "1" ]; then apk add --no-cache gcc musl-dev; fi
 
 WORKDIR /src
 
@@ -33,7 +34,7 @@ RUN go mod download
 # 复制全部源码并构建
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=1 go build \
+RUN CGO_ENABLED=${CGO_ENABLED} go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /build/codeschema \
     ./cmd/codeschema
@@ -45,6 +46,8 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 COPY --from=builder /build/codeschema .
+# 可选：ONNX 运行时库（CGO 构建时由构建阶段产物提供，见上注释）
+COPY --from=builder /src/down/onnxruntime /app/down/onnxruntime 2>/dev/null || true
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
