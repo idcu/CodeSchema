@@ -70,6 +70,13 @@ go build -o codeschema ./cmd/codeschema
 ./codeschema version
 ```
 
+### 5 分钟接入 AI 客户端（MCP）
+
+1. 启动 MCP Server：`./codeschema mcp --addr :8080`
+2. 查看当前端点的客户端配置：`./codeschema mcp --print-config`（或见 `docs/MCP接入指南.md`）
+3. 在 VS Code / JetBrains / Claude Code / Cursor 中粘贴对应配置片段，即可调用
+   `search_symbols` / `context` / `impact` 等 11 个 MCP 工具。
+
 ### Docker 部署
 
 ```bash

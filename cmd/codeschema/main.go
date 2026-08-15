@@ -377,7 +377,14 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	addr := fs.String("addr", cfg.Server.MCPAddr, "监听地址")
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
+	printCfg := fs.Bool("print-config", false, "打印各客户端 MCP 接入配置片段并退出（不启动服务）")
 	fs.Parse(args)
+
+	// T2-5：一键打印客户端接入配置（无需启动服务即可获取）
+	if *printCfg {
+		printMCPClientConfigs(*addr, *authToken)
+		return nil
+	}
 
 	st, err := newStore(ctx, cfg, *storeDir)
 	if err != nil {
