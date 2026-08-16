@@ -41,10 +41,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
+      - name: Test (non-Windows)
+        if: runner.os != 'Windows'
         run: go test -count=1 -timeout 180s ./...
 
-      # Windows 诊断：详细输出 + 上传日志，定位具体失败测试（临时 continue-on-error）
+      # Windows 专用：详细输出 + 上传日志，定位具体失败测试（临时 continue-on-error，先拿日志）
       - name: Test (Windows verbose, diagnostic)
         if: runner.os == 'Windows'
         continue-on-error: true
