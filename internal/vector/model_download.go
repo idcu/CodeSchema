@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -335,12 +336,14 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		name := filepath.Clean(hdr.Name)
+		// tar 头路径恒为 POSIX（/ 分隔），必须用 path 而非 filepath 处理，
+		// 否则 Windows 上 filepath.Clean 把 / 转成 \，破坏顶层目录剥离逻辑。
+		name := path.Clean(hdr.Name)
 		if filepath.IsAbs(name) || strings.HasPrefix(name, "..") {
 			return fmt.Errorf("unsafe path in archive: %s", hdr.Name)
 		}
 		// 跳过 macOS AppleDouble 元数据条目（tar 生成的 ._* 文件，非模型内容）
-		if strings.HasPrefix(filepath.Base(name), "._") {
+		if strings.HasPrefix(path.Base(name), "._") {
 			continue
 		}
 		// 剥离顶层目录段（若存在）
@@ -407,9 +410,9 @@ func detectTarTopDir(archivePath string) string {
 		if hdr.Typeflag == tar.TypeDir {
 			continue // 目录条目不计入
 		}
-		name := filepath.Clean(hdr.Name)
+		name := path.Clean(hdr.Name)
 		// 跳过 macOS AppleDouble 元数据条目（._* 文件）
-		if strings.HasPrefix(filepath.Base(name), "._") {
+		if strings.HasPrefix(path.Base(name), "._") {
 			continue
 		}
 		seg := name
