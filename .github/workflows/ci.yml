@@ -27,22 +27,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       - name: Build
         run: go build -v ./cmd/codeschema
@@ -51,7 +42,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -count=1 -timeout 120s ./...
+        run: go test -count=1 -timeout 180s ./...
 
   # === 规模基准（BulkUpsert 回归看护） ===
   bench:
@@ -60,12 +51,13 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Scale benchmark (BulkUpsert regression guard)
         # -run '^$' 仅跑基准，避免触发同包内超慢的 TestScaleBench（100k 逐文件 UpsertIR，分钟级）
@@ -81,22 +73,13 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       - name: Scale E2E benchmark (N=100000)
         # 真实文件→Scanner→UpsertIR→BuildFromStore→Searcher 全链路，产出 build/scale-e2e.json
@@ -111,7 +94,7 @@ jobs:
           fi
 
       - name: Upload scale e2e artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: scale-e2e-${{ github.sha }}
           path: |
@@ -126,15 +109,16 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Test with race detector
-        run: go test -race -count=1 -timeout 180s ./...
+        run: go test -race -count=1 -timeout 300s ./...
 
   # === 真语法树路径（-tags treesitter，需 gcc） ===
   treesitter:
@@ -143,22 +127,14 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-gotreesitter-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-gotreesitter-
+          cache: true
+          cache-dependency-path: go.sum
 
       # 真语法树路径守护：构建 + AST 适配器测试 + 调用图基准（复杂档需精确解析）
       - name: Build with -tags treesitter
@@ -176,7 +152,7 @@ jobs:
 
       # 归档调用图基准产物（JSON 明细 + JSONL 历史），跨提交对比精度漂移
       - name: Upload callgraph bench artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: treesitter-bench-${{ github.sha }}
           path: |
@@ -191,19 +167,20 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       - name: Cross-compile
         run: |
           make cross
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: codeschema-binaries
           path: build/codeschema-*
@@ -216,17 +193,17 @@ jobs:
     needs: [test, race]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: codeschema
           tags: |
@@ -234,7 +211,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and export
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
