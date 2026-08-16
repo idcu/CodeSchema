@@ -45,18 +45,27 @@ jobs:
         if: runner.os != 'Windows'
         run: go test -count=1 -timeout 180s ./...
 
-      # Windows 专用：详细输出 + 失败测试名 annotation（远程可直接读取，无需登录下载日志）
-      # 用 tee 双写：失败测试名同时进 GitHub 步骤日志（可见）与 artifact（可下载）
+      # Windows 专用：详细输出 + 失败测试名写入 commit status（匿名远程可读，无需登录）
+      # tee 双写日志到 artifact；同时提取 '--- FAIL:' 测试名经 GITHUB_TOKEN 写入
+      # commit status(context=win-test-failures)，远端无 token 即可读取定位失败点。
       - name: Test (Windows verbose)
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           go test -count=1 -timeout 600s -v ./... 2>&1 | tee windows-test.log
           code=${PIPESTATUS[0]}
           echo "test exit code: $code"
-          echo "=== failing tests (as annotations) ==="
-          grep -E '^--- FAIL:' windows-test.log | sed 's/^--- FAIL: /::error::FAIL: /' || true
+          FAILS=$(grep -E '^--- FAIL:' windows-test.log | sed 's/^--- FAIL: //' | cut -c1-120 | tr '\n' ';')
+          if [ -n "$FAILS" ]; then
+            curl -sS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+              -d "{\"state\":\"failure\",\"description\":\"WINFAIL: $FAILS\",\"context\":\"win-test-failures\"}" || true
+          fi
           exit $code
 
       - name: Upload Windows test log
