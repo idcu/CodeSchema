@@ -44,6 +44,22 @@ jobs:
       - name: Test
         run: go test -count=1 -timeout 180s ./...
 
+      # Windows 诊断：详细输出 + 上传日志，定位具体失败测试（临时 continue-on-error）
+      - name: Test (Windows verbose, diagnostic)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          go test -count=1 -timeout 300s -v ./... > windows-test.log 2>&1
+          echo "test exit code: $?"
+
+      - name: Upload Windows test log
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-test-log-${{ github.run_id }}
+          path: windows-test.log
+          if-no-files-found: warn
+
   # === 规模基准（BulkUpsert 回归看护） ===
   bench:
     name: Scale Benchmark
