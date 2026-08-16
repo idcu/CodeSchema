@@ -13,6 +13,11 @@ on:
   schedule:
     - cron: '0 20 * * *'
 
+# 允许 Windows 步骤经 GITHUB_TOKEN 写入 commit status（暴露失败测试名供匿名读取）
+permissions:
+  contents: read
+  statuses: write
+
 env:
   GO_VERSION: '1.25'
 
