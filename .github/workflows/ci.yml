@@ -45,16 +45,18 @@ jobs:
         if: runner.os != 'Windows'
         run: go test -count=1 -timeout 180s ./...
 
-      # Windows 专用：详细输出 + 上传日志，定位具体失败测试（已去掩蔽，失败即红，杜绝偶发被吞）
-      # 用 tee 双写：失败测试名同时进 GitHub 步骤日志（可见）与 artifact（可下载），避免仅落文件导致 CI 日志看不到细节
+      # Windows 专用：详细输出 + 失败测试名 annotation（远程可直接读取，无需登录下载日志）
+      # 用 tee 双写：失败测试名同时进 GitHub 步骤日志（可见）与 artifact（可下载）
       - name: Test (Windows verbose)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           set -o pipefail
-          go test -count=1 -timeout 600s -v ./... | tee windows-test.log
+          go test -count=1 -timeout 600s -v ./... 2>&1 | tee windows-test.log
           code=${PIPESTATUS[0]}
           echo "test exit code: $code"
+          echo "=== failing tests (as annotations) ==="
+          grep -E '^--- FAIL:' windows-test.log | sed 's/^--- FAIL: /::error::FAIL: /' || true
           exit $code
 
       - name: Upload Windows test log
