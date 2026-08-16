@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/vector"
+
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 // qualityEntity 黄金语料中的代码实体（id + 用于 embedding 的文本）。
@@ -240,9 +242,9 @@ func TestEmbeddingQuality(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	root := repoRoot()
-	_ = os.MkdirAll(filepath.Join(root, "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(root, "build", "embedding-quality.json"), data, 0o644); err != nil {
-		t.Logf("warn: 写 build/embedding-quality.json 失败: %v", err)
+	outPath := testutil.BenchOutPath(t, "embedding-quality.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 写 %s 失败: %v", outPath, err)
 	}
 	writeEmbeddingQualityMarkdown(t, root, out)
 }
@@ -298,9 +300,9 @@ func TestEmbeddingQualityMultiCorpus(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	root := repoRoot()
-	_ = os.MkdirAll(filepath.Join(root, "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(root, "build", "embedding-quality-multi.json"), data, 0o644); err != nil {
-		t.Logf("warn: 写 build/embedding-quality-multi.json 失败: %v", err)
+	outPath := testutil.BenchOutPath(t, "embedding-quality-multi.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 写 %s 失败: %v", outPath, err)
 	}
 	writeMultiCorpusMarkdown(t, root, results)
 }

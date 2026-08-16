@@ -27,10 +27,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -45,21 +45,27 @@ jobs:
         if: runner.os != 'Windows'
         run: go test -count=1 -timeout 180s ./...
 
-      # Windows 专用：详细输出 + 上传日志，定位具体失败测试（临时 continue-on-error，先拿日志）
-      - name: Test (Windows verbose, diagnostic)
+      # Windows 专用：详细输出 + 上传日志，定位具体失败测试（已去掩蔽，失败即红，杜绝偶发被吞）
+      - name: Test (Windows verbose)
         if: runner.os == 'Windows'
-        continue-on-error: true
         run: |
-          go test -count=1 -timeout 300s -v ./... > windows-test.log 2>&1
-          echo "test exit code: $?"
+          go test -count=1 -timeout 600s -v ./... > windows-test.log 2>&1
+          code=$?
+          echo "test exit code: $code"
+          exit $code
 
       - name: Upload Windows test log
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: windows-test-log-${{ github.run_id }}
           path: windows-test.log
           if-no-files-found: warn
+
+      # 看护：确认已跟踪的基准快照未被测试误改（默认写临时目录，仅 CODESCHEMA_UPDATE_BENCH=1 才写回 build/）
+      - name: Assert tracked bench snapshots unchanged
+        if: runner.os != 'Windows'
+        run: git diff --exit-code -- build/bench-compare.json build/realrepo-bench.json
 
   # === 规模基准（BulkUpsert 回归看护） ===
   bench:
@@ -68,10 +74,10 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -88,12 +94,15 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     timeout-minutes: 60
+    # 写回 build/scale-e2e.json 供归档（默认测试写临时目录，此处需显式开启）
+    env:
+      CODESCHEMA_UPDATE_BENCH: '1'
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -111,7 +120,7 @@ jobs:
           fi
 
       - name: Upload scale e2e artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: scale-e2e-${{ github.sha }}
           path: |
@@ -126,10 +135,10 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -142,12 +151,15 @@ jobs:
     name: TreeSitter AST (CGO)
     runs-on: ubuntu-latest
     needs: [test]
+    # 写回 build/treesitter-callgraph-bench.json 供归档（默认测试写临时目录，此处需显式开启）
+    env:
+      CODESCHEMA_UPDATE_BENCH: '1'
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -169,7 +181,7 @@ jobs:
 
       # 归档调用图基准产物（JSON 明细 + JSONL 历史），跨提交对比精度漂移
       - name: Upload callgraph bench artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: treesitter-bench-${{ github.sha }}
           path: |
@@ -184,10 +196,10 @@ jobs:
     needs: [test]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -197,7 +209,7 @@ jobs:
           make cross
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: codeschema-binaries
           path: build/codeschema-*
@@ -210,17 +222,17 @@ jobs:
     needs: [test, race]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: codeschema
           tags: |
@@ -228,7 +240,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and export
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           load: true

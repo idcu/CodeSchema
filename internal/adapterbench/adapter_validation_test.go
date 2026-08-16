@@ -25,6 +25,8 @@ import (
 
 	"github.com/idcu/codeschema/internal/parser/adapter/lsp"
 	"github.com/idcu/codeschema/internal/parser/adapter/scip"
+
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 // adapterResult 是单条适配器验证结果。
@@ -110,16 +112,15 @@ func TestAdapterValidation(t *testing.T) {
 	results = append(results, validateLSPCpp(t))
 	results = append(results, validateLSPJava(t))
 
-	// 输出 JSON 报告到仓库根 build/
-	root := repoRoot()
+	// 输出 JSON 报告（默认临时目录；CODESCHEMA_UPDATE_BENCH=1 才写回 build/）
 	out := map[string]any{
 		"generated_at": time.Now().Format(time.RFC3339),
 		"adapters":     results,
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
-	os.MkdirAll(filepath.Join(root, "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(root, "build", "adapter-bench.json"), data, 0o644); err != nil {
-		t.Logf("warn: 报告写入 build/adapter-bench.json 失败（可能本机杀软锁定生成文件）: %v", err)
+	outPath := testutil.BenchOutPath(t, "adapter-bench.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 报告写入 %s 失败（可能本机杀软锁定生成文件）: %v", outPath, err)
 	}
 	t.Logf("Adapter validation report:\n%s", string(data))
 

@@ -28,6 +28,8 @@ import (
 	sqlitestore "github.com/idcu/codeschema/internal/store/sqlite"
 	"github.com/idcu/codeschema/internal/vector"
 	chromem "github.com/philippgille/chromem-go"
+
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 const benchDim = 384
@@ -243,9 +245,9 @@ func TestScaleBench(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	root := repoRoot()
-	_ = os.MkdirAll(filepath.Join(root, "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(root, "build", "scale-bench.json"), data, 0o644); err != nil {
-		t.Logf("warn: 写 build/scale-bench.json 失败（可能本机杀软锁定生成文件）: %v", err)
+	outPath := testutil.BenchOutPath(t, "scale-bench.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 写 %s 失败（可能本机杀软锁定生成文件）: %v", outPath, err)
 	}
 	writeScaleMarkdown(t, root, out)
 }
@@ -502,8 +504,8 @@ func TestScaleEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	_ = os.MkdirAll(filepath.Join(repoRoot(), "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(repoRoot(), "build", "scale-e2e.json"), data, 0o644); err != nil {
-		t.Logf("warn: 写 build/scale-e2e.json 失败: %v", err)
+	outPath := testutil.BenchOutPath(t, "scale-e2e.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 写 %s 失败: %v", outPath, err)
 	}
 }

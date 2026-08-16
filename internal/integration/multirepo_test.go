@@ -1,8 +1,9 @@
 // Package integration 提供多仓库 benchmark 对比测试。
 //
 // 运行方式：
-//   go test -run=TestMultiRepo_CollectMetrics -timeout 600s ./internal/integration/
-//   CODESCHEMA_BENCH_REPOS="C:\repo1;C:\repo2" go test -run=TestMultiRepo_CollectMetrics -timeout 600s ./internal/integration/
+//
+//	go test -run=TestMultiRepo_CollectMetrics -timeout 600s ./internal/integration/
+//	CODESCHEMA_BENCH_REPOS="C:\repo1;C:\repo2" go test -run=TestMultiRepo_CollectMetrics -timeout 600s ./internal/integration/
 //
 // 输出文件：build/bench-compare.json（JSON 对比报告）
 package integration
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 // TestMultiRepo_CollectMetrics 多仓库基准测试：采集每个仓库的 scan→index→search 指标并输出对比报告。
@@ -152,10 +154,8 @@ func TestMultiRepo_CollectMetrics(t *testing.T) {
 			t.Fatalf("GenerateComparisonJSON failed: %v", err)
 		}
 
-		// 输出到文件
-		repoRoot := FindRepoRoot(t)
-		outPath := filepath.Join(repoRoot, "build", "bench-compare.json")
-		os.MkdirAll(filepath.Dir(outPath), 0755)
+		// 输出到文件（默认临时目录，避免误改仓库 build/；CODESCHEMA_UPDATE_BENCH=1 才写回 build/）
+		outPath := testutil.BenchOutPath(t, "bench-compare.json")
 		if err := os.WriteFile(outPath, jsonData, 0644); err != nil {
 			t.Logf("Warning: could not write comparison to %s: %v", outPath, err)
 		}

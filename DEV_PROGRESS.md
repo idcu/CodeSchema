@@ -354,6 +354,13 @@ P18      [████████████████████] 100%
 - [x] **测试** — `internal/vector/model_download_test.go` 新增 `TestResolveLocalArtifact_VersionSuffix`；`internal/config/config_test.go` 的 `TestDefaultConfig` 新增默认 `EmbeddingModel` 断言。
 - [x] **验证** — `go build ./...`、`go vet ./...`、`gofmt` 干净；`go test ./...` 全绿（此前并行竞态已消除）；`-race` 历史 26 内部包无竞态。
 
+### 维护优化（2026-08-16）：风险与待办落地（benchmark 快照防护 + Windows CI 去掩蔽 + action 版本 pin）
+
+- [x] **benchmark 快照误提交防护（评估风险 #3 修复）** — 新增 `internal/testutil` 包与 `BenchOutPath(tb, name)`：将 `internal/integration`、`internal/scalebench`、`internal/adapterbench` 共 8 处基准报告写入点（bench-compare / realrepo-bench / scale-bench / scale-e2e / embedding-quality / embedding-quality-multi / adapter-bench / treesitter-callgraph-bench）统一路由——`go test ./...` 默认写入 `t.TempDir()` 并自动清理，彻底不再触碰仓库 `build/`；仅当设置 `CODESCHEMA_UPDATE_BENCH=1` 才写回 `build/<name>`，供开发者主动刷新需提交的快照。CI `test` 任务追加 `git diff --exit-code build/bench-compare.json build/realrepo-bench.json` 看护；`nightly-scale` 与 `treesitter` 两个需对外发布快照的任务显式设置该环境变量以写回 `build/`。
+- [x] **Windows CI 去掩蔽（评估风险 #2 推进）** — 移除 Windows 测试步骤的 `continue-on-error: true`，失败即红、不再吞掉偶发错误；超时由 300s 提至 600s 降低慢机器抖动；保留详细日志与制品上传用于定位。
+- [x] **CI action 版本 pin SHA（评估风险 #5 修复）** — `ci.yml` 与 `release.yml` 中所有 action 引用由浮动词版本（@v3/@v4/@v6/@v7）改为对应 commit SHA（保留 `# vX` 注释），杜绝供应链漂移。
+- [x] **验证** — `go vet ./internal/testutil/... ./internal/integration/... ./internal/scalebench/... ./internal/adapterbench/...` 干净；另写临时测试确认 `BenchOutPath` 默认走临时目录、`CODESCHEMA_UPDATE_BENCH=1` 走 `build/`（验证后已删除）；`go test ./...` 后 `build/` 无变更；两 workflow YAML 通过解析校验、无浮动词引用。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
@@ -371,5 +378,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：CI Node 24 修复 + 模型命名对齐（`0c4a1a1`）；此前单实例多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交：风险与待办落地（benchmark 快照防护 + Windows CI 去掩蔽 + CI action pin SHA）；此前 CI Node 24 修复 + 模型命名对齐（`0c4a1a1`）、单实例多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

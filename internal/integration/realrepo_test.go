@@ -10,13 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/idcu/codeschema/internal/search"
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 // BenchmarkRealRepo_ScanAndIndex 基准测试：扫描真实仓库并构建索引。
@@ -250,9 +250,8 @@ func TestRealRepo_CollectMetrics(t *testing.T) {
 	data, _ := json.MarshalIndent(result, "", "  ")
 	t.Logf("Benchmark Results:\n%s", string(data))
 
-	// 同时输出到文件
-	outPath := filepath.Join(repoRoot, "build", "realrepo-bench.json")
-	os.MkdirAll(filepath.Dir(outPath), 0755)
+	// 同时输出到文件（默认临时目录；CODESCHEMA_UPDATE_BENCH=1 才写回 build/）
+	outPath := testutil.BenchOutPath(t, "realrepo-bench.json")
 	if err := os.WriteFile(outPath, data, 0644); err != nil {
 		t.Logf("Warning: could not write results to %s: %v", outPath, err)
 	}

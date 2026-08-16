@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/parser/adapter/treesitter"
+
+	"github.com/idcu/codeschema/internal/testutil"
 )
 
 // callSample 单语言黄金样本：代码 + 期望检出的调用（CalleeFQN 集合）。
@@ -684,9 +686,9 @@ func TestTreeSitterCallGraphBench(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	root := repoRoot()
-	_ = os.MkdirAll(filepath.Join(root, "build"), 0o755)
-	if err := os.WriteFile(filepath.Join(root, "build", "treesitter-callgraph-bench.json"), data, 0o644); err != nil {
-		t.Logf("warn: 写 build/treesitter-callgraph-bench.json 失败: %v", err)
+	outPath := testutil.BenchOutPath(t, "treesitter-callgraph-bench.json")
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		t.Logf("warn: 写 %s 失败: %v", outPath, err)
 	}
 	appendBenchHistory(t, root, simpleOverall, complexOverall, overall)
 	writeCallGraphMarkdown(t, root, out)
