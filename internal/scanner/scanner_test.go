@@ -17,10 +17,10 @@ type mockParser struct {
 	parseFn  func(ctx context.Context, path string) (*parser.IRDocument, error)
 }
 
-func (m *mockParser) Name() string                               { return m.name }
-func (m *mockParser) Supports(lang string) bool                   { return m.supports[lang] }
+func (m *mockParser) Name() string                                          { return m.name }
+func (m *mockParser) Supports(lang string) bool                             { return m.supports[lang] }
 func (m *mockParser) Init(ctx context.Context, config map[string]any) error { return nil }
-func (m *mockParser) Close() error                               { return nil }
+func (m *mockParser) Close() error                                          { return nil }
 func (m *mockParser) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
 	if m.parseFn != nil {
 		return m.parseFn(ctx, path)
@@ -112,10 +112,10 @@ func TestScanAll(t *testing.T) {
 
 	// 创建测试文件
 	files := map[string]string{
-		"main.go":     "package main\nfunc main() {}\n",
-		"util.go":     "package main\nfunc util() {}\n",
-		"helper.go":   "package main\nfunc helper() {}\n",
-		"README.md":   "documentation",
+		"main.go":   "package main\nfunc main() {}\n",
+		"util.go":   "package main\nfunc util() {}\n",
+		"helper.go": "package main\nfunc helper() {}\n",
+		"README.md": "documentation",
 	}
 	for name, content := range files {
 		os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
@@ -185,6 +185,7 @@ func TestListFiles_IgnoreDirs(t *testing.T) {
 		t.Errorf("expected 1 file, got %d: %v", len(files), files)
 	}
 }
+
 // TestListFiles_SymlinkDir 验证：指向目录的符号链接不被收集为文件
 // （此前 Walk 用 Lstat 不识别为目录，导致 os.ReadFile 读目录报 "is a directory"）。
 func TestListFiles_SymlinkDir(t *testing.T) {
@@ -203,11 +204,11 @@ func TestListFiles_SymlinkDir(t *testing.T) {
 	}
 	// 符号链接 → 目录
 	if err := os.Symlink(filepath.Join(dir, "real_dir"), filepath.Join(dir, "links", "dir_link")); err != nil {
-		t.Fatal(err)
+		t.Skipf("无法创建符号链接（%v），当前环境（如 Windows CI 默认无权限）不支持，跳过", err)
 	}
 	// 符号链接 → 普通文件（应保留）
 	if err := os.Symlink(filepath.Join(dir, "links", "b.go"), filepath.Join(dir, "links", "file_link.go")); err != nil {
-		t.Fatal(err)
+		t.Skipf("无法创建符号链接（%v），当前环境（如 Windows CI 默认无权限）不支持，跳过", err)
 	}
 
 	files, err := listFiles(dir)
@@ -217,7 +218,7 @@ func TestListFiles_SymlinkDir(t *testing.T) {
 
 	for _, f := range files {
 		rel, _ := filepath.Rel(dir, f)
-		if rel == "links/dir_link" {
+		if rel == filepath.Join("links", "dir_link") {
 			t.Errorf("symlink-to-dir should NOT be listed: %s", rel)
 		}
 	}
