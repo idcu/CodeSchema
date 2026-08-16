@@ -173,7 +173,7 @@ services:
       - ${MT_REPO_A:-./repo-a}:/repo-a:ro
       - ${MT_REPO_B:-./repo-b}:/repo-b:ro
       - ${MT_CONFIG:-./config.mt.yaml}:/app/config.mt.yaml:ro
-    command: ["serve", "--config", "/app/config.mt.yaml"]
+    command: ["--config", "/app/config.mt.yaml", "serve"]
     healthcheck:
       test: ["CMD", "/app/codeschema", "version"]
       interval: 30s

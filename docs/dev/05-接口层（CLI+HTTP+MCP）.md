@@ -74,7 +74,7 @@
 
 ## 4. MCP Server
 
-MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph 与 JCodeIndexer 事实标准，降低 Agent 迁移成本。
+MCP Server 提供 12 个工具（P0 8 个 + P5 3 个 + 多租户 list_projects 1 个），命名对齐 CodeGraph 与 JCodeIndexer 事实标准，降低 Agent 迁移成本。
 
 **双传输（2026-08-15，T4-1）**：
 - **SSE（默认）**：`codeschema mcp --addr :8080`，端点为 `/sse`（HTTP SSE），`/message` 收 JSON-RPC 消息。
@@ -96,6 +96,7 @@ MCP Server 提供 11 个工具（P0 8 个 + P5 3 个），命名对齐 CodeGraph
 | `get_tags` | `symbol: string`（类/方法全限定名） | 指定符号的标签列表 | P5 新增 | P5 |
 | `search_by_tag` | `tag: string`（如 `controller`） | 按标签搜索类和方法 | P5 新增 | P5 |
 | `get_all_tags` | — | 所有已知标签及分类统计 | P5 新增 | P5 |
+| `list_projects` | —（无） | 当前实例服务的全部租户元信息（id / name / root） | 多租户枚举 | P13 |
 
 ---
 
@@ -160,6 +161,6 @@ func (s *MCPServer) Stop() error
 - [x] CLI 全部 7 个命令可运行（scan/watch/rebuild-kv/benchmark/mcp/serve/version），`codeschema version` 输出正确版本号。
 - [x] HTTP API 响应正确（/health*、/context、/impact、/tests、/search、/tags*、/metrics、/viz、/openapi.json 等），返回 JSON 格式。
 - [x] 错误中间件覆盖全部 5 种错误码，响应格式统一。
-- [x] MCP Server 启动成功，所有 11 个工具（P0 8 个 + P5 3 个）注册成功。
+- [x] MCP Server 启动成功，所有 12 个工具（P0 8 个 + P5 3 个 + 多租户 list_projects 1 个）注册成功。
 - [x] MCP 工具调用返回正确结果，参数校验返回友好错误。
 - [ ] 集成测试：HTTP + MCP 一次启动测试全部接口。（P1 实现）

@@ -281,7 +281,7 @@ index built: 152 docs indexed in 50ms
 
 ### 4.1 MCP 协议简介
 
-Model Context Protocol（MCP）是一个开放协议，允许 AI 工具通过标准接口与外部数据源交互。CodeSchema 实现了 MCP Server，为 AI 提供 11 个代码查询工具：
+Model Context Protocol（MCP）是一个开放协议，允许 AI 工具通过标准接口与外部数据源交互。CodeSchema 实现了 MCP Server，为 AI 提供 12 个代码查询工具：
 
 | 工具 | 功能 | AI 应用场景 |
 |------|------|-------------|
@@ -296,6 +296,7 @@ Model Context Protocol（MCP）是一个开放协议，允许 AI 工具通过标
 | `get_all_tags` | 获取所有标签 | 了解代码库架构 |
 | `find_dependencies` | 查找依赖关系 | 分析代码依赖 |
 | `search_config` | 搜索配置项 | 定位配置定义 |
+| `list_projects` | 枚举当前实例服务的全部仓库/租户 | 多租户模式下发现可用仓库 |
 
 ### 4.2 Trae 集成
 

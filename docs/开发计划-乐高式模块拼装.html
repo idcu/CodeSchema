@@ -105,7 +105,7 @@
 <h2><span class="n">2</span>现状盘点：红绿灯复核 <span class="tagline">对技术路线文档逐项核对代码实测（2026-08-15）</span></h2>
 <div class="okbox">
   <b>🟢 已打通（无需投入）：</b><br>
-  扫描（SHA-256 去重）→ 解析（30 语言，正则默认 + <code>-tags treesitter</code> 真语法树）→ 分析（调用图/类层次/反向索引）→ 存档（JSON 默认 + SQLite BulkUpsert 5~14s/10万 + PG/Redis build-tag 接线）→ 双路检索（FTS + 向量融合重排，ONNX bge-small-zh 本机端到端 dim=512）→ CLI/HTTP/MCP 三接口（11 个 MCP 工具）。
+  扫描（SHA-256 去重）→ 解析（30 语言，正则默认 + <code>-tags treesitter</code> 真语法树）→ 分析（调用图/类层次/反向索引）→ 存档（JSON 默认 + SQLite BulkUpsert 5~14s/10万 + PG/Redis build-tag 接线）→ 双路检索（FTS + 向量融合重排，ONNX bge-small-zh-v1.5 本机端到端 dim=512）→ CLI/HTTP/MCP 三接口（12 个 MCP 工具）。
   默认构建免 CGO；SQLite 慢 500 倍与强制 gcc 两个大坑已填平并固化 CI 看护。
 </div>
 <div class="warnbox">

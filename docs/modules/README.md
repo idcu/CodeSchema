@@ -132,7 +132,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | `store.Store` 接口 | P7_1（`internal/store/store.go`） | P2/P4/P5 + 全驱动 |
 | IR 数据模型 | P3_1（`internal/parser/ir.go`） | Store/Search/Analyzer/AI |
 | `VectorStore` / `Embedder` 接口 | P6_1/P6_2（`internal/vector`） | P5_1 检索 |
-| MCP 11 工具 | P1_2（`internal/server/mcp.go`） | AI 客户端 |
+| MCP 12 工具 | P1_2（`internal/server/mcp.go`） | AI 客户端 |
 | `Service` 查询方法集 | P2_1（`internal/service/service.go`） | P1 接入层 |
 
 ## 六、本次同步记录（2026-08-15）

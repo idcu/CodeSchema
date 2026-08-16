@@ -233,7 +233,7 @@ P18      [████████████████████] 100%
 ### P13 — 构建脚本 / CI 配置 / 容器化 / 部署文档
 - [x] **`Makefile`** — 构建自动化脚本，支持 build/test/clean/cross/lint/bench/run 等 10 个目标，跨平台交叉编译（linux/darwin/windows × amd64/arm64）
 - [x] **`Dockerfile`** — 多阶段构建，golang:1.25-alpine → alpine:3.20，CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
-- [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，5 个 Job（test 3 平台 + race 竞态检测 + cross 交叉编译 + **bench 规模基准（BulkUpsert 回归看护）** + docker 镜像）
+- [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，8 个 Job（test 跨 ubuntu/macos/windows + bench + nightly-scale + race 竞态检测 + treesitter + cross 交叉编译 + docker 镜像）；actions 已升级为 Node 24 兼容版本（`actions/checkout@v7`、`actions/setup-go@v7`、`actions/upload-artifact@v6`、`docker/setup-qemu-action@v4`、`docker/setup-buildx-action@v4`、`docker/metadata-action@v6`、`docker/build-push-action@v7`、`softprops/action-gh-release@v3`），此前 Node 20 actions 缓存 tar 恢复失败与 Windows 偶发失败均已在 `427fe7b`/`b90271a`/`0c4a1a1` 修复
 - [x] **`docs/dev/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
 - [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新
 
@@ -371,5 +371,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：单实例多租户落地 + 文档同步（`693bdc4`）；此前 PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交：CI Node 24 修复 + 模型命名对齐（`0c4a1a1`）；此前单实例多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

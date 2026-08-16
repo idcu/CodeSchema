@@ -91,7 +91,7 @@ go build -o codeschema ./cmd/codeschema
 1. 启动 MCP Server：`./codeschema mcp --addr :8080`
 2. 查看当前端点的客户端配置：`./codeschema mcp --print-config`（或见 `docs/MCP接入指南.md`）
 3. 在 VS Code / JetBrains / Claude Code / Cursor 中粘贴对应配置片段，即可调用
-   `search_symbols` / `context` / `impact` 等 11 个 MCP 工具。
+   `search_symbols` / `context` / `impact` 等 12 个 MCP 工具。
 
 ### Docker 部署
 
@@ -211,12 +211,13 @@ make clean
   - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。
   - LSP：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS）；`clangd` 工程上下文真实验证（构造 compile_commands.json 最小工程，clangd 22 真实提取类/方法，`TestLSPAdapter_RealClangd` 已 PASS）；mock 服务器已覆盖 JSON-RPC 传输/超时/取消/多行头/稳定性。并修复两处生产缺陷：`SymbolKind` 映射漏掉 Go 的 Struct(23)/Interface(24)/Function(12) 导致 gopls 返回 0 类；`jsonRPCRequest.ID` 缺 `omitempty` 使 notification 携带 `"id":0` 违反 JSON-RPC 2.0 导致 clangd 拒绝登记文档。
   - 多语言验证/基准框架见 `internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
+- **GitHub Actions CI 已修复（2026-08-16）**：CI 此前因 Node 20 actions 缓存 tar 恢复失败而中断，现已将 `actions/checkout@v7`、`actions/setup-go@v7`、`actions/upload-artifact@v6`、`docker/*-action@v4/v6/v7`、`softprops/action-gh-release@v3` 升级为 Node 24 兼容版本并加固 Windows 任务，8 个 Job（test 跨 ubuntu/macos/windows + bench + nightly-scale + race + treesitter + cross + docker）全部修复通过；同时默认嵌入模型对齐为 `bge-small-zh-v1.5`（离线命中本地 ONNX，语义检索精度恢复到 R@1 1.00）。
 
 ## 实际核查备注（2026-08-14）
 
 > 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/dev/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
 
-- **包数量**：实际 **29** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24/27 个包」等旧表述已过时。
+- **包数量**：实际 **31** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24/27 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/dev/12` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。
@@ -239,7 +240,7 @@ make bench
 | 依赖 | 最低版本 | 说明 |
 |------|---------|------|
 | Go | 1.25+ | 编译运行 |
-| GCC/MinGW | 任一 C 编译器 | **仅 ONNX 语义检索需要**：默认 `go build ./...` 已免 CGO/gcc。`go build -tags onnx` 启用 ONNX 嵌入器（bge-small-zh）时需 gcc 与 onnxruntime 动态库；不使用 ONNX 时纯 Go 构建即可（modernc.org/sqlite 亦为纯 Go）。 |
+| GCC/MinGW | 任一 C 编译器 | **仅 ONNX 语义检索需要**：默认 `go build ./...` 已免 CGO/gcc。`go build -tags onnx` 启用 ONNX 嵌入器（bge-small-zh-v1.5）时需 gcc 与 onnxruntime 动态库；不使用 ONNX 时纯 Go 构建即可（modernc.org/sqlite 亦为纯 Go）。 |
 | Docker | 24+ | 容器化部署 |
 | onnxruntime | 1.23.2（本机已验证） | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`；本机 x86_64 经 `third_party/onnxruntime_go_patch` 适配 API v23，真实嵌入推理 dim=512 已验证） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |

@@ -156,3 +156,24 @@ scanner:
   file_size_limit_mb: 10
   # 超过此行数的文件跳过解析
   line_count_limit: 50000
+
+# ---------------------------------------------------------------------------
+# 多租户配置（可选）
+# ---------------------------------------------------------------------------
+# 多租户（单实例多仓库，可选）：一个进程服务多个隔离仓库，按 project 路由
+# tenants:
+#   - id: demo-a
+#     name: "Demo A"
+#     root: ./cmd                  # 要扫描的仓库根目录
+#     storage:
+#       dsn: ./build/mt-a          # 该租户独立存储目录（索引按此派生隔离）
+#     auto_scan: true              # 启动时自动扫描
+#     watch: false                 # 是否监听增量
+#   - id: demo-b
+#     name: "Demo B"
+#     root: ./internal/config
+#     storage:
+#       dsn: ./build/mt-b
+#     auto_scan: true
+#     watch: false
+# 不配置 tenants 时退化为单 "default" 租户，行为与原单项目模式完全一致。
