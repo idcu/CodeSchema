@@ -11,7 +11,6 @@ package runtime
 import (
 	"context"
 	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/config"
+	"github.com/idcu/codeschema/internal/fsperm"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter/codegraph"
 	lspadapter "github.com/idcu/codeschema/internal/parser/adapter/lsp"
@@ -288,7 +288,7 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	WithImpactAnalyzer(svc, st)
 	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+	if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
 		if err := builder.SaveIDF(idfFile); err != nil {
 			log.Printf("WARN: save IDF dictionary: %v", err)
 		}

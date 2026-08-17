@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // LocalEmbedder 基于统计特征的纯 Go Embedder。
@@ -157,15 +159,11 @@ func (l *LocalEmbedder) SaveIDF(path string) error {
 		DF:     dfCopy,
 	}
 
-	f, err := os.Create(path)
+	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
-		return fmt.Errorf("create idf file: %w", err)
+		return fmt.Errorf("marshal idf: %w", err)
 	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(data)
+	return fsperm.WriteFile(path, raw)
 }
 
 // LoadIDF 从文件加载 IDF 词典。

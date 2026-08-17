@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // fileLock Windows 平台的进程锁（简化实现：基于独占创建锁文件的原子性）。
@@ -20,17 +22,18 @@ type fileLock struct {
 
 // acquireLock 获取指定目录的进程锁。Windows 简化实现。
 func acquireLock(rootDir string) (*fileLock, error) {
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+	if err := fsperm.MkdirAll(rootDir); err != nil {
 		return nil, fmt.Errorf("mkdir lock dir: %w", err)
 	}
 	path := filepath.Join(rootDir, "store.lock")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("acquire file lock %s (another process is writing? remove stale store.lock if no writer exists)", path)
 		}
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
+	_ = os.Chmod(path, 0o600)
 	_, _ = f.WriteString("codeschema-file-lock\n")
 	_ = f.Close()
 	return &fileLock{rootDir: rootDir, path: path}, nil

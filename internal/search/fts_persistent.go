@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // PersistentFTS 磁盘持久化的全文搜索引擎。
@@ -115,7 +117,7 @@ func (pf *PersistentFTS) save() error {
 	if pf.filePath == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(pf.filePath), 0755); err != nil {
+	if err := fsperm.MkdirAll(filepath.Dir(pf.filePath)); err != nil {
 		return fmt.Errorf("persistent fts: mkdir: %w", err)
 	}
 	data := persistentFTSData{
@@ -133,7 +135,7 @@ func (pf *PersistentFTS) save() error {
 	if err != nil {
 		return fmt.Errorf("persistent fts: marshal: %w", err)
 	}
-	if err := os.WriteFile(pf.filePath, raw, 0644); err != nil {
+	if err := fsperm.WriteFile(pf.filePath, raw); err != nil {
 		return fmt.Errorf("persistent fts: write: %w", err)
 	}
 	pf.dirties = 0

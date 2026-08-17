@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/idcu/codeschema/internal/fsperm"
 	"golang.org/x/sys/unix"
 )
 
@@ -23,14 +24,15 @@ type fileLock struct {
 
 // acquireLock 获取指定目录的进程锁。Unix 实现使用 flock（跨平台不可用时可降级为无锁）。
 func acquireLock(rootDir string) (*fileLock, error) {
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+	if err := fsperm.MkdirAll(rootDir); err != nil {
 		return nil, fmt.Errorf("mkdir lock dir: %w", err)
 	}
 	path := filepath.Join(rootDir, "store.lock")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
+	_ = os.Chmod(path, 0o600)
 	// 非阻塞尝试；失败则说明其他进程持有锁（写操作互斥）
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()

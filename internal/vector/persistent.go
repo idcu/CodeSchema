@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // PersistentStore 磁盘持久化的向量存储。
@@ -164,7 +166,7 @@ func (ps *PersistentStore) save() error {
 	if ps.filePath == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(ps.filePath), 0755); err != nil {
+	if err := fsperm.MkdirAll(filepath.Dir(ps.filePath)); err != nil {
 		return fmt.Errorf("persistent: mkdir: %w", err)
 	}
 	data := persistentData{Vectors: ps.vecs, Contents: ps.contents}
@@ -172,7 +174,7 @@ func (ps *PersistentStore) save() error {
 	if err != nil {
 		return fmt.Errorf("persistent: marshal: %w", err)
 	}
-	if err := os.WriteFile(ps.filePath, raw, 0644); err != nil {
+	if err := fsperm.WriteFile(ps.filePath, raw); err != nil {
 		return fmt.Errorf("persistent: write: %w", err)
 	}
 	ps.dirties = 0

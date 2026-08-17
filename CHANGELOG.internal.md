@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 113: feat(store): 索引数据目录/文件权限加固（目录 0700、文件 0600）
+
+- 背景：安全自查清单「索引目录权限 0600」未落地——store.json/vector.json/FTS/IDF/SQLite/锁文件默认 0755/0644，宽松 umask 下可被同机其他用户读取
+- 决策：新增**公共包** `internal/fsperm`（仅供 store/vector/search/runtime 跨包复用，零三方依赖）：
+  - `MkdirAll(path)`：创建目录树且末端 `chmod 0700`（新建/已存在都收敛，覆盖 umask）
+  - `WriteFile(path,data)`：父目录 0700 + 文件 `chmod 0600`（Chmod 保证既有过宽容忍也收紧）
+- 接入点（store 3 处、sqlite 1、vector 2、search 2、runtime 1）：
+  - `store/filestore.go` 数据目录 + store.json（tmp 0600→rename，最终 0600）
+  - `store/filelock_{unix,windows}.go` 锁目录 + store.lock 0600
+  - `store/sqlite/sqlite.go` ensureDir
+  - `vector/persistent.go` vector.json、`vector/embedder_local.go` SaveIDF（改 fsperm.WriteFile）
+  - `search/fts_persistent.go` FTS、`search/builder.go` IDF 目录
+  - `runtime/runtime.go` IDF 目录
+- 测试：`internal/fsperm` 4 条（目录 0700、收紧已存在 0755、文件 0600+父目录 0700+内容一致；Windows 自动 Skip POSIX 权限断言）
+- 文档同步：安全设计文档 §7 勾选项 3、交接说明（勾选+遗留收敛为部署期项）、CHANGELOG
+- 验证：`go build ./...` 通过；`go test ./...` 全零 FAIL（fsperm 0.147s、store 3.219s、vector 10.992s、search 3.492s、runtime 4.756s）
+- 预留：chromem 可选后端文件权限由 chromem-go 库自管未收敛；「对外监听收敛」为部署期项未勾选
+
 ### Commit 112: feat(server): 全局限流中间件（rate_limit 令牌桶，可选），安全自查勾选 4+1 项
 
 - 背景：安全设计文档 §7 合规自查清单存在 6 个未勾选项。逐项对照代码核实后，认证（authMiddleware）、路径遍历（pathTraversalMiddleware）、模型 checksum（model_sha256）、日志脱敏（api_key 仅内存）均已有实现与单测，仅有"限流中间件"确为代码缺口

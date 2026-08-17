@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/idcu/codeschema/internal/fsperm"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -80,7 +81,7 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 		fs.rootDir = "./data"
 	}
 
-	if err := os.MkdirAll(fs.rootDir, 0755); err != nil {
+	if err := fsperm.MkdirAll(fs.rootDir); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
@@ -615,7 +616,7 @@ func (fs *FileStore) saveToDisk() error {
 	tmpPath := filepath.Join(fs.rootDir, "store.json.tmp")
 	finalPath := filepath.Join(fs.rootDir, "store.json")
 
-	if err := os.WriteFile(tmpPath, b, 0644); err != nil {
+	if err := fsperm.WriteFile(tmpPath, b); err != nil {
 		return fmt.Errorf("write temp store: %w", err)
 	}
 	return os.Rename(tmpPath, finalPath)
