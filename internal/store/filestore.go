@@ -18,7 +18,7 @@ import (
 type FileStore struct {
 	mu            sync.RWMutex
 	rootDir       string
-	lock          *fileLock // 进程锁（防止多进程并发写坏 store.json）
+	lock          *fileLock                // 进程锁（防止多进程并发写坏 store.json）
 	files         map[string]*FileRecord   // absolute_path -> FileRecord
 	classes       map[int64][]ClassRecord  // fileID -> classes
 	methods       map[int64][]MethodRecord // classID -> methods
@@ -28,6 +28,9 @@ type FileStore struct {
 	tagCategories map[string]string        // tag name -> category
 	nextID        int64
 }
+
+// DriverName 报告驱动名（store.DriverNamer 可选接口）。
+func (fs *FileStore) DriverName() string { return "file" }
 
 // ClassRecord 对应解析后的类信息。
 type ClassRecord struct {
@@ -203,16 +206,16 @@ func (fs *FileStore) DeleteFile(ctx context.Context, fileID int64) error {
 
 	for path, f := range fs.files {
 		if f.ID == fileID {
+			// 先取该文件的类集合（用于清理方法/标签），再删除文件与类记录
+			classes := fs.classes[fileID]
 			delete(fs.files, path)
 			delete(fs.classes, fileID)
 			delete(fs.calls, fileID)
-			// 清理关联的 methods
-			for classID := range fs.methods {
-				for _, c := range fs.classes[fileID] {
-					if c.ID == classID {
-						delete(fs.methods, classID)
-					}
-				}
+			// 清理关联的 methods 与其标签
+			for _, c := range classes {
+				delete(fs.methods, c.ID)
+				delete(fs.methodTags, c.ID)
+				delete(fs.classTags, c.ID)
 			}
 			return nil
 		}
@@ -421,20 +424,13 @@ func (fs *FileStore) UpsertTags(ctx context.Context, classID int64, tags []strin
 	}
 
 	// 去重
-	seen := make(map[string]bool)
-	var unique []string
-	for _, t := range tags {
-		if !seen[t] {
-			seen[t] = true
-			unique = append(unique, t)
-		}
-	}
+	unique := UniqueStrings(tags)
 	fs.classTags[classID] = unique
 
 	// 更新标签分类索引
 	for _, t := range unique {
 		if _, ok := fs.tagCategories[t]; !ok {
-			fs.tagCategories[t] = deriveTagCategory(t)
+			fs.tagCategories[t] = DeriveTagCategory(t)
 		}
 	}
 	return nil
@@ -450,19 +446,12 @@ func (fs *FileStore) UpsertMethodTags(ctx context.Context, methodID int64, tags 
 		return nil
 	}
 
-	seen := make(map[string]bool)
-	var unique []string
-	for _, t := range tags {
-		if !seen[t] {
-			seen[t] = true
-			unique = append(unique, t)
-		}
-	}
+	unique := UniqueStrings(tags)
 	fs.methodTags[methodID] = unique
 
 	for _, t := range unique {
 		if _, ok := fs.tagCategories[t]; !ok {
-			fs.tagCategories[t] = deriveTagCategory(t)
+			fs.tagCategories[t] = DeriveTagCategory(t)
 		}
 	}
 	return nil
@@ -598,24 +587,6 @@ func (fs *FileStore) GetAllTagsWithCategories(ctx context.Context) (map[string]s
 		result[k] = v
 	}
 	return result, nil
-}
-
-// deriveTagCategory 根据标签名推断其分类。
-func deriveTagCategory(tag string) string {
-	switch tag {
-	case "controller", "service", "dao", "domain", "infra", "repository", "handler", "middleware", "config":
-		return "layer"
-	case "unit", "integration", "e2e", "mock":
-		return "test"
-	case "go", "java", "python", "typescript", "javascript", "cpp", "rust", "kotlin", "scala", "ruby", "php":
-		return "lang"
-	case "legacy", "todo", "deprecated", "performance", "security":
-		return "risk"
-	case "cache", "mq", "retry", "transactional", "async", "schedule", "batch":
-		return "tech"
-	default:
-		return "biz"
-	}
 }
 
 // saveToDisk 将内存数据持久化到磁盘。

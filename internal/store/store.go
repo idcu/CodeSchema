@@ -86,15 +86,21 @@ type Store interface {
 
 // FileRecord 对应 file 表的一行记录。
 type FileRecord struct {
-	ID               int64    `json:"id"`
-	AbsolutePath     string   `json:"absolute_path"`
-	ContentHash      string   `json:"content_hash,omitempty"`
-	LineCount        int      `json:"line_count"`
-	ByteSize         int64    `json:"byte_size"`
+	ID                int64    `json:"id"`
+	AbsolutePath      string   `json:"absolute_path"`
+	ContentHash       string   `json:"content_hash,omitempty"`
+	LineCount         int      `json:"line_count"`
+	ByteSize          int64    `json:"byte_size"`
 	ReferencedByFiles []string `json:"referenced_by_files,omitempty"`
-	Imports          []string `json:"imports,omitempty"`
-	Language         string   `json:"language,omitempty"`
-	ParseStatus      string   `json:"parse_status"`
+	Imports           []string `json:"imports,omitempty"`
+	Language          string   `json:"language,omitempty"`
+	ParseStatus       string   `json:"parse_status"`
+}
+
+// DriverNamer 可选接口：返回存储驱动名（file/sqlite/pg/...）。
+// 供健康检查等按实例精确报告驱动类型；未实现时由调用方按默认推断。
+type DriverNamer interface {
+	DriverName() string
 }
 
 // SkippedWriter 可选接口：对因超限被旁路（大文件/超行数）的文件标记 parse_skipped 留痕。
@@ -102,6 +108,23 @@ type FileRecord struct {
 type SkippedWriter interface {
 	// MarkParseSkipped 记录一个被旁路的文件，parse_status 置为 "parse_skipped"。
 	MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error)
+}
+
+// CacheReader 可选接口：Redis L2 缓存读路径（按 FQN 热点类/调用反查）。
+// 由 cmd 层的 redisCacheStore 实现；service 侧探测到该接口时可优先走缓存，
+// 未命中或未实现时回退主存储，保证数据一致性与向后兼容。
+type CacheReader interface {
+	// GetClass 按全限定名读取缓存的类；未命中返回 (nil, nil)。
+	GetClass(ctx context.Context, fqn string) (*parser.ClassIR, error)
+	// ClassFilePath 返回类全限定名对应的源文件路径（Redis 反查索引；
+	// 未命中返回 ("", false)）。
+	ClassFilePath(ctx context.Context, fqn string) (string, bool)
+	// CallersOf 返回某方法的调用者集合（反向索引）。
+	CallersOf(ctx context.Context, fqn string) ([]string, error)
+	// CalleesOf 返回某方法直接调用的被调者集合。
+	CalleesOf(ctx context.Context, fqn string) ([]string, error)
+	// ClassesOfFile 返回文件包含的类 FQN 集合。
+	ClassesOfFile(ctx context.Context, path string) ([]string, error)
 }
 
 // NewStore 根据驱动类型创建对应的存储实现。
@@ -116,4 +139,36 @@ func NewStore(driver string) Store {
 	default:
 		return &FileStore{}
 	}
+}
+
+// DeriveTagCategory 根据标签名推断其分类（layer/test/lang/risk/tech/biz）。
+// 三后端（FileStore/SQLiteStore/PGStore）共用同一分类口径，避免语义分叉。
+func DeriveTagCategory(tag string) string {
+	switch tag {
+	case "controller", "service", "dao", "domain", "infra", "repository", "handler", "middleware", "config":
+		return "layer"
+	case "unit", "integration", "e2e", "mock":
+		return "test"
+	case "go", "java", "python", "typescript", "javascript", "cpp", "rust", "kotlin", "scala", "ruby", "php":
+		return "lang"
+	case "legacy", "todo", "deprecated", "performance", "security":
+		return "risk"
+	case "cache", "mq", "retry", "transactional", "async", "schedule", "batch":
+		return "tech"
+	default:
+		return "biz"
+	}
+}
+
+// UniqueStrings 去重并保持首次出现顺序。
+func UniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, t := range in {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
 }

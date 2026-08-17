@@ -119,7 +119,7 @@ type HealthStatus struct {
 func (s *Service) Health(ctx context.Context) *HealthStatus {
 	status := &HealthStatus{
 		Uptime:    time.Since(s.startTime).Round(time.Second).String(),
-		StoreType: "file",
+		StoreType: storeTypeName(s.store),
 	}
 	if err := s.store.HealthCheck(ctx); err != nil {
 		status.Status = "degraded"
@@ -129,6 +129,24 @@ func (s *Service) Health(ctx context.Context) *HealthStatus {
 		status.StoreOK = true
 	}
 	return status
+}
+
+// storeTypeName 从 store 实例推断驱动名（不再硬编码 "file"）。
+// 优先走 store.DriverNamer 可选接口（各驱动实现精确报告），
+// 未实现时回退 FileStore 类型匹配，包装型返回 generic。
+func storeTypeName(st store.Store) string {
+	if st == nil {
+		return "none"
+	}
+	if dn, ok := st.(store.DriverNamer); ok {
+		return dn.DriverName()
+	}
+	switch st.(type) {
+	case *store.FileStore:
+		return "file"
+	default:
+		return "generic"
+	}
 }
 
 // StoreHealthCheck 执行存储层健康检查。
@@ -338,7 +356,29 @@ func (l *symbolLocation) renderMinimal() string {
 
 // resolveSymbolLocation 在 Store 中查找符号（类/方法）的物理位置。
 // 先按类 FullName 精确匹配，再按方法 FullName 精确匹配。
+//
+// 快速路径：底层 store 实现 store.CacheReader（Redis L2 缓存）时，
+// 类符号经缓存 O(1) 命中（GetClass + ClassFilePath），避免全表扫描；
+// 未命中或非类符号回退全表遍历（数据一致性与向后兼容）。
 func (s *Service) resolveSymbolLocation(ctx context.Context, symbol string) (*symbolLocation, bool) {
+	if cr, ok := s.store.(store.CacheReader); ok {
+		if cls, err := cr.GetClass(ctx, symbol); err == nil && cls != nil {
+			if path, ok := cr.ClassFilePath(ctx, symbol); ok {
+				loc := &symbolLocation{
+					FilePath:  path,
+					StartLine: cls.StartLine,
+					EndLine:   cls.EndLine,
+					Kind:      "class",
+					Doc:       cls.Doc,
+				}
+				// 补文件行数（读主存储一次；失败不阻断）。
+				if f, err := s.store.GetFileByPath(ctx, path); err == nil {
+					loc.LineCount = f.LineCount
+				}
+				return loc, true
+			}
+		}
+	}
 	files, err := s.store.GetAllFiles(ctx)
 	if err != nil {
 		return nil, false

@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/idcu/codeschema/internal/robust"
+	slog "github.com/idcu/codeschema/internal/log"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
 )
@@ -44,9 +44,9 @@ type jsonRPCRequest struct {
 }
 
 type jsonRPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      any    `json:"id"`
-	Result  any    `json:"result,omitempty"`
+	JSONRPC string    `json:"jsonrpc"`
+	ID      any       `json:"id"`
+	Result  any       `json:"result,omitempty"`
 	Error   *rpcError `json:"error,omitempty"`
 }
 
@@ -274,8 +274,8 @@ func (m *MCPServer) Start(ctx context.Context) error {
 
 	// 中间件链：认证 → CORS → Panic 恢复
 	handler := m.authMiddleware(
-		recoveryMiddleware(
-			corsMiddleware(mux),
+		recoveryMiddlewareFor(false, slog.WithModule("mcp"))(
+			corsMiddlewareFor("GET, POST, OPTIONS", "Content-Type, Authorization, X-Tenant")(mux),
 		),
 	)
 
@@ -573,26 +573,3 @@ func (m *MCPServer) authMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-// corsMiddleware 添加 CORS 头，用于 MCP SSE 连接。
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// recoveryMiddleware 捕获 panic 并返回 500 错误。
-func recoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer robust.Recover()
-		next.ServeHTTP(w, r)
-	})
-}
-

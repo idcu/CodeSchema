@@ -24,6 +24,7 @@ import (
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/server"
 	"github.com/idcu/codeschema/internal/service"
+	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/tenant"
 	"github.com/idcu/codeschema/internal/vector"
 	"github.com/idcu/codeschema/internal/watcher"
@@ -149,6 +150,9 @@ Use "codeschema <command> -h" for more information about a command.
 
 	case "benchmark":
 		return benchmarkCmd(ctx, cfg, args[1:])
+
+	case "agent-bench":
+		return agentBenchCmd(ctx, cfg, args[1:])
 
 	case "rebuild-kv":
 		return rebuildKVCmd(ctx, cfg, args[1:])
@@ -436,6 +440,26 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 			)
 			httpSrv.SetVizHandler(vizHandler)
 			fmt.Println("vector index visualization enabled at /viz")
+
+			// 向量索引健康检查：真实探测当前向量存储（Size 返回文档数，
+			// 用其探活；后端不可用视为 degraded）。
+			vs := rt0.VecStore
+			httpSrv.SetVectorHealthCheck(func(ctx context.Context) error {
+				_ = vs.Size()
+				return nil
+			})
+		}
+	}
+	// KV 缓存健康检查：探测默认租户 store 是否叠加了 Redis L2 缓存。
+	if rt0, rerr := mgr.Runtime(""); rerr == nil && rt0.Store != nil {
+		if cr, ok := rt0.Store.(store.CacheReader); ok {
+			// redisCacheStore 内嵌 store.Store（含 HealthCheck），
+			// 经可选接口断言取其健康检查函数。
+			if hc, ok := cr.(interface {
+				HealthCheck(ctx context.Context) error
+			}); ok {
+				httpSrv.SetKVHealthCheck(func(ctx context.Context) error { return hc.HealthCheck(ctx) })
+			}
 		}
 	}
 

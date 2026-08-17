@@ -19,10 +19,18 @@ import (
 	"sync"
 
 	"github.com/idcu/codeschema/internal/config"
+	"github.com/idcu/codeschema/internal/metrics"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
 )
+
+// init 注册多租户模块指标（差异点可观测性）。
+func init() {
+	metrics.RegisterGauge("tenant_instances_total", "Total active tenant instances")
+	metrics.RegisterCounter("tenant_route_total", "Total tenant routing lookups", "tenant")
+	metrics.RegisterCounter("tenant_apply_total", "Total tenant hot-reload apply operations")
+}
 
 // OpenStoreFunc 打开（并按需叠加缓存层）一个存储后端的工厂函数。
 // 由 cmd 层注入，使 tenant 包无需依赖 build-tagged 的 pg/redis 存储分发逻辑，
@@ -186,6 +194,8 @@ func (m *Manager) Service(ctx context.Context, id string) (*service.Service, err
 	if !ok {
 		return nil, fmt.Errorf("tenant %q not found", id)
 	}
+	// 差异点打点：路由命中计数（tenant 标签为租户 ID）。
+	metrics.IncCounter("tenant_route_total", id)
 	return t.Runtime.Svc, nil
 }
 
@@ -327,6 +337,13 @@ func (m *Manager) Apply(ctx context.Context, base *config.Config) error {
 		m.defaultID = m.order[0]
 	}
 	m.mu.Unlock()
+
+	// 差异点打点：热重载后刷新活跃实例数 gauge。
+	metrics.IncCounter("tenant_apply_total")
+	m.mu.RLock()
+	n := len(m.tenants)
+	m.mu.RUnlock()
+	metrics.SetGauge("tenant_instances_total", float64(n))
 
 	// 锁外释放旧实例资源。
 	for _, id := range release {

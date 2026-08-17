@@ -1,15 +1,10 @@
-// Package adapter 提供适配器层的公共工具函数和常。
+// Package adapter 提供适配器层的公共工具函数和常量。
 package adapter
 
 import (
 	"os"
 	"strings"
 )
-
-// SupportedLanguages 返回适配器层支持的所有语言列表。
-func SupportedLanguages() []string {
-	return []string{"go", "java", "ts", "js", "py", "rust", "cpp", "c", "kotlin", "swift", "php", "csharp", "ruby", "bash", "scala", "sql", "elixir", "ocaml", "lua", "groovy", "css", "toml", "yaml", "protobuf", "html", "hcl", "svelte", "markdown", "dockerfile", "elm", "cue"}
-}
 
 // FileExists 检查文件是否存在。
 func FileExists(path string) bool {
@@ -90,84 +85,5 @@ func ExtToLang(ext string) string {
 		return "cue"
 	default:
 		return "unknown"
-	}
-}
-
-// IsSourceFile 判断文件扩展名是否属于可识别的源码文件。
-func IsSourceFile(path string) bool {
-	ext := ""
-	if idx := strings.LastIndex(path, "."); idx >= 0 {
-		ext = path[idx:]
-	}
-	return ExtToLang(ext) != "unknown"
-}
-
-// LangToExtensions 返回指定语言的所有文件扩展名。
-func LangToExtensions(lang string) []string {
-	switch lang {
-	case "go":
-		return []string{".go"}
-	case "java":
-		return []string{".java"}
-	case "py":
-		return []string{".py"}
-	case "ts":
-		return []string{".ts", ".tsx"}
-	case "js":
-		return []string{".js", ".jsx"}
-	case "rust":
-		return []string{".rs"}
-	case "cpp":
-		return []string{".cpp", ".cc", ".cxx", ".h", ".hpp"}
-	case "c":
-		return []string{".c"}
-	case "kotlin":
-		return []string{".kt", ".kts"}
-	case "swift":
-		return []string{".swift"}
-	case "php":
-		return []string{".php"}
-	case "csharp":
-		return []string{".cs"}
-	case "ruby":
-		return []string{".rb"}
-	case "bash":
-		return []string{".sh", ".bash"}
-	case "scala":
-		return []string{".scala", ".sc"}
-	case "sql":
-		return []string{".sql"}
-	case "elixir":
-		return []string{".ex", ".exs"}
-	case "ocaml":
-		return []string{".ml", ".mli"}
-	case "lua":
-		return []string{".lua"}
-	case "groovy":
-		return []string{".groovy"}
-	case "css":
-		return []string{".css"}
-	case "toml":
-		return []string{".toml"}
-	case "yaml":
-		return []string{".yml", ".yaml"}
-	case "protobuf":
-		return []string{".proto"}
-	case "html":
-		return []string{".html", ".htm"}
-	case "hcl":
-		return []string{".tf", ".hcl"}
-	case "svelte":
-		return []string{".svelte"}
-	case "markdown":
-		return []string{".md", ".markdown"}
-	case "dockerfile":
-		return []string{"Dockerfile"}
-	case "elm":
-		return []string{".elm"}
-	case "cue":
-		return []string{".cue"}
-	default:
-		return nil
 	}
 }

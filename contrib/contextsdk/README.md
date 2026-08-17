@@ -50,6 +50,10 @@ func NewClient(resolve ResolveService) *Client // Client = contextsdk.Client（�
 | P2 | 独立 `go.mod` 发布至 `github.com/idcu/codeschema-contextsdk` | 首个 v* tag |
 | P3 | 发布示例与 dsh 集成指南 | 同 P2 |
 
+> 发布前置验证已就绪（2026-08-17）：`bash scripts/check-contextsdk-publish.sh`
+> 把本包复制到临时目录做独立 module 编译 + vet + test，仅标准库依赖即可通过；
+> dsh Code mode 集成示例见 `contrib/dsh/README.md` §8。
+
 ## 5. 验证纪律
 
 - 发布前 `go test ./contrib/contextsdk/...` 全通

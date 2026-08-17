@@ -14,8 +14,15 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/store"
 )
+
+// init 注册测试关联模块指标（差异点可观测性）。
+func init() {
+	metrics.RegisterCounter("testlink_lookups_total", "Total test link lookups", "strategy")
+	metrics.RegisterCounter("testlink_hits_total", "Total test links found", "strategy")
+}
 
 // TestLink 测试关联结果。
 type TestLink struct {
@@ -110,6 +117,19 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 
 	// 按置信度降序排序
 	sortByConfidenceDesc(results)
+
+	// 差异点打点：按策略统计查询与命中（可观测「测试关联」价值）。
+	metrics.IncCounter("testlink_lookups_total", "all")
+	strategyHits := map[string]int{}
+	for _, r := range results {
+		strategyHits[r.Strategy]++
+	}
+	for strat, n := range strategyHits {
+		metrics.IncCounter("testlink_lookups_total", strat)
+		for i := 0; i < n; i++ {
+			metrics.IncCounter("testlink_hits_total", strat)
+		}
+	}
 
 	// 过滤置信度
 	filtered := make([]TestLink, 0, len(results))

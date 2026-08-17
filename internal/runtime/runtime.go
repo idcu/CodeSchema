@@ -76,7 +76,7 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 	}
 
 	// ③ SCIP 适配器（可选：配置了 index_dir 才注册）
-	if dir := cfg.Parser.SCIP.IndexDir; dir != "" && dir != "./scipout" {
+	if dir := cfg.Parser.SCIP.IndexDir; dir != "" && dir != config.DefaultSCIPIndexDir {
 		sc := scip.NewSCIPAdapter(dir)
 		if err := sc.Init(ctx, map[string]any{"index_dir": dir}); err != nil {
 			log.Printf("parser.scip: init failed (%v), skipping", err)
@@ -86,7 +86,7 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 	}
 
 	// ④ CodeGraph 适配器（可选：配置了 db 才注册）
-	if db := cfg.Parser.CodeGraph.DB; db != "" && db != "./codegraph.db" {
+	if db := cfg.Parser.CodeGraph.DB; db != "" && db != config.DefaultCodeGraphDB {
 		cg := codegraph.NewCodeGraphAdapter(db)
 		if err := cg.Init(ctx, map[string]any{"db_path": db}); err != nil {
 			log.Printf("parser.codegraph: init failed (%v), skipping", err)

@@ -7,7 +7,7 @@
 // 用法：
 //
 //	client := contextsdk.NewClient(func(tenant string) (*service.Service, error) {
-//	    return mgr.GetService(tenant)
+//	    return mgr.Service(ctx, tenant)
 //	})
 //	pkg, err := client.Compose(ctx, contextsdk.Request{
 //	    Tenant: "repo-a",

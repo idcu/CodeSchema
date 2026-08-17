@@ -82,5 +82,6 @@ docs/
 
 | 日期 | 说明 |
 |---|---|
+| 2026-08-17 | 代码夯基：包数口径 33→36（新增 contrib/adapterx、contrib/contextsdk、internal/contextsdk）；PG 全量替换契约修复、标签分类三后端统一、Redis 读路径 CacheReader、健康检查真实化、语言映射单表 |
 | 2026-08-17 | 新增 `文档体系关系.md`（关系视图），导航加入该文档 |
 | 2026-08-17 | 初始化 docs/ 分层结构，建立总入口 |

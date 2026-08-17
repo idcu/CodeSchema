@@ -1,0 +1,171 @@
+{
+  "timestamp": "2026-08-17T12:25:15Z",
+  "repo_path": "/Volumes/Data/code-schema",
+  "file_count": 350,
+  "tasks": [
+    {
+      "task_id": "code-schema-bug-001",
+      "description": "修复 Scanner.ScanAll 在存在被忽略目录（vendor/node_modules）时仍可能尝试解析其中文件的问题",
+      "type": "bugfix",
+      "target_symbol": "Scanner.ScanAll",
+      "modes": {
+        "full": {
+          "token_estimate": 84,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 1,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 723,
+          "generation_time_ms": 0.94
+        },
+        "minimal": {
+          "token_estimate": 4,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 146,
+          "generation_time_ms": 0.11
+        },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "code-schema-bug-002",
+      "description": "修复 SQLiteStore.BulkUpsert 未先清理旧数据导致重扫残留脏 class/method 的问题（应先 DELETE 再 INSERT）",
+      "type": "bugfix",
+      "target_symbol": "SQLiteStore.BulkUpsert",
+      "modes": {
+        "full": {
+          "token_estimate": 84,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 1,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 768,
+          "generation_time_ms": 0.68
+        },
+        "minimal": {
+          "token_estimate": 4,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 150,
+          "generation_time_ms": 0.06
+        },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "code-schema-feat-001",
+      "description": "为 Analyzer 增加 Prometheus 指标打点（analyzer_build_total），需要确认现有的指标注册方式（metrics.RegisterCounter）",
+      "type": "feature",
+      "target_symbol": "Analyzer",
+      "modes": {
+        "full": {
+          "token_estimate": 84,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 1,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 982,
+          "generation_time_ms": 0.55
+        },
+        "minimal": {
+          "token_estimate": 4,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 145,
+          "generation_time_ms": 0.02
+        },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "code-schema-refactor-001",
+      "description": "重构：把 FileStore/SQLiteStore/PGStore 三处重复的标签分类逻辑统一到 store.DeriveTagCategory",
+      "type": "refactor",
+      "target_symbol": "FileStore",
+      "modes": {
+        "full": {
+          "token_estimate": 84,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 1,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 881,
+          "generation_time_ms": 0.53
+        },
+        "minimal": {
+          "token_estimate": 4,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 143,
+          "generation_time_ms": 0.02
+        },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    }
+  ],
+  "summary": {
+    "pass_rate_none": 0,
+    "pass_rate_full": 1,
+    "pass_rate_minimal": 1,
+    "token_avg_none": 0,
+    "token_avg_full": 84,
+    "token_avg_minimal": 4,
+    "token_saving_minimal_vs_full": 0.9524,
+    "full_vs_none": 1,
+    "minimal_vs_none": 1,
+    "task_total": 4
+  }
+}

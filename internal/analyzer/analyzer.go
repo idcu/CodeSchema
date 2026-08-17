@@ -164,7 +164,9 @@ func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
 				if err == nil && len(tags) > 0 {
 					existing, _ := a.store.GetTagsByClassID(ctx, cls.ID)
 					if merged := mergeUnique(existing, tags); len(merged) > 0 {
-						_ = a.store.UpsertTags(ctx, cls.ID, merged)
+						if err := a.store.UpsertTags(ctx, cls.ID, merged); err != nil {
+							a.logger.Warn("upsert class tags failed", "class", cls.FullName, "error", err)
+						}
 						aiTagged++
 					}
 				}
@@ -173,7 +175,9 @@ func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
 			}
 			if cls.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
 				if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewClassEntity(cls)); err == nil && doc != "" {
-					_ = du.UpdateClassDoc(ctx, cls.ID, doc)
+					if err := du.UpdateClassDoc(ctx, cls.ID, doc); err != nil {
+						a.logger.Warn("update class doc failed", "class", cls.FullName, "error", err)
+					}
 					aiDocd++
 				}
 			}
@@ -188,7 +192,9 @@ func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
 					if err == nil && len(tags) > 0 {
 						existing, _ := a.store.GetTagsByMethodID(ctx, m.ID)
 						if merged := mergeUnique(existing, tags); len(merged) > 0 {
-							_ = a.store.UpsertMethodTags(ctx, m.ID, merged)
+							if err := a.store.UpsertMethodTags(ctx, m.ID, merged); err != nil {
+								a.logger.Warn("upsert method tags failed", "method", m.FullName, "error", err)
+							}
 							aiTagged++
 						}
 					}
@@ -197,7 +203,9 @@ func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
 				}
 				if m.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
 					if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewMethodEntity(m)); err == nil && doc != "" {
-						_ = du.UpdateMethodDoc(ctx, m.ID, doc)
+						if err := du.UpdateMethodDoc(ctx, m.ID, doc); err != nil {
+							a.logger.Warn("update method doc failed", "method", m.FullName, "error", err)
+						}
 						aiDocd++
 					}
 				}

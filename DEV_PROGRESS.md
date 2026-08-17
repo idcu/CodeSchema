@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-08-17
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）+ 多租户热重载 + 全局能力热重载（监听地址/认证令牌/限流）+ 服务级热重载补齐（scanner 三项）+ 对外监听收敛基线（secure-demo.yaml）+ 生态资产发布准备（adapterx 聚合包 / context-sdk 发布评估）**）
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）+ 多租户热重载 + 全局能力热重载（监听地址/认证令牌/限流）+ 服务级热重载补齐（scanner 三项）+ 对外监听收敛基线（secure-demo.yaml）+ 生态资产发布准备（adapterx 聚合包 / context-sdk 接口抽象完成）+ 代码夯基与结构优化（PG 全量替换契约修复 / 标签分类三后端统一 / Redis 读路径 CacheReader / 健康检查真实化 / 语言映射单表 / 静默吞错留痕 / 死代码清理）+ **分析建议全量推进（Agent 任务端到端基准 agent-bench 子命令 / Redis 读路径类符号快速路径接线 / CORS+recovery 中间件合并 / context-sdk 独立发布验证脚本 / 测试关联·AI 预算·多租户打点补齐）**）
 > 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成；2026-08-16 新增「单实例多租户」作为独立能力，详见下方维护优化章节）
 
 ---
@@ -39,7 +39,7 @@ P18      [████████████████████] 100%
 
 > 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/1-生产层/开发文档/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
 
-1. **包数量实为 33 个**（`go list ./...`，含 2026-08-16 新增的 `internal/tenant`、`internal/runtime`、`scripts/benchtrend`），全文历史「23/24/27/31/32 个包」表述已过时；`go build ./...` 通过（exit 0）。
+1. **包数量实为 36 个**（`go list ./...`，含 2026-08-16 新增的 `internal/tenant`、`internal/runtime`、`scripts/benchtrend` 与 2026-08-17 新增的 `contrib/adapterx`、`contrib/contextsdk`、`internal/contextsdk`），全文历史「23/24/27/31/32/33 个包」表述已过时；`go build ./...` 通过（exit 0）。
 2. **默认构建强制 CGO（已修复）**：原 `internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，即使不用 ONNX 也需 gcc。现已以 `//go:build onnx` 隔离 ONNX 实现，新增 `embedder_onnx_stub.go`（`!onnx`）提供同名 API 桩，默认 `go build ./...`（CGO 关）免 gcc；ONNX 语义检索需 `go build -tags onnx`（仍依赖 gcc + onnxruntime 动态库）。「GCC 可选」的旧表述已校正为「仅 ONNX 需要」。
 3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/1-生产层/开发文档/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
 4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 117 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）；`rebuild-kv` 命令在 `-tags redis` 下从基础存储全量重建缓存。详见 `docs/1-生产层/开发文档/12` §12.5 与 README「存储后端」小节。
@@ -388,5 +388,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）；此前全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交：分析建议 1-5 全量推进（Commit 124）——agent-bench 子命令（Agent 任务端到端评测，本仓实测 minimal 省 95.2% token）、Redis 读路径类符号快速路径接线、CORS/recovery 中间件合并、context-sdk 独立发布验证脚本、测试关联/AI 预算/多租户打点补齐；此前代码夯基与结构优化（Commit 123）、context-sdk 接口抽象（Commit 122）、服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）、全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

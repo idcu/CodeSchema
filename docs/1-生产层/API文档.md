@@ -19,7 +19,7 @@
 
 | 端点 | 方法 | 参数 | 说明 |
 |---|---|---|---|
-| `/health` `/health/db` `/health/vector` `/health/kv` | GET | - | 健康检查（含存储/缓存/向量） |
+| `/health` `/health/db` `/health/vector` `/health/kv` | GET | - | 健康检查（存储/向量/缓存）。`/health/vector` 探测真实向量存储；`/health/kv` 在启用 Redis 时探测真实状态，未配置返回 `type:"none"`（不再为占位） |
 | `/context` | GET | `symbol`,`context_lines`,`mode` | 获取符号精准裁剪上下文（`mode`: `full` 源码/`minimal` 仅符号元数据） |
 | `/impact` | GET | `method`,`depth` | 影响面分析 |
 | `/tests` | GET | `method`,`min_confidence` | 关联单测 |
@@ -68,6 +68,7 @@
 
 | 日期 | 说明 |
 |---|---|
+| 2026-08-17 | `/health/kv`、`/health/vector` 语义更新：探测真实 Redis/向量状态（原为占位），store_type 经 DriverNamer 报告真实驱动 |
 | 2026-08-17 | 从 DEPLOYMENT_AND_USAGE/接口层文档提炼，补 /openapi、/viz、/projects、错误码 |
 | 2026-08-17 | 同步新增 `preset` 配置、`context` / `impact` 追溯、`mode`（full/minimal）参数 |
 

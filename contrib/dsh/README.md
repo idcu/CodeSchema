@@ -106,14 +106,45 @@ preset: minimal
 - `semantic`：语义档——开启 FTS + 语义检索（向量/ONNX），保持 AI 增强
 - `multitenant`：多租户档——保持全能力，监听默认开启，租户在 `tenants` 中声明
 
-## 8. 故障排查
+## 8. 方式三：Code mode 程序化编排（context-sdk）
+
+dsh **Code mode** 让模型写 TypeScript 程序组合多轮工具调用。配合 CodeSchema 的
+**context-sdk**（`contrib/contextsdk`，独立发布 `github.com/idcu/codeschema-contextsdk`），
+可在单次程序化调用里组合「多租户 × 多符号 × 影响面 × 关联单测」的上下文包，
+避免多轮往返：
+
+```typescript
+// dsh Code mode 脚本示例：一次编排拿到上下文包
+import { Client, Request } from "codeschema-contextsdk";
+
+const client = new Client(async (tenant) => {
+  // 返回实现 SDKProvider 的后端（codeschema 服务端 / 任何第三方实现）
+  return getCodeschemaProvider(tenant); // 桥接内部 Service → SDKProvider
+});
+
+const pkg = await client.Compose({
+  tenant: "repo-a",
+  symbols: ["com.example.OrderService.getUser"],
+  withImpact: true,
+  withTests: true,
+  mode: "minimal", // 或 "full"：注入源码原文
+});
+console.log(`token 估算: ${pkg.summary.totalTokens}`);
+// → 打印每个符号的源码/元数据 + 影响面 + 关联单测
+```
+
+- `mode: "minimal"` 仅符号元数据（零文件 IO，token 约为 full 的 1/20）；
+- `withImpact` / `withTests` 聚合影响面与关联单测，一次注入；
+- 发布验证：`bash scripts/check-contextsdk-publish.sh`（独立 module 编译+测试通过）。
+
+## 9. 故障排查
 
 - 连接失败：检查 CodeSchema 进程是否正常运行
 - 工具调用超时：大仓库首次索引需时间，等待索引完成后再调用
 - 认证拒绝：确认 auth-token 已正确配置
 - 日志查看：CodeSchema 进程的 stderr 输出包含索引构建和请求日志
 
-## 9. 参考链接
+## 10. 参考链接
 
 - [CodeSchema README](../../README.md)
 - [CodeSchema MCP 接入指南](../../docs/3-使用层/客户端接入指南（MCP）.md)

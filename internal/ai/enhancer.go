@@ -6,9 +6,16 @@ import (
 	"strings"
 
 	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
+
+// init 注册 AI 增强层指标（差异点可观测性）。
+func init() {
+	metrics.RegisterCounter("ai_enhance_total", "Total AI enhancement calls", "kind", "phase")
+	metrics.RegisterCounter("ai_budget_exceeded_total", "Total AI budget-exceeded skips", "phase")
+}
 
 // Phase 表示 AI 增强所处的调用作用域，决定消耗哪类预算。
 type Phase int
@@ -82,11 +89,21 @@ func (e *Enhancer) BudgetRemaining() int {
 	return e.budget.ScanRemaining()
 }
 
+// phaseName 返回当前作用域名（打点标签）。
+func (e *Enhancer) phaseName() string {
+	if e.phase == PhaseQuery {
+		return "query"
+	}
+	return "scan"
+}
+
 // EnhanceTag 对实体推导并补全标签。预算超限返回 errors.ErrBudgetExceeded。
 func (e *Enhancer) EnhanceTag(ctx context.Context, ent IRable) ([]string, error) {
 	if !e.consume() {
+		metrics.IncCounter("ai_budget_exceeded_total", e.phaseName())
 		return nil, errors.ErrBudgetExceeded
 	}
+	metrics.IncCounter("ai_enhance_total", "tag", e.phaseName())
 	tags, err := e.client.Complete(ctx, buildTagPrompt(ent))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errors.ErrEnhanceFailed, err)
@@ -98,8 +115,10 @@ func (e *Enhancer) EnhanceTag(ctx context.Context, ent IRable) ([]string, error)
 // 预算超限返回 errors.ErrBudgetExceeded。
 func (e *Enhancer) EnhanceDoc(ctx context.Context, ent IRable) (string, error) {
 	if !e.consume() {
+		metrics.IncCounter("ai_budget_exceeded_total", e.phaseName())
 		return "", errors.ErrBudgetExceeded
 	}
+	metrics.IncCounter("ai_enhance_total", "doc", e.phaseName())
 	lines, err := e.client.Complete(ctx, buildDocPrompt(ent))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", errors.ErrEnhanceFailed, err)
@@ -111,8 +130,10 @@ func (e *Enhancer) EnhanceDoc(ctx context.Context, ent IRable) (string, error) {
 // 预算超限返回 errors.ErrBudgetExceeded。
 func (e *Enhancer) Disambiguate(ctx context.Context, candidates []parser.MethodIR, hint string) (int, error) {
 	if !e.consume() {
+		metrics.IncCounter("ai_budget_exceeded_total", e.phaseName())
 		return 0, errors.ErrBudgetExceeded
 	}
+	metrics.IncCounter("ai_enhance_total", "disambiguate", e.phaseName())
 	idx, err := e.client.Choose(ctx, buildDisambiguationPrompt(candidates, hint))
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", errors.ErrEnhanceFailed, err)

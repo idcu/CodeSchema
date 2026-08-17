@@ -32,6 +32,9 @@ type PGStore struct {
 	dsn string
 }
 
+// DriverName 报告驱动名（store.DriverNamer 可选接口）。
+func (s *PGStore) DriverName() string { return "pg" }
+
 // NewPGStore 创建 PG 存储（未打开，需 Open）。
 func NewPGStore() *PGStore { return &PGStore{} }
 
@@ -144,27 +147,37 @@ func upsertFileTx(ctx context.Context, tx *sql.Tx, ir *parser.IRDocument) (int64
 	return id, err
 }
 
+// upsertClassesTx 按文件全量替换类记录（DELETE + INSERT，对齐 SQLite 语义）。
+// 旧实现仅 ON CONFLICT DO NOTHING 不删除历史行，整仓重扫时残留脏数据。
 func upsertClassesTx(ctx context.Context, tx *sql.Tx, fileID int64, classes []parser.ClassIR, src string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id=$1)`, fileID); err != nil {
+		return fmt.Errorf("pg delete stale methods: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM class WHERE file_id=$1`, fileID); err != nil {
+		return fmt.Errorf("pg delete stale classes: %w", err)
+	}
 	for _, c := range classes {
 		ann, _ := json.Marshal(c.Annotations)
 		extra, _ := json.Marshal(c.Extra)
 		const q = `INSERT INTO class (file_id, name, full_name, type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, source, extra)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-			ON CONFLICT DO NOTHING`
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 		if _, err := tx.ExecContext(ctx, q, fileID, c.Name, c.FullName, c.Type,
 			c.StartLine, c.StartCol, c.EndLine, c.EndCol, c.Modifier, c.Doc, string(ann), src, string(extra)); err != nil {
-			return err
+			return fmt.Errorf("pg insert class %s: %w", c.FullName, err)
 		}
 	}
 	return nil
 }
 
 func upsertCallsTx(ctx context.Context, tx *sql.Tx, fileID int64, calls []parser.CallIR, src string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM call WHERE file_id=$1`, fileID); err != nil {
+		return fmt.Errorf("pg delete stale calls: %w", err)
+	}
 	for _, c := range calls {
 		const q = `INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source)
-			VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
+			VALUES ($1,$2,$3,$4,$5,$6)`
 		if _, err := tx.ExecContext(ctx, q, fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, src); err != nil {
-			return err
+			return fmt.Errorf("pg insert call %s->%s: %w", c.CallerFQN, c.CalleeFQN, err)
 		}
 	}
 	return nil
@@ -286,6 +299,10 @@ func (s *PGStore) UpsertMethods(ctx context.Context, classID int64, methods []pa
 		return err
 	}
 	defer tx.Rollback()
+	// 全量替换：先删旧方法（对齐 Store 接口契约与 SQLite/FileStore 语义）。
+	if _, err := tx.ExecContext(ctx, `DELETE FROM method WHERE class_id=$1`, classID); err != nil {
+		return err
+	}
 	for _, m := range methods {
 		ann, _ := json.Marshal(m.Annotations)
 		extra, _ := json.Marshal(m.Extra)
@@ -454,7 +471,8 @@ func upsertTagsTx(ctx context.Context, db *sql.DB, linkTable, idCol string, id i
 		return err
 	}
 	for _, tag := range tags {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO tag (name, category) VALUES ($1,'auto') ON CONFLICT (name) DO NOTHING`, tag); err != nil {
+		// 分类口径与 FileStore/SQLiteStore 统一（store.DeriveTagCategory）。
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tag (name, category) VALUES ($1,$2) ON CONFLICT (name) DO NOTHING`, tag, store.DeriveTagCategory(tag)); err != nil {
 			return err
 		}
 		var tagID int64
@@ -588,6 +606,16 @@ func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) erro
 
 	for _, ir := range irs {
 		ref, _ := json.Marshal(ir.ReferencedBy)
+		// 全量替换该文件：先清旧 method/class/call（对齐 SQLite BulkUpsert 的 DELETE 预编译语义）。
+		if _, err := tx.ExecContext(ctx, `DELETE FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id=(SELECT id FROM file WHERE absolute_path=$1))`, ir.FilePath); err != nil {
+			return fmt.Errorf("bulk delete stale methods %s: %w", ir.FilePath, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM class WHERE file_id=(SELECT id FROM file WHERE absolute_path=$1)`, ir.FilePath); err != nil {
+			return fmt.Errorf("bulk delete stale classes %s: %w", ir.FilePath, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM call WHERE file_id=(SELECT id FROM file WHERE absolute_path=$1)`, ir.FilePath); err != nil {
+			return fmt.Errorf("bulk delete stale calls %s: %w", ir.FilePath, err)
+		}
 		var fileID int64
 		if err := tx.QueryRowContext(ctx, qFile, ir.FilePath, ir.FilePath, ir.FileHash, ir.CommitHash,
 			ir.LineCount, ir.ByteSize, string(ref), ir.Language, "parse_ok").Scan(&fileID); err != nil {

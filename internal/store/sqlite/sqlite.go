@@ -27,6 +27,9 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+// DriverName 报告驱动名（store.DriverNamer 可选接口）。
+func (s *SQLiteStore) DriverName() string { return "sqlite" }
+
 // schema 初始化 SQL（幂等）。
 const schema = `
 CREATE TABLE IF NOT EXISTS file (
@@ -515,12 +518,12 @@ func (s *SQLiteStore) upsertTagsLocked(ctx context.Context, kind string, ownerID
 	if len(tags) == 0 {
 		return tx.Commit()
 	}
-	for _, t := range dedupe(tags) {
+	for _, t := range store.UniqueStrings(tags) {
 		var tagID int64
 		if err := tx.QueryRow(`
 			INSERT INTO tag (name, category) VALUES (?, ?)
 			ON CONFLICT(name) DO UPDATE SET category=excluded.category
-			RETURNING id`, t, deriveTagCategory(t)).Scan(&tagID); err != nil {
+			RETURNING id`, t, store.DeriveTagCategory(t)).Scan(&tagID); err != nil {
 			return fmt.Errorf("upsert tag %s: %w", t, err)
 		}
 		if _, err := tx.Exec(fmt.Sprintf("INSERT OR IGNORE INTO %s (%s, tag_id) VALUES (?, ?)", linkTable, idCol), ownerID, tagID); err != nil {
@@ -831,36 +834,6 @@ func jsonStringSlice(s string) []string {
 		return []string{}
 	}
 	return out
-}
-
-func dedupe(in []string) []string {
-	seen := make(map[string]bool, len(in))
-	var out []string
-	for _, t := range in {
-		if !seen[t] {
-			seen[t] = true
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// deriveTagCategory 根据标签名推断其分类（与 FileStore 保持一致）。
-func deriveTagCategory(tag string) string {
-	switch tag {
-	case "controller", "service", "dao", "domain", "infra", "repository", "handler", "middleware", "config":
-		return "layer"
-	case "unit", "integration", "e2e", "mock":
-		return "test"
-	case "go", "java", "python", "typescript", "javascript", "cpp", "rust", "kotlin", "scala", "ruby", "php":
-		return "lang"
-	case "legacy", "todo", "deprecated", "performance", "security":
-		return "risk"
-	case "cache", "mq", "retry", "transactional", "async", "schedule", "batch":
-		return "tech"
-	default:
-		return "biz"
-	}
 }
 
 func ensureDir(dir string) error {

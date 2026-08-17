@@ -10,6 +10,7 @@ import (
 	"github.com/idcu/codeschema/internal/log"
 	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser/adapter"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/trace"
 )
@@ -35,7 +36,7 @@ type Scanner struct {
 	onIndex   func(ctx context.Context, filePath string) error // P8.3 索引回调
 	onDelete  func(ctx context.Context, filePath string) error // P8.3 删除回调
 	// 旁路限额（<=0 表示对应维度不限制）：超限文件跳过解析并标记 parse_skipped
-	maxFileSize int64
+	maxFileSize  int64
 	maxLineCount int
 }
 
@@ -260,80 +261,14 @@ func (s *Scanner) markSkipped(ctx context.Context, path string, byteSize int64, 
 	return nil
 }
 
-// detectLang 根据文件扩展名检测语言。
+// detectLang 根据文件路径检测语言。
+// Dockerfile 前缀特判（"Dockerfile.dev" 等）；其余委托 adapter.ExtToLang
+// 的单一扩展名映射表（与解析适配层共用，避免双表漂移）。
 func detectLang(path string) string {
 	if base := filepath.Base(path); base == "Dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
 		return "dockerfile"
 	}
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".java":
-		return "java"
-	case ".py":
-		return "py"
-	case ".ts", ".tsx":
-		return "ts"
-	case ".js", ".jsx":
-		return "js"
-	case ".rs":
-		return "rust"
-	case ".cpp", ".cc", ".cxx":
-		return "cpp"
-	case ".c":
-		return "c"
-	case ".h", ".hpp":
-		return "cpp"
-	case ".kt", ".kts":
-		return "kotlin"
-	case ".swift":
-		return "swift"
-	case ".php":
-		return "php"
-	case ".cs":
-		return "csharp"
-	case ".rb":
-		return "ruby"
-	case ".sh", ".bash":
-		return "bash"
-	case ".scala", ".sc":
-		return "scala"
-	case ".sql":
-		return "sql"
-	case ".ex", ".exs":
-		return "elixir"
-	case ".ml", ".mli":
-		return "ocaml"
-	case ".lua":
-		return "lua"
-	case ".groovy":
-		return "groovy"
-	case ".css":
-		return "css"
-	case ".toml":
-		return "toml"
-	case ".yml", ".yaml":
-		return "yaml"
-	case ".proto":
-		return "protobuf"
-	case ".html", ".htm":
-		return "html"
-	case ".tf", ".hcl":
-		return "hcl"
-	case ".svelte":
-		return "svelte"
-	case ".md", ".markdown":
-		return "markdown"
-	case "Dockerfile":
-		return "dockerfile"
-	case ".elm":
-		return "elm"
-	case ".cue":
-		return "cue"
-	default:
-		return "unknown"
-	}
+	return adapter.ExtToLang(filepath.Ext(path))
 }
 
 // countLines 统计文件行数。
@@ -380,6 +315,10 @@ func listFiles(root string) ([]string, error) {
 		".idea":        true,
 		".vscode":      true,
 		"__pycache__":  true,
+		// 测试临时目录：adapterbench 为规避 Windows 8.3 短路径会把样例写到仓库根
+		// cs_ab_tmp/，与「扫描整仓」的测试（integration/agentbench）并行时若中途
+		// 被清理会读到消失的文件导致 ScanAll 失败。忽略后互不干扰。
+		"cs_ab_tmp": true,
 	}
 	// 数据文件：当 store 目录位于仓库根（默认 ./data）时，避免将 store.json /
 	// store.lock 等持久化文件当作源码收录（无语言识别，会污染文件清单与集成测试断言）。

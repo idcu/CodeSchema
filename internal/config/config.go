@@ -22,18 +22,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// 解析适配器默认路径常量（DefaultConfig 与 runtime 判断「是否显式配置」共用，
+// 避免魔法串漂移）。
+const (
+	// DefaultSCIPIndexDir SCIP 适配器默认 index 目录。
+	DefaultSCIPIndexDir = "./scipout"
+	// DefaultCodeGraphDB CodeGraph 适配器默认 db 路径。
+	DefaultCodeGraphDB = "./codegraph.db"
+)
+
 // Config 顶层配置结构。
 type Config struct {
 	// Preset 能力层预设（建议 3）：minimal / semantic / multitenant / ""（默认）。
 	// 用单个字段组合整组能力配置，见 ApplyPreset。
-	Preset  Preset         `yaml:"preset" json:"preset"`
-	Project ProjectConfig  `yaml:"project" json:"project"`
-	Storage StorageConfig  `yaml:"storage" json:"storage"`
-	Parser  ParserConfig   `yaml:"parser" json:"parser"`
-	AI      AIConfig       `yaml:"ai" json:"ai"`
-	Server  ServerConfig   `yaml:"server" json:"server"`
-	Watcher WatcherConfig  `yaml:"watcher" json:"watcher"`
-	Scanner ScannerConfig  `yaml:"scanner" json:"scanner"`
+	Preset  Preset        `yaml:"preset" json:"preset"`
+	Project ProjectConfig `yaml:"project" json:"project"`
+	Storage StorageConfig `yaml:"storage" json:"storage"`
+	Parser  ParserConfig  `yaml:"parser" json:"parser"`
+	AI      AIConfig      `yaml:"ai" json:"ai"`
+	Server  ServerConfig  `yaml:"server" json:"server"`
+	Watcher WatcherConfig `yaml:"watcher" json:"watcher"`
+	Scanner ScannerConfig `yaml:"scanner" json:"scanner"`
 	// Tenants 多租户注册表。非空时 serve/mcp 以单实例服务多个隔离仓库；
 	// 为空则沿用顶层 project/storage 等配置，保持单项目模式（向后兼容）。
 	Tenants []TenantConfig `yaml:"tenants" json:"tenants"`
@@ -314,10 +323,10 @@ func DefaultConfig() *Config {
 		Parser: ParserConfig{
 			Adapters: []string{"treesitter"},
 			SCIP: SCIPConfig{
-				IndexDir: "./scipout",
+				IndexDir: DefaultSCIPIndexDir,
 			},
 			CodeGraph: CodeGraphConfig{
-				DB: "./codegraph.db",
+				DB: DefaultCodeGraphDB,
 			},
 			JCodeIndexer: JCodeIndexerConfig{
 				DB:         "./jcodeindexer.db",

@@ -6,6 +6,35 @@
 
 ## 提交记录
 
+### Commit 124: feat(agentbench+redis+server): 分析文档建议 1-5 全量推进——Agent 任务端到端基准/Redis 读路径接线/中间件合并/context-sdk 发布准备/差异点打点
+
+- 背景：`analysis/2026-08-17-competitor-and-harness-analysis.md` §3.4 给出 5 条下一步建议（基于 Commit 123 夯基后的再评估），用户要求全量推进实施。
+- 实现：
+  - **建议 1：Agent 任务端到端评测基准（对外可信基准）** — 新增 `internal/agentbench` 包（纯生产代码，不依赖 testing）：`AgentTask`（任务描述 + 必需关键词）、`Run`（扫描→索引→三档上下文生成→覆盖判定）、`Report/Summary`（通过率 × token 权衡）、`GenerateMarkdown/GenerateJSON`（对外发布形态）。三档判定口径差异化：none 必失败、minimal 看定位线索（FilePath+行号）、full 看源码关键词命中。CLI 新增 `codeschema agent-bench` 子命令（命令数 7→8）。内置 4 个真实任务（bugfix×2/feature/refactor，符号经 tree-sitter 实测可解析）。**真实评测（本仓）**：full 通过率 100% / 平均 token 84；minimal 通过率 100% / 平均 token 4（**token 节省 95.2%**）；none 0%。报告落盘 `build/agent-task-bench/`（md+json）。测试：8 组单元 + 1 组真实仓库（TestRun_RealRepo）。
+  - **建议 2：Redis 读路径全量接线** — `store.CacheReader` 接口新增 `ClassFilePath`（类 FQN→源文件路径反查）；`internal/store/redis` 新增 `PutClassPath`/`ClassPath`（key `classpath:<fqn>`）；cmd 层 redisCacheStore 实现该方法，populate 写入 classpath 索引；`Service.resolveSymbolLocation` 类符号命中处接入缓存快速路径（GetClass + ClassFilePath 一次命中，miss 回退全表遍历）。测试：service 新增 2 组（缓存命中快速路径/缓存 miss 回退），redis 集成测试补 classpath/file→class 索引覆盖。
+  - **建议 3：CORS/recovery 中间件合并** — 新增 `internal/server/middleware.go`：`corsMiddlewareFor(allowMethods, allowHeaders)`（HTTP: GET,OPTIONS / MCP: GET,POST,OPTIONS）与 `recoveryMiddlewareFor(withError, logger)`（HTTP 写 500 错误体 / MCP 仅恢复），HTTP 与 MCP 各删一份旧实现（-40 行重复）。测试更新引用新函数。
+  - **建议 4：context-sdk 独立发布准备** — 新增 `scripts/check-contextsdk-publish.sh`：复制 contrib/contextsdk 到临时目录 → 独立 `go mod init` → vet/build/test，验证仅标准库即可独立发布（实测通过）；`contrib/dsh/README.md` 新增 §8「Code mode 程序化编排（context-sdk）」示例；`contrib/contextsdk/README.md` P2 前置说明更新。
+  - **建议 5：差异点打点加固** — 三个此前无 Prometheus 指标的差异点补齐：`internal/service/testlink.go`（testlink_lookups_total/testlink_hits_total 按策略）、`internal/ai/enhancer.go`（ai_enhance_total 按 kind/phase、ai_budget_exceeded_total）、`internal/tenant/tenant.go`（tenant_instances_total gauge、tenant_route_total、tenant_apply_total）。
+- 验证：`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...` 通过；`go test ./...` 全零 FAIL（36 包 OK；agentbench 新包全绿）。
+- 文档同步：analysis/2026-08-17-competitor-and-harness-analysis.md（§3.4 建议 1-5 标记落地状态）、CHANGELOG.internal.md（本记录）、DEV_PROGRESS.md（状态摘要 + 接手说明）、docs/1-生产层/API文档.md（agent-bench 命令说明）。
+- 遗留 TODO：agent-bench 任务集当前内置 4 个（可经 --repo 换仓库、任务集待扩）；Redis 方法符号缓存（当前仅类符号走缓存快速路径）；adapterx 独立仓库拷贝发布（P2，与 contextsdk 独立 module 并列）。
+
+### Commit 123: refactor(store+server+scanner): 代码夯基与结构优化——PG 契约修复/标签统一/Redis 读路径/健康检查真实化/语言单表/吞错留痕/死代码清理
+
+- 背景：承接 Commit 122 后的维护优化。对内部代码做系统性夯实：修复三处真实契约/行为缺陷（PG 全量替换、FileStore 标签清理、健康检查占位），统一三后端标签分类语义，接入 Redis 读路径（可选接口），消除语言映射双表，处理静默吞错与死代码。
+- 实现：
+  - **PG 违反全量替换契约（真实 bug）** `internal/store/pg/pg.go`：`upsertClassesTx`/`upsertCallsTx` 原仅 `ON CONFLICT DO NOTHING` 不删历史行，整仓重扫残留脏数据（SQLite 有 DELETE、PG 无，语义分叉）。修复：类/调用写入前先按 file_id 清旧（含级联删旧方法），公开 `UpsertMethods` 与 `BulkUpsert` 同步对齐；BulkUpsert 每文件循环前按 absolute_path 反查 file_id 清理旧 method/class/call。
+  - **FileStore.DeleteFile 标签清理（对齐 SQLite）** `internal/store/filestore.go`：删除文件时清理其类的 classTags 与方法的 methodTags（原只删 files/classes/calls/methods，标签残留）。
+  - **标签分类三后端统一** `internal/store/store.go` + filestore/sqlite/pg：新增导出 `DeriveTagCategory`/`UniqueStrings`，FileStore 与 SQLiteStore 删除本地重复实现改为引用；PG `upsertTagsTx` 硬编码 `'auto'` 改为 `store.DeriveTagCategory(tag)`，消除三后端分类语义分叉。
+  - **Redis 读路径接入（可选接口）** `internal/store/store.go` 新增 `CacheReader` 可选接口（GetClass/CallersOf/CalleesOf/ClassesOfFile）+ `DriverNamer` 可选接口（DriverName）；`cmd/codeschema/store_redis.go` 的 redisCacheStore 实现两者（读路径纯转发、DriverName 报告底层驱动），populate 补写文件→类索引（PutFileClasses，原缺失）；服务侧不强制接线（未命中回退主存储，向后兼容）。
+  - **健康检查真实化** `internal/service/service.go`：`StoreType` 不再硬编码 `"file"`，经 `store.DriverNamer` 探测（FileStore/SQLiteStore/PGStore/redisCacheStore 均实现）；`internal/server/http.go`：新增 `SetKVHealthCheck`/`SetVectorHealthCheck` 注入，`/health/kv` 由「P0 placeholder」改为探测 redis 真实状态、`/health/vector` 由「P8.1 占位」改为探测向量存储；`cmd/codeschema/main.go` serve 接线两处注入。
+  - **语言映射单表** `internal/scanner/scanner.go`：删除与 `adapter.ExtToLang` 完全重复的 `detectLang` switch（75 行），改为 Dockerfile 前缀特判 + `adapter.ExtToLang` 委托，消除双表漂移风险。
+  - **静默吞错留痕** `internal/analyzer/analyzer.go`：AI 增强写入（UpsertTags/UpsertMethodTags/UpdateClassDoc/UpdateMethodDoc）由 `_ =` 丢弃改为失败记 `a.logger.Warn`（不改变 best-effort 语义）。
+  - **死代码清理** `internal/parser/adapter/adapter.go`：删除零引用函数 `SupportedLanguages`/`IsSourceFile`/`LangToExtensions`（86 行，含测试均无引用）；`internal/contextsdk/sdk.go` 修正误导注释（示例 `mgr.GetService` → `mgr.Service(ctx, tenant)`）；`internal/config/config.go` 新增 `DefaultSCIPIndexDir`/`DefaultCodeGraphDB` 常量，`internal/runtime/runtime.go` 魔法串 `"./scipout"`/`"./codegraph.db"` 改为引用常量。
+- 验证：`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...` 全部通过；`go test ./...` 全零 FAIL（36 包 OK；store/scanner/analyzer/config/runtime/service/server 相关包全绿）。
+- 文档同步：README.md（包数 33→36）、DEV_PROGRESS.md（核查结论/状态/接手说明）、CHANGELOG.internal.md（本记录）、docs/README.md（无结构变动，仅日期刷新）、docs/1-生产层/技术设计文档.md（修订记录补充）、docs/1-生产层/代码规范与开发指南.md（新增「可选接口」命名惯例）、docs/1-生产层/API文档.md（/health/kv、/health/vector 语义更新）、analysis/2026-08-17-competitor-and-harness-analysis.md（整体重写）。
+- 遗留 TODO：CORS/recovery 中间件 HTTP 与 MCP 各一份（方法集/日志策略有差异，暂不强行合并）；upsert.go 的 `MatchResult` 族仅被测试引用（算法有测试保护，保留）；`Service.GetContext` 仅测试调用（为 GetContextMode 便捷封装，保留）。
+
 ### Commit 122: refactor(contextsdk): 解除 context-sdk 独立发布阻塞——接口抽象完成
 
 - 背景：Commit 121 遗留 TODO「context-sdk 独立发布阻塞项：internal/contextsdk 直接依赖 internal/service.Service，需抽取 SDKProvider 轻量接口」。本次完成 P0 接口抽象，使 contrib/contextsdk 自包含、可独立编译/测试/发布。

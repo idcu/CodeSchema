@@ -53,6 +53,28 @@ func TestRedisCache_RealInstance(t *testing.T) {
 		t.Fatalf("GetClass mismatch: %+v", got)
 	}
 
+	// 类 → 文件路径反查索引（CacheReader.ClassFilePath 依赖）
+	const srcPath = "/tmp/it/src/svc.go"
+	if err := cache.PutClassPath(ctx, cls.FullName, srcPath); err != nil {
+		t.Fatalf("PutClassPath: %v", err)
+	}
+	path, ok := cache.ClassPath(ctx, cls.FullName)
+	if !ok || path != srcPath {
+		t.Fatalf("ClassPath mismatch: %q %v", path, ok)
+	}
+	if _, ok := cache.ClassPath(ctx, "no.such.Class"); ok {
+		t.Fatalf("ClassPath should miss for unknown fqn")
+	}
+
+	// 文件 → 类反向索引（ClassesOfFile）
+	if err := cache.PutFileClasses(ctx, srcPath, []string{cls.FullName}); err != nil {
+		t.Fatalf("PutFileClasses: %v", err)
+	}
+	classes, err := cache.ClassesOfFile(ctx, srcPath)
+	if err != nil || len(classes) != 1 || classes[0] != cls.FullName {
+		t.Fatalf("ClassesOfFile: %v (%v)", err, classes)
+	}
+
 	// 调用反查索引（caller→callees, callee→callers）
 	call := &parser.CallIR{CallerFQN: cls.FullName + ".Run", CalleeFQN: "pkg.Other.Stop"}
 	if err := cache.PutCall(ctx, call); err != nil {

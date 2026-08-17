@@ -39,9 +39,9 @@ func seedContextFile(t testing.TB, svc *Service) string {
 		LineCount: 7,
 		ByteSize:  int64(len(content)),
 		Classes: []parser.ClassIR{{
-			Name:     "OrderService",
-			FullName: "com.example.OrderService",
-			Type:     "CLASS",
+			Name:      "OrderService",
+			FullName:  "com.example.OrderService",
+			Type:      "CLASS",
 			StartLine: 3,
 			EndLine:   3,
 		}},
@@ -324,5 +324,97 @@ func TestGetImpact_Trace_WithoutAnalyzer(t *testing.T) {
 	}
 	if result.Trace.HitSymbols != 0 {
 		t.Errorf("expected HitSymbols 0, got %d", result.Trace.HitSymbols)
+	}
+}
+
+// cacheReaderStore 包装真实 FileStore 并实现 store.CacheReader（模拟 Redis L2 缓存层），
+// 用于验证 resolveSymbolLocation 的缓存快速路径（类符号命中）。
+type cacheReaderStore struct {
+	*store.FileStore
+	classes map[string]*parser.ClassIR
+	paths   map[string]string
+}
+
+func (c *cacheReaderStore) GetClass(ctx context.Context, fqn string) (*parser.ClassIR, error) {
+	if cls, ok := c.classes[fqn]; ok {
+		return cls, nil
+	}
+	return nil, nil
+}
+
+func (c *cacheReaderStore) ClassFilePath(ctx context.Context, fqn string) (string, bool) {
+	p, ok := c.paths[fqn]
+	return p, ok
+}
+
+func (c *cacheReaderStore) CallersOf(ctx context.Context, fqn string) ([]string, error) {
+	return nil, nil
+}
+func (c *cacheReaderStore) CalleesOf(ctx context.Context, fqn string) ([]string, error) {
+	return nil, nil
+}
+func (c *cacheReaderStore) ClassesOfFile(ctx context.Context, path string) ([]string, error) {
+	return nil, nil
+}
+
+func TestGetContextMode_ClassViaCacheFastPath(t *testing.T) {
+	// 构建真实 FileStore 并播种（方法解析需要类记录，缓存只加速类命中）。
+	svc := newTestService(t)
+	path := seedContextFile(t, svc)
+
+	// 包装为缓存 store：类 FQN → ClassIR + 路径索引。
+	cached := &cacheReaderStore{
+		FileStore: svc.store.(*store.FileStore),
+		classes: map[string]*parser.ClassIR{
+			"com.example.OrderService": {
+				Name: "OrderService", FullName: "com.example.OrderService",
+				Type: "CLASS", StartLine: 3, EndLine: 3,
+			},
+		},
+		paths: map[string]string{
+			"com.example.OrderService": path,
+		},
+	}
+	svc2 := NewService(cached)
+
+	// 类符号：应经缓存快速路径命中（即便 FileStore 全表也不丢，此路径证明缓存被使用）。
+	ctx, err := svc2.GetContextMode(context.Background(), "com.example.OrderService", ContextOptions{
+		Mode:         ModeFull,
+		IncludeTrace: true,
+	})
+	if err != nil {
+		t.Fatalf("GetContextMode class via cache: %v", err)
+	}
+	if ctx == nil || ctx.Symbol != "com.example.OrderService" {
+		t.Fatalf("unexpected context: %+v", ctx)
+	}
+	if ctx.StartLine != 3 || ctx.EndLine != 3 {
+		t.Errorf("class lines via cache: %d-%d, want 3-3", ctx.StartLine, ctx.EndLine)
+	}
+	if ctx.Trace == nil || ctx.Trace.Source != "store.GetContext" {
+		t.Errorf("expected trace from cache fast path, got %+v", ctx.Trace)
+	}
+}
+
+func TestGetContextMode_ClassCacheMissFallsBack(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+
+	// 缓存不包含该类 → 必须回退 FileStore 全表解析成功。
+	cached := &cacheReaderStore{
+		FileStore: svc.store.(*store.FileStore),
+		classes:   map[string]*parser.ClassIR{},
+		paths:     map[string]string{},
+	}
+	svc2 := NewService(cached)
+
+	ctx, err := svc2.GetContextMode(context.Background(), "com.example.OrderService", ContextOptions{
+		Mode: ModeFull,
+	})
+	if err != nil {
+		t.Fatalf("GetContextMode cache miss fallback: %v", err)
+	}
+	if ctx == nil || !strings.Contains(ctx.FilePath, "order.go") {
+		t.Fatalf("expected fallback to FileStore, got %+v", ctx)
 	}
 }

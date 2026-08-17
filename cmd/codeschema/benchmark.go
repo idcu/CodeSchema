@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/idcu/codeschema/internal/agentbench"
 	"github.com/idcu/codeschema/internal/benchmark"
 	"github.com/idcu/codeschema/internal/config"
 )
@@ -15,7 +16,8 @@ import (
 // benchmarkCmd 实现 `codeschema benchmark` 子命令（技术路线红灯笼①落地）。
 //
 // 用法：
-//   codeschema benchmark [--repos="path1;path2"] [--out=build/bench-compare.json] [--workers=N] [repo...]
+//
+//	codeschema benchmark [--repos="path1;path2"] [--out=build/bench-compare.json] [--workers=N] [repo...]
 //
 // 未指定仓库时：优先取位置参数（可多个），其次 CODESCHEMA_BENCH_REPOS 环境变量，
 // 最后回退到当前目录。输出 Markdown 对比到 stdout，JSON 落盘到 --out。
@@ -108,4 +110,57 @@ func splitRepos(s string) []string {
 		}
 	}
 	return out
+}
+
+// agentBenchCmd 实现 `codeschema agent-bench` 子命令（对外可信基准，对标
+// Sverklo 90-task bench / grepai token 节省）。
+//
+// 用法：
+//
+//	codeschema agent-bench [--repo=path] [--out=build/agent-task-bench] [--workers=N] [--context-lines=10]
+//
+// 评测对象：单仓库（默认 CodeSchema 自身）+ 内置 Agent 任务集（bug 修复/
+// 特性实现/重构），对比 none/full/minimal 三档上下文供给的「任务可完成率 ×
+// token 消耗」，输出 Markdown 到 stdout、md+json 落盘到 --out。
+func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error {
+	fs := flag.NewFlagSet("agent-bench", flag.ExitOnError)
+	repoFlag := fs.String("repo", "", "评测仓库路径（默认 CodeSchema 自身）")
+	outFlag := fs.String("out", filepath.Join("build", "agent-task-bench"), "报告输出目录（md + json）")
+	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
+	contextLines := fs.Int("context-lines", 10, "full 档位注入上下文行数（0 表示不裁剪）")
+	fs.Parse(args)
+
+	repo := *repoFlag
+	if repo == "" {
+		repo = agentbench.DefaultRepo()
+	}
+	info, err := os.Stat(repo)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("agent-bench repo %s: not a directory or unreadable", repo)
+	}
+
+	tasks := agentbench.DefaultTasks()
+	agentbench.SortTasks(tasks)
+	fmt.Printf("agent task bench on %s (%d tasks, workers=%d, context_lines=%d)\n",
+		repo, len(tasks), *workers, *contextLines)
+
+	report, err := agentbench.Run(ctx, repo, tasks, agentbench.Options{
+		Workers:      *workers,
+		ContextLines: *contextLines,
+	})
+	if err != nil {
+		return fmt.Errorf("agent-bench: %w", err)
+	}
+
+	md := agentbench.GenerateMarkdown(report)
+	fmt.Printf("\n%s\n", md)
+
+	paths, err := agentbench.WriteOutput(report, *outFlag)
+	if err != nil {
+		return fmt.Errorf("agent-bench write output: %w", err)
+	}
+	for _, p := range paths {
+		fmt.Printf("agent task bench report saved to: %s\n", p)
+	}
+	return nil
 }

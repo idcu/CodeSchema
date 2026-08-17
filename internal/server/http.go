@@ -52,6 +52,10 @@ type HTTPServer struct {
 	ln            net.Listener // 当前监听器（UpdateRuntime 地址重绑时替换）
 	lnMu          sync.Mutex
 	errCh         chan error
+	// kvHealth/vectorHealth 可选健康检查函数（由 cmd 层注入真实状态；
+	// 未注入时健康端点返回 not_configured/默认描述，行为向后兼容）。
+	kvHealth     func(ctx context.Context) error
+	vectorHealth func(ctx context.Context) error
 }
 
 // NewHTTPServer 创建 HTTP API 服务器实例（单项目模式）。
@@ -176,6 +180,16 @@ func (h *HTTPServer) SetVizHandler(viz *VizHandler) {
 	h.viz = viz
 }
 
+// SetKVHealthCheck 注入 KV 缓存健康检查函数（Redis 可用时报告真实状态）。
+func (h *HTTPServer) SetKVHealthCheck(fn func(ctx context.Context) error) {
+	h.kvHealth = fn
+}
+
+// SetVectorHealthCheck 注入向量索引健康检查函数（可选后端时报告真实状态）。
+func (h *HTTPServer) SetVectorHealthCheck(fn func(ctx context.Context) error) {
+	h.vectorHealth = fn
+}
+
 // serviceForRequest 从请求中解析租户 ID 并返回对应 Service。
 // 单项目模式下忽略租户标识，始终返回唯一实例。
 func (h *HTTPServer) serviceForRequest(r *http.Request) *service.Service {
@@ -236,8 +250,8 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 		h.rateLimitMiddleware(
 			h.authMiddleware(
 				h.pathTraversalMiddleware(
-					h.errorRecoveryMiddleware(
-						h.corsMiddleware(mux),
+					recoveryMiddlewareFor(true, h.logger)(
+						corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant")(mux),
 					),
 				),
 			),
@@ -314,11 +328,23 @@ func (h *HTTPServer) handleHealthKV(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
 		return
 	}
-	// P0: KV 缓存尚未实现，返回占位状态
+	// KV 缓存层（Redis）为可选后端：已实现但不强制启用。
+	// 状态由 cmd 层注入（SetKVHealthCheck），未注入时返回 not_configured。
+	if h.kvHealth != nil {
+		status := "ok"
+		if err := h.kvHealth(r.Context()); err != nil {
+			status = "degraded"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": status,
+			"type":   "redis",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"type":   "none",
-		"note":   "KV cache not implemented (P0 placeholder)",
+		"note":   "KV cache (redis) not configured",
 	})
 }
 
@@ -327,11 +353,22 @@ func (h *HTTPServer) handleHealthVector(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
 		return
 	}
-	// P8.1: 内存向量索引已实现，支持语义搜索
+	// 向量索引已实现（Persistent/Memory/Chromem），状态由 cmd 层注入。
+	if h.vectorHealth != nil {
+		status := "ok"
+		if err := h.vectorHealth(r.Context()); err != nil {
+			status = "degraded"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": status,
+			"type":   "vector",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"type":   "memory",
-		"note":   "In-memory vector index active (P8.1, P2 for chromem-go)",
+		"note":   "Vector index active (Persistent/Memory)",
 	})
 }
 
@@ -531,36 +568,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 }
 
 // ---- 中间件 ----
-
-// errorRecoveryMiddleware 捕获 panic 并返回 500 错误。
-func (h *HTTPServer) errorRecoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				h.logger.Error("panic recovered",
-					"path", r.URL.Path,
-					"error", fmt.Sprintf("%v", rec),
-				)
-				writeError(w, "ERR_INTERNAL", fmt.Sprintf("internal server error: %v", rec), 500)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
-
-// corsMiddleware 添加 CORS 头。
-func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Tenant")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
+//
+// CORS 与 panic 恢复收敛为包级公共函数（middleware.go）：
+//   recoveryMiddlewareFor(true, h.logger) / corsMiddlewareFor("GET, OPTIONS", ...)。
+// 本文件仅保留依赖实例状态（认证/限流/路径遍历/请求指标）的中间件。
 
 // authMiddleware Bearer token 认证中间件。
 // 每次请求读取运行时快照中的认证令牌：支持热更新（UpdateRuntime），即时生效。

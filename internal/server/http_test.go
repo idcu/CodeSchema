@@ -163,8 +163,7 @@ func TestSearchEndpoint_Success(t *testing.T) {
 }
 
 func TestCORSMiddleware(t *testing.T) {
-	srv := newTestHTTPServer(t)
-	handler := srv.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -183,7 +182,7 @@ func TestCORSMiddleware(t *testing.T) {
 
 func TestErrorRecoveryMiddleware(t *testing.T) {
 	srv := newTestHTTPServer(t)
-	handler := srv.errorRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := recoveryMiddlewareFor(true, srv.logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")
 	}))
 

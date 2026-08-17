@@ -49,13 +49,36 @@ func (c *RedisCache) HealthCheck(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
 
-// PutClass 缓存一个类（热点）。
+// PutClass 缓存一个类（热点），并建立 class:<fqn> → file path 反查索引。
 func (c *RedisCache) PutClass(ctx context.Context, class *parser.ClassIR) error {
 	b, err := json.Marshal(class)
 	if err != nil {
 		return err
 	}
-	return c.client.HSet(ctx, "class:"+class.FullName, "ir", b).Err()
+	if err := c.client.HSet(ctx, "class:"+class.FullName, "ir", b).Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PutClassPath 记录类全限定名 → 源文件路径（供 CacheReader.ClassFilePath 反查）。
+func (c *RedisCache) PutClassPath(ctx context.Context, fqn, path string) error {
+	if fqn == "" || path == "" {
+		return nil
+	}
+	return c.client.Set(ctx, "classpath:"+fqn, path, 0).Err()
+}
+
+// ClassPath 返回类全限定名对应的源文件路径；未命中返回 ("", false)。
+func (c *RedisCache) ClassPath(ctx context.Context, fqn string) (string, bool) {
+	path, err := c.client.Get(ctx, "classpath:"+fqn).Result()
+	if err == redis.Nil {
+		return "", false
+	}
+	if err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 // GetClass 读取缓存的类；未命中返回 (nil, nil)。
