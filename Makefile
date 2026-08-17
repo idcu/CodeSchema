@@ -87,6 +87,16 @@ bench-callgraph:
 	$(GO) test -tags treesitter -run TestTreeSitterCallGraphBench -count=1 -timeout 120s ./internal/adapterbench/
 	@echo "==> Bench outputs: build/treesitter-callgraph-bench.json + build/treesitter-bench-history.jsonl"
 
+# Agent 任务端到端评测（对外可信基准）：真实仓库评测 + 刷新快照
+# （build/agent-task-bench/；快照归一化 repo_path=仓库名，可跨机器 diff）
+# 用法：make bench-agent [AGENT_BENCH_REPO=/path/to/repo]
+.PHONY: bench-agent
+bench-agent:
+	@echo "==> Running agent task bench (real repo, snapshot refresh) ..."
+	$(GO) build -o $(OUTPUT)/codeschema ./cmd/codeschema
+	$(OUTPUT)/codeschema agent-bench --repo $(if $(AGENT_BENCH_REPO),$(AGENT_BENCH_REPO),.) --out build/agent-task-bench
+	@echo "==> Agent bench outputs: build/agent-task-bench/agent-task-bench.md + .json"
+
 # 基准历史趋势可视化：读取 build/treesitter-bench-history.jsonl 生成 HTML 趋势图
 .PHONY: bench-trend
 bench-trend:

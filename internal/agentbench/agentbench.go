@@ -102,7 +102,8 @@ type Summary struct {
 // Report 完整评测报告。
 type Report struct {
 	Timestamp   string       `json:"timestamp"`
-	RepoPath    string       `json:"repo_path"`
+	RepoPath    string       `json:"repo_path"`          // 仓库名（filepath.Base，跨机器可移植，快照 diff 稳定）
+	RepoAbs     string       `json:"repo_abs,omitempty"` // 仓库绝对路径（诊断用，不参与快照对比）
 	FileCount   int          `json:"file_count"`
 	ActiveTasks int          `json:"active_tasks"` // 实际评测的任务数（排除 Skipped）
 	Tasks       []TaskResult `json:"tasks"`
@@ -207,7 +208,11 @@ func Run(ctx context.Context, repoPath string, tasks []AgentTask, opts Options) 
 
 	report := &Report{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		RepoPath:  repoPath,
+		// 归一化：RepoPath 存仓库名（filepath.Base），绝对路径入 RepoAbs。
+		// 使 build/agent-task-bench 快照可跨机器 diff（CI 看护 git diff --exit-code
+		// 不受本机路径差异影响）。
+		RepoPath:  filepath.Base(repoPath),
+		RepoAbs:   repoPath,
 		FileCount: countSourceFiles(repoPath),
 	}
 
@@ -408,7 +413,11 @@ func summarize(tasks []TaskResult) Summary {
 func GenerateMarkdown(r *Report) string {
 	var b strings.Builder
 	b.WriteString("## Agent 任务端到端评测报告\n\n")
-	b.WriteString(fmt.Sprintf("- 仓库：`%s`（文件数 %d）\n", r.RepoPath, r.FileCount))
+	if r.RepoAbs != "" {
+		b.WriteString(fmt.Sprintf("- 仓库：`%s`（%s，文件数 %d）\n", r.RepoPath, r.RepoAbs, r.FileCount))
+	} else {
+		b.WriteString(fmt.Sprintf("- 仓库：`%s`（文件数 %d）\n", r.RepoPath, r.FileCount))
+	}
 	b.WriteString(fmt.Sprintf("- 任务数：%d\n", r.Summary.TaskTotal))
 	b.WriteString(fmt.Sprintf("- 时间：%s\n\n", r.Timestamp))
 
@@ -458,7 +467,7 @@ func GenerateMultiMarkdown(reports []*Report) string {
 	b.WriteString("| 仓库 | 任务数 | full 通过率 | minimal 通过率 | none 通过率 | full token | minimal token | token 节省 |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|\n")
 	for _, r := range reports {
-		name := filepath.Base(r.RepoPath)
+		name := r.RepoPath // 已是仓库名（Run 归一化），无需再 Base
 		s := r.Summary
 		b.WriteString(fmt.Sprintf("| %s | %d | %.0f%% | %.0f%% | %.0f%% | %.0f | %.0f | **%.1f%%** |\n",
 			name, s.TaskTotal,

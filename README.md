@@ -79,6 +79,11 @@ go build -o codeschema ./cmd/codeschema
 # 全链路基准（扫描/索引/检索指标，单仓或多仓对比）
 ./codeschema benchmark ./repo --out build/bench.json
 
+# Agent 任务端到端评测（对外可信基准：三档上下文 × 任务集的通过率与 token 节省）
+./codeschema agent-bench --repo . --out build/agent-task-bench
+# 多仓库评测（按 RepoHint 过滤任务，跨仓对比报告）
+./codeschema agent-bench --repos "repo1;repo2" --out build/agent-task-bench
+
 # MCP 原生 stdio 直连（供仅支持 stdio 的客户端，如 Claude Desktop）
 ./codeschema mcp --stdio --store ./data
 
@@ -232,6 +237,9 @@ make test
 
 # 性能基准测试（含 internal/scalebench 的 BulkUpsert 回归看护 BenchmarkScaleBulk）
 make bench
+
+# Agent 任务端到端评测（对外可信基准，刷新 build/agent-task-bench/ 快照）
+make bench-agent
 ```
 
 当前全部包通过测试，0 失败（含 -race 竞态检测）。

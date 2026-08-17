@@ -84,7 +84,31 @@ jobs:
       # 看护：确认已跟踪的基准快照未被测试误改（默认写临时目录，仅 CODESCHEMA_UPDATE_BENCH=1 才写回 build/）
       - name: Assert tracked bench snapshots unchanged
         if: runner.os != 'Windows'
-        run: git diff --exit-code -- build/bench-compare.json build/realrepo-bench.json
+        run: git diff --exit-code -- build/bench-compare.json build/realrepo-bench.json build/agent-task-bench/agent-task-bench.json build/agent-task-bench/agent-task-bench.md
+
+  # === Agent 任务端到端评测（对外可信基准回归看护） ===
+  agent-bench:
+    name: Agent Task Bench
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Agent task bench (real repo, snapshot guard)
+        # 真实仓库评测（TestRun_RealRepo）：验证通过率梯度（full>=minimal>=none）与
+        # token 节省（minimal<full）；快照归一化（repo_path=仓库名）保证 CI 上
+        # git diff --exit-code 不受本机路径差异影响。
+        run: go test -count=1 -timeout 300s -run '^TestRun_RealRepo$' ./internal/agentbench/
+
+      - name: Assert agent-bench snapshot unchanged
+        run: git diff --exit-code -- build/agent-task-bench/agent-task-bench.json build/agent-task-bench/agent-task-bench.md
 
   # === 规模基准（BulkUpsert 回归看护） ===
   bench:

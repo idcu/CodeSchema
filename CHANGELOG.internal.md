@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 127: ci(make+bench): agent-bench 工程化看护——CI job + 快照归一化 + Makefile 目标
+
+- 背景：agent-bench（对外可信基准）此前仅一次性工具，未纳入 CI 与 Makefile；快照含本机绝对路径，跨机器 diff 必失败。
+- 实现：
+  - **快照归一化（关键修复）** `internal/agentbench/agentbench.go`：`Report.RepoPath` 改存仓库名（`filepath.Base`），新增 `RepoAbs` 保留绝对路径（诊断用，不参与快照对比）——`build/agent-task-bench/*.json` 可在任何机器生成且 `git diff --exit-code` 稳定，CI 看护不再受本机路径差异影响。
+  - **CI 看护** `.github/workflows/ci.yml`：新增 `agent-bench` job（真实仓库评测 TestRun_RealRepo + 快照 diff 看护）；test job 的「Assert tracked bench snapshots unchanged」纳入 agent-task-bench 两个快照文件。
+  - **Makefile**：新增 `bench-agent` 目标（构建 CLI → agent-bench 单仓评测 → 刷新 build/agent-task-bench/ 快照，支持 `AGENT_BENCH_REPO` 覆盖仓库）。
+  - **文档**：README 快速开始补 `agent-bench`（单仓/多仓）示例与 `make bench-agent`；docs/2-交付层/测试指南.md §6 基准回归补 agent-bench 说明（CI 看护口径）。
+- 验证：`make bench-agent` 实测通过（快照归一化为 repo_path="code-schema"）；`go build ./...`、`go vet ./...` 通过；`go test ./internal/agentbench/` 全绿；ci.yml YAML 解析通过（jobs 9 个，新增 agent-bench）。
+- 文档同步：README.md、docs/2-交付层/测试指南.md、CHANGELOG.internal.md（本记录）、DEV_PROGRESS.md。
+- 遗留：无代码级遗留；外部动作（adapterx/contextsdk 独立仓库 push 发布、对外监听收敛部署）同前。
+
 ### Commit 126: chore(contrib+scripts): 生态资产 P2 发布前置收尾——adapterx 独立发布验证 + 脚本抽公共
 
 - 背景：Commit 125 遗留 TODO「adapterx 独立仓库拷贝发布（P2）」推进；context-sdk 发布前置核查。
