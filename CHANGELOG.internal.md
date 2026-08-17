@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 103: docs(doc-package): P2 迁移清理遗留源档 + 新增用户手册/测试指南
+
+- 新增 `docs/3-使用层/用户操作手册.md`（命令总览/扫描/监听/MCP/HTTP/多租户）；`docs/2-交付层/测试指南.md`（命令/约定/场景/CI/基准）
+- 迁移：`docs/modules`→`1-生产层/modules/`、`docs/dev`→`1-生产层/开发文档/`、`docs/ops`→`2-交付层/运维文档/`（git mv，保留实现细节）
+- 清理：`DEPLOYMENT_AND_USAGE.md`、`MCP接入指南.md` 归档至 `4-决策层/归档资料/`（历史源档，非删除）
+- 更新 `docs/README.md` 导航（迁移完成说明）及各圈层 README 状态
+- 验证：纯文档零代码改动；docs/ 根目录已仅剩 README/AI 协规范/五大目录；未 push
+- 遗留：无（P0-P2 文档治理执行完毕；版本发布说明为模板待发布流维护）
+
 ### Commit 102: docs(doc-package): P1 落地生产层/交付层/跨圈层/决策层 + 归档旧规划
 
 - 生产层新增：`数据库设计.md`（自 dev/01）、`配置参考.md`（自 config.example/dev11）、`扩展指南（新增适配器）.md`（自 dev/07）
