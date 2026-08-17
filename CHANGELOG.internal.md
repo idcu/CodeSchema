@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 115: docs(consistency): 全项目文档与代码现状核查同步（五圈层迁移收尾）
+
+- 背景：docs/ 迁移至五圈层结构后，活文档仍残留旧路径（docs/dev、docs/ops、docs/modules、docs/MCP接入指南、DEPLOYMENT_AND_USAGE）、旧包数与旧 onnxruntime 版本；逐行核查并统一。
+- 路径同步（19 文件 + 后续补充 4 文件）：
+  - `docs/dev/`→`docs/1-生产层/开发文档/`（README 开发指南、DEV_PROGRESS 核查/接手/已完成工作、开发文档 00-13 前置依赖、04 交叉引用）
+  - `docs/modules/`→`docs/1-生产层/modules/`（DEV_PROGRESS P3_4 引用）
+  - `docs/ops/`→`docs/2-交付层/运维文档/`（运维手册健康检查引用、01-生产部署清单）
+  - `docs/MCP接入指南.md`→`docs/3-使用层/客户端接入指南（MCP）.md`（README 快速开始、开发文档 05、P1/P1_2）
+  - `DEPLOYMENT_AND_USAGE.md`→`部署手册.md`（01-生产部署清单 4 处；源档已归档 4-决策层/归档资料/）
+- 版本同步：onnxruntime 1.23.2→1.28.0（匹配 `onnxruntime_go v1.32.1`、API 28；macOS Intel 旧机型保留 1.23.2 说明），README/11-配置/部署手册 三处统一。
+- 包数同步：23/24/27/31/32 → **33**（`go list ./...` 实测，新增 internal/tenant、internal/runtime、scripts/benchtrend）。
+- 索引同步：开发文档 13 篇 → 14 篇（`00`–`13`，新增 13-多租户设计文档）。
+- 顺手清理：删除遗留临时文件 `commitmsg.tmp`（Commit 113 残留）。
+- 验证：`go list ./...` = 33 个包（2026-08-17 实测）；`go build ./...` 通过；全库 grep 确认活文档已无 `docs/dev|docs/ops|docs/modules` 存活引用（仅 CHANGELOG 历史记录、4-决策层归档资料、「来源/迁移备注」说明属合理保留，不改）。
+- 遗留：归档资料（4-决策层/）与 CHANGELOG 历史段为只读快照，不随本次同步回改。
+
 ### Commit 114: feat(runtime): chromem 可选后端目录/文件权限纵深收敛（0700/0600）
 
 - 背景：全量推进安全自查，补齐 chromem 可选后端——其持久化文件由 chromem-go 库生成、默认受 umask 影响（0666&umask），前一提交已要求显式 `driver=chromem` 才启用，但文件权限未收敛。

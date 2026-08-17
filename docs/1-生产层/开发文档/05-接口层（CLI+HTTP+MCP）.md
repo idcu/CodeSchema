@@ -1,7 +1,7 @@
 # 05 — 接口层（CLI + HTTP + MCP）
 
 > 开发顺序：第 5 步
-> 前置依赖：[docs/dev/03-存储层实现.md](03-存储层实现.md)
+> 前置依赖：[03-存储层实现.md](03-存储层实现.md)
 > 对应原始文档章节：§12 接口层
 
 ---
@@ -79,7 +79,7 @@ MCP Server 提供 12 个工具（P0 8 个 + P5 3 个 + 多租户 list_projects 1
 **双传输（2026-08-15，T4-1）**：
 - **SSE（默认）**：`codeschema mcp --addr :8080`，端点为 `/sse`（HTTP SSE），`/message` 收 JSON-RPC 消息。
 - **stdio（原生直连）**：`codeschema mcp --stdio`，LSP 风格 `Content-Length` 帧读 stdin / 写 stdout，EOF 优雅退出——供仅支持 stdio 的客户端（如 Claude Desktop）以子进程方式连接；JSON-RPC 处理逻辑经 `handleRequest` 纯函数抽取，两传输复用。
-- **一键配置**：`codeschema mcp --print-config` 输出 VS Code / JetBrains / Claude Code / Cursor / npx 桥接五类接入配置片段（见 `docs/MCP接入指南.md`）。
+- **一键配置**：`codeschema mcp --print-config` 输出 VS Code / JetBrains / Claude Code / Cursor / npx 桥接五类接入配置片段（见 `docs/3-使用层/客户端接入指南（MCP）.md`）。
 
 ### 4.1 工具表
 
