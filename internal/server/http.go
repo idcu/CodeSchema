@@ -255,8 +255,13 @@ func (h *HTTPServer) handleContext(w http.ResponseWriter, r *http.Request) {
 
 	symbol := r.URL.Query().Get("symbol")
 	contextLines, _ := strconv.Atoi(r.URL.Query().Get("context_lines"))
+	mode := r.URL.Query().Get("mode") // full（默认）/ minimal（极简，供评测基线）
 
-	result, err := h.serviceForRequest(r).GetContext(r.Context(), symbol, contextLines)
+	result, err := h.serviceForRequest(r).GetContextMode(r.Context(), symbol, service.ContextOptions{
+		ContextLines: contextLines,
+		Mode:         service.ContextMode(mode),
+		IncludeTrace: true,
+	})
 	if err != nil {
 		writeServiceError(w, err)
 		return

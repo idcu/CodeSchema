@@ -1,0 +1,33 @@
+# CodeSchema × DeepSeek Harness 集成配置模板
+# 
+# 用法：
+#   1. 启动 CodeSchema MCP Server（stdio 或 SSE，见 README.md）
+#   2. 在 dsh 的 MCP 配置中填入下方对应段落
+#   3. 重启 dsh 会话
+#
+# 注意：dsh 的 MCP 配置格式可能随版本变化，请以 dsh 官方文档为准。
+# 本配置仅作参考，实际使用时需根据 dsh 版本调整。
+
+# 方式一：stdio 模式（推荐）
+# 适用于 CodeSchema 与 dsh 在同一台机器上运行
+# codeschema mcp --stdio --store /path/to/data
+codeschema:
+  command: codeschema
+  args:
+    - mcp
+    - --stdio
+    - --store
+    - /path/to/data
+
+# 方式二：SSE 远程模式
+# 适用于 CodeSchema 部署在远程服务器
+# codeschema mcp --addr :8080
+# codeschema:
+#   url: http://localhost:8080/sse
+
+# 方式三：SSE 远程模式 + 认证
+# codeschema mcp --addr :8080 --auth-token <token>
+# codeschema:
+#   url: http://localhost:8080/sse
+#   headers:
+#     Authorization: Bearer <token>

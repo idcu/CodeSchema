@@ -20,7 +20,7 @@
 | 端点 | 方法 | 参数 | 说明 |
 |---|---|---|---|
 | `/health` `/health/db` `/health/vector` `/health/kv` | GET | - | 健康检查（含存储/缓存/向量） |
-| `/context` | GET | `symbol`,`context_lines` | 获取符号精准裁剪上下文 |
+| `/context` | GET | `symbol`,`context_lines`,`mode` | 获取符号精准裁剪上下文（`mode`: `full` 源码/`minimal` 仅符号元数据） |
 | `/impact` | GET | `method`,`depth` | 影响面分析 |
 | `/tests` | GET | `method`,`min_confidence` | 关联单测 |
 | `/search` | GET | `q`,`mode`,`limit` | 双路检索（exact/semantic/both） |
@@ -42,9 +42,14 @@
 调用示例：
 ```json
 { "name": "context", "arguments": { "symbol": "com.example.UserService.login", "context_lines": 10 } }
+{ "name": "context", "arguments": { "symbol": "com.example.UserService.login", "mode": "minimal" } }
 { "name": "search_symbols", "arguments": { "q": "用户登录", "mode": "both", "limit": 20 } }
 { "name": "impact", "arguments": { "method": "com.example.UserService.login", "depth": 2 } }
 ```
+`context` 工具支持 `mode` 参数：
+- `full`（默认）：注入符号的完整源码（可配 `context_lines` 裁剪）；
+- `minimal`：仅注入符号元数据（名称/位置/文档），不读源码；适合 token 评测基线。
+
 多租户下检索类工具额外接受 `project` 参数；省略时路由默认租户（`"default"`）。
 
 ## 4. 错误码与边界
@@ -64,6 +69,7 @@
 | 日期 | 说明 |
 |---|---|
 | 2026-08-17 | 从 DEPLOYMENT_AND_USAGE/接口层文档提炼，补 /openapi、/viz、/projects、错误码 |
+| 2026-08-17 | 同步新增 `preset` 配置、`context` / `impact` 追溯、`mode`（full/minimal）参数 |
 
 ---
 

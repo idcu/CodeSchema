@@ -377,7 +377,12 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "context":
 		symbol, _ := args["symbol"].(string)
 		contextLines, _ := toInt(args["context_lines"])
-		result, err := svc.GetContext(ctx, symbol, contextLines)
+		mode, _ := args["mode"].(string) // 注入模式：full（默认）/ minimal（极简，供评测基线）
+		result, err := svc.GetContextMode(ctx, symbol, service.ContextOptions{
+			ContextLines: contextLines,
+			Mode:         service.ContextMode(mode),
+			IncludeTrace: true,
+		})
 		if err != nil {
 			return mcpError(id, err)
 		}

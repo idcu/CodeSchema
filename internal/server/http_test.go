@@ -20,6 +20,7 @@ func newTestHTTPServer(t *testing.T) *HTTPServer {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	seedSymbol(t, st)
 	svc := service.NewService(st)
 	return NewHTTPServer(svc, ":0")
 }

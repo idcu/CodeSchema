@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/ai"
@@ -13,7 +14,7 @@ import (
 	"github.com/idcu/codeschema/internal/vector"
 )
 
-func newTestService(t *testing.T) *Service {
+func newTestService(t testing.TB) *Service {
 	t.Helper()
 	dir := t.TempDir()
 	st := store.NewStore("file")
@@ -58,12 +59,21 @@ func TestGetContext_EmptySymbol(t *testing.T) {
 
 func TestGetContext_Success(t *testing.T) {
 	svc := newTestService(t)
-	ctx, err := svc.GetContext(context.Background(), "com.example.MyClass.myMethod", 5)
+	seedContextFile(t, svc)
+
+	ctx, err := svc.GetContext(context.Background(), "com.example.OrderService.GetUser", 5)
 	if err != nil {
 		t.Fatalf("GetContext: %v", err)
 	}
-	if ctx.Symbol != "com.example.MyClass.myMethod" {
+	if ctx.Symbol != "com.example.OrderService.GetUser" {
 		t.Errorf("expected symbol, got %s", ctx.Symbol)
+	}
+	// 真实解析：注入源码原文（非 P0 占位），并附带追溯字段
+	if !strings.Contains(ctx.Source, "GetUser") {
+		t.Errorf("expected real source body, got %q", ctx.Source)
+	}
+	if ctx.Trace == nil || ctx.Trace.Source != "store.GetContext" {
+		t.Error("expected context injection trace on success path")
 	}
 }
 

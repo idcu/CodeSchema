@@ -20,6 +20,7 @@ func newTestMCPServer(t *testing.T) *MCPServer {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	seedSymbol(t, st)
 	svc := service.NewService(st)
 	return NewMCPServer(svc, ":0")
 }

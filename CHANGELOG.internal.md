@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 117: feat(harness): dsh 建议 1-7 全量推进——上下文追溯/极简模式/能力预设/context-sdk/dsh 接入/生态资产化 + ONNX 版本口径统一
+
+- 背景：`analysis/2026-08-17-competitor-and-harness-analysis.md` §3.3 给出 8 条建议（按优先级），用户要求全量推进实施。本提交落地建议 1-7，并同步任务 1（ONNX 版本口径：osx amd64 上游仅到 1.23.2 不再更新）。
+- 建议 1 dsh 插件接入：新增 `contrib/dsh/README.md`（stdio/SSE 双方式集成指南）+ `contrib/dsh/codeschema-dsh.yaml`（配置模板，12 个 MCP 工具作能力插件）。
+- 建议 2 上下文注入追溯：`internal/service` 新增 `TraceEntry`（来源/命中符号/命中行/裁剪原因/裁剪行/估算 token/时间戳），`GetContextMode`/`GetImpact` 注入附 `_trace`；HTTP `/context`、MCP `context` 工具 `IncludeTrace: true` 默认带回。
+- 建议 3 能力层 preset：`internal/config/preset.go` 新增 `Preset`（`minimal`/`semantic`/`multitenant`/`""`），`ApplyPreset` 幂等、是其管理字段的权威来源；`Load`/`LoadFromEnv`/`Merge` 全链路接入；未知值加载时归一为空。
+- 建议 4 极简上下文模式：`GetContextMode` 支持 `mode=minimal`（仅符号元数据、零文件 IO），HTTP/MCP 增加 `mode` 参数；新增 `BenchmarkContextMode` 对照。
+- 建议 5 context-sdk：新增 `internal/contextsdk`，`NewClient(resolve).Compose(...)` 一次编排多租户 × 多符号 × 影响面 × 关联单测的上下文包，汇总 token 估算。
+- 建议 6 AGENTS.md：根级 `AGENTS.md` 面向接入 agent 提供协作约束（读档顺序/同步清单/接口契约）。
+- 建议 7 生态资产化：新增 `docs/4-决策层/生态资产发布说明.md`（A/B/C 三级资产清单 + 发布路线图 + 资产化纪律），并在 docs/README 与 4-决策层 README 登记入口。
+- 任务 1 ONNX 版本口径统一：README/部署手册/11-配置/交接说明/安全设计 五处改为「主版本 1.28.0（Win/Linux/Apple Silicon）；macOS Intel(x86_64) 上游自 1.23.2 后不再发布，锁定 1.23.2（`third_party/onnxruntime_go_patch` ORT_API_VERSION 23 适配）」。
+- 测试：新增 `internal/config/preset_test.go`（3 项）、`internal/contextsdk/sdk_test.go`（4 项）、`internal/service/trace_test.go`（4 项）、`internal/service/context_bench_test.go`（benchmark）、`internal/server/testutil_test.go`（seedSymbol 供 context/impact 工具测试）；修复 preset 权威覆盖/merge 时序/Load 归一/inclusive-trace 默认关闭等 5 处测试语义。
+- 验证：`go build ./...` 通过；`go test ./...` 全零 FAIL（config 0.095s / service 0.404s / server 0.483s / contextsdk 0.207s，全包 OK）。
+- 打点数据（BenchmarkContextMode，100 符号批量，i5-13400/Win）：full 5.55ms·730,909B·4400 allocs → **minimal 0.142ms·84,073B·1200 allocs（约 39× 快、8.7× 省内存、3.7× 省分配）**；context_lines=5 与 full 同量级（5.07ms）。
+- 文档同步：API文档.md、配置参考.md、客户端接入指南（MCP）.md、05-接口层（CLI+HTTP+MCP）.md、部署手册.md、11-配置部署与路线图.md、交接说明.md、安全设计文档.md、README.md、config.yaml.example、docs/README.md、4-决策层/README.md。
+- 遗留 TODO：建议 8（风险提示）为理性守势不实施；context-sdk 独立发布与 A 级适配器聚合发布列入生态资产路线图（P2，待首个 v* tag 后评估）；对外监听收敛仍为部署期项。
+
 ### Commit 116: docs(process): 巩固文档同步性——AI协作规范 §4 映射扩至 14 类 + 核验清单
 
 - 背景：五圈层迁移后，AI协作规范 §4「改码必改档」映射表仅 8 类，缺安全/适配器/监控/性能/测试/多租户等圈层主档，同步性有盲区。

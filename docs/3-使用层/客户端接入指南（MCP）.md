@@ -64,7 +64,11 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 
 `context` · `impact` · `tests` · `affected` · `get_call_graph` · `search_config` · `find_dependencies` · `search_symbols` · `get_tags` · `search_by_tag` · `get_all_tags` · `list_projects`。
 
+`context` 支持 `mode` 参数：`full`（默认，注入源码）／`minimal`（仅符号元数据，token 评测基线）。每次 `context` / `impact` 注入附 `_trace` 追溯（来源/裁剪原因/估算 token），便于复盘。
+
 多租户下 11 个检索类工具额外接受 `project` 参数指定目标仓库；省略时路由默认租户（`"default"`）。`list_projects` 返回当前实例所有租户元信息。
+
+> 对接 DeepSeek Harness（dsh）：见 [`contrib/dsh`](../../../contrib/dsh/README.md) 集成指南（stdio/SSE 两种方式 + 配置模板）。
 
 ## 8. 验证连通
 
@@ -77,3 +81,4 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 | 日期 | 说明 |
 |---|---|
 | 2026-08-17 | 自 docs/MCP接入指南.md 按圈层归位改进 |
+| 2026-08-17 | 补 context 的 mode 参数与 _trace 追溯说明；新增 dsh 集成指引 |

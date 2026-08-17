@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -135,32 +136,303 @@ func (s *Service) StoreHealthCheck(ctx context.Context) error {
 	return s.store.HealthCheck(ctx)
 }
 
-// SymbolContext 符号上下文响应。
-type SymbolContext struct {
-	Symbol       string   `json:"symbol"`
-	Source       string   `json:"source"`
-	FilePath     string   `json:"file_path"`
-	StartLine    int      `json:"start_line"`
-	EndLine      int      `json:"end_line"`
-	Doc          string   `json:"doc,omitempty"`
-	RelatedTests []string `json:"related_tests,omitempty"`
+// TraceEntry 上下文注入追溯记录，记录每次注入的来源、裁剪依据与时间戳。
+// 对齐 DeepSeek Harness 的 append-only 轨迹思想：让每次上下文注入"有迹可循"，
+// 可量化省了多少 token、为什么省（与 agentic grep 对比的基线数据）。
+type TraceEntry struct {
+	Source        string `json:"source"`         // 来源：如 "store.GetContext" / "store.GetImpact"
+	HitSymbols    int    `json:"hit_symbols"`    // 命中符号数
+	HitLines      int    `json:"hit_lines"`      // 命中行数（实际注入行数）
+	TrimReason    string `json:"trim_reason"`    // 裁剪原因：如 "context_lines" / "mode_minimal" / "full" / "file_unreadable"
+	TrimmedLines  int    `json:"trimmed_lines"`  // 裁剪行数（文件总行 - 注入行）
+	TokenEstimate int    `json:"token_estimate"` // 估算 token 数（≈ 注入行数 × 4）
+	Timestamp     string `json:"timestamp"`      // ISO 8601 时间戳
 }
 
-// GetContext 获取指定符号的上下文（P0 骨架，返回占位数据）。
+// ContextMode 上下文注入模式：控制"喂给 Agent 的内容形态"。
+//   - ModeFull（默认）：注入真实源码原文（方法体/类体），可配 context_lines 裁剪；
+//   - ModeMinimal：仅注入符号元数据（签名/文档/行列区间），不喂源码原文，
+//     作为「极简上下文模式」评测基线，用于与全文档对照产出 token 节省数据。
+type ContextMode string
+
+const (
+	ModeFull    ContextMode = "full"    // 注入源码原文（默认）
+	ModeMinimal ContextMode = "minimal" // 仅符号 + 行号，不喂源码原文
+)
+
+// ContextOptions 上下文注入选项。
+type ContextOptions struct {
+	// ContextLines 上下文裁剪行数（mode=full 生效）：
+	//   - 0：注入符号完整内容（方法/类全量，不裁剪）；
+	//   - N>0：注入符号体并前后各附带 N 行上下文（夹在文件边界内）。
+	ContextLines int
+	// Mode 注入模式：ModeFull（默认）或 ModeMinimal。
+	Mode ContextMode
+	// IncludeTrace 是否在响应中附加 _trace 追溯字段（默认 true）。
+	IncludeTrace bool
+}
+
+// SymbolContext 符号上下文响应。
+type SymbolContext struct {
+	Symbol       string      `json:"symbol"`
+	Source       string      `json:"source"`
+	FilePath     string      `json:"file_path"`
+	StartLine    int         `json:"start_line"`
+	EndLine      int         `json:"end_line"`
+	Doc          string      `json:"doc,omitempty"`
+	RelatedTests []string    `json:"related_tests,omitempty"`
+	Trace        *TraceEntry `json:"_trace,omitempty"` // 追溯日志（仅供调试/审计，不公开）
+}
+
+// GetContext 获取指定符号的上下文（contextLines=0 表示完整内容，>0 前后裁剪）。
+//
+// 向后兼容的默认行为：contextLines<=0 视为 0（注入符号完整内容，不再按旧占位
+// 默认 5 行）。真实实现从 Store 解析符号位置并从磁盘读取源码注入，附带 _trace
+// 追溯字段（建议 2：上下文注入追溯）。
 func (s *Service) GetContext(ctx context.Context, symbol string, contextLines int) (*SymbolContext, error) {
+	return s.GetContextMode(ctx, symbol, ContextOptions{
+		ContextLines: contextLines,
+		Mode:         ModeFull,
+		IncludeTrace: true,
+	})
+}
+
+// GetContextMode 按指定选项获取符号上下文，支持 full/minimal 两种注入模式。
+//
+// 定位逻辑：
+//   - 先按类 FullName 精确匹配，再按方法 FullName 精确匹配（与 GetTags 一致）；
+//   - 命中后读取磁盘源码，按 context_lines 语义裁剪；
+//   - minimal 模式只返回签名/文档/行列区间，不读源码原文（零文件 IO 的快路径）。
+func (s *Service) GetContextMode(ctx context.Context, symbol string, opts ContextOptions) (*SymbolContext, error) {
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
-	if contextLines <= 0 {
-		contextLines = 5
+	if opts.Mode == "" {
+		opts.Mode = ModeFull
 	}
 
-	// P0: 返回占位数据，P1 接入真实存储查询
-	return &SymbolContext{
-		Symbol:   symbol,
-		Source:   fmt.Sprintf("// context for %s (P0 placeholder)", symbol),
-		FilePath: "unknown",
-	}, nil
+	loc, ok := s.resolveSymbolLocation(ctx, symbol)
+	if !ok {
+		return nil, &ServiceError{Code: "ERR_SYMBOL_NOT_FOUND", Message: fmt.Sprintf("symbol not found: %s", symbol)}
+	}
+
+	// minimal 模式：不读源码原文，只回元数据（快路径）。
+	if opts.Mode == ModeMinimal {
+		summary := loc.renderMinimal()
+		trace := &TraceEntry{
+			Source:        "store.GetContext",
+			HitSymbols:    1,
+			HitLines:      1, // 极简模式仅注入一行定位信息
+			TrimReason:    "mode_minimal",
+			TrimmedLines:  loc.LineCount - 1,
+			TokenEstimate: 4,
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		}
+		ctx2 := &SymbolContext{
+			Symbol:    symbol,
+			Source:    summary,
+			FilePath:  loc.FilePath,
+			StartLine: loc.StartLine,
+			EndLine:   loc.EndLine,
+			Doc:       loc.Doc,
+		}
+		if opts.IncludeTrace {
+			ctx2.Trace = trace
+		}
+		return ctx2, nil
+	}
+
+	// full 模式：读取源码原文并按 context_lines 语义裁剪。
+	lines, err := readFileLines(loc.FilePath)
+	if err != nil {
+		// 文件被移动/删除（扫描后磁盘变化）：回退为 minimal 形态，保留追溯留痕。
+		trimReason := "file_unreadable"
+		trace := &TraceEntry{
+			Source:        "store.GetContext",
+			HitSymbols:    1,
+			HitLines:      0,
+			TrimReason:    trimReason,
+			TrimmedLines:  loc.LineCount,
+			TokenEstimate: 0,
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		}
+		ctx2 := &SymbolContext{
+			Symbol:    symbol,
+			Source:    loc.renderMinimal(),
+			FilePath:  loc.FilePath,
+			StartLine: loc.StartLine,
+			EndLine:   loc.EndLine,
+			Doc:       loc.Doc,
+		}
+		if opts.IncludeTrace {
+			ctx2.Trace = trace
+		}
+		return ctx2, nil
+	}
+
+	// 计算注入窗口：context_lines==0 → 符号完整内容；>0 → 前后各 N 行上下文。
+	start := clamp(loc.StartLine-1, 0, len(lines)) // 转 0 基
+	end := clamp(loc.EndLine, 0, len(lines))       // 半开区间
+	trimmed := 0
+	if opts.ContextLines > 0 {
+		start = clamp(start-opts.ContextLines, 0, len(lines))
+		end = clamp(end+opts.ContextLines, 0, len(lines))
+		trimmed = len(lines) - (end - start)
+	}
+	hit := lines[start:end]
+	if len(hit) == 0 {
+		hit = lines // 兜底：窗口为空时退化为整文件（防御，正常不会发生）
+	}
+
+	// 关联单测（沿用五策略，低置信度过滤 60，静默失败）。
+	var related []string
+	if links, err := s.FindTestLinks(ctx, symbol, 60); err == nil {
+		for _, l := range links {
+			related = append(related, l.TestMethod)
+		}
+	}
+
+	trimReason := "full"
+	if opts.ContextLines > 0 {
+		trimReason = "context_lines"
+	}
+	trace := &TraceEntry{
+		Source:        "store.GetContext",
+		HitSymbols:    1,
+		HitLines:      len(hit),
+		TrimReason:    trimReason,
+		TrimmedLines:  trimmed,
+		TokenEstimate: len(hit) * 4,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+
+	ctx2 := &SymbolContext{
+		Symbol:       symbol,
+		Source:       strings.Join(hit, "\n"),
+		FilePath:     loc.FilePath,
+		StartLine:    loc.StartLine,
+		EndLine:      loc.EndLine,
+		Doc:          loc.Doc,
+		RelatedTests: related,
+	}
+	if opts.IncludeTrace {
+		ctx2.Trace = trace
+	}
+	return ctx2, nil
+}
+
+// symbolLocation 符号的物理定位信息（从 Store 解析）。
+type symbolLocation struct {
+	FilePath  string
+	StartLine int
+	EndLine   int
+	Kind      string // "class" | "method"
+	Doc       string
+	LineCount int // 文件总行数（从 FileRecord 读取）
+}
+
+// renderMinimal 生成极简上下文：仅一行定位摘要（供 minimal 模式与文件不可读兜底）。
+func (l *symbolLocation) renderMinimal() string {
+	return fmt.Sprintf("%s (%s lines %d-%d)%s", l.Kind, l.FilePath, l.StartLine, l.EndLine, suffixIf(l.Doc != "", " /* "+singleLine(l.Doc)+" */"))
+}
+
+// resolveSymbolLocation 在 Store 中查找符号（类/方法）的物理位置。
+// 先按类 FullName 精确匹配，再按方法 FullName 精确匹配。
+func (s *Service) resolveSymbolLocation(ctx context.Context, symbol string) (*symbolLocation, bool) {
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, false
+	}
+	lineCount := make(map[int64]int, len(files))
+	for _, f := range files {
+		lineCount[f.ID] = f.LineCount
+	}
+	for _, f := range files {
+		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, cls := range classes {
+			if cls.FullName == symbol {
+				return &symbolLocation{
+					FilePath:  f.AbsolutePath,
+					StartLine: cls.StartLine,
+					EndLine:   cls.EndLine,
+					Kind:      "class",
+					Doc:       cls.Doc,
+					LineCount: lineCount[f.ID],
+				}, true
+			}
+		}
+	}
+	// 方法匹配（需要先找类再找方法）
+	for _, f := range files {
+		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, cls := range classes {
+			methods, err := s.store.GetMethodsByClassID(ctx, cls.ID)
+			if err != nil {
+				continue
+			}
+			for _, m := range methods {
+				if m.FullName == symbol {
+					return &symbolLocation{
+						FilePath:  f.AbsolutePath,
+						StartLine: m.StartLine,
+						EndLine:   m.EndLine,
+						Kind:      "method",
+						Doc:       m.Doc,
+						LineCount: lineCount[f.ID],
+					}, true
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+// readFileLines 读取文件并按行拆分（保留行尾换行前的原始内容，去除末尾空行）。
+func readFileLines(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines, nil
+}
+
+// clamp 将 v 限制在 [lo, hi] 区间内。
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// suffixIf 条件拼接后缀。
+func suffixIf(cond bool, suffix string) string {
+	if cond {
+		return suffix
+	}
+	return ""
+}
+
+// singleLine 将多行文档压成单行（minimal 摘要用）。
+func singleLine(doc string) string {
+	doc = strings.ReplaceAll(doc, "\n", " ")
+	doc = strings.ReplaceAll(doc, "\r", "")
+	if len(doc) > 60 {
+		doc = doc[:60] + "..."
+	}
+	return doc
 }
 
 // ImpactNode 影响面分析节点。
@@ -175,6 +447,7 @@ type ImpactResult struct {
 	Method  string       `json:"method"`
 	Callers []ImpactNode `json:"callers"`
 	Callees []ImpactNode `json:"callees"`
+	Trace   *TraceEntry  `json:"_trace,omitempty"` // 追溯日志（建议 2：上下文注入追溯）
 }
 
 // GetImpact 获取指定方法的影响面（基于真实调用图 + 关联单测）。
@@ -199,6 +472,16 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 	}
 
 	if s.analyzer == nil {
+		// 未注入 analyzer：空影响面，追溯记录来源（供复盘判断"为什么空"）。
+		result.Trace = &TraceEntry{
+			Source:        "store.GetImpact",
+			HitSymbols:    0,
+			HitLines:      0,
+			TrimReason:    "analyzer_unavailable",
+			TrimmedLines:  0,
+			TokenEstimate: 0,
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		}
 		return result, nil
 	}
 
@@ -209,6 +492,18 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 
 	result.Callers = s.enrichImpactNodes(ctx, callers)
 	result.Callees = s.enrichImpactNodes(ctx, callees)
+
+	// 追溯记录：命中符号数 = callers + callees 总数，裁剪依据 = 深度限制。
+	hitSymbols := len(result.Callers) + len(result.Callees)
+	result.Trace = &TraceEntry{
+		Source:        "store.GetImpact",
+		HitSymbols:    hitSymbols,
+		HitLines:      hitSymbols, // 影响面以节点粒度注入（每节点一行摘要 + 关联单测），按节点数计
+		TrimReason:    "depth_limit",
+		TrimmedLines:  0,
+		TokenEstimate: hitSymbols * 4,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
 	return result, nil
 }
 

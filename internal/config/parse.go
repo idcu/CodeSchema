@@ -8,6 +8,11 @@ import (
 // applyToConfig 将解析后的 map 数据合并到默认配置中。
 // 仅 JSON 配置使用此路径；YAML 配置直接通过 yaml.v3 的 Unmarshal 合并。
 func applyToConfig(cfg *Config, parsed map[string]any) error {
+	if v, ok := parsed["preset"]; ok {
+		if s, ok := v.(string); ok && ValidPreset(s) {
+			cfg.Preset = Preset(s)
+		}
+	}
 	if v, ok := parsed["project"]; ok {
 		if m, ok := v.(map[string]any); ok {
 			applyProject(&cfg.Project, m)

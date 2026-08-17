@@ -36,7 +36,7 @@
 
 | 接口 | 方法 | 用途 | 请求参数 | 响应 | 阶段 |
 |---|---|---|---|---|---|---|
-| `GET /context` | GET | 返回方法源码 ± N 行 + 类字段 + 接口 + 单测路径 | `symbol`（必需，全限定名）、`context_lines`（可选，默认 5） | `{symbol, source, class, tests, impacted_by}` | P0 |
+| `GET /context` | GET | 返回方法源码 ± N 行 + 类字段 + 接口 + 单测路径 + `_trace` 追溯 | `symbol`（必需，全限定名）、`context_lines`（可选，默认 5）、`mode`（可选，`full`/`minimal`，默认 `full`） | `{symbol, source, file_path, start_line, end_line, doc, related_tests, _trace}` | P0 |
 | `GET /impact` | GET | 返回上游调用方列表 | `method`（必需）、`depth`（可选，默认 1） | `{method, callers: [{method, depth}], callees: [{method, depth}]}` | P0 |
 | `GET /tests` | GET | 返回关联单测 | `method`（必需）、`min_confidence`（可选，默认 60） | `{method, tests: [{test_method, strategy, confidence}]}` | P0 |
 | `GET /search` | GET | 精确 + 语义双路检索 | `q`（必需）、`mode`（可选，`exact`/`semantic`/`both`，默认 `both`）、`limit`（可选，默认 20） | `{results: [{symbol, kind, file, score, snippet}]}` | P0 |
@@ -85,7 +85,7 @@ MCP Server 提供 12 个工具（P0 8 个 + P5 3 个 + 多租户 list_projects 1
 
 | 工具 | 入参 | 返回 | 对标 | 阶段 |
 |---|---|---|---|---|
-| `context` | `symbol: string`（类/方法全名） | 精准裁剪上下文（方法体 + 字段 + 接口 + 单测） | CodeGraph `codegraph_context` | P0 |
+| `context` | `symbol: string`, `context_lines?: number`, `mode?: 'full'\|'minimal'` | 精准裁剪上下文（方法体 + 字段 + 接口 + 单测）+ `_trace` 追溯；`minimal` 仅符号元数据 | CodeGraph `codegraph_context` | P0 |
 | `impact` | `method: string`, `depth?: number` | 上游调用方 + 下游被调 | CodeGraph `codegraph_impact` | P0 |
 | `tests` | `method: string`, `min_confidence?: number` | 关联单测列表（含 dependency） | CodeGraph `codegraph_affected` | P0 |
 | `affected` | `symbol: string`, `recursive?: boolean` | 递归 import/include 依赖找受影响测试 | CodeGraph `affected` | P0 |

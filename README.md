@@ -243,7 +243,7 @@ make bench
 | Go | 1.25+ | 编译运行 |
 | GCC/MinGW | 任一 C 编译器 | **仅 ONNX 语义检索需要**：默认 `go build ./...` 已免 CGO/gcc。`go build -tags onnx` 启用 ONNX 嵌入器（bge-small-zh-v1.5）时需 gcc 与 onnxruntime 动态库；不使用 ONNX 时纯 Go 构建即可（modernc.org/sqlite 亦为纯 Go）。 |
 | Docker | 24+ | 容器化部署 |
-| onnxruntime | 1.28.0（匹配 `onnxruntime_go v1.32.1`，API 28） | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`；本机 x86_64 经 `third_party/onnxruntime_go_patch` 适配，真实嵌入推理 dim=512 已验证；macOS Intel 旧机型可保留 1.23.2 作最后 x86 版本） |
+| onnxruntime | 1.28.0（匹配 `onnxruntime_go v1.32.1`，API 28） | 可选，ONNX 模型语义检索加速（需 `onnxruntime.dll` / `.so` / `.dylib`；Win/Linux/Apple Silicon 用 1.28.0；**macOS Intel(x86_64) 上游自 1.23.2 后不再发布新版本，锁定 1.23.2**，绑定经 `third_party/onnxruntime_go_patch` 适配 API 23，真实嵌入推理 dim=512 已验证） |
 | bge-small-zh-v1.5 | — | 可选，ONNX 语义嵌入模型（FP16 量化，~47MB，自动降级到 LocalEmbedder） |
 
 ## 许可证

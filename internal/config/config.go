@@ -24,13 +24,16 @@ import (
 
 // Config 顶层配置结构。
 type Config struct {
-	Project ProjectConfig `yaml:"project" json:"project"`
-	Storage StorageConfig `yaml:"storage" json:"storage"`
-	Parser  ParserConfig  `yaml:"parser" json:"parser"`
-	AI      AIConfig      `yaml:"ai" json:"ai"`
-	Server  ServerConfig  `yaml:"server" json:"server"`
-	Watcher WatcherConfig `yaml:"watcher" json:"watcher"`
-	Scanner ScannerConfig `yaml:"scanner" json:"scanner"`
+	// Preset 能力层预设（建议 3）：minimal / semantic / multitenant / ""（默认）。
+	// 用单个字段组合整组能力配置，见 ApplyPreset。
+	Preset  Preset         `yaml:"preset" json:"preset"`
+	Project ProjectConfig  `yaml:"project" json:"project"`
+	Storage StorageConfig  `yaml:"storage" json:"storage"`
+	Parser  ParserConfig   `yaml:"parser" json:"parser"`
+	AI      AIConfig       `yaml:"ai" json:"ai"`
+	Server  ServerConfig   `yaml:"server" json:"server"`
+	Watcher WatcherConfig  `yaml:"watcher" json:"watcher"`
+	Scanner ScannerConfig  `yaml:"scanner" json:"scanner"`
 	// Tenants 多租户注册表。非空时 serve/mcp 以单实例服务多个隔离仓库；
 	// 为空则沿用顶层 project/storage 等配置，保持单项目模式（向后兼容）。
 	Tenants []TenantConfig `yaml:"tenants" json:"tenants"`
@@ -391,12 +394,23 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: unsupported config format: %s (supported: yaml, yml, json)", ext)
 	}
 
+	// 应用能力层预设（幂等；仅 YAML/JSON 显式配置 preset 时生效）。
+	// 未知 preset 值在此归一为空，保持默认能力（可由 Validate 显式告警）。
+	if cfg.Preset != "" && !ValidPreset(string(cfg.Preset)) {
+		cfg.Preset = ""
+	}
+	ApplyPreset(cfg)
+
 	return cfg, nil
 }
 
 // Validate 校验配置的合法性，返回所有错误。
 func Validate(cfg *Config) []error {
 	var errs []error
+
+	if cfg.Preset != "" && !ValidPreset(string(cfg.Preset)) {
+		errs = append(errs, fmt.Errorf("preset %q is unsupported (allowed: minimal, semantic, multitenant)", cfg.Preset))
+	}
 
 	if cfg.Project.Root == "" {
 		errs = append(errs, fmt.Errorf("project.root must not be empty"))
@@ -486,6 +500,14 @@ func Validate(cfg *Config) []error {
 //
 // LoadFromEnv 会直接修改传入的 cfg 实例，优先级高于配置文件但低于 CLI 参数。
 func LoadFromEnv(cfg *Config) {
+	// preset（能力层预设，设置后立即应用，幂等）
+	if v := os.Getenv("CODESCHEMA_PRESET"); v != "" {
+		if ValidPreset(v) {
+			cfg.Preset = Preset(v)
+			ApplyPreset(cfg)
+		}
+	}
+
 	// project
 	if v := os.Getenv("CODESCHEMA_PROJECT_ROOT"); v != "" {
 		cfg.Project.Root = v
@@ -750,6 +772,12 @@ func Merge(base, overlay *Config) *Config {
 		merged.Scanner.LineCountLimit = overlay.Scanner.LineCountLimit
 	}
 
+	// Preset：最后应用（覆盖同层字段，保证"只改 preset 即达预期组合"）
+	if overlay.Preset != "" && ValidPreset(string(overlay.Preset)) {
+		merged.Preset = overlay.Preset
+		ApplyPreset(merged)
+	}
+
 	return merged
 }
 
@@ -780,6 +808,7 @@ func cloneConfig(cfg *Config) *Config {
 		return nil
 	}
 	return &Config{
+		Preset: cfg.Preset,
 		Project: ProjectConfig{
 			Name:      cfg.Project.Name,
 			Root:      cfg.Project.Root,
