@@ -920,11 +920,13 @@ type OnReload func(oldCfg, newCfg *Config)
 // 默认轮询间隔为 2 秒。当检测到文件内容变更时，自动重新加载配置
 // 并通过 OnReload 回调通知应用层。
 //
-// 线程安全：reloadCfg 和 cfgMu 保护配置的原子切换。
+// 线程安全：cfgMu 保护配置的原子切换；reloadMu 保护 OnReload 回调
+// 的注册与读取（SetOnReload 允许在 Start 之后调用）。
 type ConfigWatcher struct {
 	path         string
 	cfg          *Config
 	cfgMu        sync.RWMutex
+	reloadMu     sync.Mutex
 	onReload     OnReload
 	pollInterval time.Duration
 	lastModTime  time.Time
@@ -963,6 +965,15 @@ func (cw *ConfigWatcher) SetPollInterval(d time.Duration) {
 	if d > 0 {
 		cw.pollInterval = d
 	}
+}
+
+// SetOnReload 注册配置重载完成后的回调。可在 Start 前后任意时刻调用，
+// 替换旧的回调；传 nil 可取消回调。回调在轮询 goroutine 中同步执行，
+// 应快速返回，避免阻塞后续配置监听。
+func (cw *ConfigWatcher) SetOnReload(fn OnReload) {
+	cw.reloadMu.Lock()
+	defer cw.reloadMu.Unlock()
+	cw.onReload = fn
 }
 
 // GetConfig 返回当前配置（线程安全，原子切换）。
@@ -1030,7 +1041,10 @@ func (cw *ConfigWatcher) checkAndReload(ctx context.Context) {
 	cw.cfgMu.Unlock()
 
 	// 通知回调
-	if cw.onReload != nil {
-		cw.onReload(oldCfg, newCfg)
+	cw.reloadMu.Lock()
+	fn := cw.onReload
+	cw.reloadMu.Unlock()
+	if fn != nil {
+		fn(oldCfg, newCfg)
 	}
 }

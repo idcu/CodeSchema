@@ -113,24 +113,25 @@ Use "codeschema <command> -h" for more information about a command.
 
 	// P9: 配置热重载（watch/mcp/serve 命令支持）
 	// 仅在指定了配置文件路径时启动
+	var cfgWatcher *config.ConfigWatcher
 	if *configPath != "" {
 		switch args[0] {
 		case "watch", "mcp", "serve":
-			cw := config.NewConfigWatcher(*configPath, cfg, nil)
-			cw.SetPollInterval(2 * time.Second)
+			cfgWatcher = config.NewConfigWatcher(*configPath, cfg, nil)
+			cfgWatcher.SetPollInterval(2 * time.Second)
 			go func() {
-				if err := cw.Start(ctx); err != nil && err != context.Canceled {
+				if err := cfgWatcher.Start(ctx); err != nil && err != context.Canceled {
 					log.Printf("config watcher stopped: %v", err)
 				}
 			}()
 			graceful.RegisterFunc("config_watcher", func(ctx context.Context) error {
-				cw.Stop()
+				cfgWatcher.Stop()
 				return nil
 			})
 
 			// 将配置实例替换为可热更新的配置
 			origCfg := cfg
-			cfg = cw.GetConfig()
+			cfg = cfgWatcher.GetConfig()
 			_ = origCfg // 保留原引用，后续使用 cfg 时会自动获取最新配置
 		}
 	}
@@ -153,10 +154,10 @@ Use "codeschema <command> -h" for more information about a command.
 		return rebuildKVCmd(ctx, cfg, args[1:])
 
 	case "mcp":
-		return mcpCmd(ctx, cfg, args[1:])
+		return mcpCmd(ctx, cfg, cfgWatcher, args[1:])
 
 	case "serve":
-		return serveCmd(ctx, cfg, args[1:])
+		return serveCmd(ctx, cfg, cfgWatcher, args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -328,7 +329,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	return w.Start(ctx)
 }
 
-func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
+func mcpCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWatcher, args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
 	addr := fs.String("addr", cfg.Server.MCPAddr, "监听地址")
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
@@ -354,6 +355,15 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	}
 	defer mgr.Close()
 
+	// 多租户热重载：配置文件变更时自动增量更新租户集合。
+	if cfgWatcher != nil {
+		cfgWatcher.SetOnReload(func(oldCfg, newCfg *config.Config) {
+			if err := mgr.Apply(ctx, newCfg); err != nil {
+				log.Printf("tenant hot-reload error: %v", err)
+			}
+		})
+	}
+
 	mcpSrv := server.NewMCPServer(nil, *addr)
 	mcpSrv.SetTenantManager(mgr)
 	if *authToken != "" {
@@ -369,7 +379,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	return mcpSrv.Start(ctx)
 }
 
-func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
+func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWatcher, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("http", cfg.Server.HTTPAddr, "监听地址")
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
@@ -386,6 +396,15 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 		return fmt.Errorf("init tenant manager: %w", err)
 	}
 	defer mgr.Close()
+
+	// 多租户热重载：配置文件变更时自动增量更新租户集合。
+	if cfgWatcher != nil {
+		cfgWatcher.SetOnReload(func(oldCfg, newCfg *config.Config) {
+			if err := mgr.Apply(ctx, newCfg); err != nil {
+				log.Printf("tenant hot-reload error: %v", err)
+			}
+		})
+	}
 
 	httpSrv := server.NewHTTPServer(nil, *addr)
 	httpSrv.SetTenantManager(mgr)

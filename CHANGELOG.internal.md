@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 119: feat(tenant): 多租户热重载——tenants 配置变更无需重启进程
+
+- 背景：多租户此前 `tenants` 在启动时固定，新增/移除/改关键字段需重启进程；P9 配置热重载（ConfigWatcher）此前仅更新 Config 实例，不联动服务重初始化。
+- 实现：
+  - `config.ConfigWatcher` 新增 `SetOnReload(fn)`（新增 `reloadMu` 保证回调注册与读取线程安全，可在 Start 前后任意时刻调用，传 nil 取消）；`checkAndReload` 改为锁内取回调、锁外同步执行。
+  - `tenant.Manager` 新增 `Apply(ctx, base)`：对租户集合做增量 diff —— 新增租户构建并入路由表；移除租户停监听+关 store+删路由；关键配置变化（DSN/Root/Name/autoScan/watch）重建替换实例；未变化租户保持原实例。锁外构建（含 IO/扫描不持锁）、锁内提交、锁外释放；失败租户隔离（保留旧实例继续服务），`errors.Join` 聚合。
+  - `tenantDirty` 仅比较影响运行期行为的关键字段，避免日志级别等无关差异触发无谓重建；抽取 `resolveTargets` 供 NewManager 与 Apply 共用。
+  - `cmd/codeschema`：`mcpCmd`/`serveCmd` 接收 `cfgWatcher`，注册 `Apply` 回调，配置变更时自动增量热更新租户集合（错误仅记日志，不中断服务）。
+- 测试：`internal/tenant` 新增 4 组热重载单测 —— 新增/移除租户（含全部移除回退 default）、同配置保持原实例（实例指针不变）、DSN 变更触发重建、单↔多互切（default ↔ [a b]，DefaultID 正确更新）；修 1 处测试断言（空 tenants 语义为回退 default 而非空集合）。
+- 验证：`go build ./...` 通过；`go test ./...` 全零 FAIL（30 包 OK，tenant 0.907s / config cached）；`go vet ./...` 通过。
+- 文档同步：13-多租户设计文档.md（§5.4 新增热重载、§8 限制改为已完成、§9 验证记录）、11-配置部署与路线图.md（§7.3 SetOnReload、§9.2 热重载）、配置参考.md（tenants 热重载）、交接说明.md（✅ 条目 + 修订记录）。
+- 遗留 TODO：热重载不覆盖 `server.*` 监听地址与 `preset` 等全局能力（需重启）；运行中租户的非关键字段变化不触发重建（设计如此，避免无谓重建）。
+
 ### Commit 118: feat(tags): search_by_tag 支持多标签 AND 交集（逗号分隔）
 
 - 背景：部分符号同时拥有多个标签（如 controller + service），单标签检索无法按交集筛选。

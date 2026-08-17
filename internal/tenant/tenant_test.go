@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/config"
@@ -177,4 +178,176 @@ func TestManager_DerivesIndexDirsPerTenant(t *testing.T) {
 	if ca.Storage.Search.FTSDir == cb.Storage.Search.FTSDir {
 		t.Error("tenant a and b must have distinct FTS index dirs")
 	}
+}
+
+// multiTenantCfg 返回含 tenants a/b 的多租户配置（各自独立临时 DSN）。
+func multiTenantCfg(t *testing.T, ids ...string) *config.Config {
+	t.Helper()
+	cfg := noNetConfig(t)
+	for _, id := range ids {
+		cfg.Tenants = append(cfg.Tenants, config.TenantConfig{
+			ID:      id,
+			Name:    "Tenant-" + id,
+			Root:    "./internal/config",
+			Storage: config.StorageConfig{Driver: "file", DSN: t.TempDir()},
+		})
+	}
+	return cfg
+}
+
+// tenantIDs 返回 Manager.List 的租户 ID 序列。
+func tenantIDs(m *Manager) []string {
+	infos := m.List()
+	out := make([]string, 0, len(infos))
+	for _, in := range infos {
+		out = append(out, in.ID)
+	}
+	return out
+}
+
+// TestManager_Apply_AddRemoveTenant 验证热重载：新增/移除租户无需重启进程。
+func TestManager_Apply_AddRemoveTenant(t *testing.T) {
+	ctx := context.Background()
+
+	// 初始：a、b 两个租户
+	cfg1 := multiTenantCfg(t, "a", "b")
+	m, err := NewManager(ctx, cfg1, openFileStore)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+
+	if got := tenantIDs(m); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("initial tenants = %v, want [a b]", got)
+	}
+
+	// 热重载 1：新增 c，移除 b → [a c]
+	cfg2 := multiTenantCfg(t, "a", "c")
+	if err := m.Apply(ctx, cfg2); err != nil {
+		t.Fatalf("Apply(add/remove): %v", err)
+	}
+	if got := tenantIDs(m); !slices.Equal(got, []string{"a", "c"}) {
+		t.Fatalf("after apply tenants = %v, want [a c]", got)
+	}
+	if _, err := m.Service(ctx, "c"); err != nil {
+		t.Errorf("Service(c) after add: %v", err)
+	}
+	if _, err := m.Service(ctx, "b"); err == nil {
+		t.Error("Service(b) after remove should error")
+	}
+
+	// 热重载 2：全部移除 → 回退单租户 default（空 tenants 即单项目模式）。
+	cfg3 := multiTenantCfg(t)
+	if err := m.Apply(ctx, cfg3); err != nil {
+		t.Fatalf("Apply(remove all): %v", err)
+	}
+	if got := tenantIDs(m); !slices.Equal(got, []string{"default"}) {
+		t.Fatalf("after remove all tenants = %v, want [default]", got)
+	}
+}
+
+// TestManager_Apply_UnchangedKept 验证热重载：配置未变化的租户保持原实例。
+func TestManager_Apply_UnchangedKept(t *testing.T) {
+	ctx := context.Background()
+	cfg := multiTenantCfg(t, "a")
+	m, err := NewManager(ctx, cfg, openFileStore)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+
+	oldSvc, _ := m.Service(ctx, "a")
+	oldRT, _ := m.Runtime("a")
+
+	// 相同配置 Apply：应保持原实例（实例指针不变）。
+	if err := m.Apply(ctx, cfg); err != nil {
+		t.Fatalf("Apply(same): %v", err)
+	}
+	newSvc, _ := m.Service(ctx, "a")
+	newRT, _ := m.Runtime("a")
+	if oldSvc != newSvc {
+		t.Error("unchanged tenant Service instance should be kept")
+	}
+	if oldRT != newRT {
+		t.Error("unchanged tenant Runtime instance should be kept")
+	}
+}
+
+// TestManager_Apply_ChangeTriggersRebuild 验证热重载：DSN 变化触发实例重建。
+func TestManager_Apply_ChangeTriggersRebuild(t *testing.T) {
+	ctx := context.Background()
+	cfg1 := multiTenantCfg(t, "a")
+	m, err := NewManager(ctx, cfg1, openFileStore)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+
+	oldRT, _ := m.Runtime("a")
+
+	// 改 DSN 的同一租户 a：应重建为新实例。
+	cfg2 := multiTenantCfg(t, "a")
+	cfg2.Tenants[0].Storage.DSN = t.TempDir()
+	if err := m.Apply(ctx, cfg2); err != nil {
+		t.Fatalf("Apply(changed): %v", err)
+	}
+	newRT, _ := m.Runtime("a")
+	if oldRT == newRT {
+		t.Error("changed tenant (DSN) should be rebuilt to a new instance")
+	}
+	// 租户 ID 不变，仍在路由表中。
+	if got := tenantIDs(m); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("tenants after rebuild = %v, want [a]", got)
+	}
+}
+
+// TestManager_Apply_SingleToMulti 验证热重载：单租户 default ↔ 显式多租户切换。
+func TestManager_Apply_SingleToMulti(t *testing.T) {
+	ctx := context.Background()
+
+	// 单租户模式起步。
+	cfg1 := noNetConfig(t)
+	m, err := NewManager(ctx, cfg1, openFileStore)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	if m.DefaultID() != "default" {
+		t.Fatalf("DefaultID = %q, want default", m.DefaultID())
+	}
+
+	// 热重载切换到显式多租户 [a b]。
+	cfg2 := multiTenantCfg(t, "a", "b")
+	if err := m.Apply(ctx, cfg2); err != nil {
+		t.Fatalf("Apply(single→multi): %v", err)
+	}
+	if got := tenantIDs(m); !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("after single→multi tenants = %v, want [a b]", got)
+	}
+	if m.DefaultID() != "a" {
+		t.Errorf("DefaultID = %q, want a", m.DefaultID())
+	}
+
+	// 再热重载切回单租户模式。
+	if err := m.Apply(ctx, noNetConfig(t)); err != nil {
+		t.Fatalf("Apply(multi→single): %v", err)
+	}
+	if got := tenantIDs(m); !slices.Equal(got, []string{"default"}) {
+		t.Fatalf("after multi→single tenants = %v, want [default]", got)
+	}
+	if m.DefaultID() != "default" {
+		t.Errorf("DefaultID = %q, want default", m.DefaultID())
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

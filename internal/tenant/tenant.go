@@ -4,10 +4,15 @@
 // store + Service + 检索索引），按租户 ID 路由请求。存储隔离通过「每租户独立
 // store」实现，不修改 internal/store.Store 接口；多租户仅是「路由层 + 多份单租户
 // 实例」的组合，因此既有单项目行为（无 tenants 配置时）完全向后兼容。
+//
+// 热重载：Manager.Apply 接收新配置，与当前租户列表做增量 diff —— 新增的租户
+// 自动构建，移除的租户关闭释放，变更的租户替换实例。配合 config.ConfigWatcher
+// 的 OnReload 回调即可实现配置文件变更时自动热更新，无需重启进程。
 package tenant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -31,6 +36,8 @@ type Tenant struct {
 	Cfg       *config.Config
 	Store     store.Store
 	Runtime   *rt.Runtime
+	AutoScan  bool // 构建时是否执行启动全量扫描
+	Watch     bool // 构建时是否启动后台增量监听
 	stopWatch func()
 }
 
@@ -39,6 +46,15 @@ type Info struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Root string `json:"root"`
+}
+
+// tenantTarget 描述一个待构建的租户目标（NewManager 与 Apply 共用的规格）。
+type tenantTarget struct {
+	id       string
+	name     string
+	cfg      *config.Config
+	autoScan bool
+	watch    bool
 }
 
 // Manager 多租户管理器：持有若干个隔离的单租户运行实例，按 ID 路由。
@@ -62,15 +78,30 @@ func NewManager(ctx context.Context, base *config.Config, openStore OpenStoreFun
 		openStore: openStore,
 		defaultID: "default",
 	}
-	if len(base.Tenants) == 0 {
-		t, err := m.buildTenant(ctx, "default", base.Project.Name, base, false, false)
+	for _, tgt := range resolveTargets(base) {
+		t, err := m.buildTenant(ctx, tgt)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("tenant %q: %w", tgt.id, err)
 		}
-		m.tenants["default"] = t
-		m.order = []string{"default"}
-		return m, nil
+		m.tenants[tgt.id] = t
+		m.order = append(m.order, tgt.id)
 	}
+	if len(m.order) > 0 {
+		m.defaultID = m.order[0]
+	}
+	return m, nil
+}
+
+// resolveTargets 从全局配置解析租户构建目标列表。
+//
+//   - 若 base.Tenants 为空：返回单个隐式 "default" 目标（沿用全局配置），
+//     完全向后兼容单项目模式。
+//   - 否则：为每个租户解析独立 Config 并派生隔离的检索/向量索引目录。
+func resolveTargets(base *config.Config) []tenantTarget {
+	if len(base.Tenants) == 0 {
+		return []tenantTarget{{id: "default", name: base.Project.Name, cfg: base}}
+	}
+	out := make([]tenantTarget, 0, len(base.Tenants))
 	for _, tc := range base.Tenants {
 		tcfg := tc.ToConfig(base)
 		if tcfg.Storage.DSN == "" {
@@ -82,40 +113,41 @@ func NewManager(ctx context.Context, base *config.Config, openStore OpenStoreFun
 		// 的 DefaultConfig 已预填 ./data/fts 等默认值，merged 永远不会为空。
 		deriveIndexDirs(&tcfg.Storage, tcfg.Storage.DSN,
 			tc.Storage.Search.FTSDir, tc.Storage.Search.VectorDir, tc.Storage.Search.IDFDir)
-		t, err := m.buildTenant(ctx, tc.ID, tc.Name, tcfg, tc.AutoScan, tc.Watch)
-		if err != nil {
-			return nil, fmt.Errorf("tenant %q: %w", tc.ID, err)
-		}
-		m.tenants[tc.ID] = t
-		m.order = append(m.order, tc.ID)
+		out = append(out, tenantTarget{
+			id:       tc.ID,
+			name:     tc.Name,
+			cfg:      tcfg,
+			autoScan: tc.AutoScan,
+			watch:    tc.Watch,
+		})
 	}
-	if len(m.order) > 0 {
-		m.defaultID = m.order[0]
-	}
-	return m, nil
+	return out
 }
 
-func (m *Manager) buildTenant(ctx context.Context, id, name string, cfg *config.Config, autoScan, watch bool) (*Tenant, error) {
-	st, err := m.openStore(ctx, cfg, cfg.Storage.DSN)
+func (m *Manager) buildTenant(ctx context.Context, tgt tenantTarget) (*Tenant, error) {
+	st, err := m.openStore(ctx, tgt.cfg, tgt.cfg.Storage.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	if autoScan && cfg.Project.Root != "" {
-		log.Printf("tenant %q: auto-scan %s", id, cfg.Project.Root)
-		if err := rt.ScanRepository(ctx, st, cfg, cfg.Project.Root); err != nil {
-			log.Printf("tenant %q: auto-scan failed: %v", id, err)
+	if tgt.autoScan && tgt.cfg.Project.Root != "" {
+		log.Printf("tenant %q: auto-scan %s", tgt.id, tgt.cfg.Project.Root)
+		if err := rt.ScanRepository(ctx, st, tgt.cfg, tgt.cfg.Project.Root); err != nil {
+			log.Printf("tenant %q: auto-scan failed: %v", tgt.id, err)
 		}
 	}
-	run, err := rt.BuildRuntime(ctx, st, cfg)
+	run, err := rt.BuildRuntime(ctx, st, tgt.cfg)
 	if err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("build runtime: %w", err)
 	}
-	t := &Tenant{ID: id, Name: name, Cfg: cfg, Store: st, Runtime: run}
-	if watch && cfg.Project.Root != "" {
-		stop, err := rt.StartWatchBackground(ctx, st, cfg, cfg.Project.Root)
+	t := &Tenant{
+		ID: tgt.id, Name: tgt.name, Cfg: tgt.cfg,
+		Store: st, Runtime: run, AutoScan: tgt.autoScan, Watch: tgt.watch,
+	}
+	if tgt.watch && tgt.cfg.Project.Root != "" {
+		stop, err := rt.StartWatchBackground(ctx, st, tgt.cfg, tgt.cfg.Project.Root)
 		if err != nil {
-			log.Printf("tenant %q: watch failed (ignored): %v", id, err)
+			log.Printf("tenant %q: watch failed (ignored): %v", tgt.id, err)
 		} else {
 			t.stopWatch = stop
 		}
@@ -220,4 +252,119 @@ func (m *Manager) Close() {
 		}
 	}
 	m.tenants = map[string]*Tenant{}
+}
+
+// Apply 依据新的全局配置对租户集合做增量热重载（配合 config.ConfigWatcher 使用，
+// 配置变更时无需重启进程）。
+//
+//   - 新增租户 → 构建并加入路由表；
+//   - 移除租户 → 停止后台监听并关闭 store，从路由表删除；
+//   - 关键配置变化（DSN / Root / Name / autoScan / watch）→ 重建实例；
+//   - 未变化的租户保持原实例，避免打断在途请求。
+//
+// 任一租户构建失败只影响该租户（保留旧实例继续服务），返回 errors.Join 聚合错误，
+// 其余租户照常应用。
+func (m *Manager) Apply(ctx context.Context, base *config.Config) error {
+	targets := resolveTargets(base)
+	wanted := make(map[string]tenantTarget, len(targets))
+	for _, t := range targets {
+		wanted[t.id] = t
+	}
+
+	// 锁外构建新实例（构建含 IO/扫描，避免持锁）。
+	m.mu.RLock()
+	cur := make(map[string]*Tenant, len(m.tenants))
+	for id, t := range m.tenants {
+		cur[id] = t
+	}
+	m.mu.RUnlock()
+
+	var errs []error
+	upsert := make(map[string]*Tenant) // 新增或重建后的新实例
+	release := make([]string, 0)       // 待释放的旧实例 id（被替换或被移除）
+
+	for _, tgt := range targets {
+		old, ok := cur[tgt.id]
+		if ok && !tenantDirty(old, tgt) {
+			continue // 未变化，保持原实例
+		}
+		t, err := m.buildTenant(ctx, tgt)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tenant %q: %w", tgt.id, err))
+			continue
+		}
+		upsert[tgt.id] = t
+		if ok {
+			release = append(release, tgt.id) // 替换旧实例
+		}
+	}
+	for id := range cur {
+		if _, ok := wanted[id]; !ok {
+			release = append(release, id) // 已从配置移除
+		}
+	}
+
+	// 提交：更新路由表（锁内，仅内存操作）。
+	m.mu.Lock()
+	for id, t := range upsert {
+		m.tenants[id] = t
+		if !sliceContains(m.order, id) {
+			m.order = append(m.order, id)
+		}
+	}
+	for _, id := range release {
+		if _, replaced := upsert[id]; !replaced {
+			delete(m.tenants, id)
+			m.order = sliceRemove(m.order, id)
+		}
+	}
+	if len(m.order) > 0 {
+		m.defaultID = m.order[0]
+	}
+	m.mu.Unlock()
+
+	// 锁外释放旧实例资源。
+	for _, id := range release {
+		old, ok := cur[id]
+		if !ok {
+			continue
+		}
+		if old.stopWatch != nil {
+			old.stopWatch()
+		}
+		if old.Store != nil {
+			_ = old.Store.Close()
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// tenantDirty 判断租户关键配置是否发生变化，需要重建实例。
+// 仅比较影响运行期行为的字段，避免日志级别等无关差异触发无谓重建。
+func tenantDirty(old *Tenant, tgt tenantTarget) bool {
+	return old.Name != tgt.name ||
+		old.AutoScan != tgt.autoScan ||
+		old.Watch != tgt.watch ||
+		old.Cfg.Project.Name != tgt.cfg.Project.Name ||
+		old.Cfg.Project.Root != tgt.cfg.Project.Root ||
+		old.Cfg.Storage.DSN != tgt.cfg.Storage.DSN
+}
+
+func sliceContains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func sliceRemove(s []string, v string) []string {
+	out := make([]string, 0, len(s))
+	for _, x := range s {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
 }
