@@ -63,7 +63,7 @@
 
 | 日期 | 说明 |
 |---|---|
-| 2026-08-17 | 从 DEPLOYMENT_AND_USAGE/接口层文档提炼，补 /openapi、/viz、/projects、错误码 -->
+| 2026-08-17 | 从 DEPLOYMENT_AND_USAGE/接口层文档提炼，补 /openapi、/viz、/projects、错误码 |
 
 ---
 

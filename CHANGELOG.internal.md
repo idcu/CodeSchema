@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 105: test(tenant): Windows 路径分隔符断言跨平台化
+
+- 根因：`tenant_test.go` 两处用例硬编码 unix 期望路径（`/var/lib/cs/mt-a/fts` 等），Windows 下 `filepath.Join` 产出反斜杠导致 `TestDeriveIndexDirs_Default*` FAIL；生产 `deriveIndexDirs` 本就跨平台正确，纯测试断言缺陷
+- 修法：期望改用 `filepath.Join` 构造，与实现口径一致（非破坏性，不改业务逻辑）
+- 验证：`go test ./internal/tenant` 0.893s ok；全量 `go test ./...` 无 FAIL（28 包带测试全绿，4 包无测试文件，`go list ./...` 共 32 包）
+- 预留：无
+
+### Commit 106: docs(doc-package): 新增文档体系关系图 + 一致性命中修正
+
+- 新增 `docs/文档体系关系.md`（Mermaid 关系图 + 读取链路 + 闭环规则），接入 docs/README 导航与修订记录；系统简介补该关系图导航
+- 决策层：`版本发布说明.md` 补 v0.1.0 首个发布能力基线草稿（版本号/日期实留待首个 v* tag 回填，不虚构）
+- 一致性修正：清理 15 份文档"修订记录"表行末尾的 `-->` 共 15 处（批量建档残留，保留 Mermaid 箭头与 HTML 注释）；据 `go list./...` 实测将包数 31→32（README/系统简介/版本发布），"31 包全绿"更新为"32 包（28 含测试，无失败）"
+- 验证：`go list ./...` = 32 包；`go test ./...` 全量 0 FAIL（28 ok + 4 no-test）；纯计数与状态有实测支撑，未虚构
+- 预留：d4 已输出三项遗留项接入可行性评估（消歧接入搜索处理器 / AI 增强接入生产编排 / LSP 串联 parser.Registry），均未实施，涉及接口签名变更需人工评审后推进
+
 ### Commit 104: docs(doc-package): 迁移遗留 P8 阶段总结至生产层开发文档归档
 
 - git mv 将 `docs/P8-阶段总结-语义检索与全文搜索.md` 归位至 `docs/1-生产层/开发文档/`，消除 docs 根目录漏网文件

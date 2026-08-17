@@ -76,4 +76,4 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 
 | 日期 | 说明 |
 |---|---|
-| 2026-08-17 | 自 docs/MCP接入指南.md 按圈层归位改进 -->
+| 2026-08-17 | 自 docs/MCP接入指南.md 按圈层归位改进 |

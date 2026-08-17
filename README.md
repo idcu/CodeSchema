@@ -217,7 +217,7 @@ make clean
 
 > 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/dev/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
 
-- **包数量**：实际 **31** 个 Go 包（`go list ./...`），本文及 `DEV_PROGRESS.md` 中「23/24/27 个包」等旧表述已过时。
+- **包数量**：实际 **32** 个 Go 包（`go list ./...`，2026-08-17 实测），本文及 `DEV_PROGRESS.md` 中「23/24/27/31 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/dev/12` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/dev/12`。

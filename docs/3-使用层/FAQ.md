@@ -65,4 +65,4 @@ go build -tags onnx -o codeschema ./cmd/codeschema   # 启用 ONNX（bge-small-z
 
 | 日期 | 说明 |
 |---|---|
-| 2026-08-17 | 从 DEPLOYMENT_AND_USAGE §8 拆出，补多租户/语义检索/基准条目 -->
+| 2026-08-17 | 从 DEPLOYMENT_AND_USAGE §8 拆出，补多租户/语义检索/基准条目 |
