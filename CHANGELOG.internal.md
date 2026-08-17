@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 112: feat(server): 全局限流中间件（rate_limit 令牌桶，可选），安全自查勾选 4+1 项
+
+- 背景：安全设计文档 §7 合规自查清单存在 6 个未勾选项。逐项对照代码核实后，认证（authMiddleware）、路径遍历（pathTraversalMiddleware）、模型 checksum（model_sha256）、日志脱敏（api_key 仅内存）均已有实现与单测，仅有"限流中间件"确为代码缺口
+- 决策：「限流默认关闭」——新增 `server.rate_limit`（每分钟请求上限，令牌桶，突发=上限），0=不限流（默认），保持既有行为无人为变更
+- 实现：
+  - `config.ServerConfig` 新增 `RateLimit int`；接入 DefaultConfig(0)/env(`CODESCHEMA_SERVER_RATE_LIMIT`)/merge(>0)/clone/parse(applyServer)
+  - `server` 新增 `tokenBucket`（并发安全令牌桶：容量=上限、补充=上限/60 个每秒）+ `rateLimitMiddleware`（超限 429 + `Retry-After: 1`）+ `SetRateLimit(rpm)`；`SetRateLimit(<=0)` 清空=不限流
+  - `cmd serve` 在 `RateLimit>0` 时接线 `httpSrv.SetRateLimit`
+  - 中间件链调整为：追踪 → 限流 → 认证 → 路径遍历 → 错误恢复 → CORS
+- 测试：server 新增 4 条（TokenBucket 突发上限、TokenBucket 随时间回填、RateLimitMiddleware 默认放行、RateLimitMiddleware 超限 429）；config 既有兼容
+- 文档同步：安全设计文档 §7 公平勾选（4 项实现+勾选、2 项未完成项注明为部署期/存储层 TODO，附勾选说明）；config.yaml.example、11-配置 补充 rate_limit；交接说明遗留段标注
+- 验证：`go build ./...` 通过；`go test ./internal/server ./internal/config` 全通过（server 6.471s / config 0.585s）
+- 预留：监听收敛（默认 :8080/:8081 全接口）、索引目录 0600 两项未落地，列为存储层/部署期 TODO（honest 未勾选）
+
 ### Commit 111: feat(vector): 接线 chromem 向量驱动（显式启用，默认后端不变）
 
 - 背景：`storage.vector.driver` 配置字段早已存在且 DefaultConfig 曾默认 "chromem"，但 runtime.NewSearcherWithStore 恒用文件 PersistentStore，chromem 从未真正接线（09/11 文档标注"未接线生产分发"）

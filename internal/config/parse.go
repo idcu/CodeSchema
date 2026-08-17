@@ -199,6 +199,11 @@ func applyServer(cfg *ServerConfig, m map[string]any) {
 	if v, ok := m["auth_token"].(string); ok {
 		cfg.AuthToken = v
 	}
+	if v, ok := m["rate_limit"]; ok {
+		if n, ok := toInt(v); ok && n >= 0 {
+			cfg.RateLimit = n
+		}
+	}
 }
 
 func applyWatcher(cfg *WatcherConfig, m map[string]any) {

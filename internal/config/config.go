@@ -259,6 +259,8 @@ type ServerConfig struct {
 	MCPAddr   string `yaml:"mcp_addr" json:"mcp_addr"`
 	HTTPAddr  string `yaml:"http_addr" json:"http_addr"`
 	AuthToken string `yaml:"auth_token" json:"auth_token"`
+	// RateLimit 每分钟请求上限（令牌桶，突发=上限值）。0 表示不限流（默认）。
+	RateLimit int `yaml:"rate_limit" json:"rate_limit"`
 }
 
 // WatcherConfig 文件监听配置。
@@ -335,6 +337,7 @@ func DefaultConfig() *Config {
 			MCPAddr:   ":8080",
 			HTTPAddr:  ":8081",
 			AuthToken: "",
+			RateLimit: 0, // 默认不限流；配置 >0 时按每分钟请求上限启用令牌桶
 		},
 		Watcher: WatcherConfig{
 			Enabled:     true,
@@ -520,6 +523,11 @@ func LoadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODESCHEMA_SERVER_AUTH_TOKEN"); v != "" {
 		cfg.Server.AuthToken = v
+	}
+	if v := os.Getenv("CODESCHEMA_SERVER_RATE_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.Server.RateLimit = n
+		}
 	}
 
 	// scanner
@@ -710,6 +718,9 @@ func Merge(base, overlay *Config) *Config {
 	if overlay.Server.AuthToken != "" {
 		merged.Server.AuthToken = overlay.Server.AuthToken
 	}
+	if overlay.Server.RateLimit > 0 {
+		merged.Server.RateLimit = overlay.Server.RateLimit
+	}
 
 	// Watcher
 	if overlay.Watcher.Enabled {
@@ -820,6 +831,7 @@ func cloneConfig(cfg *Config) *Config {
 			MCPAddr:   cfg.Server.MCPAddr,
 			HTTPAddr:  cfg.Server.HTTPAddr,
 			AuthToken: cfg.Server.AuthToken,
+			RateLimit: cfg.Server.RateLimit,
 		},
 		Watcher: WatcherConfig{
 			Enabled:     cfg.Watcher.Enabled,

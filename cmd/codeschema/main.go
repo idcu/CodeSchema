@@ -392,6 +392,9 @@ func serveCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
 	}
+	if cfg.Server.RateLimit > 0 {
+		httpSrv.SetRateLimit(cfg.Server.RateLimit)
+	}
 
 	// 向量索引可视化工具（默认栈），挂到默认租户的运行期组件上。
 	if rt0, rerr := mgr.Runtime(""); rerr == nil && rt0.VecStore != nil {

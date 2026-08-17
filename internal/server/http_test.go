@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
@@ -357,7 +358,83 @@ func TestPathTraversalMiddleware_Blocked(t *testing.T) {
 	}
 }
 
-func TestMethodNotAllowedOnAllEndpoints(t *testing.T) {
+func TestTokenBucketAllowsBurstThenLimits(t *testing.T) {
+	// 容量=3，速率=3/秒。初始即可突发消费 3 次，随后需按速率补充。
+	b := newTokenBucket(3, 3)
+	// 桶满：连续 3 次应全部放行。
+	for i := 0; i < 3; i++ {
+		if !b.allow() {
+			t.Fatalf("request %d: expected allowed within burst capacity", i)
+		}
+	}
+	// 第 4 次（几乎同一时刻）应被拒绝。
+	if b.allow() {
+		t.Fatal("expected 4th request to be rejected after burst exhausted")
+	}
+}
+
+func TestTokenBucketRefillsOverTime(t *testing.T) {
+	b := newTokenBucket(1, 10) // 容量 1，速率 10/秒
+	if !b.allow() {
+		t.Fatal("first request should be allowed")
+	}
+	if b.allow() {
+		t.Fatal("second request should be rejected immediately")
+	}
+	// 等待约 100ms，速率 10/秒 => 补充约 1 枚令牌。
+	time.Sleep(120 * time.Millisecond)
+	if !b.allow() {
+		t.Fatal("request after refill should be allowed")
+	}
+}
+
+func TestRateLimitMiddleware_Disabled(t *testing.T) {
+	srv := newTestHTTPServer(t) // rateLimiter 默认 nil = 不限流
+	hit := false
+	handler := srv.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	for i := 0; i < 5; i++ {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+		if w.Result().StatusCode != http.StatusOK {
+			t.Fatalf("request %d: expected 200 (unlimited), got %d", i, w.Result().StatusCode)
+		}
+	}
+	if !hit {
+		t.Fatal("expected downstream handler to be reached")
+	}
+}
+
+func TestRateLimitMiddleware_RejectsOverflow(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	srv.SetRateLimit(2) // 每分钟 2 个请求
+	ok := 0
+	limited := 0
+	for i := 0; i < 6; i++ {
+		w := httptest.NewRecorder()
+		srv.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+		switch w.Result().StatusCode {
+		case http.StatusOK:
+			ok++
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("request %d: unexpected status %d", i, w.Result().StatusCode)
+		}
+	}
+	if ok != 2 {
+		t.Errorf("expected 2 allowed, got %d", ok)
+	}
+	if limited == 0 {
+		t.Errorf("expected some requests to be rate-limited")
+	}
+}
+
+func TestTestMethodNotAllowedOnAllEndpoints(t *testing.T) {
 	srv := newTestHTTPServer(t)
 	endpoints := []struct {
 		name    string

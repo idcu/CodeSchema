@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/idcu/codeschema/internal/log"
@@ -38,6 +39,7 @@ type HTTPServer struct {
 	resolver     TenantResolverHTTP
 	defaultTenant string
 	projects     []tenant.Info
+	rateLimiter  *tokenBucket // 全局令牌桶限流器；nil 表示不限流
 }
 
 // NewHTTPServer 创建 HTTP API 服务器实例（单项目模式）。
@@ -55,6 +57,17 @@ func NewHTTPServer(svc *service.Service, addr string) *HTTPServer {
 // SetAuthToken 设置 Bearer token 认证。
 func (h *HTTPServer) SetAuthToken(token string) {
 	h.authToken = token
+}
+
+// SetRateLimit 设置全局限流：每分钟最多放行 rpm 个请求（令牌桶，突发=上限）。
+// rpm <= 0 表示不限流（默认），调用方可据此保持默认行为不变。
+func (h *HTTPServer) SetRateLimit(rpm int) {
+	if rpm <= 0 {
+		h.rateLimiter = nil
+		return
+	}
+	// 令牌桶：容量=每分钟上限（允许突发一整桶），补充速率=上限/60 个/秒。
+	h.rateLimiter = newTokenBucket(float64(rpm), float64(rpm)/60.0)
 }
 
 // SetTenantManager 注入多租户管理器，使本服务器以单实例服务多个隔离仓库。
@@ -126,12 +139,14 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 		RegisterVizRoutes(mux, h.viz)
 	}
 
-	// 中间件链：请求追踪 → 认证 → 路径遍历防护 → 错误恢复 → CORS
+	// 中间件链：请求追踪 → 限流 → 认证 → 路径遍历防护 → 错误恢复 → CORS
 	handler := h.requestMetricsMiddleware(
-		h.authMiddleware(
-			h.pathTraversalMiddleware(
-				h.errorRecoveryMiddleware(
-					h.corsMiddleware(mux),
+		h.rateLimitMiddleware(
+			h.authMiddleware(
+				h.pathTraversalMiddleware(
+					h.errorRecoveryMiddleware(
+						h.corsMiddleware(mux),
+					),
 				),
 			),
 		),
@@ -447,6 +462,51 @@ func (h *HTTPServer) authMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rateLimitMiddleware 全局限流中间件：未启用限流（rateLimiter == nil）时直接放行，
+// 否则按令牌桶判断，超限返回 429 Too Many Requests。
+func (h *HTTPServer) rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.rateLimiter == nil || h.rateLimiter.allow() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Retry-After", "1")
+		writeError(w, "ERR_RATE_LIMITED", "too many requests", http.StatusTooManyRequests)
+	})
+}
+
+// tokenBucket 是一个简单的并发安全令牌桶限流器。
+type tokenBucket struct {
+	mu       sync.Mutex
+	capacity float64 // 桶容量（允许突发）
+	tokens   float64 // 当前令牌数
+	rate     float64 // 每秒补充速率
+	last     time.Time
+}
+
+// newTokenBucket 创建容量为 capacity 的令牌桶，按 rate（个/秒）持续补充令牌。
+func newTokenBucket(capacity, rate float64) *tokenBucket {
+	return &tokenBucket{capacity: capacity, tokens: capacity, rate: rate, last: time.Now()}
+}
+
+// allow 原子地判断是否放行一个请求（消耗一枚令牌）。
+func (b *tokenBucket) allow() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	// 先按经过的时间补充令牌，再消费。
+	b.tokens += now.Sub(b.last).Seconds() * b.rate
+	if b.tokens > b.capacity {
+		b.tokens = b.capacity
+	}
+	b.last = now
+	if b.tokens >= 1 {
+		b.tokens--
+		return true
+	}
+	return false
 }
 
 // pathTraversalMiddleware 防止路径遍历攻击。
