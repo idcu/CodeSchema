@@ -37,14 +37,17 @@ func noNetConfig(t *testing.T) *config.Config {
 func TestDeriveIndexDirs_DefaultsFromDSN(t *testing.T) {
 	s := &config.StorageConfig{Driver: "file", DSN: "/var/lib/cs/mt-a"}
 	deriveIndexDirs(s, s.DSN, "", "", "")
-	if s.Search.FTSDir != "/var/lib/cs/mt-a/fts" {
-		t.Errorf("FTSDir = %q, want %q", s.Search.FTSDir, "/var/lib/cs/mt-a/fts")
+	wantFTS := filepath.Join("/var/lib/cs/mt-a", "fts")
+	wantVec := filepath.Join("/var/lib/cs/mt-a", "vector")
+	wantIDF := filepath.Join("/var/lib/cs/mt-a", "idf")
+	if s.Search.FTSDir != wantFTS {
+		t.Errorf("FTSDir = %q, want %q", s.Search.FTSDir, wantFTS)
 	}
-	if s.Search.VectorDir != "/var/lib/cs/mt-a/vector" {
-		t.Errorf("VectorDir = %q, want %q", s.Search.VectorDir, "/var/lib/cs/mt-a/vector")
+	if s.Search.VectorDir != wantVec {
+		t.Errorf("VectorDir = %q, want %q", s.Search.VectorDir, wantVec)
 	}
-	if s.Search.IDFDir != "/var/lib/cs/mt-a/idf" {
-		t.Errorf("IDFDir = %q, want %q", s.Search.IDFDir, "/var/lib/cs/mt-a/idf")
+	if s.Search.IDFDir != wantIDF {
+		t.Errorf("IDFDir = %q, want %q", s.Search.IDFDir, wantIDF)
 	}
 }
 
@@ -58,7 +61,7 @@ func TestDeriveIndexDirs_ExplicitOverride(t *testing.T) {
 	if s.Search.FTSDir != "/custom/fts" {
 		t.Errorf("FTSDir = %q, want explicit /custom/fts preserved", s.Search.FTSDir)
 	}
-	if s.Search.VectorDir != "/var/lib/cs/mt-a/vector" {
+	if s.Search.VectorDir != filepath.Join("/var/lib/cs/mt-a", "vector") {
 		t.Errorf("VectorDir = %q, want derived (unset)", s.Search.VectorDir)
 	}
 	if s.Search.IDFDir != "/custom/idf" {
