@@ -180,6 +180,29 @@ func (s *SQLiteStore) UpsertFile(ctx context.Context, filePath, contentHash stri
 	return id, nil
 }
 
+// MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
+func (s *SQLiteStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var id int64
+	err := s.db.QueryRow(`
+		INSERT INTO file (absolute_path, content_hash, line_count, byte_size, parse_status)
+		VALUES (?, '', ?, ?, 'parse_skipped')
+		ON CONFLICT(absolute_path) DO UPDATE SET
+			content_hash='',
+			line_count=excluded.line_count,
+			byte_size=excluded.byte_size,
+			parse_status='parse_skipped'
+		RETURNING id`,
+		filePath, lineCount, byteSize,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("mark file skipped: %w", err)
+	}
+	return id, nil
+}
+
 // GetFileByPath 按路径查询文件。
 func (s *SQLiteStore) GetFileByPath(ctx context.Context, path string) (*store.FileRecord, error) {
 	s.mu.RLock()

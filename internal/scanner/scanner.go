@@ -34,6 +34,9 @@ type Scanner struct {
 	logger    *log.Logger
 	onIndex   func(ctx context.Context, filePath string) error // P8.3 索引回调
 	onDelete  func(ctx context.Context, filePath string) error // P8.3 删除回调
+	// 旁路限额（<=0 表示对应维度不限制）：超限文件跳过解析并标记 parse_skipped
+	maxFileSize int64
+	maxLineCount int
 }
 
 // NewScanner 创建 Scanner 实例。
@@ -49,6 +52,13 @@ func NewScanner(st store.Store, reg *parser.Registry, workers int) *Scanner {
 		semaphore: make(chan struct{}, workers),
 		logger:    log.WithModule("scanner"),
 	}
+}
+
+// SetLimits 设置文件旁路限额：超过 maxFileSize 字节或 maxLineCount 行的文件跳过解析并
+// 标记 parse_skipped（DoS 防护/索引净化）。参数 <=0 表示对应维度不限制。
+func (s *Scanner) SetLimits(maxFileSize int64, maxLineCount int) {
+	s.maxFileSize = maxFileSize
+	s.maxLineCount = maxLineCount
 }
 
 // SetOnIndex 设置索引回调，在文件入库成功后自动更新搜索索引。
@@ -75,6 +85,15 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	span := trace.Start("process_file", "path", path)
 	defer span.End()
 
+	// 0. 限额旁路（DoS 防护）：先用廉价 stat 短路超大文件，避免整文件读取后再解析；
+	//    也防止后续 sha256 全量读取占用 I/O 与内存。
+	if s.maxFileSize > 0 {
+		if info, serr := os.Stat(path); serr == nil && info.Size() > s.maxFileSize {
+			s.logger.Debug("file skipped (size limit)", "path", path, "size", info.Size(), "limit", s.maxFileSize)
+			return s.markSkipped(ctx, path, info.Size(), 0)
+		}
+	}
+
 	// 1. 计算哈希，如果文件不存在则触发删除处理
 	h, err := sha256sum(path)
 	if err != nil {
@@ -98,6 +117,14 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 		metrics.IncCounter("scanner_processed_total", "skipped")
 		s.logger.Debug("file skipped (hash match)", "path", path)
 		return nil
+	}
+
+	// 2.5 行数旁路：超行数文件跳过解析并标记 parse_skipped
+	if s.maxLineCount > 0 {
+		if lc := countLines(path); lc > s.maxLineCount {
+			s.logger.Debug("file skipped (line limit)", "path", path, "lines", lc, "limit", s.maxLineCount)
+			return s.markSkipped(ctx, path, statSize(path), lc)
+		}
 	}
 
 	// 3. 检测语言并选择适配器
@@ -212,6 +239,24 @@ func (s *Scanner) ScanAll(ctx context.Context, root string) error {
 	}
 
 	s.logger.Info("scan completed", "files", len(files))
+	return nil
+}
+
+// markSkipped 记录一个被旁路的文件（超限未解析），返回 false 表示无需继续。
+// 优先经 store.SkippedWriter 标记 parse_skipped 留痕；未实现该接口的 store 回退 UpsertFile。
+func (s *Scanner) markSkipped(ctx context.Context, path string, byteSize int64, lineCount int) error {
+	if sw, ok := s.store.(store.SkippedWriter); ok {
+		if _, err := sw.MarkParseSkipped(ctx, path, byteSize, lineCount); err != nil {
+			metrics.IncCounter("scanner_errors_total", "mark_skipped")
+			s.logger.Warn("mark parse_skipped failed", "path", path, "error", err)
+			return nil
+		}
+	} else if _, err := s.store.UpsertFile(ctx, path, "", lineCount, byteSize); err != nil {
+		metrics.IncCounter("scanner_errors_total", "mark_skipped")
+		s.logger.Warn("record skipped file failed", "path", path, "error", err)
+		return nil
+	}
+	metrics.IncCounter("scanner_processed_total", "parse_skipped")
 	return nil
 }
 

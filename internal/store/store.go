@@ -96,6 +96,13 @@ type FileRecord struct {
 	ParseStatus      string   `json:"parse_status"`
 }
 
+// SkippedWriter 可选接口：对因超限被旁路（大文件/超行数）的文件标记 parse_skipped 留痕。
+// FileStore/SQLiteStore/PGStore 均实现；未实现该接口的 Store 保留原行为（UpsertFile）。
+type SkippedWriter interface {
+	// MarkParseSkipped 记录一个被旁路的文件，parse_status 置为 "parse_skipped"。
+	MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error)
+}
+
 // NewStore 根据驱动类型创建对应的存储实现。
 //
 // 注意：因 sqlitestore/pg 子包反向依赖本包（实现 Store 接口），本函数按设计

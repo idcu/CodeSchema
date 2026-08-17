@@ -263,6 +263,7 @@ func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Run
 func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, root string) error {
 	reg := NewParserRegistry(ctx, cfg, root)
 	s := scanner.NewScanner(st, reg, cfg.Scanner.Workers)
+	s.SetLimits(int64(cfg.Scanner.FileSizeLimitMB)*1024*1024, cfg.Scanner.LineCountLimit)
 	if err := s.ScanAll(ctx, root); err != nil {
 		return err
 	}
@@ -286,6 +287,7 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Config, root string) (func(), error) {
 	reg := NewParserRegistry(ctx, cfg, root)
 	s := scanner.NewScanner(st, reg, cfg.Scanner.Workers)
+	s.SetLimits(int64(cfg.Scanner.FileSizeLimitMB)*1024*1024, cfg.Scanner.LineCountLimit)
 	searcher, builder := NewSearcher(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)

@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 110: feat(scanner): 大文件/超行数旁路，超限标记 parse_skipped
+
+- 背景：`scanner.file_size_limit_mb`/`scanner.line_count_limit` 配置字段早已存在（解析/校验/默认/合并齐全），但 scanner 从未读取，超限文件不会被旁路（06-编排层 §4.3 与 DoS 安全设计标注的缺口）
+- 实现（非破坏性）：
+  - `store` 新增**可选**子接口 `SkippedWriter`（Store 接口不变）；FileStore/SQLiteStore/PGStore 各自实现 `MarkParseSkipped`，insert/upsert 置 `parse_status='parse_skipped'`
+  - scanner 新增 `maxFileSize`/`maxLineCount` 字段 + `SetLimits()`；ProcessFile 用廉价 `os.Stat` 在 sha256 之前短路超大文件（避免整文件读取的 I/O/内存，DoS 防护）；超行数经 `countLines` 二次旁路；`markSkipped` 优先走 SkippedWriter 留痕，未实现时回退 UpsertFile
+  - runtime `ScanRepository`/`StartWatchBackground` 两处 `SetLimits(MB→byte, LineCountLimit)` 接线
+- 测试：scanner 新增 3 条（SizeLimit 超限旁路+parse_skipped+size 校验、LineLimit 旁路+parse_skipped+行数校验、UnderLimit 正常解析）
+- 文档同步：06-编排层 §4.3 移除"未实现"标注、勾选大文件旁路检查点；交接说明遗留段与修订记录标注落地
+- 验证：`go build ./...` 通过；`go vet scanner/store/runtime` 通过；`go test scanner(1.611s) store(2.306s) runtime(2.060s)` 全绿；`go build -tags "sqlite pg" ./internal/store/...` 编译通过（sqlite/pg 实现可用）
+- 预留：`SkippedWriter` 为可选接口且默认驱动 file 已覆盖，生产 sqlite/pg 需在各自 build-tag 下启用；committed 未 push
+
 ### Commit 109: refactor(search): 统一 cosineSimilarity 为 vector 包单一实现
 
 - 现状核实：生产层 `cosineSimilarity` 实际仅存在于 `internal/vector/store.go`（复用方 store.search/persistent），P8 §7.3 标注的 `search/fts.go` 生产版早已不复存在；真正的残留是 `internal/search/search_test.go` 里复制粘贴的测试助手 `cosineSimilarity` + `TestCosineSimilarityEdge`（仅覆盖全零一种边界），重复定义生产逻辑

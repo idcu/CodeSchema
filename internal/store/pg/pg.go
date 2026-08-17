@@ -184,6 +184,17 @@ func (s *PGStore) GetFileByPath(ctx context.Context, path string) (*store.FileRe
 	return scanFile(row)
 }
 
+// MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
+func (s *PGStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	const q = `INSERT INTO file (absolute_path, relative_path, content_hash, line_count, byte_size, parse_status)
+		VALUES ($1,$2,'', $3,$4,'parse_skipped')
+		ON CONFLICT (absolute_path) DO UPDATE SET content_hash='', line_count=EXCLUDED.line_count,
+		byte_size=EXCLUDED.byte_size, parse_status='parse_skipped', updated_at=now() RETURNING id`
+	var id int64
+	err := s.db.QueryRowContext(ctx, q, filePath, filePath, lineCount, byteSize).Scan(&id)
+	return id, err
+}
+
 func (s *PGStore) GetFileByID(ctx context.Context, id int64) (*store.FileRecord, error) {
 	const q = `SELECT id, absolute_path, content_hash, line_count, byte_size, referenced_by_files, imports, language, parse_status FROM file WHERE id=$1`
 	row := s.db.QueryRowContext(ctx, q, id)

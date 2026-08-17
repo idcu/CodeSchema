@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/parser"
@@ -225,5 +226,119 @@ func TestListFiles_SymlinkDir(t *testing.T) {
 	// a.go + b.go + file_link.go 三个真实文件
 	if len(files) != 3 {
 		t.Errorf("expected 3 files, got %d: %v", len(files), files)
+	}
+}
+
+// TestProcessFile_SizeLimitSkipped 验证：超过 SetLimits 字节的文件跳过解析并标记 parse_skipped。
+func TestProcessFile_SizeLimitSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.go")
+	// 100 字节 > 限制 10 字节
+	os.WriteFile(path, []byte(strings.Repeat("a", 100)), 0644)
+
+	reg := parser.NewRegistry()
+	parseCalled := false
+	reg.Register(&mockParser{
+		name:     "test",
+		supports: map[string]bool{"go": true},
+		parseFn: func(ctx context.Context, path string) (*parser.IRDocument, error) {
+			parseCalled = true
+			return &parser.IRDocument{FilePath: path}, nil
+		},
+	})
+
+	st := store.NewStore("file")
+	st.Open(context.Background(), dir)
+	defer st.Close()
+
+	s := NewScanner(st, reg, 1)
+	s.SetLimits(10, 0) // 仅限制大小
+	if err := s.ProcessFile(context.Background(), path); err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	if parseCalled {
+		t.Error("parse should NOT be called for file over size limit")
+	}
+	f, _ := st.GetFileByPath(context.Background(), path)
+	if f == nil {
+		t.Fatal("skipped file should be recorded")
+	}
+	if f.ParseStatus != "parse_skipped" {
+		t.Errorf("ParseStatus = %q, want %q", f.ParseStatus, "parse_skipped")
+	}
+	if f.ByteSize != 100 {
+		t.Errorf("ByteSize = %d, want 100", f.ByteSize)
+	}
+}
+
+// TestProcessFile_LineLimitSkipped 验证：超过 SetLimits 行数的文件跳过解析并标记 parse_skipped。
+func TestProcessFile_LineLimitSkipped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.go")
+	os.WriteFile(path, []byte(strings.Repeat("line\n", 100)), 0644)
+
+	reg := parser.NewRegistry()
+	parseCalled := false
+	reg.Register(&mockParser{
+		name:     "test",
+		supports: map[string]bool{"go": true},
+		parseFn: func(ctx context.Context, path string) (*parser.IRDocument, error) {
+			parseCalled = true
+			return &parser.IRDocument{FilePath: path}, nil
+		},
+	})
+
+	st := store.NewStore("file")
+	st.Open(context.Background(), dir)
+	defer st.Close()
+
+	s := NewScanner(st, reg, 1)
+	s.SetLimits(0, 10) // 仅限制行数
+	if err := s.ProcessFile(context.Background(), path); err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	if parseCalled {
+		t.Error("parse should NOT be called for file over line limit")
+	}
+	f, _ := st.GetFileByPath(context.Background(), path)
+	if f == nil {
+		t.Fatal("skipped file should be recorded")
+	}
+	if f.ParseStatus != "parse_skipped" {
+		t.Errorf("ParseStatus = %q, want %q", f.ParseStatus, "parse_skipped")
+	}
+	if f.LineCount != 100 {
+		t.Errorf("LineCount = %d, want 100", f.LineCount)
+	}
+}
+
+// TestProcessFile_UnderLimit_Parses 验证：未超限文件不受影响，正常解析。
+func TestProcessFile_UnderLimit_Parses(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.go")
+	os.WriteFile(path, []byte("package main\n"), 0644)
+
+	reg := parser.NewRegistry()
+	parseCalled := false
+	reg.Register(&mockParser{
+		name:     "test",
+		supports: map[string]bool{"go": true},
+		parseFn: func(ctx context.Context, path string) (*parser.IRDocument, error) {
+			parseCalled = true
+			return &parser.IRDocument{FilePath: path}, nil
+		},
+	})
+
+	st := store.NewStore("file")
+	st.Open(context.Background(), dir)
+	defer st.Close()
+
+	s := NewScanner(st, reg, 1)
+	s.SetLimits(1024*1024, 50000) // 宽松限额
+	if err := s.ProcessFile(context.Background(), path); err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	if !parseCalled {
+		t.Error("parse should be called for file under limits")
 	}
 }

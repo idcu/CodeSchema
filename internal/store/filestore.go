@@ -145,6 +145,31 @@ func (fs *FileStore) UpsertFile(ctx context.Context, filePath string, contentHas
 	return rec.ID, nil
 }
 
+// MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
+func (fs *FileStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if existing, ok := fs.files[filePath]; ok {
+		existing.ContentHash = ""
+		existing.LineCount = lineCount
+		existing.ByteSize = byteSize
+		existing.ParseStatus = "parse_skipped"
+		return existing.ID, nil
+	}
+
+	rec := &FileRecord{
+		ID:           fs.nextID,
+		AbsolutePath: filePath,
+		LineCount:    lineCount,
+		ByteSize:     byteSize,
+		ParseStatus:  "parse_skipped",
+	}
+	fs.nextID++
+	fs.files[filePath] = rec
+	return rec.ID, nil
+}
+
 // GetFileByPath 按路径查询文件。
 func (fs *FileStore) GetFileByPath(ctx context.Context, path string) (*FileRecord, error) {
 	fs.mu.RLock()
