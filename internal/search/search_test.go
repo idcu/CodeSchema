@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"math"
 	"testing"
 )
 
@@ -293,33 +292,6 @@ func TestTokenize(t *testing.T) {
 	if len(tokens) == 0 {
 		t.Fatal("expected non-empty tokens")
 	}
-}
-
-func TestCosineSimilarityEdge(t *testing.T) {
-	// 全零向量
-	s := cosineSimilarity([]float32{0, 0}, []float32{0, 0})
-	if math.Abs(s-0.0) > 0.001 {
-		t.Errorf("expected 0.0, got %f", s)
-	}
-}
-
-// cosineSimilarity 供测试使用的内部函数
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) {
-		return 0
-	}
-	var dotProduct, normA, normB float64
-	for i := range a {
-		fa := float64(a[i])
-		fb := float64(b[i])
-		dotProduct += fa * fb
-		normA += fa * fa
-		normB += fb * fb
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func TestPersistentFTS_SaveLoad(t *testing.T) {

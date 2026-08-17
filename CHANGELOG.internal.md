@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 109: refactor(search): 统一 cosineSimilarity 为 vector 包单一实现
+
+- 现状核实：生产层 `cosineSimilarity` 实际仅存在于 `internal/vector/store.go`（复用方 store.search/persistent），P8 §7.3 标注的 `search/fts.go` 生产版早已不复存在；真正的残留是 `internal/search/search_test.go` 里复制粘贴的测试助手 `cosineSimilarity` + `TestCosineSimilarityEdge`（仅覆盖全零一种边界），重复定义生产逻辑
+- 修法：删除 search_test.go 中的 `cosineSimilarity` 助手与 `TestCosineSimilarityEdge`，并移除随之失效的 `math` 导入；余弦实现统归于 `vector` 包（已有 `TestCosineSimilarity` 覆盖完全相同/正交/相反/零向量/不同长度 5 类边界）
+- 文档同步：P8 §7.3 将该清理项划除；交接说明遗留段与修订记录标注统一进展
+- 验证：`go build ./...`、`go vet ./internal/search ./internal/vector` 通过；`go test ./internal/search ./internal/vector` 全绿（search 1.171s、vector 0.182s）；删测试副本零行为变化
+- 预留：committed 未 push
+
 ### Commit 108: refactor(search): 移除死函数 SearchResultFromVector + 文档遗留同步
 
 - 死代码：`internal/search/searcher.go` 的 `SearchResultFromVector` 全仓库无调用（含测试），且其类型断言对象为局部 `vectorResult` 结构，无任何真实返回值命中，属 P8 阶段总结 §7.3 标注的遗留项；当前架构已用 `search.NewVectorAdapter(indexer)` 适配 vector 结果，直接删除
