@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 126: chore(contrib+scripts): 生态资产 P2 发布前置收尾——adapterx 独立发布验证 + 脚本抽公共
+
+- 背景：Commit 125 遗留 TODO「adapterx 独立仓库拷贝发布（P2）」推进；context-sdk 发布前置核查。
+- 实现：
+  - **adapterx 独立发布准备（A 级资产）**：新增 `scripts/check-adapterx-publish.sh`（复制 contrib/adapterx → 独立 go mod init → vet/build/test，仅标准库即可独立发布，实测通过）；新增 `contrib/adapterx/README.md`（发布评估：P0 契约 → P1 独立验证 → P2 独立 module → P3 第三方接入指南，对标 contextsdk）。
+  - **发布验证脚本抽公共**：新增 `scripts/check-contrib-publish.sh <src_dir> <module_name>` 通用验证脚本，`check-contextsdk-publish.sh` / `check-adapterx-publish.sh` 改为薄包装（exec 委托），消除 90% 重复。
+  - **context-sdk 发布前置核查**：`scripts/check-contextsdk-publish.sh` 仍通过（仅标准库）；README P2 状态与发布说明一致。
+- 坑：`check-contrib-publish.sh` 中 `echo "...$MODULE_NAME）..."`（变量后紧跟全角右括号）在本机 bash 下被解析为 `MODULE_NAME）` 变量 → `unbound variable`。修复：改用 `${MODULE_NAME}` 花括号明确边界（多字节字符后必须花括号包裹）。
+- 文档同步：analysis/2026-08-17-competitor-and-harness-analysis.md（遗留 TODO 状态 + 修订记录）、docs/4-决策层/生态资产发布说明.md（A 级进度 + 修订记录）、CHANGELOG.internal.md（本记录）。
+- 遗留：**真正发布动作属外部**——首个 v* tag + push 独立仓库 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk`（待用户执行）；「对外监听收敛」为部署期运维项（按 secure-demo.yaml）。
+
 ### Commit 125: feat(agentbench+redis): 遗留 TODO 推进——agent-bench 多仓库评测 + Redis 方法符号缓存
 
 - 背景：Commit 124 遗留 TODO 的前两项落地（agent-bench 任务集扩展 / Redis 方法符号缓存）。
