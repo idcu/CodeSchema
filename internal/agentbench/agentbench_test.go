@@ -271,3 +271,65 @@ func repoRoot() string {
 		dir = parent
 	}
 }
+
+// TestRunMulti_RepoHintFilter 多仓库评测：按 RepoHint 过滤任务，Skipped 不计入分母。
+func TestRunMulti_RepoHintFilter(t *testing.T) {
+	root := repoRoot()
+	if root == "" {
+		t.Skip("未定位到仓库根，跳过")
+	}
+	// 用本仓 + 一个临时小仓（不含 code-schema 专属符号）。
+	other := t.TempDir()
+	src := "package other\n\ntype Config struct{ X int }\n\nfunc (c *Config) Load() int { return c.X }\n"
+	if err := os.WriteFile(filepath.Join(other, "config.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := RunMulti(context.Background(), []string{root, other}, DefaultTasks(), Options{Workers: 2, ContextLines: 10})
+	if err != nil {
+		t.Fatalf("RunMulti: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("expected 2 reports, got %d", len(reports))
+	}
+	// 本仓：5 任务全部 active（4 code-schema + 1 generic）。
+	if reports[0].ActiveTasks != 5 {
+		t.Fatalf("repo1 active tasks = %d, want 5", reports[0].ActiveTasks)
+	}
+	// 临时仓：仅 generic-feat-001 active（Config 符号存在），其余 4 个 Skipped。
+	if reports[1].ActiveTasks != 1 {
+		t.Fatalf("repo2 active tasks = %d, want 1", reports[1].ActiveTasks)
+	}
+	var skipped int
+	for _, tr := range reports[1].Tasks {
+		if tr.Skipped {
+			skipped++
+		}
+	}
+	if skipped != 4 {
+		t.Fatalf("repo2 skipped tasks = %d, want 4", skipped)
+	}
+	// 跨仓对比 Markdown 可生成。
+	md := GenerateMultiMarkdown(reports)
+	for _, want := range []string{"多仓库对比", "token 节省"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("multi markdown missing %q", want)
+		}
+	}
+}
+
+// TestSummarize_SkippedExcluded Skipped 任务不计入通过率分母。
+func TestSummarize_SkippedExcluded(t *testing.T) {
+	tasks := []TaskResult{
+		{TaskID: "a", Modes: map[Mode]ModeResult{
+			ModeNone: {Pass: false}, ModeFull: {Pass: true, TokenEstimate: 100}, ModeMinimal: {Pass: true, TokenEstimate: 10},
+		}},
+		{TaskID: "b", Skipped: true, Modes: map[Mode]ModeResult{}},
+	}
+	s := summarize(tasks)
+	if s.TaskTotal != 1 {
+		t.Fatalf("task total = %d, want 1 (skipped excluded)", s.TaskTotal)
+	}
+	if s.PassRateFull != 1.0 {
+		t.Fatalf("full pass rate = %v, want 1.0", s.PassRateFull)
+	}
+}

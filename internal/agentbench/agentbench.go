@@ -49,10 +49,11 @@ type AgentTask struct {
 	// TargetSymbol 完成任务需要了解/修改的核心符号（如 "Scanner.ScanAll"）。
 	// 为 minimal/full 档位提供注入目标；none 档位不注入。
 	TargetSymbol string `json:"target_symbol"`
-	// RequiredSymbols 完成任务必须看到的关键符号集合（上下文覆盖判定依据）。
-	RequiredSymbols []string `json:"required_symbols,omitempty"`
 	// RequiredKeywords 关键信息片段（决定改法的事实，如依赖名/方法名/配置键）。
 	RequiredKeywords []string `json:"required_keywords,omitempty"`
+	// RepoHint 任务适用的仓库名（多仓库评测时按 filepath.Base(仓库路径) 匹配；
+	// 为空表示适用于任意仓库）。
+	RepoHint string `json:"repo_hint,omitempty"`
 }
 
 // ModeResult 单档位评测结果。
@@ -69,11 +70,13 @@ type ModeResult struct {
 
 // TaskResult 单任务三档评测结果。
 type TaskResult struct {
-	TaskID       string              `json:"task_id"`
-	Description  string              `json:"description"`
-	Type         string              `json:"type"`
-	TargetSymbol string              `json:"target_symbol"`
-	Modes        map[Mode]ModeResult `json:"modes"`
+	TaskID       string `json:"task_id"`
+	Description  string `json:"description"`
+	Type         string `json:"type"`
+	TargetSymbol string `json:"target_symbol"`
+	// Skipped 任务因符号不适用于当前仓库而未评测（多仓库场景按 RepoHint 过滤）。
+	Skipped bool                `json:"skipped,omitempty"`
+	Modes   map[Mode]ModeResult `json:"modes"`
 }
 
 // Summary 汇总统计（对外发布的核心数据）。
@@ -98,11 +101,12 @@ type Summary struct {
 
 // Report 完整评测报告。
 type Report struct {
-	Timestamp string       `json:"timestamp"`
-	RepoPath  string       `json:"repo_path"`
-	FileCount int          `json:"file_count"`
-	Tasks     []TaskResult `json:"tasks"`
-	Summary   Summary      `json:"summary"`
+	Timestamp   string       `json:"timestamp"`
+	RepoPath    string       `json:"repo_path"`
+	FileCount   int          `json:"file_count"`
+	ActiveTasks int          `json:"active_tasks"` // 实际评测的任务数（排除 Skipped）
+	Tasks       []TaskResult `json:"tasks"`
+	Summary     Summary      `json:"summary"`
 }
 
 // Options 评测参数。
@@ -116,14 +120,24 @@ type Options struct {
 // DefaultTasks 返回内置任务集（以 CodeSchema 自身仓库为评测对象，符号真实可查）。
 // 注意：TargetSymbol 必须是 tree-sitter 能解析进 class/method 表的符号
 // （Go 方法 FQN = "ClassName.MethodName"，类 FQN = 简单类名；包级函数不在此列）。
+// 多仓库评测时，RepoHint 为空的通用任务在所有仓库评测，非空的任务仅在其
+// 指定仓库评测（其余仓库标记 Skipped，不惩罚）。
 func DefaultTasks() []AgentTask {
 	return []AgentTask{
+		{
+			ID:               "generic-feat-001",
+			Description:      "为项目核心类型补充导出文档注释（golint 要求导出的标识符必须有注释）",
+			Type:             "feature",
+			TargetSymbol:     "Config",
+			RequiredKeywords: []string{"Config"},
+		},
 		{
 			ID:               "code-schema-bug-001",
 			Description:      "修复 Scanner.ScanAll 在存在被忽略目录（vendor/node_modules）时仍可能尝试解析其中文件的问题",
 			Type:             "bugfix",
 			TargetSymbol:     "Scanner.ScanAll",
 			RequiredKeywords: []string{"ScanAll"},
+			RepoHint:         "code-schema",
 		},
 		{
 			ID:               "code-schema-feat-001",
@@ -131,6 +145,7 @@ func DefaultTasks() []AgentTask {
 			Type:             "feature",
 			TargetSymbol:     "Analyzer",
 			RequiredKeywords: []string{"Analyzer"},
+			RepoHint:         "code-schema",
 		},
 		{
 			ID:               "code-schema-refactor-001",
@@ -138,6 +153,7 @@ func DefaultTasks() []AgentTask {
 			Type:             "refactor",
 			TargetSymbol:     "FileStore",
 			RequiredKeywords: []string{"FileStore"},
+			RepoHint:         "code-schema",
 		},
 		{
 			ID:               "code-schema-bug-002",
@@ -145,6 +161,7 @@ func DefaultTasks() []AgentTask {
 			Type:             "bugfix",
 			TargetSymbol:     "SQLiteStore.BulkUpsert",
 			RequiredKeywords: []string{"BulkUpsert"},
+			RepoHint:         "code-schema",
 		},
 	}
 }
@@ -202,6 +219,48 @@ func Run(ctx context.Context, repoPath string, tasks []AgentTask, opts Options) 
 	return report, nil
 }
 
+// RunMulti 对多个仓库执行 Agent 任务评测，返回按仓库分组的报告列表。
+// 任务集按 RepoHint 过滤：匹配仓库名的任务执行评测，其余标记 Skipped（不计入
+// 通过率分母，保证跨仓对比公平——符号不存在的仓库不被"惩罚"）。
+func RunMulti(ctx context.Context, repos []string, tasks []AgentTask, opts Options) ([]*Report, error) {
+	if len(repos) == 0 {
+		return nil, fmt.Errorf("agent-bench: no repos specified")
+	}
+	var reports []*Report
+	for _, repo := range repos {
+		report, err := Run(ctx, repo, tasks, opts)
+		if err != nil {
+			return reports, fmt.Errorf("agent-bench %s: %w", repo, err)
+		}
+		// 按 RepoHint 过滤任务：标记不适用于本仓的任务为 Skipped。
+		repoName := filepath.Base(repo)
+		filtered := make([]TaskResult, 0, len(report.Tasks))
+		active := 0
+		for _, tr := range report.Tasks {
+			// 找到对应任务定义取 RepoHint。
+			hint := ""
+			for _, t := range tasks {
+				if t.ID == tr.TaskID {
+					hint = t.RepoHint
+					break
+				}
+			}
+			if hint != "" && hint != repoName {
+				tr.Skipped = true
+				tr.Modes = map[Mode]ModeResult{}
+			} else {
+				active++
+			}
+			filtered = append(filtered, tr)
+		}
+		report.Tasks = filtered
+		report.Summary = summarize(report.Tasks)
+		report.ActiveTasks = active
+		reports = append(reports, report)
+	}
+	return reports, nil
+}
+
 // evalTask 对单个任务执行三档评测。
 func evalTask(ctx context.Context, svc *service.Service, t AgentTask, opts Options) TaskResult {
 	tr := TaskResult{
@@ -220,11 +279,10 @@ func evalTask(ctx context.Context, svc *service.Service, t AgentTask, opts Optio
 // evalMode 生成单档位上下文并判定覆盖。
 func evalMode(ctx context.Context, svc *service.Service, t AgentTask, mode Mode, opts Options) ModeResult {
 	res := ModeResult{
-		RequiredSymbols:  len(t.RequiredSymbols),
 		RequiredKeywords: len(t.RequiredKeywords),
 	}
 	if mode == ModeNone || t.TargetSymbol == "" {
-		res.Pass = res.RequiredSymbols == 0 && res.RequiredKeywords == 0
+		res.Pass = res.RequiredKeywords == 0
 		return res
 	}
 
@@ -270,7 +328,7 @@ func evalMode(ctx context.Context, svc *service.Service, t AgentTask, mode Mode,
 	}
 	switch mode {
 	case ModeNone:
-		res.Pass = len(t.RequiredSymbols) == 0 && len(t.RequiredKeywords) == 0
+		res.Pass = len(t.RequiredKeywords) == 0
 	case ModeMinimal:
 		res.Pass = located
 	case ModeFull:
@@ -298,9 +356,18 @@ func containsSymbol(content, symbol string) bool {
 	return false
 }
 
-// summarize 汇总通过率与 token 权衡。
+// summarize 汇总通过率与 token 权衡（仅统计未 Skipped 的任务）。
 func summarize(tasks []TaskResult) Summary {
 	s := Summary{TaskTotal: len(tasks)}
+	// 有效任务：未被 Skipped（Skipped 任务 Modes 为空 map）。
+	active := make([]TaskResult, 0, len(tasks))
+	for _, t := range tasks {
+		if !t.Skipped {
+			active = append(active, t)
+		}
+	}
+	tasks = active
+	s.TaskTotal = len(tasks)
 	if len(tasks) == 0 {
 		return s
 	}
@@ -377,6 +444,31 @@ func GenerateMarkdown(r *Report) string {
 // GenerateJSON 生成 JSON 报告（机器可读，供基准存档）。
 func GenerateJSON(r *Report) ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
+}
+
+// GenerateMultiMarkdown 生成多仓库跨仓对比 Markdown（对外发布形态）。
+// 按仓库列出通过率与 token 消耗，突出 minimal 相对 full 的 token 节省一致性。
+func GenerateMultiMarkdown(reports []*Report) string {
+	var b strings.Builder
+	b.WriteString("## Agent 任务端到端评测（多仓库对比）\n\n")
+	if len(reports) == 0 {
+		b.WriteString("(no reports)\n")
+		return b.String()
+	}
+	b.WriteString("| 仓库 | 任务数 | full 通过率 | minimal 通过率 | none 通过率 | full token | minimal token | token 节省 |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|\n")
+	for _, r := range reports {
+		name := filepath.Base(r.RepoPath)
+		s := r.Summary
+		b.WriteString(fmt.Sprintf("| %s | %d | %.0f%% | %.0f%% | %.0f%% | %.0f | %.0f | **%.1f%%** |\n",
+			name, s.TaskTotal,
+			s.PassRateFull*100, s.PassRateMinimal*100, s.PassRateNone*100,
+			s.TokenAvgFull, s.TokenAvgMinimal, s.TokenSavingMinimalVsFull*100))
+	}
+	b.WriteString("\n> 口径：full 注入完整源码原文（context_lines 裁剪）；minimal 仅符号元数据、零文件 IO；")
+	b.WriteString("none 无上下文（对照基线）。任务按 RepoHint 匹配仓库，不适用的任务标记 Skipped 不计入分母。\n")
+	b.WriteString("> token 节省 = 1 − minimal 平均 token / full 平均 token。\n")
+	return b.String()
 }
 
 // WriteOutput 把报告写到 outDir（markdown + json），返回写入文件列表。

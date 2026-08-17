@@ -3,9 +3,12 @@
 // Redis 真实实例集成测试（T3-2）。
 //
 // 前提：本地已有 Redis 实例（推荐用 docker-compose：
-//   docker compose --profile redis up -d
+//
+//	docker compose --profile redis up -d
+//
 // 或：
-//   docker run -d --name codeschema-redis -p 6379:6379 redis:7-alpine
+//
+//	docker run -d --name codeschema-redis -p 6379:6379 redis:7-alpine
 //
 // 需 -tags 'pg redis' 构建（依赖 internal/store/redis 包）。
 // 实例不可达时优雅跳过。
@@ -88,7 +91,28 @@ func TestRedisCache_RealInstance(t *testing.T) {
 	if err != nil || len(callers) != 1 || callers[0] != call.CallerFQN {
 		t.Fatalf("CallersOf: %v (%v)", err, callers)
 	}
-	t.Logf("Redis cache OK: class hit + caller/callee reverse index verified")
+
+	// 方法符号缓存（PutMethod/GetMethod + 方法路径反查）
+	m := &parser.MethodIR{Name: "Run", ClassFQN: cls.FullName, Signature: "Run() error", StartLine: 10, EndLine: 20}
+	if err := cache.PutMethod(ctx, m); err != nil {
+		t.Fatalf("PutMethod: %v", err)
+	}
+	mFQN := cls.FullName + ".Run"
+	gotM, err := cache.GetMethod(ctx, mFQN)
+	if err != nil || gotM == nil || gotM.Name != "Run" || gotM.StartLine != 10 {
+		t.Fatalf("GetMethod mismatch: %+v (%v)", gotM, err)
+	}
+	if err := cache.PutMethodPath(ctx, mFQN, srcPath); err != nil {
+		t.Fatalf("PutMethodPath: %v", err)
+	}
+	if p, ok := cache.MethodPath(ctx, mFQN); !ok || p != srcPath {
+		t.Fatalf("MethodPath mismatch: %q %v", p, ok)
+	}
+	if _, ok := cache.MethodPath(ctx, "no.such.Method"); ok {
+		t.Fatalf("MethodPath should miss for unknown fqn")
+	}
+
+	t.Logf("Redis cache OK: class hit + method hit + caller/callee reverse index verified")
 
 	// 清理
 	_ = cache.Flush(ctx)

@@ -109,10 +109,10 @@ func TestFileStore_UpsertIR(t *testing.T) {
 
 	// 模拟一个 IR 文档
 	ir := &parser.IRDocument{
-		Source:   "treesitter",
-		Language: "go",
-		FilePath: "/test/service.go",
-		FileHash: "sha256hash",
+		Source:    "treesitter",
+		Language:  "go",
+		FilePath:  "/test/service.go",
+		FileHash:  "sha256hash",
 		LineCount: 200,
 		ByteSize:  8192,
 		Classes: []parser.ClassIR{

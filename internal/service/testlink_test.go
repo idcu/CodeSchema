@@ -11,27 +11,41 @@ import (
 
 // mockStoreWithTestData 实现 Store 接口，用于测试关联测试。
 type mockStoreWithTestData struct {
-	files   []*store.FileRecord
-	classes map[int64][]store.ClassRecord
-	methods map[int64][]store.MethodRecord
-	calls   map[int64][]store.CallRecord
+	files      []*store.FileRecord
+	classes    map[int64][]store.ClassRecord
+	methods    map[int64][]store.MethodRecord
+	calls      map[int64][]store.CallRecord
 	classTags  map[int64][]string
 	methodTags map[int64][]string
 	tagCats    map[string]string
 }
 
-func (m *mockStoreWithTestData) Open(_ context.Context, _ string) error    { return nil }
-func (m *mockStoreWithTestData) Close() error                               { return nil }
-func (m *mockStoreWithTestData) HealthCheck(_ context.Context) error        { return nil }
-func (m *mockStoreWithTestData) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) { return 0, nil }
-func (m *mockStoreWithTestData) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) { return nil, nil }
-func (m *mockStoreWithTestData) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error)    { return nil, nil }
-func (m *mockStoreWithTestData) DeleteFile(_ context.Context, _ int64) error                          { return nil }
-func (m *mockStoreWithTestData) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error   { return nil }
-func (m *mockStoreWithTestData) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
-func (m *mockStoreWithTestData) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
-func (m *mockStoreWithTestData) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
-func (m *mockStoreWithTestData) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error           { return nil }
+func (m *mockStoreWithTestData) Open(_ context.Context, _ string) error { return nil }
+func (m *mockStoreWithTestData) Close() error                           { return nil }
+func (m *mockStoreWithTestData) HealthCheck(_ context.Context) error    { return nil }
+func (m *mockStoreWithTestData) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockStoreWithTestData) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStoreWithTestData) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStoreWithTestData) DeleteFile(_ context.Context, _ int64) error { return nil }
+func (m *mockStoreWithTestData) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error {
+	return nil
+}
+func (m *mockStoreWithTestData) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error {
+	return nil
+}
+func (m *mockStoreWithTestData) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error {
+	return nil
+}
+func (m *mockStoreWithTestData) UpsertIR(_ context.Context, _ *parser.IRDocument) error { return nil }
+func (m *mockStoreWithTestData) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error {
+	return nil
+}
 func (m *mockStoreWithTestData) UpsertTags(_ context.Context, classID int64, tags []string) error {
 	if m.classTags == nil {
 		m.classTags = make(map[int64][]string)
@@ -39,16 +53,24 @@ func (m *mockStoreWithTestData) UpsertTags(_ context.Context, classID int64, tag
 	m.classTags[classID] = tags
 	return nil
 }
-func (m *mockStoreWithTestData) UpsertMethodTags(_ context.Context, _ int64, _ []string) error { return nil }
+func (m *mockStoreWithTestData) UpsertMethodTags(_ context.Context, _ int64, _ []string) error {
+	return nil
+}
 func (m *mockStoreWithTestData) GetTagsByClassID(_ context.Context, classID int64) ([]string, error) {
 	if m.classTags == nil {
 		return nil, nil
 	}
 	return m.classTags[classID], nil
 }
-func (m *mockStoreWithTestData) GetTagsByMethodID(_ context.Context, _ int64) ([]string, error) { return nil, nil }
-func (m *mockStoreWithTestData) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) { return nil, nil, nil }
-func (m *mockStoreWithTestData) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) { return nil, nil, nil }
+func (m *mockStoreWithTestData) GetTagsByMethodID(_ context.Context, _ int64) ([]string, error) {
+	return nil, nil
+}
+func (m *mockStoreWithTestData) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) {
+	return nil, nil, nil
+}
+func (m *mockStoreWithTestData) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) {
+	return nil, nil, nil
+}
 func (m *mockStoreWithTestData) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) {
 	return m.tagCats, nil
 }
@@ -542,8 +564,8 @@ func TestResolveExplicitClass(t *testing.T) {
 	}{
 		{"com.example.OrderService", "com.example.OrderService"}, // 精确
 		{"OrderService", "com.example.OrderService"},             // 简单名
-		{"UserService", "com.example.user.UserService"},         // 简单名
-		{"NonExistent", ""},                                     // 解析失败
+		{"UserService", "com.example.user.UserService"},          // 简单名
+		{"NonExistent", ""}, // 解析失败
 	}
 	for _, tt := range tests {
 		got := resolveExplicitClass(tt.token, all)

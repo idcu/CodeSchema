@@ -1,7 +1,8 @@
 {
-  "timestamp": "2026-08-17T12:25:15Z",
+  "timestamp": "2026-08-17T12:44:30Z",
   "repo_path": "/Volumes/Data/code-schema",
   "file_count": 350,
+  "active_tasks": 0,
   "tasks": [
     {
       "task_id": "code-schema-bug-001",
@@ -17,7 +18,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 723,
-          "generation_time_ms": 0.94
+          "generation_time_ms": 0.8
         },
         "minimal": {
           "token_estimate": 4,
@@ -55,7 +56,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 768,
-          "generation_time_ms": 0.68
+          "generation_time_ms": 0.62
         },
         "minimal": {
           "token_estimate": 4,
@@ -65,7 +66,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 150,
-          "generation_time_ms": 0.06
+          "generation_time_ms": 0.12
         },
         "none": {
           "token_estimate": 0,
@@ -93,7 +94,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 982,
-          "generation_time_ms": 0.55
+          "generation_time_ms": 0.54
         },
         "minimal": {
           "token_estimate": 4,
@@ -103,7 +104,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 145,
-          "generation_time_ms": 0.02
+          "generation_time_ms": 0.03
         },
         "none": {
           "token_estimate": 0,
@@ -131,7 +132,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 881,
-          "generation_time_ms": 0.53
+          "generation_time_ms": 0.54
         },
         "minimal": {
           "token_estimate": 4,
@@ -142,6 +143,44 @@
           "pass": true,
           "injected_chars": 143,
           "generation_time_ms": 0.02
+        },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "generic-feat-001",
+      "description": "为项目核心类型补充导出文档注释（golint 要求导出的标识符必须有注释）",
+      "type": "feature",
+      "target_symbol": "Config",
+      "modes": {
+        "full": {
+          "token_estimate": 84,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 1,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 981,
+          "generation_time_ms": 0.54
+        },
+        "minimal": {
+          "token_estimate": 4,
+          "symbols_covered": 1,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": true,
+          "injected_chars": 106,
+          "generation_time_ms": 0.03
         },
         "none": {
           "token_estimate": 0,
@@ -166,6 +205,6 @@
     "token_saving_minimal_vs_full": 0.9524,
     "full_vs_none": 1,
     "minimal_vs_none": 1,
-    "task_total": 4
+    "task_total": 5
   }
 }

@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 125: feat(agentbench+redis): 遗留 TODO 推进——agent-bench 多仓库评测 + Redis 方法符号缓存
+
+- 背景：Commit 124 遗留 TODO 的前两项落地（agent-bench 任务集扩展 / Redis 方法符号缓存）。
+- 实现：
+  - **agent-bench 多仓库评测** `internal/agentbench` + `cmd/codeschema/benchmark.go`：新增 `RunMulti`（按仓库分组评测，任务按 `RepoHint` 过滤——不适用的任务标记 `Skipped` 不计入通过率分母，跨仓对比公平）；`AgentTask` 新增 `RepoHint` 字段（通用任务留空在任意仓库评测）；内置任务扩至 5 个（新增 `generic-feat-001` 通用任务，符号 Config 任意 Go 仓可命中）；新增 `GenerateMultiMarkdown` 跨仓对比报告；CLI `agent-bench` 新增 `--repos="p1;p2"` 多仓库模式（输出每仓独立报告 + stdout 跨仓对比表）。实测：code-schema 5 任务 full 100%/minimal 100%（token 节省 98.7%）、demo-repo 1 任务（88.9%）。
+  - **Redis 方法符号缓存** `internal/store/redis/redis.go` + `store.go` + `store_redis.go` + `service.go`：方法 FQN（ClassFQN+"."+Name，三后端一致合成规则）缓存——Redis 新增 `PutMethod`/`GetMethod`（HASH method:<fqn>）+ `PutMethodPath`/`MethodPath`（methodpath:<fqn>）；`store.CacheReader` 接口新增 `GetMethod`/`MethodFilePath`；cmd 层 redisCacheStore populate 写入方法索引并实现新接口；`Service.resolveSymbolLocation` 方法符号走缓存快速路径（方法是最热查询形态，命中 O(1) 免全表 O(files×classes×methods)），miss 回退全表。
+- 测试：agentbench 新增 2 组（RunMulti RepoHint 过滤 + Skipped 不计入分母）；service 新增 2 组（方法缓存命中/回退）；Redis 集成测试补方法缓存覆盖（PutMethod/GetMethod/MethodPath）。
+- 验证：`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...` 通过；`go test ./...` 全零 FAIL。
+- 文档同步：analysis/2026-08-17-competitor-and-harness-analysis.md（遗留 TODO 状态更新 + 修订记录）、CHANGELOG.internal.md（本记录）。
+- 遗留 TODO：adapterx 独立仓库拷贝发布（P2，与 contextsdk 独立 module 并列，待首个 v* tag）。
+
 ### Commit 124: feat(agentbench+redis+server): 分析文档建议 1-5 全量推进——Agent 任务端到端基准/Redis 读路径接线/中间件合并/context-sdk 发布准备/差异点打点
 
 - 背景：`analysis/2026-08-17-competitor-and-harness-analysis.md` §3.4 给出 5 条下一步建议（基于 Commit 123 夯基后的再评估），用户要求全量推进实施。

@@ -117,50 +117,74 @@ func splitRepos(s string) []string {
 //
 // 用法：
 //
-//	codeschema agent-bench [--repo=path] [--out=build/agent-task-bench] [--workers=N] [--context-lines=10]
+//	codeschema agent-bench [--repo=path] [--repos="p1;p2"] [--out=build/agent-task-bench] [--workers=N] [--context-lines=10]
 //
-// 评测对象：单仓库（默认 CodeSchema 自身）+ 内置 Agent 任务集（bug 修复/
-// 特性实现/重构），对比 none/full/minimal 三档上下文供给的「任务可完成率 ×
-// token 消耗」，输出 Markdown 到 stdout、md+json 落盘到 --out。
+// 评测对象：单仓库（默认 CodeSchema 自身）或多仓库（--repos 分号分隔）+ 内置
+// Agent 任务集（bug 修复/特性实现/重构，按 RepoHint 匹配仓库），对比 none/full/
+// minimal 三档上下文供给的「任务可完成率 × token 消耗」，输出 Markdown 到
+// stdout、md+json 落盘到 --out。
 func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("agent-bench", flag.ExitOnError)
-	repoFlag := fs.String("repo", "", "评测仓库路径（默认 CodeSchema 自身）")
+	repoFlag := fs.String("repo", "", "评测仓库路径（默认 CodeSchema 自身，与 --repos 二选一）")
+	reposFlag := fs.String("repos", "", "分号分隔的多仓库路径列表（多仓库评测）")
 	outFlag := fs.String("out", filepath.Join("build", "agent-task-bench"), "报告输出目录（md + json）")
 	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
 	contextLines := fs.Int("context-lines", 10, "full 档位注入上下文行数（0 表示不裁剪）")
 	fs.Parse(args)
 
-	repo := *repoFlag
-	if repo == "" {
-		repo = agentbench.DefaultRepo()
+	var repos []string
+	switch {
+	case *reposFlag != "":
+		repos = splitRepos(*reposFlag)
+	case *repoFlag != "":
+		repos = []string{*repoFlag}
+	default:
+		repos = []string{agentbench.DefaultRepo()}
 	}
-	info, err := os.Stat(repo)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("agent-bench repo %s: not a directory or unreadable", repo)
+	for _, r := range repos {
+		info, err := os.Stat(r)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("agent-bench repo %s: not a directory or unreadable", r)
+		}
 	}
 
 	tasks := agentbench.DefaultTasks()
 	agentbench.SortTasks(tasks)
-	fmt.Printf("agent task bench on %s (%d tasks, workers=%d, context_lines=%d)\n",
-		repo, len(tasks), *workers, *contextLines)
+	fmt.Printf("agent task bench on %d repo(s) (%d tasks, workers=%d, context_lines=%d)\n",
+		len(repos), len(tasks), *workers, *contextLines)
 
-	report, err := agentbench.Run(ctx, repo, tasks, agentbench.Options{
-		Workers:      *workers,
-		ContextLines: *contextLines,
-	})
+	opts := agentbench.Options{Workers: *workers, ContextLines: *contextLines}
+
+	if len(repos) == 1 {
+		report, err := agentbench.Run(ctx, repos[0], tasks, opts)
+		if err != nil {
+			return fmt.Errorf("agent-bench: %w", err)
+		}
+		md := agentbench.GenerateMarkdown(report)
+		fmt.Printf("\n%s\n", md)
+		paths, err := agentbench.WriteOutput(report, *outFlag)
+		if err != nil {
+			return fmt.Errorf("agent-bench write output: %w", err)
+		}
+		for _, p := range paths {
+			fmt.Printf("agent task bench report saved to: %s\n", p)
+		}
+		return nil
+	}
+
+	// 多仓库：RunMulti + 跨仓对比 Markdown。
+	reports, err := agentbench.RunMulti(ctx, repos, tasks, opts)
 	if err != nil {
 		return fmt.Errorf("agent-bench: %w", err)
 	}
-
-	md := agentbench.GenerateMarkdown(report)
+	md := agentbench.GenerateMultiMarkdown(reports)
 	fmt.Printf("\n%s\n", md)
-
-	paths, err := agentbench.WriteOutput(report, *outFlag)
-	if err != nil {
-		return fmt.Errorf("agent-bench write output: %w", err)
-	}
-	for _, p := range paths {
-		fmt.Printf("agent task bench report saved to: %s\n", p)
+	for _, r := range reports {
+		sub := filepath.Join(*outFlag, filepath.Base(r.RepoPath))
+		if _, err := agentbench.WriteOutput(r, sub); err != nil {
+			return fmt.Errorf("agent-bench write output %s: %w", r.RepoPath, err)
+		}
+		fmt.Printf("agent task bench report saved to: %s\n", sub)
 	}
 	return nil
 }

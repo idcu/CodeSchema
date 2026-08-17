@@ -89,16 +89,16 @@ func rebuildKVCmd(ctx context.Context, cfg *config.Config, args []string) error 
 // classRecordToIR 将存储层的 ClassRecord 转为 Redis 缓存所需的 parser.ClassIR。
 func classRecordToIR(r *store.ClassRecord) *parser.ClassIR {
 	return &parser.ClassIR{
-		Name:        r.Name,
-		FullName:    r.FullName,
-		Type:        r.Type,
-		ParentFQNs:  r.ParentFQNs,
-		StartLine:   r.StartLine,
-		StartCol:    r.StartCol,
-		EndLine:     r.EndLine,
-		EndCol:      r.EndCol,
-		Modifier:    r.Modifier,
-		Doc:         r.Doc,
+		Name:       r.Name,
+		FullName:   r.FullName,
+		Type:       r.Type,
+		ParentFQNs: r.ParentFQNs,
+		StartLine:  r.StartLine,
+		StartCol:   r.StartCol,
+		EndLine:    r.EndLine,
+		EndCol:     r.EndCol,
+		Modifier:   r.Modifier,
+		Doc:        r.Doc,
 	}
 }
 

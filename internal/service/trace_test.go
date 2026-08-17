@@ -328,11 +328,12 @@ func TestGetImpact_Trace_WithoutAnalyzer(t *testing.T) {
 }
 
 // cacheReaderStore 包装真实 FileStore 并实现 store.CacheReader（模拟 Redis L2 缓存层），
-// 用于验证 resolveSymbolLocation 的缓存快速路径（类符号命中）。
+// 用于验证 resolveSymbolLocation 的缓存快速路径（类/方法符号命中）。
 type cacheReaderStore struct {
 	*store.FileStore
 	classes map[string]*parser.ClassIR
 	paths   map[string]string
+	methods map[string]*parser.MethodIR
 }
 
 func (c *cacheReaderStore) GetClass(ctx context.Context, fqn string) (*parser.ClassIR, error) {
@@ -343,6 +344,18 @@ func (c *cacheReaderStore) GetClass(ctx context.Context, fqn string) (*parser.Cl
 }
 
 func (c *cacheReaderStore) ClassFilePath(ctx context.Context, fqn string) (string, bool) {
+	p, ok := c.paths[fqn]
+	return p, ok
+}
+
+func (c *cacheReaderStore) GetMethod(ctx context.Context, fqn string) (*parser.MethodIR, error) {
+	if m, ok := c.methods[fqn]; ok {
+		return m, nil
+	}
+	return nil, nil
+}
+
+func (c *cacheReaderStore) MethodFilePath(ctx context.Context, fqn string) (string, bool) {
 	p, ok := c.paths[fqn]
 	return p, ok
 }
@@ -372,7 +385,15 @@ func TestGetContextMode_ClassViaCacheFastPath(t *testing.T) {
 			},
 		},
 		paths: map[string]string{
-			"com.example.OrderService": path,
+			"com.example.OrderService":         path,
+			"com.example.OrderService.GetUser": path,
+		},
+		methods: map[string]*parser.MethodIR{
+			"com.example.OrderService.GetUser": {
+				Name: "GetUser", ClassFQN: "com.example.OrderService",
+				Signature: "GetUser(id int) string", StartLine: 5, EndLine: 7,
+				Doc: "按 ID 查询用户",
+			},
 		},
 	}
 	svc2 := NewService(cached)
@@ -393,6 +414,67 @@ func TestGetContextMode_ClassViaCacheFastPath(t *testing.T) {
 	}
 	if ctx.Trace == nil || ctx.Trace.Source != "store.GetContext" {
 		t.Errorf("expected trace from cache fast path, got %+v", ctx.Trace)
+	}
+}
+
+// TestGetContextMode_MethodViaCacheFastPath 方法符号经缓存快速路径命中
+// （方法 FQN = ClassFQN.Name，最热查询形态）。
+func TestGetContextMode_MethodViaCacheFastPath(t *testing.T) {
+	svc := newTestService(t)
+	path := seedContextFile(t, svc)
+
+	cached := &cacheReaderStore{
+		FileStore: svc.store.(*store.FileStore),
+		classes:   map[string]*parser.ClassIR{},
+		paths: map[string]string{
+			"com.example.OrderService.GetUser": path,
+		},
+		methods: map[string]*parser.MethodIR{
+			"com.example.OrderService.GetUser": {
+				Name: "GetUser", ClassFQN: "com.example.OrderService",
+				Signature: "GetUser(id int) string", StartLine: 5, EndLine: 7,
+				Doc: "按 ID 查询用户",
+			},
+		},
+	}
+	svc2 := NewService(cached)
+
+	ctx, err := svc2.GetContextMode(context.Background(), "com.example.OrderService.GetUser", ContextOptions{
+		Mode:         ModeMinimal,
+		IncludeTrace: true,
+	})
+	if err != nil {
+		t.Fatalf("GetContextMode method via cache: %v", err)
+	}
+	if ctx == nil || ctx.Symbol != "com.example.OrderService.GetUser" {
+		t.Fatalf("expected method context via cache, got %+v", ctx)
+	}
+	if ctx.StartLine != 5 || ctx.EndLine != 7 {
+		t.Errorf("method lines via cache: %d-%d, want 5-7", ctx.StartLine, ctx.EndLine)
+	}
+}
+
+// TestGetContextMode_MethodCacheMissFallsBack 方法缓存未命中 → 回退全表解析。
+func TestGetContextMode_MethodCacheMissFallsBack(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+
+	cached := &cacheReaderStore{
+		FileStore: svc.store.(*store.FileStore),
+		classes:   map[string]*parser.ClassIR{},
+		paths:     map[string]string{},
+		methods:   map[string]*parser.MethodIR{},
+	}
+	svc2 := NewService(cached)
+
+	ctx, err := svc2.GetContextMode(context.Background(), "com.example.OrderService.GetUser", ContextOptions{
+		Mode: ModeMinimal,
+	})
+	if err != nil {
+		t.Fatalf("GetContextMode method cache miss fallback: %v", err)
+	}
+	if ctx == nil || !strings.Contains(ctx.FilePath, "order.go") {
+		t.Fatalf("expected fallback to FileStore, got %+v", ctx)
 	}
 }
 

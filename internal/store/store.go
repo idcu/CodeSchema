@@ -119,6 +119,11 @@ type CacheReader interface {
 	// ClassFilePath 返回类全限定名对应的源文件路径（Redis 反查索引；
 	// 未命中返回 ("", false)）。
 	ClassFilePath(ctx context.Context, fqn string) (string, bool)
+	// GetMethod 按全限定名（ClassFQN + "." + Name）读取缓存的方法；
+	// 未命中返回 (nil, nil)。
+	GetMethod(ctx context.Context, fqn string) (*parser.MethodIR, error)
+	// MethodFilePath 返回方法全限定名对应的源文件路径；未命中返回 ("", false)。
+	MethodFilePath(ctx context.Context, fqn string) (string, bool)
 	// CallersOf 返回某方法的调用者集合（反向索引）。
 	CallersOf(ctx context.Context, fqn string) ([]string, error)
 	// CalleesOf 返回某方法直接调用的被调者集合。

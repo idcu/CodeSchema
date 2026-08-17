@@ -81,6 +81,59 @@ func (c *RedisCache) ClassPath(ctx context.Context, fqn string) (string, bool) {
 	return path, true
 }
 
+// PutMethod 缓存一个方法（热点），key 为方法 FQN（ClassFQN + "." + Name）。
+func (c *RedisCache) PutMethod(ctx context.Context, method *parser.MethodIR) error {
+	b, err := json.Marshal(method)
+	if err != nil {
+		return err
+	}
+	return c.client.HSet(ctx, "method:"+methodFQN(method), "ir", b).Err()
+}
+
+// PutMethodPath 记录方法 FQN → 源文件路径（供 CacheReader.MethodFilePath 反查）。
+func (c *RedisCache) PutMethodPath(ctx context.Context, fqn, path string) error {
+	if fqn == "" || path == "" {
+		return nil
+	}
+	return c.client.Set(ctx, "methodpath:"+fqn, path, 0).Err()
+}
+
+// GetMethod 读取缓存的方法；未命中返回 (nil, nil)。
+func (c *RedisCache) GetMethod(ctx context.Context, fqn string) (*parser.MethodIR, error) {
+	b, err := c.client.HGet(ctx, "method:"+fqn, "ir").Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m parser.MethodIR
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// MethodPath 返回方法 FQN 对应的源文件路径；未命中返回 ("", false)。
+func (c *RedisCache) MethodPath(ctx context.Context, fqn string) (string, bool) {
+	path, err := c.client.Get(ctx, "methodpath:"+fqn).Result()
+	if err == redis.Nil {
+		return "", false
+	}
+	if err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+// methodFQN 按三后端一致规则合成方法全限定名（ClassFQN + "." + Name）。
+func methodFQN(m *parser.MethodIR) string {
+	if m.ClassFQN == "" {
+		return m.Name
+	}
+	return m.ClassFQN + "." + m.Name
+}
+
 // GetClass 读取缓存的类；未命中返回 (nil, nil)。
 func (c *RedisCache) GetClass(ctx context.Context, fqn string) (*parser.ClassIR, error) {
 	b, err := c.client.HGet(ctx, "class:"+fqn, "ir").Bytes()

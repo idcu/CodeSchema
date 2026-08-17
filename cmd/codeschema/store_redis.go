@@ -62,7 +62,7 @@ func (c *redisCacheStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocume
 	return nil
 }
 
-// populate 把类、调用关系与文件→类索引 best-effort 推入 Redis；
+// populate 把类、方法、调用关系与文件→类索引 best-effort 推入 Redis；
 // 任一错误仅记录，不影响主路径。
 func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
 	fqns := make([]string, 0, len(ir.Classes))
@@ -75,6 +75,15 @@ func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
 			log.Printf("[warn] redis 写入类路径索引 %s 失败：%v", ir.Classes[i].FullName, err)
 		}
 		fqns = append(fqns, ir.Classes[i].FullName)
+	}
+	// 方法 FQN（ClassFQN.Name）→ 方法体 + 源文件路径（service 方法符号快速路径）。
+	for i := range ir.Methods {
+		if err := c.cache.PutMethod(ctx, &ir.Methods[i]); err != nil {
+			log.Printf("[warn] redis 写入方法 %s 失败：%v", ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, err)
+		}
+		if err := c.cache.PutMethodPath(ctx, ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, ir.FilePath); err != nil {
+			log.Printf("[warn] redis 写入方法路径索引 %s 失败：%v", ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, err)
+		}
 	}
 	if err := c.cache.PutFileClasses(ctx, ir.FilePath, fqns); err != nil {
 		log.Printf("[warn] redis 写入文件→类索引 %s 失败：%v", ir.FilePath, err)
@@ -107,6 +116,16 @@ func (c *redisCacheStore) GetClass(ctx context.Context, fqn string) (*parser.Cla
 // ClassFilePath 返回类全限定名对应的源文件路径（Redis 反查索引）。
 func (c *redisCacheStore) ClassFilePath(ctx context.Context, fqn string) (string, bool) {
 	return c.cache.ClassPath(ctx, fqn)
+}
+
+// GetMethod 按全限定名读取缓存的方法；未命中返回 (nil, nil)。
+func (c *redisCacheStore) GetMethod(ctx context.Context, fqn string) (*parser.MethodIR, error) {
+	return c.cache.GetMethod(ctx, fqn)
+}
+
+// MethodFilePath 返回方法全限定名对应的源文件路径（Redis 反查索引）。
+func (c *redisCacheStore) MethodFilePath(ctx context.Context, fqn string) (string, bool) {
+	return c.cache.MethodPath(ctx, fqn)
 }
 
 // CallersOf 返回某方法的调用者集合（反向索引）。

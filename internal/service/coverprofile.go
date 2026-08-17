@@ -44,6 +44,7 @@ func (s *Service) LoadGoCoverProfile(ctx context.Context, path string) error {
 //  1. 被覆盖的生产方法集合（行号区间命中）；
 //  2. 对每个测试类（isTestClass），按命名约定找到其源类（matchTestClass），
 //     若源类的任一方法被覆盖 → 测试方法 FQN → 被覆盖的生产方法 FQN 列表。
+//
 // 语义：这些单测真实运行过并覆盖了这些方法（置信度 90），改动方法时应当重跑。
 func (s *Service) ParseGoCoverProfile(ctx context.Context, r io.Reader) error {
 	blocks, err := parseCoverProfile(r)
@@ -69,7 +70,7 @@ func (s *Service) ParseGoCoverProfile(ctx context.Context, r io.Reader) error {
 	}
 
 	// 1. 被覆盖的生产方法集合：方法行号区间 ∩ 命中块区间
-	coveredProd := make(map[string]bool)      // prod method FQN
+	coveredProd := make(map[string]bool)       // prod method FQN
 	coveredByFile := make(map[string][]string) // 文件路径 → 被覆盖方法 FQN（供测试类匹配）
 	for file, hits := range hitsByFile {
 		methods := methodsByFile[file]

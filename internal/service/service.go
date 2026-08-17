@@ -358,10 +358,27 @@ func (l *symbolLocation) renderMinimal() string {
 // 先按类 FullName 精确匹配，再按方法 FullName 精确匹配。
 //
 // 快速路径：底层 store 实现 store.CacheReader（Redis L2 缓存）时，
-// 类符号经缓存 O(1) 命中（GetClass + ClassFilePath），避免全表扫描；
-// 未命中或非类符号回退全表遍历（数据一致性与向后兼容）。
+// 类/方法符号均经缓存 O(1) 命中（GetClass/GetMethod + 路径反查），
+// 避免全表扫描；未命中或未实现时回退全表遍历（数据一致性与向后兼容）。
 func (s *Service) resolveSymbolLocation(ctx context.Context, symbol string) (*symbolLocation, bool) {
 	if cr, ok := s.store.(store.CacheReader); ok {
+		// 方法符号快速路径（方法 FQN = ClassFQN + "." + Name，最热查询形态）。
+		if m, err := cr.GetMethod(ctx, symbol); err == nil && m != nil {
+			if path, ok := cr.MethodFilePath(ctx, symbol); ok {
+				loc := &symbolLocation{
+					FilePath:  path,
+					StartLine: m.StartLine,
+					EndLine:   m.EndLine,
+					Kind:      "method",
+					Doc:       m.Doc,
+				}
+				if f, err := s.store.GetFileByPath(ctx, path); err == nil {
+					loc.LineCount = f.LineCount
+				}
+				return loc, true
+			}
+		}
+		// 类符号快速路径。
 		if cls, err := cr.GetClass(ctx, symbol); err == nil && cls != nil {
 			if path, ok := cr.ClassFilePath(ctx, symbol); ok {
 				loc := &symbolLocation{
