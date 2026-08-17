@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 107: refactor(parser): 收敛解析适配器注册单一实现，删除 cmd 死副本
+
+- 结论核实：LSP 串联 parser.Registry 的接入当前代码已落地——`internal/runtime.NewParserRegistry` 负责注册 tree-sitter（兜底）+ gopls/jdtls/clangd（`FallbackParser` 失败回退 tree-sitter）+ SCIP/CodeGraph，并 SetPriority（go/java/cpp 走 LSP 优先），`scan`/`watch` 均经 `main.go` 调用同一装配
+- 问题：`cmd/codeschema/parser_registry.go` 存在一份与 runtime 完全重复的 `newParserRegistry`/`commandAvailable`，且从未被调用（死代码），违反"严禁复制粘贴式实现、提取公共逻辑"
+- 修法：删除 `cmd/codeschema/parser_registry.go`，Registry 注册统一收敛到 `internal/runtime/runtime.go` 单一实现（非破坏性，`main.go` 仅依赖 `rt.NewParserRegistry`，无符号被删引用）
+- 文档同步：`02-解析适配中间层.md:149` 优先级注释由 `cmd/codeschema/parser_registry.go` 改指 `internal/runtime/runtime.go` 的 NewParserRegistry；`P1_1.md` 解析适配器注册描述改为统一走 `internal/runtime.NewParserRegistry`
+- 验证：`go build ./...`、`go vet ./cmd/codeschema/` 通过；`go test ./internal/parser/... ./internal/runtime ./internal/scanner ./internal/watcher ./internal/scheduler ./internal/tenant` 全部 ok（含 lsp 1.624s、watcher 1.644s）；删除死码未引入任何行为变化
+- 预留：committed 未 push
+
 ### Commit 105: test(tenant): Windows 路径分隔符断言跨平台化
 
 - 根因：`tenant_test.go` 两处用例硬编码 unix 期望路径（`/var/lib/cs/mt-a/fts` 等），Windows 下 `filepath.Join` 产出反斜杠导致 `TestDeriveIndexDirs_Default*` FAIL；生产 `deriveIndexDirs` 本就跨平台正确，纯测试断言缺陷
