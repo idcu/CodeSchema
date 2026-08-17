@@ -301,6 +301,52 @@ func TestManager_Apply_ChangeTriggersRebuild(t *testing.T) {
 	}
 }
 
+// TestManager_Apply_ScannerWorkersTriggersRebuild 验证热重载：scanner.workers /
+// 旁路限额变化同样触发实例重建（服务级配置热重载补齐，Commit 121）。
+func TestManager_Apply_ScannerWorkersTriggersRebuild(t *testing.T) {
+	ctx := context.Background()
+
+	// 初始：workers=4（默认）。
+	cfg1 := multiTenantCfg(t, "a")
+	if cfg1.Scanner.Workers != 4 {
+		t.Fatalf("default workers = %d, want 4", cfg1.Scanner.Workers)
+	}
+	m, err := NewManager(ctx, cfg1, openFileStore)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	oldRT, _ := m.Runtime("a")
+
+	// 改 workers：应重建为新实例。
+	cfg2 := multiTenantCfg(t, "a")
+	cfg2.Scanner.Workers = 8
+	if err := m.Apply(ctx, cfg2); err != nil {
+		t.Fatalf("Apply(workers changed): %v", err)
+	}
+	newRT, _ := m.Runtime("a")
+	if oldRT == newRT {
+		t.Error("changed tenant (scanner.workers) should be rebuilt to a new instance")
+	}
+	if got, _ := m.Config("a"); got.Scanner.Workers != 8 {
+		t.Errorf("tenant a workers = %d, want 8", got.Scanner.Workers)
+	}
+
+	// 改旁路限额（line_count_limit）：同样触发重建。
+	cfg3 := multiTenantCfg(t, "a")
+	cfg3.Scanner.LineCountLimit = 100000
+	if err := m.Apply(ctx, cfg3); err != nil {
+		t.Fatalf("Apply(line limit changed): %v", err)
+	}
+	rt3, _ := m.Runtime("a")
+	if newRT == rt3 {
+		t.Error("changed tenant (scanner.line_count_limit) should be rebuilt")
+	}
+	if got, _ := m.Config("a"); got.Scanner.LineCountLimit != 100000 {
+		t.Errorf("tenant a line_count_limit = %d, want 100000", got.Scanner.LineCountLimit)
+	}
+}
+
 // TestManager_Apply_SingleToMulti 验证热重载：单租户 default ↔ 显式多租户切换。
 func TestManager_Apply_SingleToMulti(t *testing.T) {
 	ctx := context.Background()

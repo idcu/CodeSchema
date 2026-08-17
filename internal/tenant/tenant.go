@@ -305,11 +305,16 @@ func (m *Manager) Apply(ctx context.Context, base *config.Config) error {
 	}
 
 	// 提交：更新路由表（锁内，仅内存操作）。
+	// 按 targets 顺序追加（而非遍历 upsert map），确保 order 稳定有序。
 	m.mu.Lock()
-	for id, t := range upsert {
-		m.tenants[id] = t
-		if !sliceContains(m.order, id) {
-			m.order = append(m.order, id)
+	for _, tgt := range targets {
+		t, ok := upsert[tgt.id]
+		if !ok {
+			continue
+		}
+		m.tenants[tgt.id] = t
+		if !sliceContains(m.order, tgt.id) {
+			m.order = append(m.order, tgt.id)
 		}
 	}
 	for _, id := range release {
@@ -347,7 +352,10 @@ func tenantDirty(old *Tenant, tgt tenantTarget) bool {
 		old.Watch != tgt.watch ||
 		old.Cfg.Project.Name != tgt.cfg.Project.Name ||
 		old.Cfg.Project.Root != tgt.cfg.Project.Root ||
-		old.Cfg.Storage.DSN != tgt.cfg.Storage.DSN
+		old.Cfg.Storage.DSN != tgt.cfg.Storage.DSN ||
+		old.Cfg.Scanner.Workers != tgt.cfg.Scanner.Workers ||
+		old.Cfg.Scanner.FileSizeLimitMB != tgt.cfg.Scanner.FileSizeLimitMB ||
+		old.Cfg.Scanner.LineCountLimit != tgt.cfg.Scanner.LineCountLimit
 }
 
 func sliceContains(s []string, v string) bool {

@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 121: feat(tenant+adapterx+contextsdk): 服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备
+
+- 背景：承接 Commit 120 遗留 TODO「热重载不重建 Scanner workers / Store DSN」，并对分析建议四项后续方向（服务级热重载补齐、对外监听收敛、A 级适配器聚合发布、context-sdk 独立发布）做批量推进。
+- 实现：
+  - **服务级配置热重载补齐**：`internal/tenant/tenant.go` `tenantDirty` 扩展覆盖 `scanner.workers` / `scanner.file_size_limit_mb` / `scanner.line_count_limit`（与既有 DSN/Root/Name/autoScan/watch 一并触发租户实例重建）；修复 `Apply` 提交阶段遍历 `upsert` map 的无序追加 —— 改为按 `targets` 顺序追加，保证 `Manager.order` 稳定有序（此前多租户顺序随机）。
+  - **对外监听收敛（配置形态）**：新增 `build/secure-demo.yaml` 生产安全基线示例（`127.0.0.1:<port>` 监听 + `auth_token` + `rate_limit` + Nginx 内网反代指引）；代码默认保持 `:8080/:8081` 向后兼容不收敛（行为不变）。
+  - **A 级适配器聚合发布准备**：新增 `contrib/adapterx/`（自包含、仅依赖标准库）—— `ParserPlugin`/`BatchParser` 统一对外契约、`IRDocument` 对外 DTO（与 internal 字段对齐）、`Registry` 注册中心（Register/Get/Names，重复注册报错）、`BuiltinAdapters()` 发布元数据（4 个内置适配器）；`internal/parser/adapterx.go` 提供 `ToAdapterX`/`FromAdapterX` 双向桥接。
+  - **context-sdk 独立发布评估**：新增 `contrib/contextsdk/` 契约骨架—— `SDKProvider` 最小接口（GetContext/GetImpact）+ 公开 DTO（SymbolContext/ImpactResult/Request/Package）+ 发布评估 README（P0 接口抽象 → P1 仓库内编译 → P2 独立 module）。
+- 测试：`internal/tenant` 新增 `TestManager_Apply_ScannerWorkersTriggersRebuild`（workers 变更、line_count_limit 变更均触发重建）；`internal/parser` 新增 `TestAdapterXRoundTrip`/`TestAdapterX_NilSafe`/`TestAdapterX_TypeAliasCompat`（双向桥接 round-trip + nil 安全 + 契约直构）；`contrib/adapterx` 新增 4 组（Registry 注册/重复拒绝/BuiltinAdapters 元数据/契约直用）。
+- 验证：`go build ./...`、`go vet ./...` 通过；`go test ./internal/tenant/... ./internal/parser/... ./contrib/adapterx/...` 全绿（tenant 0.923s / parser 4.079s / adapterx 0.508s；contextsdk 为纯契约骨架，无 test files）。
+- 文档同步：配置参考.md（scanner 三项热重载 + tenants 关键字段口径）、交接说明.md（✅ 条目 + 修订记录）、生态资产发布说明.md（A/B 级进度落地 + 修订记录）、安全设计文档.md（§7 勾选「对外监听收敛」+ secure-demo.yaml 指引）、config.yaml.example（server 节监听收敛/认证注释）。
+- 遗留 TODO：context-sdk 独立发布阻塞项——`internal/contextsdk` 仍直接依赖 `internal/service.Service`，需抽取为 `SDKProvider` 轻量接口（首个 v* tag 前完成）；adapterx 独立仓库拷贝发布；对外监听收敛为部署期运维项（按 secure-demo.yaml 执行）。
+
 ### Commit 120: feat(server): 全局能力热重载扩展——监听地址/认证令牌/限流无需重启
 
 - 背景：Commit 119 遗留 TODO「热重载不覆盖 `server.*` 监听地址与 `preset` 等全局能力（需重启）」。本次将配置热重载从租户集合扩展到服务端全局能力。

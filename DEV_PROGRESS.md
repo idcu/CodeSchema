@@ -1,7 +1,7 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-16
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）**）
+> 更新时间：2026-08-17
+> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）+ 多租户热重载 + 全局能力热重载（监听地址/认证令牌/限流）+ 服务级热重载补齐（scanner 三项）+ 对外监听收敛基线（secure-demo.yaml）+ 生态资产发布准备（adapterx 聚合包 / context-sdk 发布评估）**）
 > 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成；2026-08-16 新增「单实例多租户」作为独立能力，详见下方维护优化章节）
 
 ---
@@ -361,6 +361,16 @@ P18      [████████████████████] 100%
 - [x] **CI action 版本 pin SHA（评估风险 #5 修复）** — `ci.yml` 与 `release.yml` 中所有 action 引用由浮动词版本（@v3/@v4/@v6/@v7）改为对应 commit SHA（保留 `# vX` 注释），杜绝供应链漂移。
 - [x] **验证** — `go vet ./internal/testutil/... ./internal/integration/... ./internal/scalebench/... ./internal/adapterbench/...` 干净；另写临时测试确认 `BenchOutPath` 默认走临时目录、`CODESCHEMA_UPDATE_BENCH=1` 走 `build/`（验证后已删除）；`go test ./...` 后 `build/` 无变更；两 workflow YAML 通过解析校验、无浮动词引用。
 
+### 维护优化（2026-08-17）：服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备
+
+承接「全局能力热重载」后续四项方向批量推进（Commit 121，本地）：
+
+- [x] **服务级配置热重载补齐** — `tenantDirty` 扩展覆盖 `scanner.workers`/`file_size_limit_mb`/`line_count_limit`，与 DSN/Root/Name/autoScan/watch 一并触发租户实例重建；修复 `Apply` 提交阶段 `upsert` map 无序追加导致的多租户顺序随机问题（改按 `targets` 顺序追加）。
+- [x] **对外监听收敛（配置形态）** — 新增 `build/secure-demo.yaml` 生产安全基线（`127.0.0.1:<port>` 监听 + 认证 + 限流 + Nginx 反代指引）；代码默认 `:8080/:8081` 保持向后兼容不收敛，安全自查勾选「对外监听收敛」。
+- [x] **A 级适配器聚合发布准备** — 新增 `contrib/adapterx/`（自包含）：`ParserPlugin`/`BatchParser` 契约、`IRDocument` DTO、`Registry`、`BuiltinAdapters()`；`internal/parser/adapterx.go` 双向桥接。
+- [x] **context-sdk 独立发布评估** — 新增 `contrib/contextsdk/` 契约骨架：`SDKProvider` 接口 + DTO + 发布评估 README（P0→P1→P2）。
+- [x] **验证** — `go build ./...`、`go vet ./...` 通过；`go test ./internal/tenant/... ./internal/parser/... ./contrib/adapterx/...` 全绿（tenant 0.923s / parser 4.079s / adapterx 0.508s）。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
@@ -378,5 +388,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：风险与待办落地（benchmark 快照防护 + Windows CI 去掩蔽 + CI action pin SHA）；此前 CI Node 24 修复 + 模型命名对齐（`0c4a1a1`）、单实例多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交：服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）；此前全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
