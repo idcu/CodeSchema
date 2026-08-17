@@ -28,7 +28,7 @@
 - 决策层：`版本发布说明.md` 补 v0.1.0 首个发布能力基线草稿（版本号/日期实留待首个 v* tag 回填，不虚构）
 - 一致性修正：清理 15 份文档"修订记录"表行末尾的 `-->` 共 15 处（批量建档残留，保留 Mermaid 箭头与 HTML 注释）；据 `go list./...` 实测将包数 31→32（README/系统简介/版本发布），"31 包全绿"更新为"32 包（28 含测试，无失败）"
 - 验证：`go list ./...` = 32 包；`go test ./...` 全量 0 FAIL（28 ok + 4 no-test）；纯计数与状态有实测支撑，未虚构
-- 预留：d4 已输出三项遗留项接入可行性评估（消歧接入搜索处理器 / AI 增强接入生产编排 / LSP 串联 parser.Registry），均未实施，涉及接口签名变更需人工评审后推进
+- 预留：d4 曾列三项遗留项接入可行性评估（消歧接入搜索处理器 / AI 增强接入生产编排 / LSP 串联 parser.Registry）。后在代码中核实三项均已实现并接线——LSP（`internal/runtime.NewParserRegistry`，见 Commit 107）；同名方法消歧（service.Search → disambiguateMethodResults，runtime.WithAIEnhancer 注入）；AI 增强（analyzer.SetEnhancer + TagAll 叠加 EnhanceTag/EnhanceDoc）。相关测试：service.TestSearch_Disambiguate* 3 条、analyzer.TestAnalyzer_TagAll_WithEnhancer* 2 条，均通过
 
 ### Commit 104: docs(doc-package): 迁移遗留 P8 阶段总结至生产层开发文档归档
 
