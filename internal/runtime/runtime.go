@@ -11,6 +11,7 @@ package runtime
 import (
 	"context"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -210,6 +211,12 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 		persist := cfg.Storage.Vector.DSN
 		if persist == "" {
 			persist = filepath.Join(cfg.Storage.Search.VectorDir, "chromem.db")
+		}
+		// chromem 库自管文件权限（默认受 umask 影响），此处纵深收敛：
+		// 父目录收紧 0700、已存在的持久化文件收紧 0600，与 fsperm 其他索引数据一致。
+		_ = fsperm.MkdirAll(filepath.Dir(persist))
+		if fi, err := os.Stat(persist); err == nil && fi.Mode().IsRegular() {
+			_ = os.Chmod(persist, 0o600)
 		}
 		cs, cerr := vector.NewPersistentChromemStore("codeschema", persist, em.Dim(), vector.NewEmbeddingFunc(em))
 		if cerr != nil {

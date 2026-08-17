@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 114: feat(runtime): chromem 可选后端目录/文件权限纵深收敛（0700/0600）
+
+- 背景：全量推进安全自查，补齐 chromem 可选后端——其持久化文件由 chromem-go 库生成、默认受 umask 影响（0666&umask），前一提交已要求显式 `driver=chromem` 才启用，但文件权限未收敛。
+- 决策：在 `runtime.go` 向量存储接线点（chromem 分支）显式收敛：
+  - 父目录 `fsperm.MkdirAll`（0700，新建/已存在都收紧）；
+  - 已存在的持久化文件 `os.Chmod` 0600；
+  - 不破坏库行为（不改写文件、不接管其内部写入时序）；新文件生成一刻仍由库按 umask 自管，为已记录的极小窗口。
+- 验证：`go build ./...` 通过；`go test ./internal/runtime ./internal/vector` 全 PASS（runtime 0.866s、vector 0.185s）。
+- 文档同步：安全设计文档 §7 勾选项整段补 chromem 收敛说明 + 交接说明 §4 ②由「未收敛」改写为「已纵深收敛，含极小 umask 窗口」。
+- 遗留 TODO：仅「对外监听收敛」未勾选——代码能力已具备（监听地址读 `server.mcp_addr/http_addr`），纯部署期配置项需运维改 `127.0.0.1` 或 Nginx 反代。
+
 ### Commit 113: feat(store): 索引数据目录/文件权限加固（目录 0700、文件 0600）
 
 - 背景：安全自查清单「索引目录权限 0600」未落地——store.json/vector.json/FTS/IDF/SQLite/锁文件默认 0755/0644，宽松 umask 下可被同机其他用户读取
