@@ -18,25 +18,23 @@ codeschema-contextsdk
 
 ## 3. 独立发布前置条件
 
-### 3.1 接口抽象（当前阻塞项）
+### 3.1 接口抽象（已解决，2026-08-18）
 
-当前 context-sdk 直接依赖 `internal/service.Service` 的具体类型：
+当前 `contrib/contextsdk` 已实现为**权威契约与编排实现**（自包含，仅依赖标准库）：
+
+- `SDKProvider` 最小契约：`GetContextMode` + `GetImpact`；
+- 公开 DTO 全部迁入本包：`ContextOptions` / `SymbolContext` / `ImpactResult` / `TraceEntry` / `Request` / `Package` / `Summary` / `SymbolBlock` / `ImpactBlock`；
+- 完整编排实现 `Client.Compose`（多租户解析 → 逐符号注入 → 可选影响面/关联单测 → token 汇总），不再依赖 `internal/service`。
+
+仓库内集成：`internal/contextsdk` 现为纯适配层，`ServiceProvider` 把 `internal/service.Service` 桥接为 `SDKProvider`，`NewClient` 签名保持向后兼容：
 
 ```go
+// internal/contextsdk
 type ResolveService func(tenant string) (*service.Service, error)
+func NewClient(resolve ResolveService) *Client // Client = contextsdk.Client（类型别名）
 ```
 
-独立发布前需将 `service.Service` 的上下文方法抽取为轻量接口：
-
-```go
-// SDKProvider 是 context-sdk 对外依赖的契约（可独立于 codeschema 后端实现）。
-type SDKProvider interface {
-    GetContextMode(ctx, symbol, opts) (*SymbolContext, error)
-    GetImpact(ctx, method, depth) (*ImpactResult, error)
-}
-```
-
-同时 `ContextOptions`、`SymbolContext`、`ImpactResult`、`TraceEntry` 等结构体需迁入公共类型包。
+验证：`go test ./contrib/contextsdk/...` 11 条 mock 编排测试全通（mockProvider 仅依赖标准库，证明第三方实现契约即可被编排）；`go test ./internal/contextsdk/...` 真实集成测试（Store+Analyzer）全通。
 
 ### 3.2 版本标记
 

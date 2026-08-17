@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 122: refactor(contextsdk): 解除 context-sdk 独立发布阻塞——接口抽象完成
+
+- 背景：Commit 121 遗留 TODO「context-sdk 独立发布阻塞项：internal/contextsdk 直接依赖 internal/service.Service，需抽取 SDKProvider 轻量接口」。本次完成 P0 接口抽象，使 contrib/contextsdk 自包含、可独立编译/测试/发布。
+- 实现：
+  - `contrib/contextsdk` 从契约骨架升级为**权威契约与编排实现**（自包含，仅依赖标准库）：`SDKProvider` 最小契约（`GetContextMode` + `GetImpact`）、公开 DTO 全部迁入（`ContextOptions`/`SymbolContext`/`ImpactResult`/`TraceEntry`/`Request`/`Package`/`Summary`/`SymbolBlock`/`ImpactBlock`）、完整编排 `Client.Compose`（多租户解析 → 逐符号注入 → 可选影响面/关联单测聚合 → token 汇总）。
+  - `internal/contextsdk` 改造为**纯适配层**：`ServiceProvider` 把 `internal/service.Service` 桥接为 `SDKProvider`（GetContextMode/GetImpact/TraceEntry 双向对齐）；`NewClient` 签名保持向后兼容（仍接受 `func(tenant string) (*service.Service, error)`，内部经 ServiceProvider 桥接）；`Client`/`Request`/`Package` 改为类型别名指向权威 DTO。
+- 测试：`contrib/contextsdk` 新增 11 条 mock 编排测试（mockProvider 仅依赖标准库，证明第三方实现契约即可被权威 Compose 编排）——默认租户/多租户路由/符号顺序保持/minimal 模式/WithImpact+WithTests 聚合/Provider 错误传播（含 context 与 impact 两路）/nil resolver/空 symbols/DTO JSON round-trip；`internal/contextsdk` 真实集成测试（真实 Store+Analyzer+文件）沿用适配层全通。
+- 验证：`go build ./contrib/contextsdk/... ./internal/contextsdk/...` 通过；`go test ./contrib/contextsdk/...` 11/11 通过（0.716s）；`go test ./internal/contextsdk/...` 全通（0.895s）；全量验证见下方（Commit 122 完成后 `go build ./...` + `go test ./...` 全绿）。
+- 文档同步：生态资产发布说明.md（B 级阻塞项解除、进度更新、修订记录 +1）、contrib/contextsdk/README.md（§3.1 由「当前阻塞项」改为「已解决」并补充验证数据）。
+- 遗留 TODO：adapterx 独立仓库拷贝发布（A 级，P2）；context-sdk 独立 module 发布 `github.com/idcu/codeschema-contextsdk`（P2，按首个 v* tag）；对外监听收敛为部署期运维项。
+
 ### Commit 121: feat(tenant+adapterx+contextsdk): 服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备
 
 - 背景：承接 Commit 120 遗留 TODO「热重载不重建 Scanner workers / Store DSN」，并对分析建议四项后续方向（服务级热重载补齐、对外监听收敛、A 级适配器聚合发布、context-sdk 独立发布）做批量推进。

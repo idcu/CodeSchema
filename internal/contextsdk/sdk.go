@@ -1,7 +1,8 @@
-// Package contextsdk 提供上下文编排的程序化 SDK（建议 5：借鉴 dsh Code mode SDK）。
+// Package contextsdk 提供 context-sdk 在仓库内的集成适配（B 级生态资产）。
 //
-// 一次调用组合「多租户 × 多符号 × 影响面 × 关联单测」的上下文包，供
-// dsh Code mode / Claude Code / 其他 Agent 运行时程序化调用，减少多轮往返。
+// 定位：对外发布契约与权威编排实现位于 contrib/contextsdk（自包含、可独立发布）。
+// 本包作为仓库内适配层，把 internal/service.Service 桥接为 contrib/contextsdk.SDKProvider，
+// 使真实后端（多租户 Service 实例）能被权威 Client.Compose 编排。
 //
 // 用法：
 //
@@ -18,159 +19,112 @@ package contextsdk
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/idcu/codeschema/contrib/contextsdk"
 	"github.com/idcu/codeschema/internal/service"
 )
 
+// ServiceProvider 把 internal/service.Service 适配为 SDKProvider（权威契约）。
+type ServiceProvider struct {
+	svc *service.Service
+}
+
+// NewServiceProvider 创建适配器。
+func NewServiceProvider(svc *service.Service) *ServiceProvider {
+	return &ServiceProvider{svc: svc}
+}
+
+// GetContextMode 实现 SDKProvider：桥接 service.SymbolContext → contextsdk.SymbolContext。
+func (p *ServiceProvider) GetContextMode(ctx context.Context, symbol string, opts contextsdk.ContextOptions) (*contextsdk.SymbolContext, error) {
+	sc, err := p.svc.GetContextMode(ctx, symbol, service.ContextOptions{
+		ContextLines: opts.ContextLines,
+		Mode:         service.ContextMode(opts.Mode),
+		IncludeTrace: opts.IncludeTrace,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &contextsdk.SymbolContext{
+		Symbol:       sc.Symbol,
+		Source:       sc.Source,
+		FilePath:     sc.FilePath,
+		StartLine:    sc.StartLine,
+		EndLine:      sc.EndLine,
+		Doc:          sc.Doc,
+		RelatedTests: sc.RelatedTests,
+		Trace:        traceToSDK(sc.Trace),
+	}, nil
+}
+
+// GetImpact 实现 SDKProvider：桥接 service.ImpactResult → contextsdk.ImpactResult。
+func (p *ServiceProvider) GetImpact(ctx context.Context, method string, depth int) (*contextsdk.ImpactResult, error) {
+	ir, err := p.svc.GetImpact(ctx, method, depth)
+	if err != nil {
+		return nil, err
+	}
+	out := &contextsdk.ImpactResult{
+		Method:  ir.Method,
+		Callers: make([]contextsdk.ImpactNode, 0, len(ir.Callers)),
+		Callees: make([]contextsdk.ImpactNode, 0, len(ir.Callees)),
+		Trace:   traceToSDK(ir.Trace),
+	}
+	for _, n := range ir.Callers {
+		out.Callers = append(out.Callers, contextsdk.ImpactNode{
+			Method:       n.Method,
+			Depth:        n.Depth,
+			RelatedTests: n.RelatedTests,
+		})
+	}
+	for _, n := range ir.Callees {
+		out.Callees = append(out.Callees, contextsdk.ImpactNode{
+			Method:       n.Method,
+			Depth:        n.Depth,
+			RelatedTests: n.RelatedTests,
+		})
+	}
+	return out, nil
+}
+
+// traceToSDK 桥接 service.TraceEntry → contextsdk.TraceEntry（nil 安全）。
+func traceToSDK(t *service.TraceEntry) *contextsdk.TraceEntry {
+	if t == nil {
+		return nil
+	}
+	return &contextsdk.TraceEntry{
+		Source:        t.Source,
+		HitSymbols:    t.HitSymbols,
+		HitLines:      t.HitLines,
+		TrimReason:    t.TrimReason,
+		TrimmedLines:  t.TrimmedLines,
+		TokenEstimate: t.TokenEstimate,
+		Timestamp:     t.Timestamp,
+	}
+}
+
 // ResolveService 返回指定租户的 Service 实例；tenant 为空表示默认租户。
+// 保留向后兼容的便捷签名，内部经 ServiceProvider 桥接为 SDKProvider。
 type ResolveService func(tenant string) (*service.Service, error)
 
-// Request 一次上下文编排请求。
-type Request struct {
-	// Tenant 目标租户（空 = 默认租户）。
-	Tenant string
-	// Symbols 待注入的符号（方法/类的 FullName）。
-	Symbols []string
-	// ContextLines 上下文裁剪行数（mode=full 生效；0=符号完整内容）。
-	ContextLines int
-	// Mode 注入模式：full（默认，注入源码原文）或 minimal（极简元数据）。
-	Mode string
-	// WithImpact 是否附带影响面（callers/callees 与对应关联单测）。
-	WithImpact bool
-	// ImpactDepth 影响面深度（默认 1）。
-	ImpactDepth int
-	// WithTests 是否附带关联单测（min_confidence=60，五策略）。
-	WithTests bool
-	// IncludeTrace 是否附带 _trace 追溯（默认 false，显式开启；
-	// 与 service.ContextOptions 的 opt-in 语义一致）。
-	IncludeTrace bool
-}
+// Client 是 internal 层对外暴露的编排客户端（代理 contrib/contextsdk.Client）。
+type Client = contextsdk.Client
 
-// SymbolBlock 单个符号的注入块。
-type SymbolBlock struct {
-	Symbol       string               `json:"symbol"`
-	Source       string               `json:"source"`
-	FilePath     string               `json:"file_path,omitempty"`
-	StartLine    int                  `json:"start_line,omitempty"`
-	EndLine      int                  `json:"end_line,omitempty"`
-	RelatedTests []string             `json:"related_tests,omitempty"`
-	Trace        *service.TraceEntry  `json:"_trace,omitempty"`
-}
+// Request 一次上下文编排请求（对外别名，指向权威 DTO）。
+type Request = contextsdk.Request
 
-// ImpactBlock 单个符号的影响面摘要。
-type ImpactBlock struct {
-	Symbol   string   `json:"symbol"`
-	Callers  []string `json:"callers"`
-	Callees  []string `json:"callees"`
-	Tests    []string `json:"tests,omitempty"`
-	Trace    *service.TraceEntry `json:"_trace,omitempty"`
-}
-
-// Summary 编排汇总（token 估算等评测口径）。
-type Summary struct {
-	Tenant        string   `json:"tenant"`
-	SymbolCount   int      `json:"symbol_count"`
-	TotalLines    int      `json:"total_lines"`
-	TokenEstimate int      `json:"token_estimate"`
-	TrimReasons   []string `json:"trim_reasons,omitempty"`
-}
-
-// Package 编排出的上下文包。
-type Package struct {
-	Tenant  string         `json:"tenant"`
-	Symbols []SymbolBlock  `json:"symbols"`
-	Impacts []ImpactBlock  `json:"impacts,omitempty"`
-	Summary Summary        `json:"summary"`
-}
-
-// Client 上下文编排客户端。
-type Client struct {
-	resolve ResolveService
-}
+// Package 编排出的上下文包（对外别名，指向权威 DTO）。
+type Package = contextsdk.Package
 
 // NewClient 创建上下文编排客户端。resolve 必须非 nil，否则 Compose 返回错误。
+// 签名兼容旧版（直接传 *service.Service 解析器），内部桥接为 SDKProvider。
 func NewClient(resolve ResolveService) *Client {
-	return &Client{resolve: resolve}
-}
-
-// Compose 编排一次上下文包：按租户解析 Service，逐个符号注入上下文，
-// 可选附带影响面与关联单测，并汇总 token 估算。
-func (c *Client) Compose(ctx context.Context, req Request) (*Package, error) {
-	if c == nil || c.resolve == nil {
-		return nil, fmt.Errorf("contextsdk: resolver is nil")
+	if resolve == nil {
+		return contextsdk.NewClient(nil)
 	}
-	if req.Mode == "" {
-		req.Mode = string(service.ModeFull)
-	}
-	if req.ImpactDepth <= 0 {
-		req.ImpactDepth = 1
-	}
-	includeTrace := req.IncludeTrace
-	if len(req.Symbols) == 0 {
-		return nil, fmt.Errorf("contextsdk: symbols is empty")
-	}
-
-	svc, err := c.resolve(req.Tenant)
-	if err != nil {
-		return nil, fmt.Errorf("contextsdk: resolve tenant %q: %w", req.Tenant, err)
-	}
-
-	pkg := &Package{
-		Tenant:  req.Tenant,
-		Symbols: make([]SymbolBlock, 0, len(req.Symbols)),
-		Summary: Summary{Tenant: req.Tenant},
-	}
-
-	for _, sym := range req.Symbols {
-		// 1) 上下文注入
-		block, err := svc.GetContextMode(ctx, sym, service.ContextOptions{
-			ContextLines: req.ContextLines,
-			Mode:         service.ContextMode(req.Mode),
-			IncludeTrace: includeTrace,
-		})
+	return contextsdk.NewClient(func(tenant string) (contextsdk.SDKProvider, error) {
+		svc, err := resolve(tenant)
 		if err != nil {
-			return nil, fmt.Errorf("contextsdk: context %q: %w", sym, err)
+			return nil, err
 		}
-		sb := SymbolBlock{
-			Symbol:    block.Symbol,
-			Source:    block.Source,
-			FilePath:  block.FilePath,
-			StartLine: block.StartLine,
-			EndLine:   block.EndLine,
-		}
-		if block.Trace != nil {
-			sb.Trace = block.Trace
-			pkg.Summary.TokenEstimate += block.Trace.TokenEstimate
-			pkg.Summary.TotalLines += block.Trace.HitLines
-			pkg.Summary.TrimReasons = append(pkg.Summary.TrimReasons, block.Trace.TrimReason)
-		}
-		if req.WithTests && block.RelatedTests != nil {
-			sb.RelatedTests = block.RelatedTests
-		}
-		pkg.Symbols = append(pkg.Symbols, sb)
-		pkg.Summary.SymbolCount++
-
-		// 2) 影响面（可选）
-		if req.WithImpact {
-			imp, err := svc.GetImpact(ctx, sym, req.ImpactDepth)
-			if err != nil {
-				return nil, fmt.Errorf("contextsdk: impact %q: %w", sym, err)
-			}
-			ib := ImpactBlock{Symbol: sym, Callers: []string{}, Callees: []string{}}
-			for _, n := range imp.Callers {
-				ib.Callers = append(ib.Callers, n.Method)
-				if req.WithTests {
-					ib.Tests = append(ib.Tests, n.RelatedTests...)
-				}
-			}
-			for _, n := range imp.Callees {
-				ib.Callees = append(ib.Callees, n.Method)
-			}
-			ib.Trace = imp.Trace
-			pkg.Impacts = append(pkg.Impacts, ib)
-		}
-	}
-
-	return pkg, nil
+		return NewServiceProvider(svc), nil
+	})
 }
