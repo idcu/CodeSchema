@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 101: docs(doc-package): 建立 docs/ 分层文档体系（入口 + AI 协作规范 + 生产层/交付层/使用层首批落地）
+
+- 新增 `docs/README.md` 总入口（圈层导航 + AI 读取顺序 + 更新规则 + 修订记录）
+- 新增 `docs/AI协作规范.md`：AI 读档顺序、领任务、编码约束、改码必改档映射表、Conventional Commits、人工复核边界——沉淀为正式文档
+- 新增五大类目录占位 README（`docs/1-production`… 等 5 类），使目录骨架纳入版本控制
+- 新增生产层：`技术设计文档.md`（综合 dev/00–13，矫正包数 31/SQLite→BulkUpsert/规模决策等过时表述）、`代码规范与开发指南.md`、`API文档.md`（HTTP 端点 + MCP 12 工具 + OpenAPI + 错误码）
+- 新增交付层/使用层：`部署手册.md`、`客户端接入指南（MCP）.md`、`FAQ.md`（由 DEPLOYMENT_AND_USAGE / MCP接入指南 拆分提炼）
+- 验证：无代码改动，纯文档；旧 `DEPLOYMENT_AND_USAGE.md`、`docs/MCP接入指南.md` 暂保留作迁移源，P1 阶段并入后删除；不 push
+- TODO：P1 迁移 dev/ops/modules 旧档落位、拆分 dev/10 安全段 → `跨圈层/安全设计文档`、决策层归档 HTML/评估报告；P2 新建用户操作手册/测试指南/系统简介/版本发布说明/交接说明
+
 ### Commit 100: docs: 开发计划 16 张任务卡片全部标记 ✅ 已实施 + 技术路线同步 Docker/PG 跑通（PHASE_09 收尾）
 
 - 开发计划 HTML：16 张任务卡片插入状态标记（含 T3-2 PG 嵌入式+Redis docker 集成 PASS、T3-3 Docker 实构建跑通）；顶部 warnbox ⑥⑦ 转 ✅；div 平衡校验 155/155
