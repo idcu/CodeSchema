@@ -6,7 +6,18 @@
 
 ## 提交记录
 
-### Commit 101: docs(doc-package): 建立 docs/ 分层文档体系（入口 + AI 协作规范 + 生产层/交付层/使用层首批落地）
+### Commit 102: docs(doc-package): P1 落地生产层/交付层/跨圈层/决策层 + 归档旧规划
+
+- 生产层新增：`数据库设计.md`（自 dev/01）、`配置参考.md`（自 config.example/dev11）、`扩展指南（新增适配器）.md`（自 dev/07）
+- 交付层新增：`运维手册.md`（自 ops/02+03）、`性能调优.md`（自 ops/04）
+- 跨圈层新增：`安全设计文档.md`（自 dev/10 拆出）、`交接说明.md`（依赖到期/坑点/遗留 TODO 归集）
+- 决策层新增：`系统简介.md`、`版本发布说明.md`（模板，对应 release.yml 产物）
+- 归档：git mv 将 `开发计划/技术路线-乐高式模块拼装.html`、`代码全量分析评估-2026-08-16.md` → `docs/4-决策层/归档资料/`
+- 同步更新各圈层 README 状态标注（去除待落位）
+- 验证：纯文档零代码改动；未 push
+- 遗留：P2 迁移 docs/modules 归档、删除旧 dev/ops/DEPLOYMENT 源档；新建用户手册/测试指南
+
+### Commit 101: docs(doc-package): 建立 docs/ 分层文档体系（入口 + AI 协作规范 + 生产/交付/使用层首批）
 
 - 新增 `docs/README.md` 总入口（圈层导航 + AI 读取顺序 + 更新规则 + 修订记录）
 - 新增 `docs/AI协作规范.md`：AI 读档顺序、领任务、编码约束、改码必改档映射表、Conventional Commits、人工复核边界——沉淀为正式文档
