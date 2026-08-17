@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 120: feat(server): 全局能力热重载扩展——监听地址/认证令牌/限流无需重启
+
+- 背景：Commit 119 遗留 TODO「热重载不覆盖 `server.*` 监听地址与 `preset` 等全局能力（需重启）」。本次将配置热重载从租户集合扩展到服务端全局能力。
+- 实现：
+  - `internal/server/http.go`：新增 `httpRuntimeConfig` 原子运行时快照（authToken + rateLimiter，`atomic.Value` 整体替换实现无锁读）；`UpdateRuntime(addr, authToken, rpm)` 三合一热更新 —— 认证/限流即时生效，addr 变更走 `rebind` 无中断重绑（新监听立即接管、旧监听关闭、在途请求由原 server 处理完毕）；`authMiddleware`/`rateLimitMiddleware` 改为每次请求读取运行时快照；`Start` 显式监听，`serve` 仅当前监听器异常反馈到 errCh。
+  - `internal/server/mcp.go`：`authToken` 由 string 改为 `atomic.Value`（string），`SetAuthToken` 无锁热更新，认证中间件读原子快照。
+  - `cmd/codeschema/main.go`：`mcpCmd`/`serveCmd` 以单一 `SetOnReload` 回调联动 `tenant.Manager.Apply` + `HTTPServer.UpdateRuntime`（serve）/`MCPServer.SetAuthToken`（mcp）；`preset` 变更经 `config.Load` 重新应用，其影响的服务端字段在此连带生效（配置文件为热重载期唯一权威来源）。
+- 测试：`internal/server` 新增 5 组 —— HTTP authToken 启用/轮换/关闭、rateLimit 启用/变更/关闭、PreserveFields（SetAuthToken/SetRateLimit 单字段 setter 不丢另一字段）、addr 重绑（`127.0.0.1:0`→`localhost:0` 触发重绑并健康探测）、MCP authToken 热更新。
+- 验证：`go build ./...` 通过；`go test ./...` 全零 FAIL（34 包 OK，server 1.646s）；`go test ./internal/server/...` 0.463s。
+- 文档同步：11-配置部署与路线图.md（§7.3 全局能力热重载三合一 + preset 连带、§9.2）、配置参考.md（server 节 rate_limit + 热重载 3 项）。
+- 遗留 TODO：热重载不重建 Scanner workers / Store DSN 等依赖配置的服务（仅 Config 实例更新）；chromem 权限自管；对外监听收敛、pg 集成测试为部署期项。
+
 ### Commit 119: feat(tenant): 多租户热重载——tenants 配置变更无需重启进程
 
 - 背景：多租户此前 `tenants` 在启动时固定，新增/移除/改关键字段需重启进程；P9 配置热重载（ConfigWatcher）此前仅更新 Config 实例，不联动服务重初始化。

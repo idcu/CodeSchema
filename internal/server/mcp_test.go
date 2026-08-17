@@ -233,3 +233,46 @@ func TestMCP_MessageMethodNotAllowed(t *testing.T) {
 		t.Errorf("expected 405, got %d", w.Result().StatusCode)
 	}
 }
+
+// TestMCP_UpdateAuthToken_HotUpdate 验证认证令牌热更新（无需重启进程）。
+func TestMCP_UpdateAuthToken_HotUpdate(t *testing.T) {
+	srv := newTestMCPServer(t) // 初始无认证
+
+	do := func(token string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})).ServeHTTP(w, req)
+		return w.Result().StatusCode
+	}
+
+	// 初始：无认证放行。
+	if code := do(""); code != http.StatusOK {
+		t.Fatalf("initial: expected 200, got %d", code)
+	}
+	// 热更新启用认证：无 token 401，正确 token 200。
+	srv.SetAuthToken("mcp-secret")
+	if code := do(""); code != http.StatusUnauthorized {
+		t.Fatalf("no token after enable: expected 401, got %d", code)
+	}
+	if code := do("mcp-secret"); code != http.StatusOK {
+		t.Fatalf("valid token: expected 200, got %d", code)
+	}
+	// 热更新轮换令牌：旧令牌失效，新令牌生效。
+	srv.SetAuthToken("mcp-secret-2")
+	if code := do("mcp-secret"); code != http.StatusUnauthorized {
+		t.Fatalf("old token after rotate: expected 401, got %d", code)
+	}
+	if code := do("mcp-secret-2"); code != http.StatusOK {
+		t.Fatalf("new token: expected 200, got %d", code)
+	}
+	// 热更新关闭认证（空串）：无 token 放行。
+	srv.SetAuthToken("")
+	if code := do(""); code != http.StatusOK {
+		t.Fatalf("no token after disable: expected 200, got %d", code)
+	}
+}

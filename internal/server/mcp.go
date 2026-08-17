@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/idcu/codeschema/internal/robust"
@@ -56,15 +57,15 @@ type rpcError struct {
 
 // MCPServer MCP 协议服务器，使用 SSE（Server-Sent Events）传输。
 type MCPServer struct {
-	service      *service.Service
-	addr         string
-	server       *http.Server
-	tools        []mcpTool
-	authToken    string
-	manager      *tenant.Manager
-	resolver     TenantResolver
+	service       *service.Service
+	addr          string
+	server        *http.Server
+	tools         []mcpTool
+	authToken     atomic.Value // string：认证令牌，支持热更新（SetAuthToken 即时生效）
+	manager       *tenant.Manager
+	resolver      TenantResolver
 	defaultTenant string
-	projects     []tenant.Info
+	projects      []tenant.Info
 }
 
 // TenantResolver 按租户 ID 解析出对应的运行期 Service。
@@ -73,14 +74,16 @@ type TenantResolver func(ctx context.Context, id string) (*service.Service, erro
 
 // NewMCPServer 创建 MCP Server 实例（单项目模式）。
 func NewMCPServer(svc *service.Service, addr string) *MCPServer {
-	return &MCPServer{
-		service:      svc,
-		addr:         addr,
-		tools:        defineTools(),
-		resolver:     func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
+	m := &MCPServer{
+		service:       svc,
+		addr:          addr,
+		tools:         defineTools(),
+		resolver:      func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
 		defaultTenant: "default",
-		projects:     []tenant.Info{{ID: "default"}},
+		projects:      []tenant.Info{{ID: "default"}},
 	}
+	m.authToken.Store("")
+	return m
 }
 
 // SetTenantManager 注入多租户管理器，使本服务器以单实例服务多个隔离仓库。
@@ -102,8 +105,10 @@ func (m *MCPServer) resolveTenant(ctx context.Context, args map[string]any) (*se
 }
 
 // SetAuthToken 设置 Bearer token 认证。
+// 可热更新（配合 config.ConfigWatcher，无需重启进程）：新令牌即时生效，
+// 传空串关闭认证。通过 atomic.Value 存储，读写无锁、无数据竞争。
 func (m *MCPServer) SetAuthToken(token string) {
-	m.authToken = token
+	m.authToken.Store(token)
 }
 
 // defineTools 定义 MCP 工具列表。
@@ -555,11 +560,12 @@ func toInt(v any) (int, bool) {
 // ---- MCP 中间件 ----
 
 // authMiddleware Bearer token 认证中间件。
+// 每次请求读取运行时快照中的认证令牌：支持热更新（SetAuthToken），即时生效。
 func (m *MCPServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if m.authToken != "" {
-			token := r.Header.Get("Authorization")
-			if !strings.HasPrefix(token, "Bearer ") || strings.TrimPrefix(token, "Bearer ") != m.authToken {
+		if token, _ := m.authToken.Load().(string); token != "" {
+			auth := r.Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}

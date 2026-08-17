@@ -355,19 +355,23 @@ func mcpCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWa
 	}
 	defer mgr.Close()
 
-	// 多租户热重载：配置文件变更时自动增量更新租户集合。
+	mcpSrv := server.NewMCPServer(nil, *addr)
+	mcpSrv.SetTenantManager(mgr)
+	if *authToken != "" {
+		mcpSrv.SetAuthToken(*authToken)
+	}
+
+	// 全局能力热重载（单一回调，避免覆盖）：配置文件变更时，无需重启进程，
+	// 自动增量应用租户集合 + 认证令牌（preset 变更经 config.Load 重新应用，
+	// 其影响的服务端字段在此连带生效；以配置文件为热重载期的唯一权威来源）。
 	if cfgWatcher != nil {
 		cfgWatcher.SetOnReload(func(oldCfg, newCfg *config.Config) {
 			if err := mgr.Apply(ctx, newCfg); err != nil {
 				log.Printf("tenant hot-reload error: %v", err)
 			}
+			mcpSrv.SetAuthToken(newCfg.Server.AuthToken)
+			log.Printf("MCP server hot-reload: authToken updated")
 		})
-	}
-
-	mcpSrv := server.NewMCPServer(nil, *addr)
-	mcpSrv.SetTenantManager(mgr)
-	if *authToken != "" {
-		mcpSrv.SetAuthToken(*authToken)
 	}
 
 	// T4-1：stdio 传输模式（供仅支持 stdio 的客户端直连）
@@ -397,15 +401,6 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 	}
 	defer mgr.Close()
 
-	// 多租户热重载：配置文件变更时自动增量更新租户集合。
-	if cfgWatcher != nil {
-		cfgWatcher.SetOnReload(func(oldCfg, newCfg *config.Config) {
-			if err := mgr.Apply(ctx, newCfg); err != nil {
-				log.Printf("tenant hot-reload error: %v", err)
-			}
-		})
-	}
-
 	httpSrv := server.NewHTTPServer(nil, *addr)
 	httpSrv.SetTenantManager(mgr)
 	if *authToken != "" {
@@ -413,6 +408,21 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 	}
 	if cfg.Server.RateLimit > 0 {
 		httpSrv.SetRateLimit(cfg.Server.RateLimit)
+	}
+
+	// 全局能力热重载（单一回调，避免覆盖）：配置文件变更时，无需重启进程，
+	// 自动增量应用租户集合 + 监听地址 / 认证令牌 / 限流（preset 变更经
+	// config.Load 重新应用，其影响的服务端字段在此连带生效；以配置文件为
+	// 热重载期的唯一权威来源）。
+	if cfgWatcher != nil {
+		cfgWatcher.SetOnReload(func(oldCfg, newCfg *config.Config) {
+			if err := mgr.Apply(ctx, newCfg); err != nil {
+				log.Printf("tenant hot-reload error: %v", err)
+			}
+			if err := httpSrv.UpdateRuntime(newCfg.Server.HTTPAddr, newCfg.Server.AuthToken, newCfg.Server.RateLimit); err != nil {
+				log.Printf("server hot-reload error: %v", err)
+			}
+		})
 	}
 
 	// 向量索引可视化工具（默认栈），挂到默认租户的运行期组件上。

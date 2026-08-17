@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/idcu/codeschema/internal/log"
@@ -28,47 +30,136 @@ func init() {
 // TenantResolverHTTP 按租户 ID 解析出对应的运行期 Service。
 type TenantResolverHTTP func(ctx context.Context, id string) (*service.Service, error)
 
+// httpRuntimeConfig 每次请求读取的运行时快照，支持热更新（认证令牌 + 限流）。
+// 通过 atomic.Value 整体替换实现无锁读，配置变更即时生效，无需重启进程。
+type httpRuntimeConfig struct {
+	authToken   string
+	rateLimiter *tokenBucket // nil 表示不限流
+}
+
 // HTTPServer 基于 net/http 标准库的 HTTP API 服务器。
 type HTTPServer struct {
-	service      *service.Service
-	addr         string
-	server       *http.Server
-	authToken    string
-	viz          *VizHandler // 可选的可视化工具处理器
-	logger       *log.Logger
-	manager      *tenant.Manager
-	resolver     TenantResolverHTTP
+	service       *service.Service
+	addr          string
+	server        *http.Server
+	runtime       atomic.Value // httpRuntimeConfig：authToken / rateLimiter 热更新快照
+	viz           *VizHandler  // 可选的可视化工具处理器
+	logger        *log.Logger
+	manager       *tenant.Manager
+	resolver      TenantResolverHTTP
 	defaultTenant string
-	projects     []tenant.Info
-	rateLimiter  *tokenBucket // 全局令牌桶限流器；nil 表示不限流
+	projects      []tenant.Info
+	ln            net.Listener // 当前监听器（UpdateRuntime 地址重绑时替换）
+	lnMu          sync.Mutex
+	errCh         chan error
 }
 
 // NewHTTPServer 创建 HTTP API 服务器实例（单项目模式）。
 func NewHTTPServer(svc *service.Service, addr string) *HTTPServer {
-	return &HTTPServer{
-		service:      svc,
-		addr:         addr,
-		logger:       log.WithModule("http"),
-		resolver:     func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
+	h := &HTTPServer{
+		service:       svc,
+		addr:          addr,
+		logger:        log.WithModule("http"),
+		resolver:      func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
 		defaultTenant: "default",
-		projects:     []tenant.Info{{ID: "default"}},
+		projects:      []tenant.Info{{ID: "default"}},
 	}
+	h.runtime.Store(httpRuntimeConfig{})
+	return h
 }
 
-// SetAuthToken 设置 Bearer token 认证。
+// SetAuthToken 设置 Bearer token 认证（可热更新，即时生效）。
 func (h *HTTPServer) SetAuthToken(token string) {
-	h.authToken = token
+	h.UpdateRuntime(h.addr, token, h.currentRateLimit())
 }
 
 // SetRateLimit 设置全局限流：每分钟最多放行 rpm 个请求（令牌桶，突发=上限）。
-// rpm <= 0 表示不限流（默认），调用方可据此保持默认行为不变。
+// rpm <= 0 表示不限流（默认），调用方可据此保持默认行为不变。可热更新，即时生效。
 func (h *HTTPServer) SetRateLimit(rpm int) {
+	h.UpdateRuntime(h.addr, h.currentAuthToken(), rpm)
+}
+
+// currentAuthToken / currentRateLimit 读取当前运行时快照（供 SetAuthToken 等
+// 单字段 setter 在 UpdateRuntime 时保留另一个字段的值）。
+func (h *HTTPServer) currentAuthToken() string {
+	return h.runtime.Load().(httpRuntimeConfig).authToken
+}
+
+func (h *HTTPServer) currentRateLimit() int {
+	rl := h.runtime.Load().(httpRuntimeConfig).rateLimiter
+	if rl == nil {
+		return 0
+	}
+	return int(rl.capacity)
+}
+
+// rateLimiterFromRPM 按每分钟上限构造令牌桶；rpm <= 0 返回 nil（不限流）。
+func rateLimiterFromRPM(rpm int) *tokenBucket {
 	if rpm <= 0 {
-		h.rateLimiter = nil
-		return
+		return nil
 	}
 	// 令牌桶：容量=每分钟上限（允许突发一整桶），补充速率=上限/60 个/秒。
-	h.rateLimiter = newTokenBucket(float64(rpm), float64(rpm)/60.0)
+	return newTokenBucket(float64(rpm), float64(rpm)/60.0)
+}
+
+// UpdateRuntime 热更新运行期配置（配合 config.ConfigWatcher，无需重启进程）：
+//   - authToken：认证令牌即时替换，新请求立即使用新令牌；
+//   - rpm：限流上限即时生效（0 表示不限流）；
+//   - addr：非空且与当前不同时，无中断重绑监听地址（旧监听关闭、在途请求
+//     由原 server 继续处理完毕），返回非 nil 错误表示重绑失败（保留旧监听）。
+func (h *HTTPServer) UpdateRuntime(addr, authToken string, rpm int) error {
+	h.runtime.Store(httpRuntimeConfig{
+		authToken:   authToken,
+		rateLimiter: rateLimiterFromRPM(rpm),
+	})
+	if addr != "" && addr != h.addr {
+		if h.server == nil {
+			// 尚未 Start：仅记录新地址，Start 时按最新地址监听（避免提前开监听）。
+			h.addr = addr
+			return nil
+		}
+		if err := h.rebind(addr); err != nil {
+			return fmt.Errorf("rebind %s: %w", addr, err)
+		}
+		h.addr = addr
+		h.logger.Info("HTTP API server rebound", "addr", addr)
+	}
+	return nil
+}
+
+// rebind 在指定地址开启新监听并切换：新监听器立即接管，旧监听器关闭后其
+// Serve goroutine 自然退出（已建立的连接继续由原 server 服务完毕）。
+func (h *HTTPServer) rebind(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	h.lnMu.Lock()
+	old := h.ln
+	h.ln = ln
+	h.lnMu.Unlock()
+	go h.serve(ln)
+	if old != nil {
+		_ = old.Close()
+	}
+	return nil
+}
+
+// serve 在指定监听器上服务连接；仅当前监听器的异常退出会反馈到 Start 的错误通道。
+func (h *HTTPServer) serve(ln net.Listener) {
+	err := h.server.Serve(ln)
+	if err == http.ErrServerClosed {
+		return
+	}
+	h.lnMu.Lock()
+	current := h.ln == ln
+	h.lnMu.Unlock()
+	if current && err != nil {
+		select {
+		case h.errCh <- err:
+		default:
+		}
+	}
 }
 
 // SetTenantManager 注入多租户管理器，使本服务器以单实例服务多个隔离仓库。
@@ -154,26 +245,24 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	)
 
 	h.server = &http.Server{
-		Addr:         h.addr,
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
+	h.errCh = make(chan error, 1)
 
 	h.logger.Info("HTTP API server starting", "addr", h.addr)
 
-	errCh := make(chan error, 1)
-	go func() {
-		if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-	}()
+	// 显式监听：监听器可被 UpdateRuntime 在地址变更时热替换。
+	if err := h.rebind(h.addr); err != nil {
+		return err
+	}
 
 	select {
 	case <-ctx.Done():
 		return h.Stop()
-	case err := <-errCh:
+	case err := <-h.errCh:
 		return err
 	}
 }
@@ -474,11 +563,12 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // authMiddleware Bearer token 认证中间件。
+// 每次请求读取运行时快照中的认证令牌：支持热更新（UpdateRuntime），即时生效。
 func (h *HTTPServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.authToken != "" {
-			token := r.Header.Get("Authorization")
-			if !strings.HasPrefix(token, "Bearer ") || strings.TrimPrefix(token, "Bearer ") != h.authToken {
+		if token := h.runtime.Load().(httpRuntimeConfig).authToken; token != "" {
+			auth := r.Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
 				writeError(w, "ERR_UNAUTHORIZED", "invalid or missing auth token", 401)
 				return
 			}
@@ -489,9 +579,10 @@ func (h *HTTPServer) authMiddleware(next http.Handler) http.Handler {
 
 // rateLimitMiddleware 全局限流中间件：未启用限流（rateLimiter == nil）时直接放行，
 // 否则按令牌桶判断，超限返回 429 Too Many Requests。
+// 每次请求读取运行时快照中的限流器：支持热更新（UpdateRuntime），即时生效。
 func (h *HTTPServer) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.rateLimiter == nil || h.rateLimiter.allow() {
+		if rl := h.runtime.Load().(httpRuntimeConfig).rateLimiter; rl == nil || rl.allow() {
 			next.ServeHTTP(w, r)
 			return
 		}

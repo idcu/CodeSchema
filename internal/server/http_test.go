@@ -566,3 +566,190 @@ func TestTagsSearchEndpoint_MultiTag(t *testing.T) {
 		t.Fatalf("no match: expected 0 classes, got %v", res3.Classes)
 	}
 }
+
+// ---- 全局能力热重载测试（UpdateRuntime，无需重启进程） ----
+
+func TestHTTPServer_UpdateRuntime_AuthToken(t *testing.T) {
+	srv := newTestHTTPServer(t) // 初始无认证
+
+	do := func(token string) int {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})).ServeHTTP(w, req)
+		return w.Result().StatusCode
+	}
+
+	// 初始：无认证放行。
+	if code := do(""); code != http.StatusOK {
+		t.Fatalf("initial: expected 200, got %d", code)
+	}
+	// 热更新启用认证：无 token 401，正确 token 200。
+	if err := srv.UpdateRuntime("", "hot-token", 0); err != nil {
+		t.Fatalf("enable auth: %v", err)
+	}
+	if code := do(""); code != http.StatusUnauthorized {
+		t.Fatalf("no token after enable: expected 401, got %d", code)
+	}
+	if code := do("hot-token"); code != http.StatusOK {
+		t.Fatalf("valid token: expected 200, got %d", code)
+	}
+	// 热更新轮换令牌：旧令牌失效，新令牌生效。
+	if err := srv.UpdateRuntime("", "new-token", 0); err != nil {
+		t.Fatalf("rotate token: %v", err)
+	}
+	if code := do("hot-token"); code != http.StatusUnauthorized {
+		t.Fatalf("old token after rotate: expected 401, got %d", code)
+	}
+	if code := do("new-token"); code != http.StatusOK {
+		t.Fatalf("new token: expected 200, got %d", code)
+	}
+	// 热更新关闭认证（空串）：无 token 放行。
+	if err := srv.UpdateRuntime("", "", 0); err != nil {
+		t.Fatalf("disable auth: %v", err)
+	}
+	if code := do(""); code != http.StatusOK {
+		t.Fatalf("no token after disable: expected 200, got %d", code)
+	}
+}
+
+func TestHTTPServer_UpdateRuntime_RateLimit(t *testing.T) {
+	srv := newTestHTTPServer(t)
+
+	do := func() int {
+		w := httptest.NewRecorder()
+		srv.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+		return w.Result().StatusCode
+	}
+
+	// 初始：不限流。
+	if code := do(); code != http.StatusOK {
+		t.Fatalf("initial: expected 200, got %d", code)
+	}
+	// 热更新启用 rpm=1：首个放行（突发=上限），随后 429。
+	if err := srv.UpdateRuntime("", "", 1); err != nil {
+		t.Fatalf("enable rate limit: %v", err)
+	}
+	if code := do(); code != http.StatusOK {
+		t.Fatalf("first after enable: expected 200, got %d", code)
+	}
+	if code := do(); code != http.StatusTooManyRequests {
+		t.Fatalf("second after enable: expected 429, got %d", code)
+	}
+	// 热更新关闭（rpm=0）：恢复不限流。
+	if err := srv.UpdateRuntime("", "", 0); err != nil {
+		t.Fatalf("disable rate limit: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if code := do(); code != http.StatusOK {
+			t.Fatalf("request %d after disable: expected 200, got %d", i, code)
+		}
+	}
+}
+
+func TestHTTPServer_UpdateRuntime_PreserveFields(t *testing.T) {
+	// 单字段 setter（SetAuthToken/SetRateLimit）必须保留另一字段的当前值，
+	// 与配置热重载"整体替换快照"语义互补（preset 变更连带场景）。
+	srv := newTestHTTPServer(t)
+	srv.SetAuthToken("tok") // UpdateRuntime(addr, "tok", 0)
+	srv.SetRateLimit(5)     // UpdateRuntime(addr, "tok", 5)
+	if got := srv.currentAuthToken(); got != "tok" {
+		t.Fatalf("authToken: got %q, want %q", got, "tok")
+	}
+	if got := srv.currentRateLimit(); got != 5 {
+		t.Fatalf("rateLimit: got %d, want 5", got)
+	}
+
+	// 仅更新限流：认证令牌保持。
+	srv.SetRateLimit(0)
+	if got := srv.currentAuthToken(); got != "tok" {
+		t.Fatalf("authToken after SetRateLimit: got %q, want %q", got, "tok")
+	}
+	if got := srv.currentRateLimit(); got != 0 {
+		t.Fatalf("rateLimit after SetRateLimit(0): got %d, want 0", got)
+	}
+
+	// 仅更新认证：限流保持。
+	srv.SetAuthToken("tok2")
+	if got := srv.currentRateLimit(); got != 0 {
+		t.Fatalf("rateLimit after SetAuthToken: got %d, want 0", got)
+	}
+	if got := srv.currentAuthToken(); got != "tok2" {
+		t.Fatalf("authToken: got %q, want %q", got, "tok2")
+	}
+}
+
+// waitForListener 等待 HTTP 服务器开始监听（Start 异步 rebind 完成）。
+func waitForListener(t *testing.T, srv *HTTPServer) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		srv.lnMu.Lock()
+		ln := srv.ln
+		srv.lnMu.Unlock()
+		if ln != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("server listener did not become ready")
+}
+
+func TestHTTPServer_UpdateRuntime_AddrRebind(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	srv := NewHTTPServer(service.NewService(st), "127.0.0.1:0")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.Start(ctx) }()
+
+	waitForListener(t, srv)
+	oldAddr := srv.ln.Addr().String()
+
+	// 热重绑到新端口（无需重启进程）：地址字符串变化即触发重绑，
+	// 旧监听仍在占用原端口，新监听必然分配到不同端口。
+	if err := srv.UpdateRuntime("localhost:0", "", 0); err != nil {
+		t.Fatalf("UpdateRuntime rebind: %v", err)
+	}
+	newAddr := srv.ln.Addr().String()
+	if newAddr == oldAddr {
+		t.Fatal("expected listener to rebind to a new address")
+	}
+
+	// 新地址可服务请求。
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + newAddr + "/health")
+	if err != nil {
+		t.Fatalf("request to new addr: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from new addr, got %d", resp.StatusCode)
+	}
+
+	// 旧地址应拒绝连接。
+	if _, err := client.Get("http://" + oldAddr + "/health"); err == nil {
+		t.Fatal("expected old addr to refuse connections after rebind")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && err != http.ErrServerClosed {
+			t.Fatalf("server stop: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop")
+	}
+}
