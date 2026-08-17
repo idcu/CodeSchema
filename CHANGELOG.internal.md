@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 111: feat(vector): 接线 chromem 向量驱动（显式启用，默认后端不变）
+
+- 背景：`storage.vector.driver` 配置字段早已存在且 DefaultConfig 曾默认 "chromem"，但 runtime.NewSearcherWithStore 恒用文件 PersistentStore，chromem 从未真正接线（09/11 文档标注"未接线生产分发"）
+- 决策（经用户确认）：「仅显式启用」——runtime 仅在 `driver=chromem` 时启用持久化 ChromemStore，默认仍走文件 PersistentStore，保持既有行为（受"不改动既有行为"红线约束，且 chromem 原生不支持单文档删除）
+- 实现：
+  - `vector` 新增 `NewEmbeddingFunc(em Embedder) chromem.EmbeddingFunc`（隔离 chromem 依赖，runtime 不直引 chromem-go）
+  - `runtime.NewSearcherWithStore` 重排：先建 embedder 再选后量存储；`driver==chromem` 时 `NewPersistentChromemStore(collection, DSN或VectorDir/chromem.db, dim, NewEmbeddingFunc(em))`，失败回退文件 PersistentStore
+  - `config.DefaultConfig` 默认 `Vector.Driver` 由 "chromem" 改为 ""（DSN 置空），使默认后端为文件并保持行为不变
+- 测试：runtime 新增 3 条（ChromemDriver 断言 *ChromemStore、DefaultFileBackend 断言 *PersistentStore、原有 NonNil）；vector/config 既有测试兼容
+- 文档同步：09-语义检索、11-配置 更新 chromem 显式启用语义；交接说明遗留段（移除已完成项、标注 chromem 限制与修订记录）
+- 验证：`go build ./...` 通过；`go test ./...` 全量零 FAIL（vector 1.539s、runtime 0.851s、config 0.667s 缓存后 0）
+- 预留：chromem 无单文档删除能力，watch 同步删文件场景建议继续用文件后端；committed 未 push
+
 ### Commit 110: feat(scanner): 大文件/超行数旁路，超限标记 parse_skipped
 
 - 背景：`scanner.file_size_limit_mb`/`scanner.line_count_limit` 配置字段早已存在（解析/校验/默认/合并齐全），但 scanner 从未读取，超限文件不会被旁路（06-编排层 §4.3 与 DoS 安全设计标注的缺口）

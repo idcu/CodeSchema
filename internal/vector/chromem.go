@@ -25,6 +25,14 @@ type ChromemStore struct {
 	dim    int
 }
 
+// NewEmbeddingFunc 将 vector.Embedder 适配为 chromem.EmbeddingFunc，
+// 供 NewPersistentChromemStore 的 embedding 回调使用（隔离 chromem 依赖，不在 runtime 层直引）。
+func NewEmbeddingFunc(em Embedder) chromem.EmbeddingFunc {
+	return func(ctx context.Context, text string) ([]float32, error) {
+		return em.Embed(ctx, text)
+	}
+}
+
 // NewChromemStore 创建 chromem-go 向量存储。
 //   - collectionName: 集合名称（如 "codeschema"）
 //   - dim: 向量维度（必须与 Embedder.Dim() 一致）

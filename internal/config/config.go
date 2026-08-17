@@ -291,8 +291,10 @@ func DefaultConfig() *Config {
 			DSN:    "./data",
 			KV:     "",
 			Vector: VectorConfig{
-				Driver:         "chromem",
-				DSN:            "./vector.db",
+				// 默认文件持久化后端（PersistentStore）；仅显式配置 driver=chromem 时启用 chromem。
+				// （历史：曾默认 chromem，但 runtime 未接线；现改为显式启用以保持既有行为不变）
+				Driver:         "",
+				DSN:            "",
 				EmbeddingModel: "bge-small-zh-v1.5", // 与真实本地制品/注册表键一致；旧短名 bge-small-zh 仅作注册表远程别名
 			},
 			Search: SearchConfig{

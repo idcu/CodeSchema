@@ -173,16 +173,6 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 		fts = pfts
 	}
 
-	vecFile := filepath.Join(cfg.Storage.Search.VectorDir, "vector.json")
-	var store vector.VectorStore
-	pstore, err := vector.NewPersistentStore(vecFile)
-	if err != nil {
-		log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory", vecFile, err)
-		store = vector.NewMemoryStore()
-	} else {
-		store = pstore
-	}
-
 	modelDir := cfg.Storage.Vector.ModelDir
 	if modelDir == "" {
 		modelDir = filepath.Join("down", "models", cfg.Storage.Vector.EmbeddingModel)
@@ -211,6 +201,32 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 			log.Printf("WARN: load IDF dictionary (%s): %v, will rebuild on build", idfFile, err)
 		}
 		em = model
+	}
+
+	// 向量存储：显式 driver=chromem 时启用持久化 chromem 后端；否则（默认/空）用文件 PersistentStore，保持既有行为。
+	vecFile := filepath.Join(cfg.Storage.Search.VectorDir, "vector.json")
+	var store vector.VectorStore
+	if cfg.Storage.Vector.Driver == "chromem" {
+		persist := cfg.Storage.Vector.DSN
+		if persist == "" {
+			persist = filepath.Join(cfg.Storage.Search.VectorDir, "chromem.db")
+		}
+		cs, cerr := vector.NewPersistentChromemStore("codeschema", persist, em.Dim(), vector.NewEmbeddingFunc(em))
+		if cerr != nil {
+			log.Printf("WARN: new persistent chromem store (%s): %v, fallback to file persistent store", persist, cerr)
+		} else {
+			log.Printf("semantic: using chromem vector store (persist=%s, dim=%d)", persist, em.Dim())
+			store = cs
+		}
+	}
+	if store == nil {
+		pstore, err := vector.NewPersistentStore(vecFile)
+		if err != nil {
+			log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory", vecFile, err)
+			store = vector.NewMemoryStore()
+		} else {
+			store = pstore
+		}
 	}
 
 	indexer := vector.NewIndexer(store, em, 2)

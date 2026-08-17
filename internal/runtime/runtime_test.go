@@ -8,6 +8,7 @@ import (
 
 	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/store"
+	"github.com/idcu/codeschema/internal/vector"
 )
 
 // writeFixture 写一个最小 Go 源文件作为待扫描仓库。
@@ -70,7 +71,31 @@ func TestNewSearcherWithStore_NonNil(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
 	s, b, v := NewSearcherWithStore(cfg)
 	if s == nil || b == nil || v == nil {
-		t.Fatal("NewSearcherWithStore must return non-nil searcher/builder/vecstore")
+		t.Fatal("NewSearcherWithStore returned nil component")
+	}
+}
+
+// TestNewSearcherWithStore_ChromemDriver 验证：显式 driver=chromem 时启用持久化 ChromemStore。
+func TestNewSearcherWithStore_ChromemDriver(t *testing.T) {
+	cfg := noNetConfig(t, t.TempDir())
+	cfg.Storage.Vector.Driver = "chromem"
+	cfg.Storage.Vector.DSN = filepath.Join(t.TempDir(), "chromem.db")
+	// 默认 EmbeddingModel 已被 noNetConfig 置空 → 回退 LocalEmbedder，无网络依赖
+	_, _, v := NewSearcherWithStore(cfg)
+	if v == nil {
+		t.Fatal("NewSearcherWithStore returned nil vector store")
+	}
+	if _, ok := v.(*vector.ChromemStore); !ok {
+		t.Fatalf("expected *vector.ChromemStore, got %T", v)
+	}
+}
+
+// TestNewSearcherWithStore_DefaultFileBackend 验证：未配置 driver（默认）走文件 PersistentStore。
+func TestNewSearcherWithStore_DefaultFileBackend(t *testing.T) {
+	cfg := noNetConfig(t, t.TempDir())
+	_, _, v := NewSearcherWithStore(cfg)
+	if _, ok := v.(*vector.PersistentStore); !ok {
+		t.Fatalf("expected *vector.PersistentStore, got %T", v)
 	}
 }
 
