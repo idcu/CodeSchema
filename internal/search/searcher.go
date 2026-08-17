@@ -86,20 +86,3 @@ func (s *Searcher) Search(ctx context.Context, query string, mode SearchMode, li
 	}
 }
 
-// SearchResultFromVector 将 vector.SearchResult 转换为 search.SearchResult。
-func SearchResultFromVector(vr interface{}) (SearchResult, bool) {
-	// 从 vector 包转换为 search 包的结果
-	// 通过接口断言避免循环依赖
-	type vectorResult struct {
-		ID    string
-		Score float64
-	}
-	if vr, ok := vr.(vectorResult); ok {
-		return SearchResult{
-			Symbol: vr.ID,
-			Score:  vr.Score,
-			Source: "vector",
-		}, true
-	}
-	return SearchResult{}, false
-}

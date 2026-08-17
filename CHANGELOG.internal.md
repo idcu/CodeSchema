@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 108: refactor(search): 移除死函数 SearchResultFromVector + 文档遗留同步
+
+- 死代码：`internal/search/searcher.go` 的 `SearchResultFromVector` 全仓库无调用（含测试），且其类型断言对象为局部 `vectorResult` 结构，无任何真实返回值命中，属 P8 阶段总结 §7.3 标注的遗留项；当前架构已用 `search.NewVectorAdapter(indexer)` 适配 vector 结果，直接删除
+- 文档同步：P8-阶段总结 §7.3 将该清理项划除并标注已移除；`跨圈层/交接说明.md` 遗留段纠正过期表述（文档迁移/用户手册/测试指南已完成），并记录死代码清理进展与新增修订记录行
+- 验证：`go build ./...`、`go vet ./internal/search/` 通过；`go test ./internal/search ./internal/store` 全绿（store 0.638s、search cached）；删死码零行为变化
+- 预留：`search/fts.go:cosineSimilarity` 与 `vector/store.go` 版本重复仍待统一（保留于文档遗留）；committed 未 push
+
 ### Commit 107: refactor(parser): 收敛解析适配器注册单一实现，删除 cmd 死副本
 
 - 结论核实：LSP 串联 parser.Registry 的接入当前代码已落地——`internal/runtime.NewParserRegistry` 负责注册 tree-sitter（兜底）+ gopls/jdtls/clangd（`FallbackParser` 失败回退 tree-sitter）+ SCIP/CodeGraph，并 SetPriority（go/java/cpp 走 LSP 优先），`scan`/`watch` 均经 `main.go` 调用同一装配
