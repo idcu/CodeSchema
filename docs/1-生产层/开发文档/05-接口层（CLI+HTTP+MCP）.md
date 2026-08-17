@@ -42,7 +42,7 @@
 | `GET /search` | GET | 精确 + 语义双路检索 | `q`（必需）、`mode`（可选，`exact`/`semantic`/`both`，默认 `both`）、`limit`（可选，默认 20） | `{results: [{symbol, kind, file, score, snippet}]}` | P0 |
 | `GET /health` | GET | 健康检查 | — | `{status, db, kv, vector}` | P0 |
 | `GET /tags` | GET | 获取指定符号的标签列表 | `symbol`（必需，全限定名） | `{symbol, kind, tags, categories}` | P5 |
-| `GET /tags/search` | GET | 按标签搜索类和方法 | `tag`（必需，如 `controller`） | `{tag, class_ids: [{id, name}], method_ids: [{id, name}]}` | P5 |
+| `GET /tags/search` | GET | 按标签搜索类和方法 | `tag`（必需，可逗号分隔多标签 AND 交集，如 `controller,service`） | `{tag, class_ids: [{id, name}], method_ids: [{id, name}]}` | P5 |
 | `GET /tags/all` | GET | 获取所有已知标签及分类统计 | — | `{tags: {tag_name: category}}` | P5 |
 | `GET /metrics` | GET | Prometheus 文本格式指标 | — | text/plain | P6 |
 | `GET /viz/*` | GET | 向量索引可视化仪表盘（概览/文档列表/搜索） | — | HTML/JSON | P17 |
@@ -94,7 +94,7 @@ MCP Server 提供 12 个工具（P0 8 个 + P5 3 个 + 多租户 list_projects 1
 | `find_dependencies` | `symbol: string` | 依赖关系列表 | JCodeIndexer | P0 |
 | `search_symbols` | `q: string`, `mode?: string`, `limit?: number` | 符号搜索（全文 + 向量） | code-context-mcp | P0 |
 | `get_tags` | `symbol: string`（类/方法全限定名） | 指定符号的标签列表 | P5 新增 | P5 |
-| `search_by_tag` | `tag: string`（如 `controller`） | 按标签搜索类和方法 | P5 新增 | P5 |
+| `search_by_tag` | `tag: string`（可逗号分隔多标签 AND 交集，如 `controller,service`） | 按标签搜索类和方法 | P5 新增 | P5 |
 | `get_all_tags` | — | 所有已知标签及分类统计 | P5 新增 | P5 |
 | `list_projects` | —（无） | 当前实例服务的全部租户元信息（id / name / root） | 多租户枚举 | P13 |
 

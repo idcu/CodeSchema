@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	_ "github.com/lib/pq"
@@ -324,11 +325,32 @@ func (s *PGStore) GetTagsByMethodID(ctx context.Context, methodID int64) ([]stri
 	return getTagsTx(ctx, s.db, "method_tag", "method_id", methodID)
 }
 func (s *PGStore) SearchByTag(ctx context.Context, tag string) (classIDs, methodIDs []int64, err error) {
-	cids, err := idCol(ctx, s.db, `SELECT class_id FROM class_tag ct JOIN tag t ON t.id=ct.tag_id WHERE t.name=$1`, tag)
+	return s.SearchByTags(ctx, []string{tag})
+}
+func (s *PGStore) SearchByTags(ctx context.Context, tags []string) (classIDs, methodIDs []int64, err error) {
+	if len(tags) == 0 {
+		return []int64{}, []int64{}, nil
+	}
+	// 构造 $1..$n 参数占位符 + HAVING COUNT(DISTINCT) = n 实现 AND 语义。
+	placeholders := make([]string, 0, len(tags))
+	args := make([]interface{}, 0, len(tags)+1)
+	for i, t := range tags {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		args = append(args, t)
+	}
+	args = append(args, len(tags))
+	in := strings.Join(placeholders, ",")
+	countArg := strconv.Itoa(len(tags) + 1)
+
+	cids, err := idCol(ctx, s.db,
+		`SELECT lt.class_id FROM class_tag lt JOIN tag t ON t.id=lt.tag_id
+		 WHERE t.name IN (`+in+`) GROUP BY lt.class_id HAVING COUNT(DISTINCT t.id) = $`+countArg, args...)
 	if err != nil {
 		return nil, nil, err
 	}
-	mids, err := idCol(ctx, s.db, `SELECT method_id FROM method_tag mt JOIN tag t ON t.id=mt.tag_id WHERE t.name=$1`, tag)
+	mids, err := idCol(ctx, s.db,
+		`SELECT lt.method_id FROM method_tag lt JOIN tag t ON t.id=lt.tag_id
+		 WHERE t.name IN (`+in+`) GROUP BY lt.method_id HAVING COUNT(DISTINCT t.id) = $`+countArg, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -463,8 +485,8 @@ func getTagsTx(ctx context.Context, db *sql.DB, linkTable, idCol string, id int6
 	return out, rows.Err()
 }
 
-func idCol(ctx context.Context, db *sql.DB, q string, arg string) ([]int64, error) {
-	rows, err := db.QueryContext(ctx, q, arg)
+func idCol(ctx context.Context, db *sql.DB, q string, args ...interface{}) ([]int64, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

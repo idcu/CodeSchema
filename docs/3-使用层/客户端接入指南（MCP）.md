@@ -66,6 +66,8 @@ claude mcp add codeschema --transport http http://localhost:8080/sse
 
 `context` 支持 `mode` 参数：`full`（默认，注入源码）／`minimal`（仅符号元数据，token 评测基线）。每次 `context` / `impact` 注入附 `_trace` 追溯（来源/裁剪原因/估算 token），便于复盘。
 
+`search_by_tag` 支持多标签 AND 交集：`tag` 参数逗号分隔多个标签（如 `controller,service`），返回同时拥有全部标签的类/方法；也兼容单标签。
+
 多租户下 11 个检索类工具额外接受 `project` 参数指定目标仓库；省略时路由默认租户（`"default"`）。`list_projects` 返回当前实例所有租户元信息。
 
 > 对接 DeepSeek Harness（dsh）：见 [`contrib/dsh`](../../../contrib/dsh/README.md) 集成指南（stdio/SSE 两种方式 + 配置模板）。

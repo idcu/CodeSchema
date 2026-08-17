@@ -526,32 +526,66 @@ func (fs *FileStore) UpdateMethodDoc(ctx context.Context, methodID int64, doc st
 	return nil
 }
 
-// SearchByTag 按标签搜索类和方法的 ID 列表。
+// SearchByTag 按单个标签搜索类和方法的 ID 列表（兼容入口，委托 SearchByTags）。
 func (fs *FileStore) SearchByTag(ctx context.Context, tag string) ([]int64, []int64, error) {
+	return fs.SearchByTags(ctx, []string{tag})
+}
+
+// SearchByTags 按多个标签（AND）搜索类和方法的 ID 列表。
+// 返回同时拥有所有指定标签的类和方法（交集）。
+func (fs *FileStore) SearchByTags(ctx context.Context, tags []string) ([]int64, []int64, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
+	// 空标签列表无意义：直接返回空（避免命中一切）。
+	if len(tags) == 0 {
+		return []int64{}, []int64{}, nil
+	}
+
+	// 将查询标签转为集合，加速 containsAll 判断。
+	query := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		if t != "" {
+			query[t] = struct{}{}
+		}
+	}
+	if len(query) == 0 {
+		return []int64{}, []int64{}, nil
+	}
+
 	var classIDs []int64
-	for cid, tags := range fs.classTags {
-		for _, t := range tags {
-			if t == tag {
-				classIDs = append(classIDs, cid)
-				break
-			}
+	for cid, tset := range fs.classTags {
+		if containsAll(tset, query) {
+			classIDs = append(classIDs, cid)
 		}
 	}
 
 	var methodIDs []int64
-	for mid, tags := range fs.methodTags {
-		for _, t := range tags {
-			if t == tag {
-				methodIDs = append(methodIDs, mid)
-				break
-			}
+	for mid, tset := range fs.methodTags {
+		if containsAll(tset, query) {
+			methodIDs = append(methodIDs, mid)
 		}
 	}
 
 	return classIDs, methodIDs, nil
+}
+
+// containsAll 判断符号标签集合是否包含查询集合中的全部标签。
+// 通过复制剩余集合避免污染调用方的 query map。
+func containsAll(have []string, need map[string]struct{}) bool {
+	remaining := make(map[string]struct{}, len(need))
+	for k := range need {
+		remaining[k] = struct{}{}
+	}
+	for _, t := range have {
+		if _, ok := remaining[t]; ok {
+			delete(remaining, t)
+			if len(remaining) == 0 {
+				return true
+			}
+		}
+	}
+	return len(remaining) == 0
 }
 
 // GetAllTagsWithCategories 返回所有已知标签及其分类。

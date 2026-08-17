@@ -48,6 +48,7 @@ func (m *mockStoreWithTestData) GetTagsByClassID(_ context.Context, classID int6
 }
 func (m *mockStoreWithTestData) GetTagsByMethodID(_ context.Context, _ int64) ([]string, error) { return nil, nil }
 func (m *mockStoreWithTestData) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) { return nil, nil, nil }
+func (m *mockStoreWithTestData) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) { return nil, nil, nil }
 func (m *mockStoreWithTestData) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) {
 	return m.tagCats, nil
 }

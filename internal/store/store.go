@@ -73,8 +73,9 @@ type Store interface {
 	// GetTagsByMethodID 获取方法的标签列表。
 	GetTagsByMethodID(ctx context.Context, methodID int64) ([]string, error)
 
-	// SearchByTag 按标签搜索类和方法的 ID 列表。
-	SearchByTag(ctx context.Context, tag string) (classIDs []int64, methodIDs []int64, err error)
+	// SearchByTags 按多个标签（AND）搜索类和方法的 ID 列表。
+	// 返回同时拥有所有指定标签的类和方法（交集）。
+	SearchByTags(ctx context.Context, tags []string) (classIDs []int64, methodIDs []int64, err error)
 
 	// GetAllTagsWithCategories 返回所有已知标签及其分类。
 	GetAllTagsWithCategories(ctx context.Context) (map[string]string, error)

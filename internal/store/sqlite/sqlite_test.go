@@ -149,6 +149,133 @@ func TestSQLite_TagsAndSearch(t *testing.T) {
 	}
 }
 
+// TestSQLite_SearchByTags_MultiTagAND 验证 SQLite 多标签 AND 交集：
+// GROUP BY + HAVING COUNT(DISTINCT) = n 只返回同时拥有全部标签的符号。
+func TestSQLite_SearchByTags_MultiTagAND(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// 三个类：A=service+cache，B=service，C=cache
+	idA, _ := s.UpsertFile(ctx, "/repo/a.go", "h1", 10, 100)
+	idB, _ := s.UpsertFile(ctx, "/repo/b.go", "h2", 10, 100)
+	idC, _ := s.UpsertFile(ctx, "/repo/c.go", "h3", 10, 100)
+	for _, id := range []int64{idA, idB, idC} {
+		_ = s.UpsertClasses(ctx, id, []parser.ClassIR{{Name: "X", FullName: "pkg.X", Type: "CLASS"}})
+	}
+	cid := func(id int64) int64 {
+		classes, _ := s.GetClassesByFileID(ctx, id)
+		return classes[0].ID
+	}
+	cidA, cidB, cidC := cid(idA), cid(idB), cid(idC)
+
+	if err := s.UpsertTags(ctx, cidA, []string{"service", "cache"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertTags(ctx, cidB, []string{"service"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertTags(ctx, cidC, []string{"cache"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 单标签 service → A、B
+	classIDs, methodIDs, err := s.SearchByTags(ctx, []string{"service"})
+	if err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	}
+	if !hasInt64(classIDs, cidA) || !hasInt64(classIDs, cidB) || hasInt64(classIDs, cidC) {
+		t.Fatalf("single tag service: want A,B got %v", classIDs)
+	}
+	if len(methodIDs) != 0 {
+		t.Fatalf("unexpected method ids: %v", methodIDs)
+	}
+
+	// 双标签 service+cache（AND）→ 仅 A
+	classIDs, _, err = s.SearchByTags(ctx, []string{"service", "cache"})
+	if err != nil {
+		t.Fatalf("SearchByTags multi: %v", err)
+	}
+	if len(classIDs) != 1 || classIDs[0] != cidA {
+		t.Fatalf("AND service+cache: want only %d, got %v", cidA, classIDs)
+	}
+
+	// 不存在组合 → 空
+	classIDs, _, err = s.SearchByTags(ctx, []string{"service", "mq"})
+	if err != nil {
+		t.Fatalf("SearchByTags missing: %v", err)
+	}
+	if len(classIDs) != 0 {
+		t.Fatalf("AND service+mq: want empty, got %v", classIDs)
+	}
+
+	// 空标签列表 → 空
+	classIDs, _, err = s.SearchByTags(ctx, nil)
+	if err != nil {
+		t.Fatalf("SearchByTags nil: %v", err)
+	}
+	if len(classIDs) != 0 {
+		t.Fatalf("nil tags: want empty, got %v", classIDs)
+	}
+}
+
+// TestSQLite_SearchByTags_MethodTags 验证方法标签的多标签 AND 检索。
+func TestSQLite_SearchByTags_MethodTags(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, _ := s.UpsertFile(ctx, "/repo/a.go", "h", 10, 100)
+	if err := s.UpsertClasses(ctx, id, []parser.ClassIR{{Name: "A", FullName: "pkg.A", Type: "CLASS"}}); err != nil {
+		t.Fatal(err)
+	}
+	classes, _ := s.GetClassesByFileID(ctx, id)
+	cid := classes[0].ID
+	if err := s.UpsertMethods(ctx, cid, []parser.MethodIR{
+		{Name: "Get", ClassFQN: "pkg.A"},
+		{Name: "Put", ClassFQN: "pkg.A"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	methods, _ := s.GetMethodsByClassID(ctx, cid)
+	var midGet, midPut int64
+	for _, m := range methods {
+		switch m.Name {
+		case "Get":
+			midGet = m.ID
+		case "Put":
+			midPut = m.ID
+		}
+	}
+	if midGet == 0 || midPut == 0 {
+		t.Fatalf("expected Get/Put ids, got %d/%d", midGet, midPut)
+	}
+	if err := s.UpsertMethodTags(ctx, midGet, []string{"cache", "read"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertMethodTags(ctx, midPut, []string{"cache"}); err != nil {
+		t.Fatal(err)
+	}
+
+	classIDs, methodIDs, err := s.SearchByTags(ctx, []string{"cache", "read"})
+	if err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	}
+	if len(classIDs) != 0 {
+		t.Fatalf("expected no class, got %v", classIDs)
+	}
+	if len(methodIDs) != 1 || methodIDs[0] != midGet {
+		t.Fatalf("AND cache+read: want only Get(%d), got %v", midGet, methodIDs)
+	}
+}
+
+func hasInt64(s []int64, v int64) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSQLite_ReplaceSemantics(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 118: feat(tags): search_by_tag 支持多标签 AND 交集（逗号分隔）
+
+- 背景：部分符号同时拥有多个标签（如 controller + service），单标签检索无法按交集筛选。
+- 接口：`store.Store` 由 `SearchByTag(tag)` 扩展为 `SearchByTags(tags []string)`（AND 交集），原 `SearchByTag` 保留为兼容入口委托新接口。
+- 实现：
+  - FileStore：内存 map 交集（`containsAll` 复制剩余集合避免污染调用方 query map），空标签列表返回空（避免命中一切）。
+  - SQLite / PostgreSQL：`IN (?,...) ... GROUP BY ... HAVING COUNT(DISTINCT) = n` 实现 AND 语义；PG 抽取 `idCol` 辅助支持变参。
+  - Service：新增 `SearchByTags`，校验空列表/空标签，抽取 `resolveTagSearchResult` 共享类/方法全限定名解析。
+  - HTTP `/tags/search`：`parseQueryTags` 支持逗号分隔与重复 `tag` 参数（`?tag=a,b&tag=c`）；OpenAPI 规范补充 description。
+  - MCP `search_by_tag`：`tag` 参数逗号分隔多个（AND 交集），保持参数名 `tag` 向后兼容。
+- 测试：FileStore 多标签 AND / 方法标签 / `containsAll` 边界（+6）；SQLite 多标签 AND / 方法标签（+2）；Service 多标签 / 校验 / 方法结果（+3）；HTTP `parseQueryTags` 7 例 + 端点多标签（+2）；3 个 mock store 补 `SearchByTags`。
+- 验证：`go build ./...` 通过；`go test ./...` 全零 FAIL（33 包 OK，含 server 5.891s / sqlite 3.326s / service 2.169s）；`go vet -tags=pg ./internal/store/pg` 通过（PG 编译确认）。
+- 文档同步：API文档.md、05-接口层（CLI+HTTP+MCP）.md、客户端接入指南（MCP）.md。
+- 遗留 TODO：无（PG 集成测试依赖真实实例，未在本地跑，仅编译核验）。
+
 ### Commit 117: feat(harness): dsh 建议 1-7 全量推进——上下文追溯/极简模式/能力预设/context-sdk/dsh 接入/生态资产化 + ONNX 版本口径统一
 
 - 背景：`analysis/2026-08-17-competitor-and-harness-analysis.md` §3.3 给出 8 条建议（按优先级），用户要求全量推进实施。本提交落地建议 1-7，并同步任务 1（ONNX 版本口径：osx amd64 上游仅到 1.23.2 不再更新）。

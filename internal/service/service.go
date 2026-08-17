@@ -960,23 +960,42 @@ type TagSearchResult struct {
 	Methods   []string `json:"methods,omitempty"` // 方法名列表
 }
 
-// SearchByTag 按标签搜索类和方法的 ID 和名称。
+// SearchByTag 按单个标签搜索类和方法的 ID 和名称（兼容入口，委托 SearchByTags）。
 func (s *Service) SearchByTag(ctx context.Context, tag string) (*TagSearchResult, error) {
-	if tag == "" {
-		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "tag is required"}
+	return s.SearchByTags(ctx, []string{tag})
+}
+
+// SearchByTags 按多个标签（AND 交集）搜索类和方法的 ID 和名称。
+// 返回同时拥有所有指定标签的类和方法。
+func (s *Service) SearchByTags(ctx context.Context, tags []string) (*TagSearchResult, error) {
+	if len(tags) == 0 {
+		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "tags is required"}
+	}
+	for _, t := range tags {
+		if t == "" {
+			return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "tag must not be empty"}
+		}
 	}
 
-	classIDs, methodIDs, err := s.store.SearchByTag(ctx, tag)
+	classIDs, methodIDs, err := s.store.SearchByTags(ctx, tags)
 	if err != nil {
-		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search by tag: %v", err)}
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search by tags: %v", err)}
 	}
 
 	result := &TagSearchResult{
-		Tag:       tag,
+		Tag:       strings.Join(tags, ","),
 		ClassIDs:  classIDs,
 		MethodIDs: methodIDs,
 	}
 
+	// 解析类名与方法名（沿用共享辅助，避免复制粘贴）。
+	s.resolveTagSearchResult(ctx, result, classIDs, methodIDs)
+	return result, nil
+}
+
+// resolveTagSearchResult 将 class/method ID 列表解析为全限定名列表，填入 result。
+// 供 SearchByTag / SearchByTags 共用。
+func (s *Service) resolveTagSearchResult(ctx context.Context, result *TagSearchResult, classIDs, methodIDs []int64) {
 	// 解析类名
 	files, _ := s.store.GetAllFiles(ctx)
 	for _, cid := range classIDs {
@@ -1004,8 +1023,6 @@ func (s *Service) SearchByTag(ctx context.Context, tag string) (*TagSearchResult
 			}
 		}
 	}
-
-	return result, nil
 }
 
 // AllTagsResult 所有标签及其分类。

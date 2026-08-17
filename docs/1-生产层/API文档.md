@@ -24,7 +24,7 @@
 | `/impact` | GET | `method`,`depth` | 影响面分析 |
 | `/tests` | GET | `method`,`min_confidence` | 关联单测 |
 | `/search` | GET | `q`,`mode`,`limit` | 双路检索（exact/semantic/both） |
-| `/tags` `/tags/search` `/tags/all` | GET | `symbol`/`tag`/- | 标签查询 |
+| `/tags` `/tags/search` `/tags/all` | GET | `symbol`/`tag`/- | 标签查询（`/tags/search` 的 `tag` 支持逗号分隔多标签 AND 交集，如 `controller,service`） |
 | `/metrics` | GET | - | Prometheus 指标 |
 | `/viz` | GET | - | 向量索引可视化（文档浏览/检索/状态） |
 | `/openapi.json` `/docs` | GET | - | OpenAPI 规范 + Swagger UI |

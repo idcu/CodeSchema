@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -463,5 +464,105 @@ func TestTestMethodNotAllowedOnAllEndpoints(t *testing.T) {
 		if w.Result().StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s: expected 405 for POST, got %d", ep.name, w.Result().StatusCode)
 		}
+	}
+}
+
+// TestParseQueryTags 验证多标签 query 参数解析。
+func TestParseQueryTags(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"single tag", "tag=controller", []string{"controller"}},
+		{"comma separated", "tag=controller,service", []string{"controller", "service"}},
+		{"three tags", "tag=cache,read,write", []string{"cache", "read", "write"}},
+		{"repeated params", "tag=controller&tag=service", []string{"controller", "service"}},
+		{"mixed", "tag=controller,service&tag=cache", []string{"controller", "service", "cache"}},
+		{"empty", "", []string{""}},
+		{"whitespace trimmed", "tag= controller , service ", []string{"controller", "service"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q, err := url.ParseQuery(tt.raw)
+			if err != nil {
+				t.Fatalf("parse query: %v", err)
+			}
+			got := parseQueryTags(q)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len: got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("[%d]: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestTagsSearchEndpoint_MultiTag 验证 HTTP 端点多标签 AND 查询。
+func TestTagsSearchEndpoint_MultiTag(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	seedSymbol(t, st)
+	srv := NewHTTPServer(service.NewService(st), ":0")
+
+	// 为 seed 类打标签
+	ctx := context.Background()
+	files, _ := st.GetAllFiles(ctx)
+	if len(files) == 0 {
+		t.Fatal("no seed file")
+	}
+	classes, _ := st.GetClassesByFileID(ctx, files[0].ID)
+	if len(classes) == 0 {
+		t.Fatal("no seed class")
+	}
+	if err := st.UpsertTags(ctx, classes[0].ID, []string{"controller", "service"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 单标签 GET /tags/search?tag=controller
+	req := httptest.NewRequest(http.MethodGet, "/tags/search?tag=controller", nil)
+	w := httptest.NewRecorder()
+	srv.handleSearchByTag(w, req)
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Result().StatusCode)
+	}
+	var res service.TagSearchResult
+	if err := json.NewDecoder(w.Result().Body).Decode(&res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(res.Classes) != 1 {
+		t.Fatalf("single tag: expected 1 class, got %v", res.Classes)
+	}
+
+	// 多标签 GET /tags/search?tag=controller,service
+	req2 := httptest.NewRequest(http.MethodGet, "/tags/search?tag=controller,service", nil)
+	w2 := httptest.NewRecorder()
+	srv.handleSearchByTag(w2, req2)
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w2.Result().StatusCode)
+	}
+	var res2 service.TagSearchResult
+	if err := json.NewDecoder(w2.Result().Body).Decode(&res2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(res2.Classes) != 1 {
+		t.Fatalf("multi tag: expected 1 class, got %v", res2.Classes)
+	}
+
+	// 不存在的组合 → 空
+	req3 := httptest.NewRequest(http.MethodGet, "/tags/search?tag=controller,mq", nil)
+	w3 := httptest.NewRecorder()
+	srv.handleSearchByTag(w3, req3)
+	var res3 service.TagSearchResult
+	json.NewDecoder(w3.Result().Body).Decode(&res3)
+	if len(res3.Classes) != 0 {
+		t.Fatalf("no match: expected 0 classes, got %v", res3.Classes)
 	}
 }

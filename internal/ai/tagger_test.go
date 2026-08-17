@@ -602,6 +602,7 @@ func (m *mockStoreWithTags) GetTagsByMethodID(_ context.Context, methodID int64)
 }
 
 func (m *mockStoreWithTags) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) { return nil, nil, nil }
+func (m *mockStoreWithTags) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) { return nil, nil, nil }
 func (m *mockStoreWithTags) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) { return nil, nil }
 
 func (m *mockStoreWithTags) GetAllFiles(_ context.Context) ([]*store.FileRecord, error) {

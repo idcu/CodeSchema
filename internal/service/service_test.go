@@ -675,3 +675,122 @@ func TestSearch_Disambiguate_BudgetExhausted(t *testing.T) {
 		t.Fatalf("expected 2 results with exhausted budget, got %d", len(got))
 	}
 }
+
+// TestSearchByTags_MultiTagAND 验证 Service 层多标签 AND 检索：
+// 只返回同时拥有全部标签的类/方法，并正确解析全限定名。
+func TestSearchByTags_MultiTagAND(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	st := svc.store
+
+	// 两个类：A=controller+service，B=controller
+	fidA, _ := st.UpsertFile(ctx, "/a.go", "h1", 10, 100)
+	fidB, _ := st.UpsertFile(ctx, "/b.go", "h2", 10, 100)
+	if err := st.UpsertClasses(ctx, fidA, []parser.ClassIR{{Name: "A", FullName: "com.example.A", Type: "CLASS"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertClasses(ctx, fidB, []parser.ClassIR{{Name: "B", FullName: "com.example.B", Type: "CLASS"}}); err != nil {
+		t.Fatal(err)
+	}
+	classesA, _ := st.GetClassesByFileID(ctx, fidA)
+	classesB, _ := st.GetClassesByFileID(ctx, fidB)
+	if err := st.UpsertTags(ctx, classesA[0].ID, []string{"controller", "service"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertTags(ctx, classesB[0].ID, []string{"controller"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// controller+service（AND）→ 仅 A
+	res, err := svc.SearchByTags(ctx, []string{"controller", "service"})
+	if err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	}
+	if res.Tag != "controller,service" {
+		t.Errorf("expected Tag controller,service, got %s", res.Tag)
+	}
+	if len(res.Classes) != 1 || res.Classes[0] != "com.example.A" {
+		t.Fatalf("expected only com.example.A, got %v", res.Classes)
+	}
+	if len(res.MethodIDs) != 0 || len(res.Methods) != 0 {
+		t.Fatalf("expected no methods, got %v %v", res.MethodIDs, res.Methods)
+	}
+
+	// 单标签 controller → A、B（兼容入口 SearchByTag）
+	res, err = svc.SearchByTag(ctx, "controller")
+	if err != nil {
+		t.Fatalf("SearchByTag: %v", err)
+	}
+	if len(res.Classes) != 2 {
+		t.Fatalf("expected 2 classes, got %v", res.Classes)
+	}
+}
+
+// TestSearchByTags_Validation 验证多标签参数校验。
+func TestSearchByTags_Validation(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	// 空列表
+	_, err := svc.SearchByTags(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for nil tags")
+	}
+	svcErr, ok := err.(*ServiceError)
+	if !ok || svcErr.Code != "ERR_INVALID_PARAMETER" {
+		t.Fatalf("expected ERR_INVALID_PARAMETER, got %v", err)
+	}
+
+	// 含空标签
+	_, err = svc.SearchByTags(ctx, []string{"service", ""})
+	if err == nil {
+		t.Fatal("expected error for empty tag")
+	}
+	svcErr, ok = err.(*ServiceError)
+	if !ok || svcErr.Code != "ERR_INVALID_PARAMETER" {
+		t.Fatalf("expected ERR_INVALID_PARAMETER, got %v", err)
+	}
+}
+
+// TestSearchByTags_MethodResult 验证方法多标签检索结果解析。
+func TestSearchByTags_MethodResult(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	st := svc.store
+
+	fid, _ := st.UpsertFile(ctx, "/a.go", "h", 10, 100)
+	if err := st.UpsertClasses(ctx, fid, []parser.ClassIR{{Name: "A", FullName: "com.example.A", Type: "CLASS"}}); err != nil {
+		t.Fatal(err)
+	}
+	classes, _ := st.GetClassesByFileID(ctx, fid)
+	cid := classes[0].ID
+	if err := st.UpsertMethods(ctx, cid, []parser.MethodIR{
+		{Name: "Get", ClassFQN: "com.example.A"},
+		{Name: "Put", ClassFQN: "com.example.A"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	methods, _ := st.GetMethodsByClassID(ctx, cid)
+	for _, m := range methods {
+		var tags []string
+		if m.Name == "Get" {
+			tags = []string{"cache", "read"}
+		} else {
+			tags = []string{"cache"}
+		}
+		if err := st.UpsertMethodTags(ctx, m.ID, tags); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := svc.SearchByTags(ctx, []string{"cache", "read"})
+	if err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	}
+	if len(res.Classes) != 0 {
+		t.Fatalf("expected no class, got %v", res.Classes)
+	}
+	if len(res.Methods) != 1 || res.Methods[0] != "com.example.A.Get" {
+		t.Fatalf("expected only com.example.A.Get, got %v", res.Methods)
+	}
+}

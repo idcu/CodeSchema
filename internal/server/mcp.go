@@ -230,11 +230,11 @@ func defineTools() []mcpTool {
 		},
 		{
 			Name:        "search_by_tag",
-			Description: "按标签搜索类和方法的 ID 和名称",
+			Description: "按标签搜索类和方法的 ID 和名称（支持多标签 AND 交集，逗号分隔，如 controller,cache）",
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"tag":     {Type: "string", Description: "标签名，如 controller/service/cache/go"},
+					"tag":     {Type: "string", Description: "标签名，可逗号分隔多个（AND 交集）。如 controller/service/cache/go"},
 					"project": projectProp,
 				},
 				Required: []string{"tag"},
@@ -459,8 +459,16 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 		return mcpResult(id, result)
 
 	case "search_by_tag":
-		tag, _ := args["tag"].(string)
-		result, err := svc.SearchByTag(ctx, tag)
+		tagStr, _ := args["tag"].(string)
+		var tags []string
+		if tagStr != "" {
+			for _, t := range strings.Split(tagStr, ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					tags = append(tags, t)
+				}
+			}
+		}
+		result, err := svc.SearchByTags(ctx, tags)
 		if err != nil {
 			return mcpError(id, err)
 		}

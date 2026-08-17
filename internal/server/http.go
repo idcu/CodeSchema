@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -344,13 +345,30 @@ func (h *HTTPServer) handleSearchByTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tag := r.URL.Query().Get("tag")
-	result, err := h.serviceForRequest(r).SearchByTag(r.Context(), tag)
+	tags := parseQueryTags(r.URL.Query())
+	result, err := h.serviceForRequest(r).SearchByTags(r.Context(), tags)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// parseQueryTags 解析 /tags/search 的 tag 参数：支持逗号分隔与重复参数
+// （?tag=a,b&tag=c → [a b c]）。空参数返回 [""] 触发 service 层校验。
+func parseQueryTags(q url.Values) []string {
+	var tags []string
+	for _, v := range q["tag"] {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				tags = append(tags, p)
+			}
+		}
+	}
+	if len(tags) == 0 {
+		tags = []string{""}
+	}
+	return tags
 }
 
 func (h *HTTPServer) handleGetAllTags(w http.ResponseWriter, r *http.Request) {

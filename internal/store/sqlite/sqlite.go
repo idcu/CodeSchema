@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -570,20 +571,35 @@ func (s *SQLiteStore) getTags(ctx context.Context, kind string, ownerID int64) (
 	return out, rows.Err()
 }
 
-// SearchByTag 按标签搜索类和方法的 ID 列表。
+// SearchByTag 按单个标签搜索类和方法的 ID 列表（兼容入口，委托 SearchByTags）。
 func (s *SQLiteStore) SearchByTag(ctx context.Context, tag string) ([]int64, []int64, error) {
+	return s.SearchByTags(ctx, []string{tag})
+}
+
+// SearchByTags 按多个标签（AND）搜索类和方法的 ID 列表。
+// 返回同时拥有所有指定标签的类和方法（交集）。
+func (s *SQLiteStore) SearchByTags(ctx context.Context, tags []string) ([]int64, []int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var classIDs, methodIDs []int64
-	if err := s.db.QueryRow("SELECT id FROM tag WHERE name = ?", tag).Scan(new(int64)); err != nil {
-		if err == sql.ErrNoRows {
-			return classIDs, methodIDs, nil
-		}
-		return nil, nil, err
+	if len(tags) == 0 {
+		return classIDs, methodIDs, nil
 	}
+
+	// 构造 IN (?,?,...) 占位符 + HAVING COUNT(DISTINCT) = len(tags) 实现 AND 语义。
+	placeholders := strings.Repeat("?,", len(tags))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]interface{}, 0, len(tags)+1)
+	for _, t := range tags {
+		args = append(args, t)
+	}
+	args = append(args, len(tags))
+
 	cRows, err := s.db.Query(`
-		SELECT lt.class_id FROM class_tag lt JOIN tag t ON t.id = lt.tag_id WHERE t.name = ?`, tag)
+		SELECT lt.class_id FROM class_tag lt JOIN tag t ON t.id = lt.tag_id
+		WHERE t.name IN (`+placeholders+`)
+		GROUP BY lt.class_id HAVING COUNT(DISTINCT t.id) = ?`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -597,7 +613,9 @@ func (s *SQLiteStore) SearchByTag(ctx context.Context, tag string) ([]int64, []i
 	}
 
 	mRows, err := s.db.Query(`
-		SELECT lt.method_id FROM method_tag lt JOIN tag t ON t.id = lt.tag_id WHERE t.name = ?`, tag)
+		SELECT lt.method_id FROM method_tag lt JOIN tag t ON t.id = lt.tag_id
+		WHERE t.name IN (`+placeholders+`)
+		GROUP BY lt.method_id HAVING COUNT(DISTINCT t.id) = ?`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
