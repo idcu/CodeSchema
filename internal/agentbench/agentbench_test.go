@@ -291,11 +291,12 @@ func TestRunMulti_RepoHintFilter(t *testing.T) {
 	if len(reports) != 2 {
 		t.Fatalf("expected 2 reports, got %d", len(reports))
 	}
-	// 本仓：5 任务全部 active（4 code-schema + 1 generic）。
+	// 本仓：5 任务 active（4 code-schema + generic-feat-001 Config 符号存在；
+	// 3 个 OrderService 通用任务经符号预检 Skipped——本仓无该符号）。
 	if reports[0].ActiveTasks != 5 {
 		t.Fatalf("repo1 active tasks = %d, want 5", reports[0].ActiveTasks)
 	}
-	// 临时仓：仅 generic-feat-001 active（Config 符号存在），其余 4 个 Skipped。
+	// 临时仓：仅 generic-feat-001 active（Config 符号存在），其余 7 个 Skipped。
 	if reports[1].ActiveTasks != 1 {
 		t.Fatalf("repo2 active tasks = %d, want 1", reports[1].ActiveTasks)
 	}
@@ -305,8 +306,8 @@ func TestRunMulti_RepoHintFilter(t *testing.T) {
 			skipped++
 		}
 	}
-	if skipped != 4 {
-		t.Fatalf("repo2 skipped tasks = %d, want 4", skipped)
+	if skipped != 7 {
+		t.Fatalf("repo2 skipped tasks = %d, want 7", skipped)
 	}
 	// 跨仓对比 Markdown 可生成。
 	md := GenerateMultiMarkdown(reports)
@@ -331,5 +332,46 @@ func TestSummarize_SkippedExcluded(t *testing.T) {
 	}
 	if s.PassRateFull != 1.0 {
 		t.Fatalf("full pass rate = %v, want 1.0", s.PassRateFull)
+	}
+}
+
+// TestEvalTask_SymbolPresencePrecheck 符号预检：目标符号不在仓库时任务标记
+// Skipped（不拉低通过率），与 RepoHint 过滤语义一致。
+func TestEvalTask_SymbolPresencePrecheck(t *testing.T) {
+	svc := newTestService(t)
+	// 不存在符号的任务 → Skipped。
+	task := AgentTask{ID: "t-missing", TargetSymbol: "NoSuch.Class", RequiredKeywords: []string{"x"}}
+	tr := evalTask(context.Background(), svc, task, Options{})
+	if !tr.Skipped {
+		t.Fatalf("expected skipped for missing symbol, got %+v", tr)
+	}
+	// 存在符号的任务 → active（不 Skipped）。
+	task2 := AgentTask{ID: "t-ok", TargetSymbol: "Sample.Add", RequiredKeywords: []string{"Add"}}
+	tr2 := evalTask(context.Background(), svc, task2, Options{})
+	if tr2.Skipped {
+		t.Fatalf("expected active for existing symbol, got %+v", tr2)
+	}
+}
+
+// TestDefaultTasks_MultiLanguage 内置任务集包含多语言通用任务（符号约定：
+// 类 FQN = 简单类名，方法 FQN = "ClassName.MethodName"，与 tree-sitter 一致）。
+func TestDefaultTasks_MultiLanguage(t *testing.T) {
+	tasks := DefaultTasks()
+	byID := map[string]AgentTask{}
+	for _, t := range tasks {
+		byID[t.ID] = t
+	}
+	for _, id := range []string{"generic-bug-001", "generic-bug-002", "generic-refactor-001"} {
+		tk, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing multi-language task %s", id)
+		}
+		if tk.RepoHint != "" {
+			t.Fatalf("generic task %s should have empty RepoHint, got %q", id, tk.RepoHint)
+		}
+	}
+	// 任务总数 = 4 code-schema + 4 generic。
+	if len(tasks) != 8 {
+		t.Fatalf("expected 8 tasks, got %d", len(tasks))
 	}
 }

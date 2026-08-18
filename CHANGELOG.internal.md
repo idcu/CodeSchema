@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 128: feat(agentbench): agent-bench 多语言任务集扩展 + 符号预检 Skipped 语义
+
+- 背景：agent-bench（对外可信基准）内置任务集仅 Go 符号（CodeSchema 专属 + Config 通用），无法评测 Java/Python/TS 等仓库；且通用任务在「符号不存在的仓库」被判定失败，拉低通过率（语义错误）。
+- 实现：
+  - **多语言任务集** `internal/agentbench/agentbench.go`：内置任务 5 → 8。新增 3 个语言通用任务（RepoHint 空，任意仓库评测）：`generic-bug-001`（OrderService.getUser 参数校验）、`generic-bug-002`（OrderService.get_user None 处理，Python 语义）、`generic-refactor-001`（OrderService 资源清理收口）。符号约定经 tree-sitter 实测验证：类 FQN = 简单类名、方法 FQN = "ClassName.MethodName"（Java/Python/TS 与 Go 一致）。
+  - **符号预检 Skipped 语义** `evalTask`：目标符号在仓库中完全无法定位（full/minimal 均无注入）→ 任务标记 Skipped（仓库不适配），不计入通过率分母——与 RepoHint 过滤语义统一。`Run` 的 `ActiveTasks` 统计补齐；`RunMulti` 改为基于最终 Skipped 状态重算 active（修复此前仅按 RepoHint 判定导致的计数偏差）。
+  - **MD 报告 Skipped 展示** `GenerateMarkdown`：分任务明细增加「状态」列（active / **skipped**（符号不适用）），脚注说明 skipped 不计入分母。
+- 实测：多语言样例仓（Java/Go/Python 混合含 OrderService）——OrderService 相关 3 任务 full/minimal 均通过、code-schema 专属任务 Skipped、Config 任务（符号缺失）预检 Skipped；本仓快照保持 5 active / 100% 通过率 / 98.7% token 节省（skipped 不拉低）。
+- 测试：新增 2 组（TestEvalTask_SymbolPresencePrecheck / TestDefaultTasks_MultiLanguage）；修正 TestRunMulti_RepoHintFilter 断言（active=5、skipped=7）。
+- 验证：`go build ./...`、`go vet ./...` 通过；`go test ./internal/agentbench/` 全绿（11 测试）。
+- 文档同步：CHANGELOG.internal.md（本记录）、DEV_PROGRESS.md、analysis/2026-08-17-competitor-and-harness-analysis.md（修订记录）、build/agent-task-bench/ 快照（8 任务集、skipped 展示）。
+- 遗留：任务集可按需继续扩展（更多语言/更复杂任务）；外部动作（adapterx/contextsdk 独立仓库 push 发布）同前。
+
 ### Commit 127: ci(make+bench): agent-bench 工程化看护——CI job + 快照归一化 + Makefile 目标
 
 - 背景：agent-bench（对外可信基准）此前仅一次性工具，未纳入 CI 与 Makefile；快照含本机绝对路径，跨机器 diff 必失败。

@@ -125,6 +125,8 @@ type Options struct {
 // 指定仓库评测（其余仓库标记 Skipped，不惩罚）。
 func DefaultTasks() []AgentTask {
 	return []AgentTask{
+		// —— 语言通用任务（RepoHint 空 = 任意仓库评测；符号约定与 tree-sitter
+		//    一致：类 FQN = 简单类名，方法 FQN = "ClassName.MethodName"）——
 		{
 			ID:               "generic-feat-001",
 			Description:      "为项目核心类型补充导出文档注释（golint 要求导出的标识符必须有注释）",
@@ -132,6 +134,28 @@ func DefaultTasks() []AgentTask {
 			TargetSymbol:     "Config",
 			RequiredKeywords: []string{"Config"},
 		},
+		{
+			ID:               "generic-bug-001",
+			Description:      "修复 OrderService.getUser 在输入非法时未做参数校验可能返回错误数据的问题",
+			Type:             "bugfix",
+			TargetSymbol:     "OrderService.getUser",
+			RequiredKeywords: []string{"getUser"},
+		},
+		{
+			ID:               "generic-bug-002",
+			Description:      "修复 OrderService.get_user 未处理空输入（None/null）导致异常的问题（Python 语义）",
+			Type:             "bugfix",
+			TargetSymbol:     "OrderService.get_user",
+			RequiredKeywords: []string{"get_user"},
+		},
+		{
+			ID:               "generic-refactor-001",
+			Description:      "重构核心服务类的构造/初始化逻辑，把重复的资源清理统一收口到 Close/close 方法",
+			Type:             "refactor",
+			TargetSymbol:     "OrderService",
+			RequiredKeywords: []string{"OrderService"},
+		},
+		// —— CodeSchema 专属任务（RepoHint 限定本仓）——
 		{
 			ID:               "code-schema-bug-001",
 			Description:      "修复 Scanner.ScanAll 在存在被忽略目录（vendor/node_modules）时仍可能尝试解析其中文件的问题",
@@ -219,6 +243,9 @@ func Run(ctx context.Context, repoPath string, tasks []AgentTask, opts Options) 
 	for _, t := range tasks {
 		tr := evalTask(ctx, svc, t, opts)
 		report.Tasks = append(report.Tasks, tr)
+		if !tr.Skipped {
+			report.ActiveTasks++
+		}
 	}
 	report.Summary = summarize(report.Tasks)
 	return report, nil
@@ -238,10 +265,12 @@ func RunMulti(ctx context.Context, repos []string, tasks []AgentTask, opts Optio
 			return reports, fmt.Errorf("agent-bench %s: %w", repo, err)
 		}
 		// 按 RepoHint 过滤任务：标记不适用于本仓的任务为 Skipped。
+		// （evalTask 已把「符号在仓中不存在」的通用任务标记 Skipped，这里只补
+		// RepoHint 不匹配的；两者或关系，均不计入通过率分母。）
 		repoName := filepath.Base(repo)
-		filtered := make([]TaskResult, 0, len(report.Tasks))
 		active := 0
-		for _, tr := range report.Tasks {
+		for i := range report.Tasks {
+			tr := &report.Tasks[i]
 			// 找到对应任务定义取 RepoHint。
 			hint := ""
 			for _, t := range tasks {
@@ -250,15 +279,14 @@ func RunMulti(ctx context.Context, repos []string, tasks []AgentTask, opts Optio
 					break
 				}
 			}
-			if hint != "" && hint != repoName {
+			if hint != "" && hint != repoName && !tr.Skipped {
 				tr.Skipped = true
 				tr.Modes = map[Mode]ModeResult{}
-			} else {
+			}
+			if !tr.Skipped {
 				active++
 			}
-			filtered = append(filtered, tr)
 		}
-		report.Tasks = filtered
 		report.Summary = summarize(report.Tasks)
 		report.ActiveTasks = active
 		reports = append(reports, report)
@@ -267,6 +295,9 @@ func RunMulti(ctx context.Context, repos []string, tasks []AgentTask, opts Optio
 }
 
 // evalTask 对单个任务执行三档评测。
+// 符号预检：目标符号在仓库中完全无法定位（full/minimal 均无线索）时标记
+// Skipped——表示「该任务不适用于此仓库」（如通用 OrderService 任务评测不含
+// OrderService 的 Go 仓），避免拉低通过率。与 RepoHint 过滤语义一致。
 func evalTask(ctx context.Context, svc *service.Service, t AgentTask, opts Options) TaskResult {
 	tr := TaskResult{
 		TaskID:       t.ID,
@@ -276,8 +307,16 @@ func evalTask(ctx context.Context, svc *service.Service, t AgentTask, opts Optio
 		Modes:        map[Mode]ModeResult{},
 	}
 	tr.Modes[ModeNone] = evalMode(ctx, svc, t, ModeNone, opts)
-	tr.Modes[ModeFull] = evalMode(ctx, svc, t, ModeFull, opts)
-	tr.Modes[ModeMinimal] = evalMode(ctx, svc, t, ModeMinimal, opts)
+	full := evalMode(ctx, svc, t, ModeFull, opts)
+	minimal := evalMode(ctx, svc, t, ModeMinimal, opts)
+	// 符号预检：full 与 minimal 都未定位（无文件路径/行号线索）→ 仓库不适配。
+	if t.TargetSymbol != "" && full.InjectedChars == 0 && minimal.InjectedChars == 0 {
+		tr.Skipped = true
+		tr.Modes = map[Mode]ModeResult{ModeNone: tr.Modes[ModeNone]}
+		return tr
+	}
+	tr.Modes[ModeFull] = full
+	tr.Modes[ModeMinimal] = minimal
 	return tr
 }
 
@@ -434,19 +473,24 @@ func GenerateMarkdown(r *Report) string {
 		r.Summary.TokenSavingMinimalVsFull*100))
 
 	b.WriteString("### 分任务明细\n\n")
-	b.WriteString("| 任务 | 类型 | none | full (token) | minimal (token) |\n")
-	b.WriteString("|---|---|---|---|---|\n")
+	b.WriteString("| 任务 | 类型 | 状态 | none | full (token) | minimal (token) |\n")
+	b.WriteString("|---|---|---|---|---|---|\n")
 	for _, t := range r.Tasks {
 		none := t.Modes[ModeNone]
 		full := t.Modes[ModeFull]
 		min := t.Modes[ModeMinimal]
-		b.WriteString(fmt.Sprintf("| %s | %s | %v | %v (%d) | %v (%d) |\n",
+		if t.Skipped {
+			b.WriteString(fmt.Sprintf("| %s | %s | **skipped**（符号不适用） | — | — | — |\n", t.TaskID, t.Type))
+			continue
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | active | %v | %v (%d) | %v (%d) |\n",
 			t.TaskID, t.Type,
 			none.Pass, full.Pass, full.TokenEstimate,
 			min.Pass, min.TokenEstimate))
 	}
 	b.WriteString("\n> 判定口径：上下文中命中全部「必需符号」与「关键信息」即视为该档位任务可完成。\n")
 	b.WriteString("> full 注入完整源码原文（context_lines 裁剪）；minimal 仅符号元数据、零文件 IO。\n")
+	b.WriteString("> skipped：任务符号不适用于当前仓库（按 RepoHint 或符号预检），不计入通过率分母。\n")
 	return b.String()
 }
 

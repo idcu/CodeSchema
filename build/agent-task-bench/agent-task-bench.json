@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-08-17T12:59:22Z",
-  "repo_path": ".",
-  "repo_abs": ".",
+  "timestamp": "2026-08-18T10:35:20Z",
+  "repo_path": "code-schema",
+  "repo_abs": "/Volumes/Data/code-schema",
   "file_count": 353,
-  "active_tasks": 0,
+  "active_tasks": 5,
   "tasks": [
     {
       "task_id": "code-schema-bug-001",
@@ -19,7 +19,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 723,
-          "generation_time_ms": 0.91
+          "generation_time_ms": 1.48
         },
         "minimal": {
           "token_estimate": 4,
@@ -28,8 +28,8 @@
           "keywords_covered": 0,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 120,
-          "generation_time_ms": 0.12
+          "injected_chars": 146,
+          "generation_time_ms": 0.09
         },
         "none": {
           "token_estimate": 0,
@@ -57,7 +57,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 768,
-          "generation_time_ms": 0.78
+          "generation_time_ms": 1.18
         },
         "minimal": {
           "token_estimate": 4,
@@ -66,8 +66,8 @@
           "keywords_covered": 0,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 124,
-          "generation_time_ms": 0.07
+          "injected_chars": 150,
+          "generation_time_ms": 0.12
         },
         "none": {
           "token_estimate": 0,
@@ -95,7 +95,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 982,
-          "generation_time_ms": 0.73
+          "generation_time_ms": 1.03
         },
         "minimal": {
           "token_estimate": 4,
@@ -104,8 +104,8 @@
           "keywords_covered": 0,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 119,
-          "generation_time_ms": 0.03
+          "injected_chars": 145,
+          "generation_time_ms": 0.04
         },
         "none": {
           "token_estimate": 0,
@@ -133,7 +133,7 @@
           "required_keywords": 1,
           "pass": true,
           "injected_chars": 881,
-          "generation_time_ms": 0.69
+          "generation_time_ms": 1.14
         },
         "minimal": {
           "token_estimate": 4,
@@ -142,9 +142,47 @@
           "keywords_covered": 0,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 117,
-          "generation_time_ms": 0.04
+          "injected_chars": 143,
+          "generation_time_ms": 0.05
         },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "generic-bug-001",
+      "description": "修复 OrderService.getUser 在输入非法时未做参数校验可能返回错误数据的问题",
+      "type": "bugfix",
+      "target_symbol": "OrderService.getUser",
+      "skipped": true,
+      "modes": {
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "generic-bug-002",
+      "description": "修复 OrderService.get_user 未处理空输入（None/null）导致异常的问题（Python 语义）",
+      "type": "bugfix",
+      "target_symbol": "OrderService.get_user",
+      "skipped": true,
+      "modes": {
         "none": {
           "token_estimate": 0,
           "symbols_covered": 0,
@@ -164,14 +202,14 @@
       "target_symbol": "Config",
       "modes": {
         "full": {
-          "token_estimate": 84,
+          "token_estimate": 1168,
           "symbols_covered": 1,
           "required_symbols": 0,
           "keywords_covered": 1,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 981,
-          "generation_time_ms": 0.67
+          "injected_chars": 8368,
+          "generation_time_ms": 1.23
         },
         "minimal": {
           "token_estimate": 4,
@@ -180,9 +218,28 @@
           "keywords_covered": 0,
           "required_keywords": 1,
           "pass": true,
-          "injected_chars": 61,
-          "generation_time_ms": 0.02
+          "injected_chars": 106,
+          "generation_time_ms": 0.05
         },
+        "none": {
+          "token_estimate": 0,
+          "symbols_covered": 0,
+          "required_symbols": 0,
+          "keywords_covered": 0,
+          "required_keywords": 1,
+          "pass": false,
+          "injected_chars": 0,
+          "generation_time_ms": 0
+        }
+      }
+    },
+    {
+      "task_id": "generic-refactor-001",
+      "description": "重构核心服务类的构造/初始化逻辑，把重复的资源清理统一收口到 Close/close 方法",
+      "type": "refactor",
+      "target_symbol": "OrderService",
+      "skipped": true,
+      "modes": {
         "none": {
           "token_estimate": 0,
           "symbols_covered": 0,
@@ -201,9 +258,9 @@
     "pass_rate_full": 1,
     "pass_rate_minimal": 1,
     "token_avg_none": 0,
-    "token_avg_full": 84,
+    "token_avg_full": 300.8,
     "token_avg_minimal": 4,
-    "token_saving_minimal_vs_full": 0.9524,
+    "token_saving_minimal_vs_full": 0.9867,
     "full_vs_none": 1,
     "minimal_vs_none": 1,
     "task_total": 5
