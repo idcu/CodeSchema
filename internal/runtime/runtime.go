@@ -10,6 +10,7 @@ package runtime
 
 import (
 	"context"
+	"gitee.com/idcu-go/pathsafe"
 	"log"
 	"os"
 	"os/exec"
@@ -261,12 +262,60 @@ type Runtime struct {
 }
 
 // BuildRuntime 基于已打开的 store 装配 Service + 检索 + 分析器，并执行首轮索引构建。
+// ContextOptionsFromConfig 把 config.context 转成 service.ContextOptions（服务端默认值）。
+//
+// 服务端默认值的定位：只有请求未显式传参时才生效（见 server 的 mergeContextOptions），
+// 因此这里不需要区分「未配置」与「配成 0」——两者都表示交给调用方决定。
+func ContextOptionsFromConfig(cfg *config.Config) service.ContextOptions {
+	if cfg == nil {
+		return service.ContextOptions{}
+	}
+	return service.ContextOptions{
+		ContextLines:  cfg.Context.ContextLines,
+		MaxBytes:      cfg.Context.MaxBytes,
+		MaxTokens:     cfg.Context.MaxTokens,
+		MaxLineChars:  cfg.Context.MaxLineChars,
+		CharsPerToken: cfg.Context.CharsPerToken,
+		PathStyle:     service.PathStyle(cfg.Context.DefaultPathStyle),
+	}
+}
+
+// ApplyContextConfig 按配置装配上下文供给侧能力（查询缓存 + 路径虚拟化虚拟根）。
+//
+// 查询缓存默认关闭：它的正确性依赖索引/文件变更时的主动失效，只有确实存在
+// 高频重复查询的场景才划算（见 runtime.StartWatchBackground 的失效接线）。
+// 虚拟根仅在 default_path_style=virtual 且 project.root 可解析为绝对路径时注入。
+func ApplyContextConfig(svc *service.Service, cfg *config.Config) {
+	if svc == nil || cfg == nil {
+		return
+	}
+	if cfg.Context.QueryCache.Enabled {
+		ttl := time.Duration(cfg.Context.QueryCache.TTLMS) * time.Millisecond
+		svc.EnableQueryCache(ttl, cfg.Context.QueryCache.MaxEntries)
+	}
+	if cfg.Context.DefaultPathStyle != "virtual" || cfg.Project.Root == "" {
+		return
+	}
+	abs, err := filepath.Abs(cfg.Project.Root)
+	if err != nil {
+		log.Printf("WARN: resolve project root for virtual path: %v", err)
+		return
+	}
+	root, err := pathsafe.NewRoot(abs, "/codebase")
+	if err != nil {
+		log.Printf("WARN: init path root: %v", err)
+		return
+	}
+	svc.WithPathRoot(root)
+}
+
 func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Runtime, error) {
 	searcher, builder, vecStore := NewSearcherWithStore(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	WithImpactAnalyzer(svc, st)
 	WithAIEnhancer(svc, cfg)
+	ApplyContextConfig(svc, cfg)
 	if _, err := svc.BuildIndex(ctx); err != nil {
 		return nil, err
 	}
@@ -315,6 +364,7 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	WithImpactAnalyzer(svc, st)
+	ApplyContextConfig(svc, cfg)
 
 	sched := scheduler.NewScheduler(cfg.Watcher.DebounceMs, 1000)
 
@@ -325,10 +375,19 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 		log.Printf("WARN: build index: %v", err)
 	}
 	s.SetOnIndex(func(ctx context.Context, filePath string) error {
-		return builder.BuildAndIndex(ctx, st, filePath)
+		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
+			return err
+		}
+		// 索引变了，查询缓存必须立即失效（B4）：否则会短暂返回裁剪过的旧内容。
+		svc.InvalidateQueryCache()
+		return nil
 	})
 	s.SetOnDelete(func(ctx context.Context, filePath string) error {
-		return builder.BuildAndRemove(ctx, st, filePath)
+		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
+			return err
+		}
+		svc.InvalidateQueryCache()
+		return nil
 	})
 
 	wctx, wcancel := context.WithCancel(ctx)

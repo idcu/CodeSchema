@@ -361,6 +361,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWa
 
 	mcpSrv := server.NewMCPServer(nil, *addr)
 	mcpSrv.SetTenantManager(mgr)
+	mcpSrv.SetContextDefaults(rt.ContextOptionsFromConfig(cfg))
 	if *authToken != "" {
 		mcpSrv.SetAuthToken(*authToken)
 	}
@@ -407,6 +408,7 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 
 	httpSrv := server.NewHTTPServer(nil, *addr)
 	httpSrv.SetTenantManager(mgr)
+	httpSrv.SetContextDefaults(rt.ContextOptionsFromConfig(cfg))
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
 	}

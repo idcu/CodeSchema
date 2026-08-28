@@ -20,9 +20,9 @@
 | 端点 | 方法 | 参数 | 说明 |
 |---|---|---|---|
 | `/health` `/health/db` `/health/vector` `/health/kv` | GET | - | 健康检查（存储/向量/缓存）。`/health/vector` 探测真实向量存储；`/health/kv` 在启用 Redis 时探测真实状态，未配置返回 `type:"none"`（不再为占位） |
-| `/context` | GET | `symbol`,`context_lines`,`mode` | 获取符号精准裁剪上下文（`mode`: `full` 源码/`minimal` 仅符号元数据） |
-| `/impact` | GET | `method`,`depth` | 影响面分析 |
-| `/tests` | GET | `method`,`min_confidence` | 关联单测 |
+| `/context` | GET | `symbol`\|`symbols`,`context_lines`,`mode`,`max_bytes`,`max_tokens`,`max_line_chars`,`path_style` | 获取符号精准裁剪上下文（`mode`: `full` 源码/`minimal` 仅符号元数据；`symbols` 传多个时走批量，返回 `{results,errors}`） |
+| `/impact` | GET | `method`\|`methods`,`depth` | 影响面分析（`methods` 传多个时走批量） |
+| `/tests` | GET | `method`\|`methods`,`min_confidence` | 关联单测（`methods` 传多个时走批量） |
 | `/search` | GET | `q`,`mode`,`limit` | 双路检索（exact/semantic/both） |
 | `/tags` `/tags/search` `/tags/all` | GET | `symbol`/`tag`/- | 标签查询（`/tags/search` 的 `tag` 支持逗号分隔多标签 AND 交集，如 `controller,service`） |
 | `/metrics` | GET | - | Prometheus 指标 |
@@ -43,12 +43,35 @@
 ```json
 { "name": "context", "arguments": { "symbol": "com.example.UserService.login", "context_lines": 10 } }
 { "name": "context", "arguments": { "symbol": "com.example.UserService.login", "mode": "minimal" } }
+{ "name": "context", "arguments": { "symbols": ["com.example.UserService.login", "com.example.OrderService.create"], "max_bytes": 4096 } }
 { "name": "search_symbols", "arguments": { "q": "用户登录", "mode": "both", "limit": 20 } }
 { "name": "impact", "arguments": { "method": "com.example.UserService.login", "depth": 2 } }
 ```
 `context` 工具支持 `mode` 参数：
 - `full`（默认）：注入符号的完整源码（可配 `context_lines` 裁剪）；
 - `minimal`：仅注入符号元数据（名称/位置/文档），不读源码；适合 token 评测基线。
+
+### 批量入参（`symbols` / `methods`）
+
+`context` / `impact` / `tests` 三个工具支持批量入参：传数组即走批量路径，
+**一轮返回 N 个符号**，把 N 次工具调用压成 1 次。单符号失败不中断整体：
+失败项落在 `errors[]`（含 `code` + `hint`），成功项落在 `results[]`。
+只传一个符号（或用旧的 `symbol` / `method` 单值参数）时，响应形状与旧版完全一致。
+
+### 输出预算与降级（`max_bytes` / `max_tokens` / `max_line_chars`）
+
+- `max_bytes`（字节）与 `max_tokens`（token）是「与」关系，任一超限即降级，取值更严者；
+- 降级链路：**缩上下文 → 块内居中截断（保头 + `...` + 保尾）→ 仅首行**；
+  每一步都重新计预算，且**语义块永不被切断**（可以少给上下文，不给半个函数）；
+- `max_line_chars` 截断超长行（压缩产物 / 生成代码），防止一行吃掉整份预算；
+- 降级结果在 `_trace` 中留痕：`degraded` / `degrade_reason` / `actual_bytes` /
+  `actual_tokens` / `omitted_lines` / `config`（本次实际生效参数）。
+
+### 路径形态（`path_style`）
+
+- `absolute`（默认）：输出宿主真实绝对路径；
+- `virtual`：把项目根映射为 `/codebase` 虚拟根，隐藏磁盘布局并缩短路径占的 token
+  （需 `context.default_path_style: virtual` 且 `project.root` 已配置，否则退化为 `absolute`）。
 
 多租户下检索类工具额外接受 `project` 参数；省略时路由默认租户（`"default"`）。
 
@@ -58,6 +81,10 @@
 - MCP 传输遵循 JSON-RPC 2.0：请求必须携带合法 id；notification 不得携带 `id`（LSP JSON-RPC `omitempty` 约束，clangd 严格拒绝违反者）。
 - HTTP 鉴权失败返回标准错误；路径遍历由中间件拦截。
 - 静默空结果模式被禁止（见代码规范）。
+- **错误随附修复建议**：HTTP 错误响应的 `error.hint` 字段给出该类错误的常见修法
+  （如 `ERR_SYMBOL_NOT_FOUND` 提示改用 `search_symbols` 确认写法、核对 `project`）；
+  MCP 的 error 只有一个 `message` 字段，hint 以 `[hint] ` 起头内联其后。未知错误码不带 hint。
+- 批量响应的 `errors[]` 每项同样带 `hint`，便于一次拿到几十个符号的失败原因与修法。
 
 ## 5. 数据结构与检索模式
 

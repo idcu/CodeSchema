@@ -16,6 +16,9 @@ require (
 )
 
 require (
+	gitee.com/idcu-go/pathsafe v0.0.0
+	gitee.com/idcu-go/trim v0.0.0
+	gitee.com/idcu-go/ttlcache v0.0.0
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -32,3 +35,9 @@ require (
 replace github.com/philippgille/chromem-go => ./down/chromem-go/chromem-go-main
 
 replace github.com/yalue/onnxruntime_go => ./third_party/onnxruntime_go_patch
+
+replace gitee.com/idcu-go/trim => ../idcu-go/trim
+
+replace gitee.com/idcu-go/ttlcache => ../idcu-go/ttlcache
+
+replace gitee.com/idcu-go/pathsafe => ../idcu-go/pathsafe

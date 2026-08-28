@@ -6,6 +6,73 @@
 
 ## 提交记录
 
+### Commit 129: feat(context): 上下文输出工程全量升级（A/B/C 档）+ 抽取 idcu-go 三个公共模块
+
+- 背景：以 FastContext（fast-context-mcp v1.3.2）为参照做源码级借鉴分析（见
+  `analysis/2026-08-29-fastcontext-analysis.md`），结论是「不抄架构（它无本地索引、查询期上云），
+  抄它的输出工程」。用户拍板：A 档开工、B5 用「现有工具加 `symbols[]`」、B1 字节与 token 预算两者都支持，
+  公共能力按 idcu-go/meta 的《通用模块标准 v1.2》抽成独立模块。
+
+- **公共模块（新建 3 个独立仓库，按 meta v1.2 标准落地，均已本地 commit，未 push）**：
+  - `gitee.com/idcu-go/trim` v0.1.0（通用·原语）：语义块对齐 + 双预算自适应降级 + 行级截断。
+    四级降级链（上下文 → 块 → 块内居中截断保头尾 → 仅首行）、字节/token 双轨预算、UTF-8 安全截断。
+    覆盖率 **92.9%**、race 全绿；基准：无预算 **145.0 ns/op / 32 B / 1 allocs**，居中截断 **1026 ns/op**。
+  - `gitee.com/idcu-go/ttlcache` v0.1.0（通用·原语）：泛型 TTL + LRU 内存缓存，无后台 goroutine；
+    空值可跳过写入并清除旧值（对齐 FastContext「空结果不缓存」）、全量失效、六计数器。
+    覆盖率 **96.6%**；命中 **106.9 ns/op / 0 allocs**，未命中 **31.0 ns/op / 0 allocs**。
+  - `gitee.com/idcu-go/pathsafe` v0.1.0（通用·工具）：虚拟根 ↔ 真实根双向映射与穿越阻断；
+    越界一律报错不静默夹紧，虚拟路径统一 POSIX（Windows 同样识别 `/codebase/...`），
+    可选 symlink 逃逸校验。覆盖率 **92.9%**；解析 **240.6 ns/op**。
+  - 三模块均为纯标准库零依赖，含 README.md / README.en.md / CHANGELOG.md / LICENSE / Makefile
+    （覆盖率门禁 ≥80%）/ .golangci.yml / Gitee CI / check-internal-deps.sh。
+
+- **A 档（输出侧补齐）**：
+  - **B1 输出预算自适应降级**：`ContextOptions` 增 `MaxBytes` / `MaxTokens` / `CharsPerToken`，
+    裁剪改走 `trim.Fit` 的降级链；`_trace` 留痕 `degraded` / `degrade_reason` / `omitted_lines`。
+  - **B2 诊断元数据回传**：`TraceEntry` 增 `config`（本次实际生效参数）/ `actual_bytes` /
+    `actual_tokens` / `actual_start` / `actual_end` / `degraded` / `line_truncated` / `cache_hit`。
+  - **B3 错误 hint**：新增 `internal/errors/hint.go`（`Hint(code)` / `WithHint`）；HTTP 错误响应增
+    `error.hint` 字段，MCP（error 只有 message）以 `[hint] ` 内联，批量 `errors[]` 每项同样带 hint。
+  - **B6 行级截断**：`MaxLineChars`（默认 0 = 不截断），防压缩产物/生成代码一行吃掉整份预算。
+  - **B7 语义块对齐**：裁剪窗口恒覆盖符号体（调用方给的窗口小于块时向外扩展），
+    `trim_reason` 新增 `semantic_block` 语义（原 `full` 语义过笼统）。
+
+- **B 档（核心 KPI）**：
+  - **B5 批量入参（方案 a）**：`context` / `impact` / `tests` 三个工具（MCP + HTTP）支持
+    `symbols[]` / `methods[]`，一轮返回 N 个符号；单符号失败隔离（落 `errors[]` 带 code + hint），
+    单符号仍返回原有响应形状（向后兼容）。service 层新增
+    `GetContextBatch` / `GetContextBatchDetailed` / `GetImpactBatch` / `GetTestsBatch`。
+
+- **C 档（性能与信息面）**：
+  - **B4 查询级缓存**：service 增 `EnableQueryCache(ttl, maxEntries)`（默认**关闭**，由
+    `context.query_cache.enabled` 开启），key = 世代号 + 符号 + 全部裁剪参数；
+    `InvalidateQueryCache()` 在 watcher 的 OnIndex/OnDelete 后调用（O(1) 失效 + 立即回收），
+    命中时 `_trace.cache_hit=true`。
+  - **B9 路径虚拟化**：`path_style=virtual` 时经 `pathsafe` 把项目根映射为 `/codebase`
+    （默认 `absolute`，向后兼容；根外路径原样返回而非伪装成功）。
+
+- **配置与装配**：新增 `context` 配置段（`context_lines` / `max_bytes` / `max_tokens` /
+  `max_line_chars` / `chars_per_token` / `default_path_style` / `query_cache.*`），
+  经 `runtime.ContextOptionsFromConfig` → `SetContextDefaults` 作为服务端默认值
+  （优先级：请求参数 > 服务端默认值 > 不限）；`runtime.ApplyContextConfig` 装配缓存与虚拟根。
+
+- 依赖接线：`go.mod` 以 `replace` 指向本地 `../idcu-go/{trim,ttlcache,pathsafe}`（v0.0.0 占位）。
+  **CI/发布遗留**：三模块尚未 push 打 tag，CI 上若无 idcu-go 目录则 `replace` 相对路径会失败——
+  发布前需改为按 tag `require`（配套 `GOPRIVATE=gitee.com/idcu-go/*`），或 CI 增加 checkout。
+
+- 测试：新增 `internal/service/context_output_test.go`（11 组：预算收缩/块内截断/token 预算/行截断/
+  块不被切断/批量失败隔离/缓存命中与失效/路径虚拟化）与 `internal/server/http_output_test.go`
+  （6 组：hint 回传/批量端点/单符号形状不变/预算生效/默认值补位不覆盖/虚拟路径），
+  `internal/errors/hint_test.go`（4 组）；修正 `trace_test.go` 两处断言以匹配新的
+  `semantic_block` 与 `TrimmedLines=文件总行-注入行` 语义（新语义与字段注释一致，旧实现不符合）。
+- 验证：`go build ./...` 通过；`go test -short ./...` **全绿**；`-race` 抽样（service/server/errors）通过；
+  `go build -tags pg,redis ./...` 与 `-tags treesitter ./...` 通过；`gofmt` 对改动文件无告警。
+- 文档同步：`docs/1-生产层/API文档.md`（批量入参 / 预算降级 / 路径形态 / 错误 hint 四节 + 端点参数表）、
+  `docs/1-生产层/配置参考.md`（新增 `context` 节 + 修订记录）、`config.yaml.example`（`context` 段，
+  经 `config.Load` 实测解析正确）、CHANGELOG.internal.md（本记录）、DEV_PROGRESS.md。
+- 遗留：`B8`（检索低置信度不返回，MinScore 阈值）本次未做——不在拍板的 A/B/C 档内，
+  待有量化口径（阈值取多少不误杀）再落地；三模块的 tag/push 属外部动作。
+
 ### Commit 128: feat(agentbench): agent-bench 多语言任务集扩展 + 符号预检 Skipped 语义
 
 - 背景：agent-bench（对外可信基准）内置任务集仅 Go 符号（CodeSchema 专属 + Config 通用），无法评测 Java/Python/TS 等仓库；且通用任务在「符号不存在的仓库」被判定失败，拉低通过率（语义错误）。

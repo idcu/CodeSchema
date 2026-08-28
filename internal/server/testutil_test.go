@@ -23,7 +23,12 @@ import (
 //	5  func (c *MyClass) myMethod() string {
 //	6      return "ok"
 //	7  }
-func seedSymbol(t testing.TB, st store.Store) {
+//
+// seedSymbol 写入种子文件并入库，返回文件绝对路径。
+//
+// 返回值供需要真实路径的用例使用（如路径虚拟化要拿文件所在目录建虚拟根）；
+// 多数调用点直接忽略返回值即可（Go 允许丢弃返回值）。
+func seedSymbol(t testing.TB, st store.Store) string {
 	t.Helper()
 	content := "package demo\n\ntype MyClass struct{}\n\nfunc (c *MyClass) myMethod() string {\n\treturn \"ok\"\n}\n"
 	path := filepath.Join(t.TempDir(), "myclass.go")
@@ -56,4 +61,5 @@ func seedSymbol(t testing.TB, st store.Store) {
 	if err := st.UpsertIR(context.Background(), ir); err != nil {
 		t.Fatalf("upsert seed ir: %v", err)
 	}
+	return path
 }

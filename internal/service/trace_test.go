@@ -81,11 +81,23 @@ func TestGetContextMode_Full_Trace(t *testing.T) {
 	if ctx.Trace.HitLines != 3 {
 		t.Errorf("expected HitLines 3, got %d", ctx.Trace.HitLines)
 	}
-	if ctx.Trace.TrimReason != "full" {
-		t.Errorf("expected TrimReason full, got %s", ctx.Trace.TrimReason)
+	// context_lines=0 时窗口即符号体本身：裁剪原因是 semantic_block（不再是笼统的 full）。
+	if ctx.Trace.TrimReason != "semantic_block" {
+		t.Errorf("expected TrimReason semantic_block, got %s", ctx.Trace.TrimReason)
 	}
-	if ctx.Trace.TrimmedLines != 0 {
-		t.Errorf("expected TrimmedLines 0, got %d", ctx.Trace.TrimmedLines)
+	// TrimmedLines = 文件总行(7) - 注入行(3)：与字段注释「文件总行 - 注入行」一致。
+	if ctx.Trace.TrimmedLines != 4 {
+		t.Errorf("expected TrimmedLines 4, got %d", ctx.Trace.TrimmedLines)
+	}
+	// 诊断元数据：生效配置与实际产出应随 trace 回传。
+	if ctx.Trace.Config == nil || ctx.Trace.Config.Mode != "full" {
+		t.Errorf("expected trace config with mode=full, got %+v", ctx.Trace.Config)
+	}
+	if ctx.Trace.ActualBytes <= 0 || ctx.Trace.ActualTokens <= 0 {
+		t.Errorf("expected positive actual bytes/tokens, got bytes=%d tokens=%d", ctx.Trace.ActualBytes, ctx.Trace.ActualTokens)
+	}
+	if ctx.Trace.Degraded {
+		t.Errorf("无预算时不应降级, got reason=%s", ctx.Trace.DegradeReason)
 	}
 	if ctx.Trace.TokenEstimate != 3*4 {
 		t.Errorf("expected TokenEstimate %d, got %d", 3*4, ctx.Trace.TokenEstimate)

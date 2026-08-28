@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/log"
 	"github.com/idcu/codeschema/internal/metrics"
 	"github.com/idcu/codeschema/internal/service"
@@ -56,9 +57,47 @@ type HTTPServer struct {
 	// 未注入时健康端点返回 not_configured/默认描述，行为向后兼容）。
 	kvHealth     func(ctx context.Context) error
 	vectorHealth func(ctx context.Context) error
+	// ctxDefaults 上下文裁剪的服务端默认值（来自 config.context）；
+	// 请求显式传参时以请求为准，未传时取这里的值。
+	ctxDefaults service.ContextOptions
 }
 
 // NewHTTPServer 创建 HTTP API 服务器实例（单项目模式）。
+// SetContextDefaults 设置上下文裁剪的服务端默认值（context.* 配置）。
+//
+// 优先级：请求参数 > 服务端默认值 > 类型零值（不限）。
+// 只覆盖调用方未显式指定的字段，因此请求里传了 max_bytes 就不会被默认值顶掉。
+func (h *HTTPServer) SetContextDefaults(def service.ContextOptions) {
+	h.ctxDefaults = def
+}
+
+// mergeContextOptions 用服务端默认值补齐请求未指定的裁剪选项。
+func (h *HTTPServer) mergeContextOptions(o service.ContextOptions) service.ContextOptions {
+	d := h.ctxDefaults
+	if o.ContextLines == 0 {
+		o.ContextLines = d.ContextLines
+	}
+	if o.Mode == "" {
+		o.Mode = d.Mode
+	}
+	if o.MaxBytes == 0 {
+		o.MaxBytes = d.MaxBytes
+	}
+	if o.MaxTokens == 0 {
+		o.MaxTokens = d.MaxTokens
+	}
+	if o.MaxLineChars == 0 {
+		o.MaxLineChars = d.MaxLineChars
+	}
+	if o.CharsPerToken == 0 {
+		o.CharsPerToken = d.CharsPerToken
+	}
+	if o.PathStyle == "" {
+		o.PathStyle = d.PathStyle
+	}
+	return o
+}
+
 func NewHTTPServer(svc *service.Service, addr string) *HTTPServer {
 	h := &HTTPServer{
 		service:       svc,
@@ -380,15 +419,19 @@ func (h *HTTPServer) handleContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	symbol := r.URL.Query().Get("symbol")
-	contextLines, _ := strconv.Atoi(r.URL.Query().Get("context_lines"))
-	mode := r.URL.Query().Get("mode") // full（默认）/ minimal（极简，供评测基线）
-
-	result, err := h.serviceForRequest(r).GetContextMode(r.Context(), symbol, service.ContextOptions{
-		ContextLines: contextLines,
-		Mode:         service.ContextMode(mode),
-		IncludeTrace: true,
-	})
+	q := r.URL.Query()
+	symbols := querySymbols(q, "symbols", "symbol")
+	opts := h.mergeContextOptions(contextOptionsFromQuery(q))
+	if len(symbols) > 1 {
+		// 批量：单轮返回 N 个符号，把 N 次请求压成 1 次（B5）。
+		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetContextBatchDetailed(r.Context(), symbols, opts))
+		return
+	}
+	symbol := q.Get("symbol")
+	if len(symbols) == 1 {
+		symbol = symbols[0]
+	}
+	result, err := h.serviceForRequest(r).GetContextMode(r.Context(), symbol, opts)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -402,9 +445,17 @@ func (h *HTTPServer) handleImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	method := r.URL.Query().Get("method")
-	depth, _ := strconv.Atoi(r.URL.Query().Get("depth"))
-
+	q := r.URL.Query()
+	methods := querySymbols(q, "methods", "method")
+	depth, _ := strconv.Atoi(q.Get("depth"))
+	if len(methods) > 1 {
+		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetImpactBatch(r.Context(), methods, depth))
+		return
+	}
+	method := q.Get("method")
+	if len(methods) == 1 {
+		method = methods[0]
+	}
 	result, err := h.serviceForRequest(r).GetImpact(r.Context(), method, depth)
 	if err != nil {
 		writeServiceError(w, err)
@@ -419,9 +470,17 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	method := r.URL.Query().Get("method")
-	minConfidence, _ := strconv.Atoi(r.URL.Query().Get("min_confidence"))
-
+	q := r.URL.Query()
+	methods := querySymbols(q, "methods", "method")
+	minConfidence, _ := strconv.Atoi(q.Get("min_confidence"))
+	if len(methods) > 1 {
+		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetTestsBatch(r.Context(), methods, minConfidence))
+		return
+	}
+	method := q.Get("method")
+	if len(methods) == 1 {
+		method = methods[0]
+	}
 	result, err := h.serviceForRequest(r).GetTests(r.Context(), method, minConfidence)
 	if err != nil {
 		writeServiceError(w, err)
@@ -539,10 +598,14 @@ func (h *HTTPServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 // ---- 工具函数 ----
 
 // errorResponse 错误响应结构。
+//
+// Hint 字段（B3）：随错误回传「这类错误的常见修法」，让调用方 Agent 一轮内自愈，
+// 而不是靠猜——与 FastContext 的错误 hint 同源。未知错误码不输出该字段。
 type errorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
+		Hint    string `json:"hint,omitempty"`
 	} `json:"error"`
 }
 
@@ -556,6 +619,7 @@ func writeError(w http.ResponseWriter, code string, message string, status int) 
 	resp := errorResponse{}
 	resp.Error.Code = code
 	resp.Error.Message = message
+	resp.Error.Hint = cerrors.Hint(code)
 	writeJSON(w, status, resp)
 }
 
@@ -565,6 +629,69 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, "ERR_INTERNAL", err.Error(), 500)
+}
+
+// querySymbols 从 query 提取符号列表：支持重复参数与逗号分隔两种写法，并兼容单值参数。
+//
+// 批量入参（B5）在 HTTP 侧没有数组类型，统一按「重复参数 + 逗号分隔」收敛，
+// 与 MCP 侧的 symbols: [...] 语义保持一致。
+func querySymbols(q url.Values, plural, single string) []string {
+	out := make([]string, 0, 4)
+	seen := make(map[string]bool)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, raw := range q[plural] {
+		for _, part := range strings.Split(raw, ",") {
+			add(part)
+		}
+	}
+	add(q.Get(single))
+	return out
+}
+
+// contextOptionsFromQuery 从 query 解析上下文选项（含输出预算与路径形态）。
+func contextOptionsFromQuery(q url.Values) service.ContextOptions {
+	contextLines, _ := strconv.Atoi(q.Get("context_lines"))
+	return service.ContextOptions{
+		ContextLines:  contextLines,
+		Mode:          service.ContextMode(q.Get("mode")), // full（默认）/ minimal（极简，供评测基线）
+		IncludeTrace:  true,
+		MaxBytes:      atoiOr(q.Get("max_bytes"), 0),
+		MaxTokens:     atoiOr(q.Get("max_tokens"), 0),
+		MaxLineChars:  atoiOr(q.Get("max_line_chars"), 0),
+		CharsPerToken: atofOr(q.Get("chars_per_token"), 0),
+		PathStyle:     service.PathStyle(q.Get("path_style")),
+	}
+}
+
+// atoiOr 解析整数参数，为空或非法时返回默认值。
+func atoiOr(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// atofOr 解析浮点参数，为空或非法时返回默认值。
+func atofOr(s string, def float64) float64 {
+	if s == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 // ---- 中间件 ----

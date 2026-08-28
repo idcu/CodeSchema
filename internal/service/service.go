@@ -11,10 +11,16 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"gitee.com/idcu-go/pathsafe"
+	"gitee.com/idcu-go/trim"
+	"gitee.com/idcu-go/ttlcache"
 
 	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
@@ -37,6 +43,16 @@ type Service struct {
 	// coverage 保存「测试方法 FQN → 其覆盖的生产方法 FQN 列表」的映射，
 	// 由 SetCoverage / LoadCoverageJSON 注入，供 coverage 测试关联策略反查。
 	coverage map[string][]string
+
+	// pathRoot 可选虚拟根（B9 路径虚拟化）。未注入或 path_style=absolute 时
+	// 输出宿主真实绝对路径（默认，向后兼容）。
+	pathRoot *pathsafe.Root
+
+	// queryCache 查询级缓存（B4）：相同 symbol + 相同裁剪参数在 TTL 内直接命中，
+	// 不再重复读盘与裁剪。nil 表示未启用（行为与启用前完全一致）。
+	queryCache *ttlcache.Cache[string, *SymbolContext]
+	// cacheEpoch 缓存世代号：失效时递增，旧 key 再也无法拼出，等价于 O(1) 全量失效。
+	cacheEpoch atomic.Uint64
 }
 
 // NewService 创建 Service 实例。
@@ -74,6 +90,90 @@ func (s *Service) WithImpactAnalyzer(a *analyzer.Analyzer) *Service {
 func (s *Service) WithAIEnhancer(e *ai.Enhancer) *Service {
 	s.enhancer = e
 	return s
+}
+
+// 查询级缓存默认值（B4）。
+const (
+	// DefaultQueryCacheTTL 默认存活时间：一轮 Agent 会话内的重复查询足以命中，
+	// 又不会让文件变更长时间反映不到结果里。
+	DefaultQueryCacheTTL = 30 * time.Second
+	// DefaultQueryCacheEntries 默认最多缓存的查询结果条目数。
+	DefaultQueryCacheEntries = 512
+)
+
+// EnableQueryCache 启用查询级缓存（B4）。
+//
+// 命中条件：相同 symbol + 相同裁剪参数（mode / context_lines / 预算 / path_style）。
+// 命中后不再读盘与裁剪，代价是索引或文件变更后必须主动 InvalidateQueryCache，
+// 否则会短暂返回旧内容（由 TTL 兜底，默认 30 秒）。
+//
+// ttl<=0 用 DefaultQueryCacheTTL；maxEntries<=0 用 DefaultQueryCacheEntries。
+func (s *Service) EnableQueryCache(ttl time.Duration, maxEntries int) *Service {
+	if ttl <= 0 {
+		ttl = DefaultQueryCacheTTL
+	}
+	if maxEntries <= 0 {
+		maxEntries = DefaultQueryCacheEntries
+	}
+	s.queryCache = ttlcache.New[string, *SymbolContext](
+		ttlcache.WithTTL(ttl),
+		ttlcache.WithMaxEntries(maxEntries),
+	)
+	return s
+}
+
+// QueryCacheEnabled 报告查询级缓存是否已启用。
+func (s *Service) QueryCacheEnabled() bool { return s.queryCache != nil }
+
+// InvalidateQueryCache 全量失效查询缓存（索引重建 / 文件变更后调用）。
+//
+// 未启用缓存时是安全的空操作。实现上先递增世代号（让旧 key 永远拼不出来），
+// 再清空现有条目回收内存——两步都做是为了「立即生效」与「立即回收」兼得。
+func (s *Service) InvalidateQueryCache() {
+	if s.queryCache == nil {
+		return
+	}
+	s.cacheEpoch.Add(1)
+	s.queryCache.Invalidate()
+}
+
+// QueryCacheStats 返回查询缓存的命中统计（未启用时返回零值）。
+func (s *Service) QueryCacheStats() ttlcache.Stats {
+	if s.queryCache == nil {
+		return ttlcache.Stats{}
+	}
+	return s.queryCache.Stats()
+}
+
+// queryCacheKey 构造缓存 key：世代号 + 符号 + 全部影响输出的裁剪参数。
+func (s *Service) queryCacheKey(symbol string, o ContextOptions) string {
+	return fmt.Sprintf("e%d|%s|%s|%d|%d|%d|%d|%.4g|%s",
+		s.cacheEpoch.Load(), symbol, o.Mode, o.ContextLines,
+		o.MaxBytes, o.MaxTokens, o.MaxLineChars, o.charsPerToken(), o.PathStyle)
+}
+
+// WithPathRoot 注入虚拟根，启用 path_style=virtual 的路径虚拟化输出。
+//
+// 虚拟根把宿主真实目录映射为 /codebase：对外隐藏磁盘布局（少泄露信息），
+// 同时缩短路径本身在响应里占的 token。未注入时 PathVirtual 退化为真实路径。
+func (s *Service) WithPathRoot(root *pathsafe.Root) *Service {
+	s.pathRoot = root
+	return s
+}
+
+// renderPath 按 PathStyle 输出路径。
+//
+// virtual 且已注入虚拟根时映射为虚拟路径；根外路径（多仓/软链越界）原样返回——
+// 宁可多给信息，也不把「映射失败」伪装成「映射成功」。
+func (s *Service) renderPath(real string, style PathStyle) string {
+	if style != PathVirtual || s.pathRoot == nil {
+		return real
+	}
+	virtual, err := s.pathRoot.Virtualize(real)
+	if err != nil {
+		return real
+	}
+	return virtual
 }
 
 // SetCoverage 注入覆盖率报告，供 coverage 测试关联策略反查。
@@ -165,6 +265,30 @@ type TraceEntry struct {
 	TrimmedLines  int    `json:"trimmed_lines"`  // 裁剪行数（文件总行 - 注入行）
 	TokenEstimate int    `json:"token_estimate"` // 估算 token 数（≈ 注入行数 × 4）
 	Timestamp     string `json:"timestamp"`      // ISO 8601 时间戳
+
+	// 以下为「诊断元数据回传」字段（对齐 FastContext 的 [config]/[diagnostic] 行）：
+	// 让调用方 Agent 拿到实际生效的参数与实际产出，能自行调参而不是盲目重试。
+	Config        *TraceConfig `json:"config,omitempty"`         // 本次实际生效的配置
+	ActualBytes   int          `json:"actual_bytes"`             // 实际输出字节数（含换行）
+	ActualTokens  int          `json:"actual_tokens"`            // 按 charsPerToken 估算的实际 token 数
+	ActualStart   int          `json:"actual_start,omitempty"`   // 实际输出首行（1-based）
+	ActualEnd     int          `json:"actual_end,omitempty"`     // 实际输出末行（1-based）
+	Degraded      bool         `json:"degraded"`                 // 是否因预算不足触发降级
+	DegradeReason string       `json:"degrade_reason,omitempty"` // 降级原因（trim.Reason）
+	LineTruncated bool         `json:"line_truncated"`           // 是否发生行级截断
+	OmittedLines  int          `json:"omitted_lines"`            // 预算不足被省略的行数
+	CacheHit      bool         `json:"cache_hit"`                // 是否命中查询级缓存
+}
+
+// TraceConfig 本次实际生效的上下文裁剪配置，随 _trace 回传。
+type TraceConfig struct {
+	Mode          string  `json:"mode"`            // full / minimal
+	ContextLines  int     `json:"context_lines"`   // 外扩上下文行数（0 = 仅符号体）
+	MaxBytes      int     `json:"max_bytes"`       // 字节预算（<=0 不限）
+	MaxTokens     int     `json:"max_tokens"`      // token 预算（<=0 不限）
+	MaxLineChars  int     `json:"max_line_chars"`  // 单行字符上限（<=0 不截断）
+	CharsPerToken float64 `json:"chars_per_token"` // token 估算口径
+	PathStyle     string  `json:"path_style"`      // absolute / virtual
 }
 
 // ContextMode 上下文注入模式：控制"喂给 Agent 的内容形态"。
@@ -182,13 +306,34 @@ const (
 type ContextOptions struct {
 	// ContextLines 上下文裁剪行数（mode=full 生效）：
 	//   - 0：注入符号完整内容（方法/类全量，不裁剪）；
-	//   - N>0：注入符号体并前后各附带 N 行上下文（夹在文件边界内）。
+	//   - N>0：注入符号体并前后各附带 N 行上下文（夹在文件边界内，且恒不切断符号体）。
 	ContextLines int
 	// Mode 注入模式：ModeFull（默认）或 ModeMinimal。
 	Mode ContextMode
 	// IncludeTrace 是否在响应中附加 _trace 追溯字段（默认 true）。
 	IncludeTrace bool
+
+	// MaxBytes 输出字节预算（<=0 不限）。与 MaxTokens 是「与」关系，任一超限即降级。
+	MaxBytes int
+	// MaxTokens 输出 token 预算（<=0 不限），按 CharsPerToken 口径折算。
+	MaxTokens int
+	// MaxLineChars 单行字符上限（<=0 不截断）。用于防止压缩产物/生成代码一行吃掉整份预算。
+	MaxLineChars int
+	// CharsPerToken token 估算口径（每 token 折合字节数）；<=0 用 trim.DefaultCharsPerToken（4）。
+	CharsPerToken float64
+	// PathStyle 路径输出形态：PathAbsolute（默认，宿主绝对路径）/ PathVirtual（虚拟根 /codebase）。
+	PathStyle PathStyle
 }
+
+// PathStyle 路径输出形态。
+type PathStyle string
+
+const (
+	// PathAbsolute 输出宿主真实绝对路径（默认，向后兼容）。
+	PathAbsolute PathStyle = "absolute"
+	// PathVirtual 输出虚拟路径（真实根映射为 /codebase），隐藏宿主布局并缩短输出。
+	PathVirtual PathStyle = "virtual"
+)
 
 // SymbolContext 符号上下文响应。
 type SymbolContext struct {
@@ -221,7 +366,36 @@ func (s *Service) GetContext(ctx context.Context, symbol string, contextLines in
 //   - 先按类 FullName 精确匹配，再按方法 FullName 精确匹配（与 GetTags 一致）；
 //   - 命中后读取磁盘源码，按 context_lines 语义裁剪；
 //   - minimal 模式只返回签名/文档/行列区间，不读源码原文（零文件 IO 的快路径）。
+//
+// GetContextMode 按指定选项获取符号上下文（查询级缓存入口，B4）。
+//
+// 缓存未启用时直接落到 getContextModeUncached；启用后按「符号 + 裁剪参数」命中缓存，
+// 命中结果做浅拷贝返回（避免调用方改到缓存里的对象），并把 _trace.cache_hit 置为 true
+// 回传——命中与否对调用方可见，便于判断省下了多少工作。
 func (s *Service) GetContextMode(ctx context.Context, symbol string, opts ContextOptions) (*SymbolContext, error) {
+	if s.queryCache == nil {
+		return s.getContextModeUncached(ctx, symbol, opts)
+	}
+	key := s.queryCacheKey(symbol, opts)
+	if hit, ok := s.queryCache.Get(key); ok && hit != nil {
+		cached := *hit
+		if hit.Trace != nil {
+			traceCopy := *hit.Trace
+			traceCopy.CacheHit = true
+			cached.Trace = &traceCopy
+		}
+		return &cached, nil
+	}
+	got, err := s.getContextModeUncached(ctx, symbol, opts)
+	if err != nil {
+		return nil, err
+	}
+	s.queryCache.Set(key, got)
+	return got, nil
+}
+
+// getContextModeUncached 是 GetContextMode 的无缓存实现（真正的裁剪逻辑）。
+func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opts ContextOptions) (*SymbolContext, error) {
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
@@ -245,11 +419,14 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 			TrimmedLines:  loc.LineCount - 1,
 			TokenEstimate: 4,
 			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+			Config:        opts.traceConfig(),
+			ActualBytes:   len(summary) + 1,
+			ActualTokens:  trim.EstimateTokens(len(summary)+1, opts.charsPerToken()),
 		}
 		ctx2 := &SymbolContext{
 			Symbol:    symbol,
 			Source:    summary,
-			FilePath:  loc.FilePath,
+			FilePath:  s.renderPath(loc.FilePath, opts.PathStyle),
 			StartLine: loc.StartLine,
 			EndLine:   loc.EndLine,
 			Doc:       loc.Doc,
@@ -260,24 +437,24 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 		return ctx2, nil
 	}
 
-	// full 模式：读取源码原文并按 context_lines 语义裁剪。
+	// full 模式：读取源码原文，按「语义块对齐 + 预算自适应降级」裁剪。
 	lines, err := readFileLines(loc.FilePath)
 	if err != nil {
 		// 文件被移动/删除（扫描后磁盘变化）：回退为 minimal 形态，保留追溯留痕。
-		trimReason := "file_unreadable"
 		trace := &TraceEntry{
 			Source:        "store.GetContext",
 			HitSymbols:    1,
 			HitLines:      0,
-			TrimReason:    trimReason,
+			TrimReason:    "file_unreadable",
 			TrimmedLines:  loc.LineCount,
 			TokenEstimate: 0,
 			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+			Config:        opts.traceConfig(),
 		}
 		ctx2 := &SymbolContext{
 			Symbol:    symbol,
 			Source:    loc.renderMinimal(),
-			FilePath:  loc.FilePath,
+			FilePath:  s.renderPath(loc.FilePath, opts.PathStyle),
 			StartLine: loc.StartLine,
 			EndLine:   loc.EndLine,
 			Doc:       loc.Doc,
@@ -288,18 +465,25 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 		return ctx2, nil
 	}
 
-	// 计算注入窗口：context_lines==0 → 符号完整内容；>0 → 前后各 N 行上下文。
-	start := clamp(loc.StartLine-1, 0, len(lines)) // 转 0 基
-	end := clamp(loc.EndLine, 0, len(lines))       // 半开区间
-	trimmed := 0
-	if opts.ContextLines > 0 {
-		start = clamp(start-opts.ContextLines, 0, len(lines))
-		end = clamp(end+opts.ContextLines, 0, len(lines))
-		trimmed = len(lines) - (end - start)
+	// 符号体即语义块（Block）：裁剪窗口恒覆盖它，绝不给半个函数/类。
+	block := trim.Block{
+		Start: clamp(loc.StartLine, 1, len(lines)),
+		End:   clamp(loc.EndLine, 1, len(lines)),
 	}
-	hit := lines[start:end]
-	if len(hit) == 0 {
-		hit = lines // 兜底：窗口为空时退化为整文件（防御，正常不会发生）
+	if block.End < block.Start {
+		block.End = block.Start
+	}
+	start, end := trim.Window(len(lines), block, opts.ContextLines)
+
+	// 一次调用完成「对齐 → 行级截断 → 预算降级」：超限按
+	// 上下文 → 块 → 块内居中截断 → 仅首行 的链路自动收敛，并留痕原因。
+	fitted, ferr := trim.Fit(lines, start, end, block,
+		trim.Budget{MaxBytes: opts.MaxBytes, MaxTokens: opts.MaxTokens},
+		trim.WithMaxLineChars(opts.MaxLineChars),
+		trim.WithCharsPerToken(opts.CharsPerToken))
+	if ferr != nil {
+		// 索引与磁盘漂移导致块区间非法：退化为保守窗口，不因裁剪失败而断流。
+		fitted = fallbackFit(lines, start, end)
 	}
 
 	// 关联单测（沿用五策略，低置信度过滤 60，静默失败）。
@@ -310,24 +494,31 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 		}
 	}
 
-	trimReason := "full"
-	if opts.ContextLines > 0 {
-		trimReason = "context_lines"
-	}
 	trace := &TraceEntry{
 		Source:        "store.GetContext",
 		HitSymbols:    1,
-		HitLines:      len(hit),
-		TrimReason:    trimReason,
-		TrimmedLines:  trimmed,
-		TokenEstimate: len(hit) * 4,
+		HitLines:      len(fitted.Lines),
+		TrimReason:    trimReasonOf(fitted),
+		TrimmedLines:  len(lines) - len(fitted.Lines),
+		TokenEstimate: len(fitted.Lines) * 4,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Config:        opts.traceConfig(),
+		ActualBytes:   fitted.Bytes,
+		ActualTokens:  fitted.Tokens,
+		ActualStart:   fitted.Start,
+		ActualEnd:     fitted.End,
+		Degraded:      fitted.Degraded,
+		LineTruncated: fitted.LineTruncated,
+		OmittedLines:  fitted.OmittedLines,
+	}
+	if fitted.Degraded {
+		trace.DegradeReason = string(fitted.Reason)
 	}
 
 	ctx2 := &SymbolContext{
 		Symbol:       symbol,
-		Source:       strings.Join(hit, "\n"),
-		FilePath:     loc.FilePath,
+		Source:       fitted.Text(),
+		FilePath:     s.renderPath(loc.FilePath, opts.PathStyle),
 		StartLine:    loc.StartLine,
 		EndLine:      loc.EndLine,
 		Doc:          loc.Doc,
@@ -337,6 +528,204 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 		ctx2.Trace = trace
 	}
 	return ctx2, nil
+}
+
+// GetContextBatch 批量获取多个符号的上下文（B5：单轮返回 N 个符号，省工具调用轮次）。
+//
+// 语义：
+//   - 单符号失败（未找到 / 参数非法）不中断整体，其位置返回 nil 并在 errs 中给出原因；
+//   - 结果与 symbols 等长且同序（未失败的位置有值）；
+//   - 空 symbols 返回空结果（不报错）。
+func (s *Service) GetContextBatch(ctx context.Context, symbols []string, opts ContextOptions) ([]*SymbolContext, []error) {
+	if len(symbols) == 0 {
+		return nil, nil
+	}
+	out := make([]*SymbolContext, len(symbols))
+	errs := make([]error, len(symbols))
+	for i, sym := range symbols {
+		if strings.TrimSpace(sym) == "" {
+			errs[i] = &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
+			continue
+		}
+		got, err := s.GetContextMode(ctx, sym, opts)
+		if err != nil {
+			errs[i] = err
+			continue
+		}
+		out[i] = got
+	}
+	return out, errs
+}
+
+// BatchError 批量查询中单个符号的失败明细。
+//
+// 带 hint 是为了让 Agent 在批量场景里同样能一轮自愈：批量查询动辄几十个符号，
+// 逐个人肉排查得不偿失。
+type BatchError struct {
+	Symbol  string `json:"symbol"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// newBatchError 把 error 归一为 BatchError（ServiceError 保留原 code，其余归 ERR_INTERNAL）。
+func newBatchError(symbol string, err error) BatchError {
+	be := BatchError{Symbol: symbol, Code: "ERR_INTERNAL", Message: err.Error()}
+	if svcErr, ok := err.(*ServiceError); ok {
+		be.Code = svcErr.Code
+		be.Message = svcErr.Message
+	}
+	be.Hint = cerrors.Hint(be.Code)
+	return be
+}
+
+// ContextBatchResult 批量上下文响应。
+type ContextBatchResult struct {
+	Results []*SymbolContext `json:"results"`
+	Errors  []BatchError     `json:"errors,omitempty"`
+}
+
+// GetContextBatchDetailed 批量获取上下文，返回结构化结果（含逐项失败明细）。
+//
+// 单符号失败不中断整体：失败位置不出现在 results，原因落在 errors（带 code + hint）。
+func (s *Service) GetContextBatchDetailed(ctx context.Context, symbols []string, opts ContextOptions) *ContextBatchResult {
+	res := &ContextBatchResult{Results: make([]*SymbolContext, 0, len(symbols))}
+	if len(symbols) == 0 {
+		return res
+	}
+	got, errs := s.GetContextBatch(ctx, symbols, opts)
+	for i := range symbols {
+		if errs[i] != nil {
+			res.Errors = append(res.Errors, newBatchError(symbols[i], errs[i]))
+			continue
+		}
+		if got[i] != nil {
+			res.Results = append(res.Results, got[i])
+		}
+	}
+	return res
+}
+
+// ImpactBatchResult 批量影响面响应。
+type ImpactBatchResult struct {
+	Results []*ImpactResult `json:"results"`
+	Errors  []BatchError    `json:"errors,omitempty"`
+}
+
+// GetImpactBatch 批量获取影响面（语义同 GetContextBatch：逐项失败隔离）。
+func (s *Service) GetImpactBatch(ctx context.Context, methods []string, depth int) *ImpactBatchResult {
+	res := &ImpactBatchResult{Results: make([]*ImpactResult, 0, len(methods))}
+	for _, m := range methods {
+		if strings.TrimSpace(m) == "" {
+			res.Errors = append(res.Errors, newBatchError(m, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "method is required"}))
+			continue
+		}
+		got, err := s.GetImpact(ctx, m, depth)
+		if err != nil {
+			res.Errors = append(res.Errors, newBatchError(m, err))
+			continue
+		}
+		res.Results = append(res.Results, got)
+	}
+	return res
+}
+
+// TestBatchItem 批量测试关联结果中的单项。
+type TestBatchItem struct {
+	Method string       `json:"method"`
+	Tests  []TestResult `json:"tests"`
+}
+
+// TestBatchResult 批量测试关联响应。
+type TestBatchResult struct {
+	Results []TestBatchItem `json:"results"`
+	Errors  []BatchError    `json:"errors,omitempty"`
+}
+
+// GetTestsBatch 批量获取关联单测（语义同 GetContextBatch：逐项失败隔离）。
+func (s *Service) GetTestsBatch(ctx context.Context, methods []string, minConfidence int) *TestBatchResult {
+	res := &TestBatchResult{Results: make([]TestBatchItem, 0, len(methods))}
+	for _, m := range methods {
+		if strings.TrimSpace(m) == "" {
+			res.Errors = append(res.Errors, newBatchError(m, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "method is required"}))
+			continue
+		}
+		got, err := s.GetTests(ctx, m, minConfidence)
+		if err != nil {
+			res.Errors = append(res.Errors, newBatchError(m, err))
+			continue
+		}
+		res.Results = append(res.Results, TestBatchItem{Method: m, Tests: got})
+	}
+	return res
+}
+
+// fallbackFit 裁剪失败时的保守窗口（保持旧行为：整窗口切片，不做预算降级）。
+func fallbackFit(lines []string, start, end int) trim.Result {
+	start = clamp(start, 1, len(lines))
+	end = clamp(end, start, len(lines))
+	seg := lines[start-1 : end]
+	nbytes := 0
+	for _, ln := range seg {
+		nbytes += len(ln) + 1
+	}
+	return trim.Result{
+		Lines:        seg,
+		Start:        start,
+		End:          end,
+		Bytes:        nbytes,
+		Tokens:       trim.EstimateTokens(nbytes, trim.DefaultCharsPerToken),
+		Reason:       trim.ReasonBlockAligned,
+		TrimmedLines: len(lines) - len(seg),
+	}
+}
+
+// trimReasonOf 把 trim 的裁剪原因映射为 CodeSchema 的 trim_reason 口径。
+// 预算降级类原因直接透出（budget_*），便于调用方按原因调参。
+func trimReasonOf(r trim.Result) string {
+	switch r.Reason {
+	case trim.ReasonContextLines:
+		return "context_lines"
+	case trim.ReasonBlockAligned:
+		return "semantic_block"
+	case trim.ReasonShrinkContext, trim.ReasonTruncateBlock, trim.ReasonHeadOnly:
+		return string(r.Reason)
+	default:
+		return "full"
+	}
+}
+
+// charsPerToken 返回生效的 token 估算口径（未设置时用 trim 默认值）。
+func (o ContextOptions) charsPerToken() float64 {
+	if o.CharsPerToken > 0 {
+		return o.CharsPerToken
+	}
+	return trim.DefaultCharsPerToken
+}
+
+// traceConfig 生成本次生效配置的快照（随 _trace 回传，供调用方自诊断）。
+func (o ContextOptions) traceConfig() *TraceConfig {
+	cpt := o.CharsPerToken
+	if cpt <= 0 {
+		cpt = trim.DefaultCharsPerToken
+	}
+	mode := string(o.Mode)
+	if mode == "" {
+		mode = string(ModeFull)
+	}
+	style := string(o.PathStyle)
+	if style == "" {
+		style = string(PathAbsolute)
+	}
+	return &TraceConfig{
+		Mode:          mode,
+		ContextLines:  o.ContextLines,
+		MaxBytes:      o.MaxBytes,
+		MaxTokens:     o.MaxTokens,
+		MaxLineChars:  o.MaxLineChars,
+		CharsPerToken: cpt,
+		PathStyle:     style,
+	}
 }
 
 // symbolLocation 符号的物理定位信息（从 Store 解析）。

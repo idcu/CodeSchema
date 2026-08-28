@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	slog "github.com/idcu/codeschema/internal/log"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
@@ -30,9 +32,10 @@ type toolParams struct {
 }
 
 type toolProperty struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Default     any    `json:"default,omitempty"`
+	Type        string        `json:"type"`
+	Description string        `json:"description"`
+	Default     any           `json:"default,omitempty"`
+	Items       *toolProperty `json:"items,omitempty"` // 数组元素类型（type=array 时必填）
 }
 
 // JSON-RPC 消息
@@ -66,6 +69,9 @@ type MCPServer struct {
 	resolver      TenantResolver
 	defaultTenant string
 	projects      []tenant.Info
+	// ctxDefaults 上下文裁剪的服务端默认值（来自 config.context）；
+	// 请求显式传参时以请求为准，未传时取这里的值。
+	ctxDefaults service.ContextOptions
 }
 
 // TenantResolver 按租户 ID 解析出对应的运行期 Service。
@@ -73,6 +79,40 @@ type MCPServer struct {
 type TenantResolver func(ctx context.Context, id string) (*service.Service, error)
 
 // NewMCPServer 创建 MCP Server 实例（单项目模式）。
+// SetContextDefaults 设置上下文裁剪的服务端默认值（context.* 配置）。
+//
+// 优先级：请求参数 > 服务端默认值 > 类型零值（不限）。
+func (m *MCPServer) SetContextDefaults(def service.ContextOptions) {
+	m.ctxDefaults = def
+}
+
+// mergeContextOptions 用服务端默认值补齐请求未指定的裁剪选项。
+func (m *MCPServer) mergeContextOptions(o service.ContextOptions) service.ContextOptions {
+	d := m.ctxDefaults
+	if o.ContextLines == 0 {
+		o.ContextLines = d.ContextLines
+	}
+	if o.Mode == "" {
+		o.Mode = d.Mode
+	}
+	if o.MaxBytes == 0 {
+		o.MaxBytes = d.MaxBytes
+	}
+	if o.MaxTokens == 0 {
+		o.MaxTokens = d.MaxTokens
+	}
+	if o.MaxLineChars == 0 {
+		o.MaxLineChars = d.MaxLineChars
+	}
+	if o.CharsPerToken == 0 {
+		o.CharsPerToken = d.CharsPerToken
+	}
+	if o.PathStyle == "" {
+		o.PathStyle = d.PathStyle
+	}
+	return o
+}
+
 func NewMCPServer(svc *service.Service, addr string) *MCPServer {
 	m := &MCPServer{
 		service:       svc,
@@ -124,11 +164,16 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"symbol":        {Type: "string", Description: "类/方法全限定名"},
-					"context_lines": {Type: "number", Description: "上下文行数", Default: 5},
-					"project":       projectProp,
+					"symbol":         {Type: "string", Description: "类/方法全限定名（单符号查询，与 symbols 二选一）"},
+					"symbols":        {Type: "array", Description: "批量符号列表：一次调用取回多个符号，把 N 次调用压成 1 次", Items: &toolProperty{Type: "string"}},
+					"context_lines":  {Type: "number", Description: "上下文行数", Default: 5},
+					"mode":           {Type: "string", Description: "注入模式: full（默认，源码原文）/ minimal（仅元数据，评测基线）"},
+					"max_bytes":      {Type: "number", Description: "输出字节预算（<=0 不限）；超限自动降级：缩上下文→块内截断→仅首行"},
+					"max_tokens":     {Type: "number", Description: "输出 token 预算（<=0 不限），与 max_bytes 取更严者"},
+					"max_line_chars": {Type: "number", Description: "单行字符上限（<=0 不截断），防超长行吃掉整份预算"},
+					"path_style":     {Type: "string", Description: "路径形态: absolute（默认）/ virtual（映射为 /codebase 虚拟根）"},
+					"project":        projectProp,
 				},
-				Required: []string{"symbol"},
 			},
 		},
 		{
@@ -137,11 +182,11 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"method":  {Type: "string", Description: "方法全限定名"},
+					"method":  {Type: "string", Description: "方法全限定名（单符号查询，与 methods 二选一）"},
+					"methods": {Type: "array", Description: "批量方法列表：一次调用取回多个方法的影响面", Items: &toolProperty{Type: "string"}},
 					"depth":   {Type: "number", Description: "分析深度", Default: 1},
 					"project": projectProp,
 				},
-				Required: []string{"method"},
 			},
 		},
 		{
@@ -150,11 +195,11 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"method":         {Type: "string", Description: "方法全限定名"},
+					"method":         {Type: "string", Description: "方法全限定名（单符号查询，与 methods 二选一）"},
+					"methods":        {Type: "array", Description: "批量方法列表：一次调用取回多个方法的关联单测", Items: &toolProperty{Type: "string"}},
 					"min_confidence": {Type: "number", Description: "最小置信度", Default: 60},
 					"project":        projectProp,
 				},
-				Required: []string{"method"},
 			},
 		},
 		{
@@ -380,22 +425,32 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 
 	switch name {
 	case "context":
+		opts := m.mergeContextOptions(contextOptionsFromArgs(args))
+		symbols := stringSliceArg(args, "symbols", "symbol")
+		if len(symbols) > 1 {
+			// 批量：单轮返回 N 个符号，把 N 次工具调用压成 1 次（B5）。
+			return mcpResult(id, svc.GetContextBatchDetailed(ctx, symbols, opts))
+		}
 		symbol, _ := args["symbol"].(string)
-		contextLines, _ := toInt(args["context_lines"])
-		mode, _ := args["mode"].(string) // 注入模式：full（默认）/ minimal（极简，供评测基线）
-		result, err := svc.GetContextMode(ctx, symbol, service.ContextOptions{
-			ContextLines: contextLines,
-			Mode:         service.ContextMode(mode),
-			IncludeTrace: true,
-		})
+		if len(symbols) == 1 {
+			symbol = symbols[0]
+		}
+		result, err := svc.GetContextMode(ctx, symbol, opts)
 		if err != nil {
 			return mcpError(id, err)
 		}
 		return mcpResult(id, result)
 
 	case "impact":
-		method, _ := args["method"].(string)
 		depth, _ := toInt(args["depth"])
+		methods := stringSliceArg(args, "methods", "method")
+		if len(methods) > 1 {
+			return mcpResult(id, svc.GetImpactBatch(ctx, methods, depth))
+		}
+		method, _ := args["method"].(string)
+		if len(methods) == 1 {
+			method = methods[0]
+		}
 		result, err := svc.GetImpact(ctx, method, depth)
 		if err != nil {
 			return mcpError(id, err)
@@ -403,8 +458,15 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 		return mcpResult(id, result)
 
 	case "tests":
-		method, _ := args["method"].(string)
 		minConfidence, _ := toInt(args["min_confidence"])
+		methods := stringSliceArg(args, "methods", "method")
+		if len(methods) > 1 {
+			return mcpResult(id, svc.GetTestsBatch(ctx, methods, minConfidence))
+		}
+		method, _ := args["method"].(string)
+		if len(methods) == 1 {
+			method = methods[0]
+		}
 		result, err := svc.GetTests(ctx, method, minConfidence)
 		if err != nil {
 			return mcpError(id, err)
@@ -524,6 +586,11 @@ func mcpError(id any, err error) jsonRPCResponse {
 		}
 		msg = svcErr.Message
 	}
+	// MCP 的 error 只有 message 一个文本字段，hint 只能内联；
+	// 用 [hint] 起头保持可解析，调用方按需拆分。
+	if svcErr, ok := err.(*service.ServiceError); ok {
+		msg = cerrors.WithHint(svcErr.Code, msg)
+	}
 	return jsonRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -534,6 +601,79 @@ func mcpError(id any, err error) jsonRPCResponse {
 func toJSONString(v any) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return string(b)
+}
+
+// stringSliceArg 提取「数组参数 + 单值参数」两种形态的字符串列表。
+//
+// 批量入参（B5）既要支持新写法 symbols: [...]，也要兼容旧写法 symbol: "x"：
+// 统一收敛成去重保序的列表，调用方按长度决定走批量还是单符号路径。
+func stringSliceArg(args map[string]any, plural, single string) []string {
+	out := make([]string, 0, 4)
+	seen := make(map[string]bool)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	if raw, ok := args[plural].([]any); ok {
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				add(s)
+			}
+		}
+	}
+	if s, ok := args[single].(string); ok {
+		add(s)
+	}
+	return out
+}
+
+// contextOptionsFromArgs 从 MCP 参数解析上下文选项（含输出预算与路径形态）。
+func contextOptionsFromArgs(args map[string]any) service.ContextOptions {
+	contextLines, _ := toInt(args["context_lines"])
+	mode, _ := args["mode"].(string) // 注入模式：full（默认）/ minimal（极简，供评测基线）
+	pathStyle, _ := args["path_style"].(string)
+	return service.ContextOptions{
+		ContextLines:  contextLines,
+		Mode:          service.ContextMode(mode),
+		IncludeTrace:  true,
+		MaxBytes:      toIntOr(args["max_bytes"], 0),
+		MaxTokens:     toIntOr(args["max_tokens"], 0),
+		MaxLineChars:  toIntOr(args["max_line_chars"], 0),
+		CharsPerToken: toFloatOr(args["chars_per_token"], 0),
+		PathStyle:     service.PathStyle(pathStyle),
+	}
+}
+
+// toIntOr 取数值参数，缺失或不可解析时返回默认值。
+func toIntOr(v any, def int) int {
+	if n, ok := toInt(v); ok {
+		return n
+	}
+	return def
+}
+
+// toFloatOr 取浮点参数，缺失或不可解析时返回默认值。
+func toFloatOr(v any, def float64) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case json.Number:
+		f, err := val.Float64()
+		if err == nil {
+			return f
+		}
+	case string:
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	}
+	return def
 }
 
 func toInt(v any) (int, bool) {

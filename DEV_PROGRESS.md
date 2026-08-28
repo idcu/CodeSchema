@@ -1,6 +1,6 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-17
+> 更新时间：2026-08-29
 > 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）+ 多租户热重载 + 全局能力热重载（监听地址/认证令牌/限流）+ 服务级热重载补齐（scanner 三项）+ 对外监听收敛基线（secure-demo.yaml）+ 生态资产发布准备（adapterx 聚合包 / context-sdk 接口抽象完成）+ 代码夯基与结构优化（PG 全量替换契约修复 / 标签分类三后端统一 / Redis 读路径 CacheReader / 健康检查真实化 / 语言映射单表 / 静默吞错留痕 / 死代码清理）+ 分析建议全量推进（Agent 任务端到端基准 agent-bench 子命令 / Redis 读路径类符号快速路径接线 / CORS+recovery 中间件合并 / context-sdk 独立发布验证脚本 / 测试关联·AI 预算·多租户打点补齐）+ 遗留 TODO 推进（agent-bench 多仓库评测 --repos+RepoHint 过滤 / Redis 方法符号缓存 GetMethod 快速路径）+ 生态资产 P2 发布前置收尾（adapterx 独立发布验证脚本 + 发布评估 README / check-contrib-publish.sh 抽公共）+ agent-bench 工程化看护（CI agent-bench job + 快照归一化 repo_path=仓库名 + Makefile bench-agent 目标）+ **agent-bench 多语言任务集扩展（内置任务 5→8，新增 Java/Python 通用任务 + 符号预检 Skipped 语义）**）
 > 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成；2026-08-16 新增「单实例多租户」作为独立能力，详见下方维护优化章节）
 
@@ -371,6 +371,31 @@ P18      [████████████████████] 100%
 - [x] **context-sdk 独立发布评估** — 新增 `contrib/contextsdk/` 契约骨架：`SDKProvider` 接口 + DTO + 发布评估 README（P0→P1→P2）。
 - [x] **验证** — `go build ./...`、`go vet ./...` 通过；`go test ./internal/tenant/... ./internal/parser/... ./contrib/adapterx/...` 全绿（tenant 0.923s / parser 4.079s / adapterx 0.508s）。
 
+### 维护优化（2026-08-29）：上下文输出工程全量升级（A/B/C 档）+ idcu-go 公共模块抽取
+
+承接 FastContext 源码级借鉴分析（`analysis/2026-08-29-fastcontext-analysis.md`）的拍板结论
+（A 档开工 / B5 用「现有工具加 `symbols[]`」/ B1 字节与 token 预算都支持 / 按 idcu-go/meta 标准抽公共模块）：
+
+- [x] **公共模块抽取（3 个独立仓库，按 meta v1.2 标准）** — `gitee.com/idcu-go/trim`（语义块对齐 +
+      双预算自适应降级 + 行级截断，覆盖率 92.9%，快路径 145 ns/op）、`ttlcache`（泛型 TTL+LRU，
+      覆盖率 96.6%，命中 107 ns/op 零分配）、`pathsafe`（虚拟根映射与穿越阻断，覆盖率 92.9%）。
+      纯标准库零依赖，含中英双版 README / CHANGELOG / LICENSE / Makefile（覆盖率门禁 ≥80%）/ Gitee CI。
+- [x] **A 档：输出侧补齐** — 输出预算自适应降级（B1，`MaxBytes`+`MaxTokens` 双轨四级降级链）、
+      诊断元数据回传（B2，`_trace` 增 `config`/`actual_bytes`/`actual_tokens`/`degraded` 等）、
+      错误随附修复建议（B3，HTTP `error.hint` + MCP `[hint]` 内联 + 批量 `errors[].hint`）、
+      行级截断（B6，`MaxLineChars`）、语义块对齐（B7，窗口恒覆盖符号体，不切断半个函数）。
+- [x] **B 档：批量入参** — `context`/`impact`/`tests` 三工具（MCP + HTTP）支持 `symbols[]`/`methods[]`，
+      一轮返回 N 个符号；单符号失败隔离（落 `errors[]` 带 code + hint），单符号响应形状不变（向后兼容）。
+- [x] **C 档：性能与信息面** — 查询级缓存（B4，`ttlcache`，默认关闭，watcher 索引变更后 O(1) 失效）、
+      路径虚拟化（B9，`path_style=virtual` 映射 `/codebase`，默认 `absolute` 兼容）。
+- [x] **配置与装配** — 新增 `context` 配置段（`context_lines`/`max_bytes`/`max_tokens`/`max_line_chars`/
+      `chars_per_token`/`default_path_style`/`query_cache.*`），作为服务端默认值
+      （优先级：请求参数 > 服务端默认值 > 不限）。
+- [x] **验证** — `go build ./...` 通过；`go test -short ./...` 全绿；`-race` 抽样（service/server/errors）
+      通过；`go build -tags pg,redis ./...` 与 `-tags treesitter ./...` 通过；新增 21 组测试。
+- [ ] **遗留** — 三模块尚未 push 打 tag（CI 上 `replace ../idcu-go/*` 相对路径会失败，发布前需改按 tag
+      `require` 并配 `GOPRIVATE`）；`B8`（检索低置信度不返回）待有阈值量化口径后再落地。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
@@ -388,5 +413,5 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：agent-bench 多语言任务集扩展（Commit 128）——内置任务 5→8（新增 OrderService 通用任务，Java/Python 语义）+ 符号预检 Skipped（不拉低通过率）+ MD 报告状态列；此前 agent-bench 工程化看护（Commit 127）——CI agent-bench job + 快照归一化（repo_path=仓库名，跨机器 diff 稳定）+ Makefile bench-agent 目标；此前生态资产 P2 发布前置收尾（Commit 126）——adapterx 独立发布验证脚本 + 发布评估 README、check-contrib-publish.sh 抽公共；此前遗留 TODO 推进（Commit 125）——agent-bench 多仓库评测（--repos + RepoHint 过滤 + 跨仓对比报告）、Redis 方法符号缓存（GetMethod 快速路径）；此前分析建议 1-5 全量推进（Commit 124）——agent-bench 子命令（Agent 任务端到端评测，本仓实测 minimal 省 95.2% token）、Redis 读路径类符号快速路径接线、CORS/recovery 中间件合并、context-sdk 独立发布验证脚本、测试关联/AI 预算/多租户打点补齐；此前代码夯基与结构优化（Commit 123）、context-sdk 接口抽象（Commit 122）、服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）、全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交：上下文输出工程全量升级（Commit 129）——A/B/C 三档落地（输出预算自适应降级 / 诊断元数据 / 错误 hint / 行级截断 / 语义块对齐 + 批量入参 `symbols[]` + 查询级缓存 + 路径虚拟化），并抽取出 `idcu-go/{trim,ttlcache,pathsafe}` 三个公共模块（按 meta v1.2 标准，纯标准库零依赖）；此前 agent-bench 多语言任务集扩展（Commit 128）——内置任务 5→8（新增 OrderService 通用任务，Java/Python 语义）+ 符号预检 Skipped（不拉低通过率）+ MD 报告状态列；此前 agent-bench 工程化看护（Commit 127）——CI agent-bench job + 快照归一化（repo_path=仓库名，跨机器 diff 稳定）+ Makefile bench-agent 目标；此前生态资产 P2 发布前置收尾（Commit 126）——adapterx 独立发布验证脚本 + 发布评估 README、check-contrib-publish.sh 抽公共；此前遗留 TODO 推进（Commit 125）——agent-bench 多仓库评测（--repos + RepoHint 过滤 + 跨仓对比报告）、Redis 方法符号缓存（GetMethod 快速路径）；此前分析建议 1-5 全量推进（Commit 124）——agent-bench 子命令（Agent 任务端到端评测，本仓实测 minimal 省 95.2% token）、Redis 读路径类符号快速路径接线、CORS/recovery 中间件合并、context-sdk 独立发布验证脚本、测试关联/AI 预算/多租户打点补齐；此前代码夯基与结构优化（Commit 123）、context-sdk 接口抽象（Commit 122）、服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）、全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`

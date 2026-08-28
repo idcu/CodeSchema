@@ -43,6 +43,8 @@ type Config struct {
 	Server  ServerConfig  `yaml:"server" json:"server"`
 	Watcher WatcherConfig `yaml:"watcher" json:"watcher"`
 	Scanner ScannerConfig `yaml:"scanner" json:"scanner"`
+	// Context 上下文供给（裁剪/预算/路径/查询缓存）配置。
+	Context ContextConfig `yaml:"context" json:"context"`
 	// Tenants 多租户注册表。非空时 serve/mcp 以单实例服务多个隔离仓库；
 	// 为空则沿用顶层 project/storage 等配置，保持单项目模式（向后兼容）。
 	Tenants []TenantConfig `yaml:"tenants" json:"tenants"`
@@ -267,6 +269,38 @@ type AIConfig struct {
 }
 
 // ServerConfig 服务器配置。
+// ContextConfig 上下文供给配置（裁剪/预算/路径/查询缓存）。
+//
+// 这些是「服务端默认值」：请求参数（context_lines / max_bytes / max_tokens /
+// max_line_chars / path_style）显式传入时以请求为准，未传时取这里的默认值。
+type ContextConfig struct {
+	// ContextLines 默认上下文行数（0 = 仅符号体，不额外外扩）。
+	ContextLines int `yaml:"context_lines" json:"context_lines"`
+	// MaxBytes 默认输出字节预算（<=0 不限）。
+	MaxBytes int `yaml:"max_bytes" json:"max_bytes"`
+	// MaxTokens 默认输出 token 预算（<=0 不限），与 MaxBytes 取更严者。
+	MaxTokens int `yaml:"max_tokens" json:"max_tokens"`
+	// MaxLineChars 默认单行字符上限（<=0 不截断）。
+	MaxLineChars int `yaml:"max_line_chars" json:"max_line_chars"`
+	// CharsPerToken token 估算口径（每 token 折合字节数；<=0 用 4）。
+	CharsPerToken float64 `yaml:"chars_per_token" json:"chars_per_token"`
+	// DefaultPathStyle 默认路径输出形态：absolute（默认）/ virtual。
+	DefaultPathStyle string `yaml:"default_path_style" json:"default_path_style"`
+	// QueryCache 查询级缓存（B4）。
+	QueryCache QueryCacheConfig `yaml:"query_cache" json:"query_cache"`
+}
+
+// QueryCacheConfig 查询级缓存配置（B4）。
+type QueryCacheConfig struct {
+	// Enabled 是否启用。默认关闭：查询缓存的正确性依赖索引变更时的主动失效，
+	// 只有确实存在高频重复查询的场景才值得开启。
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// TTLMS 缓存存活毫秒（<=0 用 service.DefaultQueryCacheTTL=30s）。
+	TTLMS int `yaml:"ttl_ms" json:"ttl_ms"`
+	// MaxEntries 最多缓存条目数（<=0 用 service.DefaultQueryCacheEntries=512）。
+	MaxEntries int `yaml:"max_entries" json:"max_entries"`
+}
+
 type ServerConfig struct {
 	MCPAddr   string `yaml:"mcp_addr" json:"mcp_addr"`
 	HTTPAddr  string `yaml:"http_addr" json:"http_addr"`
@@ -362,6 +396,17 @@ func DefaultConfig() *Config {
 			Workers:         4,
 			FileSizeLimitMB: 10,
 			LineCountLimit:  50000,
+		},
+		Context: ContextConfig{
+			ContextLines:     0, // 默认只给符号体，不外扩上下文（调用方按需传）
+			MaxBytes:         0, // 默认不限（向后兼容）
+			MaxTokens:        0, // 默认不限
+			MaxLineChars:     0, // 默认不截断
+			CharsPerToken:    0, // <=0 用 trim 默认口径 4
+			DefaultPathStyle: "absolute",
+			QueryCache: QueryCacheConfig{
+				Enabled: false, // 默认关闭：需靠索引变更主动失效，非高频重复查询场景不划算
+			},
 		},
 	}
 }
@@ -882,6 +927,19 @@ func cloneConfig(cfg *Config) *Config {
 			Workers:         cfg.Scanner.Workers,
 			FileSizeLimitMB: cfg.Scanner.FileSizeLimitMB,
 			LineCountLimit:  cfg.Scanner.LineCountLimit,
+		},
+		Context: ContextConfig{
+			ContextLines:     cfg.Context.ContextLines,
+			MaxBytes:         cfg.Context.MaxBytes,
+			MaxTokens:        cfg.Context.MaxTokens,
+			MaxLineChars:     cfg.Context.MaxLineChars,
+			CharsPerToken:    cfg.Context.CharsPerToken,
+			DefaultPathStyle: cfg.Context.DefaultPathStyle,
+			QueryCache: QueryCacheConfig{
+				Enabled:    cfg.Context.QueryCache.Enabled,
+				TTLMS:      cfg.Context.QueryCache.TTLMS,
+				MaxEntries: cfg.Context.QueryCache.MaxEntries,
+			},
 		},
 	}
 }
