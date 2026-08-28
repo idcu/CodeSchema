@@ -6,6 +6,41 @@
 
 ## 提交记录
 
+### Commit 130: ci(deps): idcu-go 三模块发布 v0.1.0（push + tag）+ CI/Release 检出步骤 + Docker 按 tag 拉取
+
+- 背景：Commit 129 把 `trim` / `ttlcache` / `pathsafe` 抽成 idcu-go 公共模块后，`go.mod` 以
+  `replace` 指向仓库外的 `../idcu-go/*`——本地可用，但 CI / Release / Docker 拿不到上级目录，
+  replace 无法解析，流水线必红。这是当时书面登记的遗留项，本提交闭环。
+
+- **模块发布（外部动作，已执行）**：三个模块新建 gitee 仓库并 push `main`，打 `v0.1.0` tag 并推送——
+  - `https://gitee.com/idcu-go/trim`（v0.1.0）
+  - `https://gitee.com/idcu-go/ttlcache`（v0.1.0）
+  - `https://gitee.com/idcu-go/pathsafe`（v0.1.0）
+  - 校验：`git ls-remote --tags` 三个仓库均返回 `refs/tags/v0.1.0`。
+
+- **go.mod / go.sum**：`require` 由占位 `v0.0.0` 提升为 **`v0.1.0`**；同时**保留 `replace` 指向本地
+  `../idcu-go/*`**（本地改模块即时生效，不需先发布）。为让「去掉 replace 也能构建」，
+  go.sum 补齐三模块的 `h1:` 校验和（由 `go mod download` 生成）。两条路径均实测通过：
+  - replace 模式（本地/CI）：`go build ./...` 通过；
+  - tag 模式（Docker/外部消费方）：`go mod edit -dropreplace=...` + `GOPRIVATE=gitee.com/idcu-go/* go build ./...`
+    在默认 `-mod=readonly` 下通过（说明 go.sum 完整、tag 可解析）。
+
+- **CI（`.github/workflows/ci.yml`）**：7 个需要构建的 job（test / agent-bench / bench / nightly-scale /
+  race / treesitter / cross）在 checkout 之后新增「Checkout idcu-go modules」步骤——按 `v0.1.0` tag
+  把三模块 clone 到同级 `../idcu-go/`，让 replace 可解析。docker job 不加（走 Dockerfile 内的 tag 拉取）。
+- **Release（`.github/workflows/release.yml`）**：`make cross` 交叉编译同样依赖 replace 目录，补同一检出步骤。
+- **Dockerfile**：构建上下文拿不到上级目录，改在镜像内
+  `go mod edit -dropreplace=gitee.com/idcu-go/{trim,ttlcache,pathsafe}` + `ENV GOPRIVATE=gitee.com/idcu-go/*`
+  后 `go mod download`，按已发布 tag 拉取（依赖 go.sum 中已补齐的校验和）。
+
+- 验证：两个 workflow YAML 解析通过（ci 8 jobs / 7 个检出步骤；release 1 job / 1 个检出步骤）；
+  本地模拟 CI 检出脚本 `git clone --depth 1 --branch v0.1.0` 三个模块均成功且 `git describe` = v0.1.0；
+  临时 module 按 tag `require` 三模块 `go mod tidy` + `go run` 通过（验证外部消费方可解析）；
+  `go build ./...`、`go test -short ./...` 全绿。
+- 文档同步：CHANGELOG.internal.md（本记录）、DEV_PROGRESS.md（遗留项闭环）、README.md（依赖口径）。
+- 遗留：无（CI / Release / Docker 三条流水线均已覆盖）。后续模块升级需同步三处：
+  模块打新 tag → 本仓 `require` 升版本 + 刷新 go.sum → CI/Release 检出步骤里的 `--branch` 版本号。
+
 ### Commit 129: feat(context): 上下文输出工程全量升级（A/B/C 档）+ 抽取 idcu-go 三个公共模块
 
 - 背景：以 FastContext（fast-context-mcp v1.3.2）为参照做源码级借鉴分析（见

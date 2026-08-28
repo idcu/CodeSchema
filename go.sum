@@ -1,3 +1,9 @@
+gitee.com/idcu-go/pathsafe v0.1.0 h1:vCr9u+RovU+DI2D3idskcPYIfJ9iOcXkmeC+WIIJrZQ=
+gitee.com/idcu-go/pathsafe v0.1.0/go.mod h1:EUpJ/IPzn1jw1+a2GbEhSnDQs0Px6X4nPNo1LVks26w=
+gitee.com/idcu-go/trim v0.1.0 h1:xKKU4TNvQqF1Uq5UGt61bQKWv1T2Mmh4D58rRlpcZe0=
+gitee.com/idcu-go/trim v0.1.0/go.mod h1:Kc8AUreXIuQyW2we9HvVCo23eKhOl2uW3gEl0rx1wy0=
+gitee.com/idcu-go/ttlcache v0.1.0 h1:IVm78lm2NIiRqIUK4fATgY6wVcDupxNGB4zWntCVv88=
+gitee.com/idcu-go/ttlcache v0.1.0/go.mod h1:a2G6z7elIWfG7g4uN3pfYkb/hwnlAxl87NPVMSlaP1Q=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

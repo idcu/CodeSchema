@@ -393,8 +393,11 @@ P18      [████████████████████] 100%
       （优先级：请求参数 > 服务端默认值 > 不限）。
 - [x] **验证** — `go build ./...` 通过；`go test -short ./...` 全绿；`-race` 抽样（service/server/errors）
       通过；`go build -tags pg,redis ./...` 与 `-tags treesitter ./...` 通过；新增 21 组测试。
-- [ ] **遗留** — 三模块尚未 push 打 tag（CI 上 `replace ../idcu-go/*` 相对路径会失败，发布前需改按 tag
-      `require` 并配 `GOPRIVATE`）；`B8`（检索低置信度不返回）待有阈值量化口径后再落地。
+- [x] **遗留已闭环（Commit 130）** — 三模块已 push 并打 `v0.1.0` tag（`gitee.com/idcu-go/{trim,ttlcache,pathsafe}`）；
+      `require` 升到 v0.1.0（保留 `replace` 供本地即时改模块），go.sum 补齐三模块校验和；
+      CI（7 个 job）与 Release 新增「Checkout idcu-go modules」按 tag 检出步骤；Dockerfile 改在镜像内
+      dropreplace + `GOPRIVATE` 按 tag 拉取。两条构建路径（replace / tag）均实测通过。
+- [ ] **遗留** — `B8`（检索低置信度不返回）待有阈值量化口径后再落地。
 
 ## 已知问题
 

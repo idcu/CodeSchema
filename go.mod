@@ -16,9 +16,9 @@ require (
 )
 
 require (
-	gitee.com/idcu-go/pathsafe v0.0.0
-	gitee.com/idcu-go/trim v0.0.0
-	gitee.com/idcu-go/ttlcache v0.0.0
+	gitee.com/idcu-go/pathsafe v0.1.0
+	gitee.com/idcu-go/trim v0.1.0
+	gitee.com/idcu-go/ttlcache v0.1.0
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect

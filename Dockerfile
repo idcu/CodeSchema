@@ -35,6 +35,13 @@ COPY go.mod go.sum ./
 COPY down/ ./down/
 COPY third_party/ ./third_party/
 ENV GOPROXY=${GOPROXY}
+# idcu-go 公共模块（trim / ttlcache / pathsafe）：go.mod 的 replace 指向仓库外的 ../idcu-go/*，
+# 而 Docker 构建上下文拿不到上级目录，因此在镜像内去掉 replace，改按已发布的 v0.1.0 tag 拉取
+#（go.sum 已含三模块的校验和；gitee.com/idcu-go/* 未进公共 sumdb，必须设 GOPRIVATE 跳过校验）。
+RUN go mod edit -dropreplace=gitee.com/idcu-go/trim \
+    -dropreplace=gitee.com/idcu-go/ttlcache \
+    -dropreplace=gitee.com/idcu-go/pathsafe
+ENV GOPRIVATE=gitee.com/idcu-go/*
 RUN go mod download
 
 # 复制全部源码并构建

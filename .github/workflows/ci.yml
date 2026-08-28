@@ -33,6 +33,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -94,6 +107,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -118,6 +144,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -143,6 +182,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -179,6 +231,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -200,6 +265,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -240,6 +318,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        # CodeSchema 依赖的三个 idcu-go 公共模块：go.mod 用 replace 指向仓库外的 ../idcu-go/*，
+        # 便于本地改模块即时生效；CI 上必须把它们取到同级目录，replace 才能解析。
+        # 三个模块已发布到 gitee.com/idcu-go/*（v0.1.0），这里按 tag 拉取固定版本。
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
