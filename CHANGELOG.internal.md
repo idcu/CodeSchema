@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 136: feat(eco): adapterx/contextsdk 独立发布就绪——自包含验证 + 独立仓骨架（发布仅差建仓+push 授权）
+
+- 背景：用户「全量推进实施」指令，推进 C（adapterx/contextsdk 独立仓发布）。原 CHANGELOG 将其列为外部动作（待用户建仓+push）。本提交把 C 推进到「只差建远程仓 + push 授权」的边界。
+- **自包含 reality-check（结论）**：
+  - `contrib/adapterx` 全源零外部依赖（仅 stdlib），被 `internal/parser/adapterx.go` 消费；**完全自包含** ✅。
+  - `contrib/contextsdk` 仅依赖 `encoding/json`（stdlib），零外部依赖；SDKProvider 抽象后只定义契约+DTO+Compose 编排，**完全自包含** ✅（发布目标）。
+  - `internal/contextsdk` 全仓零消费方、仍耦合 `internal/service` → **确认为死码**（SDKProvider 抽象前的旧位置）；建议删除（待用户确认，未擅删）。
+- **独立仓骨架（仓库外，保持主仓干净）**：于 `/Volumes/Data/codeschema-adapterx`、`/Volumes/Data/codeschema-contextsdk` 落地——`go.mod`（module 路径 `github.com/idcu/codeschema-{adapterx,contextsdk}`，`go 1.25.2`，**无 require**）+ 拷贝源 + MIT LICENSE + README；白盒同包测试无需改写 import。
+- **验证（独立脱离主仓）**：两仓均 `go build ./...`=OK、`go vet ./...`=OK、`go test ./... -short`=ok；已 `git init` + 首提交 + 打 `v0.1.0` tag，处于发布就绪态。
+- 遗留：真正对外发布 = 用户建 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk` 远程仓 + 授权 `git push --follow-tags origin main`（骨架已 local commit+tag，remote add 后即推）。`internal/contextsdk` 死码删除待用户拍板。
+- 文档同步：CHANGELOG.internal.md（本记录 + 更新 C legacy 备注 @Commit 214/265）。
+
 ### Commit 135: fix(docker): 修复镜像构建 + 真实 Redis/PG 端到端验证（关闭 Docker/PG·Redis 实跑环境阻塞）
 
 - 背景：Commit 134 后按用户「全量推进下一步 + 环境可用 redis/docker」指令，转向验证 CHANGELOG 标注的『Docker 实构建 / PG·Redis 实跑待本机 Docker 网络恢复』环境阻塞项；过程中发现镜像构建实际已坏（非单纯网络），并修复。
@@ -211,7 +223,7 @@
   - **context-sdk 发布前置核查**：`scripts/check-contextsdk-publish.sh` 仍通过（仅标准库）；README P2 状态与发布说明一致。
 - 坑：`check-contrib-publish.sh` 中 `echo "...$MODULE_NAME）..."`（变量后紧跟全角右括号）在本机 bash 下被解析为 `MODULE_NAME）` 变量 → `unbound variable`。修复：改用 `${MODULE_NAME}` 花括号明确边界（多字节字符后必须花括号包裹）。
 - 文档同步：analysis/2026-08-17-competitor-and-harness-analysis.md（遗留 TODO 状态 + 修订记录）、docs/4-决策层/生态资产发布说明.md（A 级进度 + 修订记录）、CHANGELOG.internal.md（本记录）。
-- 遗留：**真正发布动作属外部**——首个 v* tag + push 独立仓库 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk`（待用户执行）；「对外监听收敛」为部署期运维项（按 secure-demo.yaml）。
+- 遗留：**真正发布动作属外部**——首个 v* tag + push 独立仓库 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk`；**已于 Commit 136 完成自包含验证 + 独立仓骨架（local commit+tag v0.1.0，仓库外 /Volumes/Data/codeschema-{adapterx,contextsdk}），仅差用户建远程仓 + push 授权**；「对外监听收敛」为部署期运维项（按 secure-demo.yaml）。
 
 ### Commit 125: feat(agentbench+redis): 遗留 TODO 推进——agent-bench 多仓库评测 + Redis 方法符号缓存
 
@@ -262,7 +274,7 @@
 - 测试：`contrib/contextsdk` 新增 11 条 mock 编排测试（mockProvider 仅依赖标准库，证明第三方实现契约即可被权威 Compose 编排）——默认租户/多租户路由/符号顺序保持/minimal 模式/WithImpact+WithTests 聚合/Provider 错误传播（含 context 与 impact 两路）/nil resolver/空 symbols/DTO JSON round-trip；`internal/contextsdk` 真实集成测试（真实 Store+Analyzer+文件）沿用适配层全通。
 - 验证：`go build ./contrib/contextsdk/... ./internal/contextsdk/...` 通过；`go test ./contrib/contextsdk/...` 11/11 通过（0.716s）；`go test ./internal/contextsdk/...` 全通（0.895s）；全量验证见下方（Commit 122 完成后 `go build ./...` + `go test ./...` 全绿）。
 - 文档同步：生态资产发布说明.md（B 级阻塞项解除、进度更新、修订记录 +1）、contrib/contextsdk/README.md（§3.1 由「当前阻塞项」改为「已解决」并补充验证数据）。
-- 遗留 TODO：adapterx 独立仓库拷贝发布（A 级，P2）；context-sdk 独立 module 发布 `github.com/idcu/codeschema-contextsdk`（P2，按首个 v* tag）；对外监听收敛为部署期运维项。
+- 遗留 TODO：adapterx 独立仓库拷贝发布（A 级，P2）——**Commit 136 已完成自包含验证 + 仓库外骨架（v0.1.0 tagged，待建远程仓 + push 授权）**；context-sdk 独立 module 发布 `github.com/idcu/codeschema-contextsdk`（P2，同上 Commit 136 就绪）；对外监听收敛为部署期运维项。
 
 ### Commit 121: feat(tenant+adapterx+contextsdk): 服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备
 
