@@ -13,7 +13,6 @@ import (
 	"gitee.com/idcu-go/pathsafe"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -108,8 +107,7 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 
 // commandAvailable 检查 PATH 中是否存在指定命令。
 func commandAvailable(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
+	return lspadapter.ResolveServerPath(name) != ""
 }
 
 // WithImpactAnalyzer 注入代码图分析器，启用真实调用图影响面分析（含关联单测）。

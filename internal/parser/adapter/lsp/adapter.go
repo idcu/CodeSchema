@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/build"
 	"io"
 	"os"
 	"os/exec"
@@ -96,9 +97,13 @@ func NewLSPAdapter(name, cmd string, args []string, lang string, timeout time.Du
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	resolved := ResolveServerPath(cmd)
+	if resolved == "" {
+		resolved = cmd
+	}
 	return &LSPAdapter{
 		name:       name,
-		cmd:        cmd,
+		cmd:        resolved,
 		args:       args,
 		lang:       lang,
 		timeout:    timeout,
@@ -110,6 +115,34 @@ func NewLSPAdapter(name, cmd string, args []string, lang string, timeout time.Du
 		retryBaseDelay: 150 * time.Millisecond,
 		retryMaxDelay:  time.Second,
 	}
+}
+
+// ResolveServerPath 解析语言服务器可执行文件路径。
+//
+// 先查 PATH（exec.LookPath），再回退到各 $GOPATH/bin 与 $HOME/go/bin，
+// 避免 GOPATH/bin 未加入 PATH（macOS 常见）时 gopls 等无法被发现而静默降级到 tree-sitter。
+// 找不到时返回空串：commandAvailable 据此返回 false（不注册该适配器）；
+// 运行期拉起命令（a.cmd）在解析失败时会回退为原命令名，由 spawn 失败触发优雅降级。
+func ResolveServerPath(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	for _, gp := range filepath.SplitList(build.Default.GOPATH) {
+		if gp == "" {
+			continue
+		}
+		cand := filepath.Join(gp, "bin", name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	if home := os.Getenv("HOME"); home != "" {
+		cand := filepath.Join(home, "go", "bin", name)
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	return ""
 }
 
 // init 注册 LSP 适配器的可观测性指标，暴露降级与失败原因。

@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 138: fix(lsp): LSP server 命令发现增强——PATH + $GOPATH/bin + $HOME/go/bin 回退（修复 gopls 静默失效）
+
+- 背景：用户「全量实施下一步方向」推进 D（LSP 可靠性）。reality-check 发现本机 `gopls` 位于 `$GOPATH/bin`（`/Users/huyu/go/bin/gopls`）但**不在 PATH**；而 `runtime.NewParserRegistry` 注册前用 `commandAvailable(name)=exec.LookPath(name)`（仅 PATH）检测，`gopls` 未命中 → gopls 适配器被 skip；`NewLSPAdapter` 拉起也用字面命令名 `gopls` 经 PATH 解析。结果：Go 符号走 LSP 高精度路径**静默降级到 tree-sitter**（clangd 因在 PATH 故正常）。这是 D 的真实可靠性缺口，且本机可验证。
+- 修复：新增 `lsp.ResolveServerPath(name)`——先 `exec.LookPath`（PATH），再回退各 `$GOPATH/bin` 与 `$HOME/go/bin`；找不到返回空串（供 `commandAvailable` 判否、不注册）。`NewLSPAdapter` 将 `a.cmd` 解析为绝对路径（未找到回退原命令名，spawn 失败仍优雅降级）；`runtime.commandAvailable` 改用 `lspadapter.ResolveServerPath(name) != ""`（移除冗余 `os/exec` 依赖）。
+- 验证：
+  - 单测 `resolve_test.go`：`TestResolveServerPath_PathResolution`（PATH 命中 + 不存在返回空）、`TestResolveServerPath_HomeGoBin`（$HOME/go/bin 回退）、`TestResolveServerPath_GoplsResolvable`（本机 `gopls resolved: /Users/huyu/go/bin/gopls` 通过，CI 无 gopls 时 skip）。
+  - 真实注册断言 `runtime.TestNewParserRegistry_LSPGoplsRegistered`：LSP 启用时 `Select("go")` 现返回 `gopls`（PASS，实际拉起 gopls 子进程注册），证明修复前静默失效已闭环。
+  - 全量回归：`go build ./...`=0；`go build -tags 'pg redis treesitter onnx' ./...`=0；`go vet ./...`=0；`go test -short ./...` 无 FAIL。
+- 结论：LSP server 发现现兼容 macOS 常见「GOPATH/bin 未入 PATH」布局；gopls/jdtls/clangd 等不再因 PATH 缺失而静默失效。新增服务器（jdtls/rust-analyzer/pyright）仍依赖对应运行时安装（D 的「新增服务器」项环境依赖不变），但发现机制已健壮。
+- 文档同步：CHANGELOG.internal.md（本记录）。
+
 ### Commit 137: chore(cleanup): 删除死码 internal/contextsdk（SDKProvider 桥，零消费方，C 清理闭环）
 
 - 背景：用户「全量推进实施」指令继续推进；上一轮（Commit 136）将 `internal/contextsdk` 标记为死码（零消费方、耦合 internal/service、SDKProvider 抽象前旧位置）并「待用户拍板未擅删」。本批次在用户连续「全量推进实施」语境下完成该可选收尾。

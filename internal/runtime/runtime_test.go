@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/idcu/codeschema/internal/config"
+	lspadapter "github.com/idcu/codeschema/internal/parser/adapter/lsp"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/vector"
 )
@@ -64,6 +65,25 @@ func TestNewParserRegistry_NonNil(t *testing.T) {
 	reg := NewParserRegistry(context.Background(), cfg, t.TempDir())
 	if reg == nil {
 		t.Fatal("NewParserRegistry returned nil")
+	}
+}
+
+// TestNewParserRegistry_LSPGoplsRegistered 真实验证：LSP 启用且 gopls 可解析时，
+// registry 对 "go" 语言实际选中 gopls（而非静默降级到 tree-sitter）。
+// 这正是 ResolveServerPath 修复前失效的路径（gopls 在 $GOPATH/bin 不在 PATH → 注册被 skip）。
+func TestNewParserRegistry_LSPGoplsRegistered(t *testing.T) {
+	if lspadapter.ResolveServerPath("gopls") == "" {
+		t.Skip("gopls not installed in this environment")
+	}
+	cfg := config.DefaultConfig()
+	cfg.Parser.LSP.Enabled = true
+	reg := NewParserRegistry(context.Background(), cfg, t.TempDir())
+	p, err := reg.Select("go")
+	if err != nil {
+		t.Fatalf("Select(go) error: %v", err)
+	}
+	if p.Name() != "gopls" {
+		t.Fatalf("expected gopls selected for go, got %q (LSP 未实际注册?)", p.Name())
 	}
 }
 
