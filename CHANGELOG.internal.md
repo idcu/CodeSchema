@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 135: fix(docker): 修复镜像构建 + 真实 Redis/PG 端到端验证（关闭 Docker/PG·Redis 实跑环境阻塞）
+
+- 背景：Commit 134 后按用户「全量推进下一步 + 环境可用 redis/docker」指令，转向验证 CHANGELOG 标注的『Docker 实构建 / PG·Redis 实跑待本机 Docker 网络恢复』环境阻塞项；过程中发现镜像构建实际已坏（非单纯网络），并修复。
+- **Dockerfile 修复（2 处真实根因）**：① builder 阶段 `golang:1.25-alpine` 缺 `git`，`GOPRIVATE=gitee.com/idcu-go/*` 经 VCS 拉取 trim/ttlcache/pathsafe 报 `git: executable file not found`；改为无条件 `apk add --no-cache git`（仅 CGO 加 gcc/musl-dev）。② `go mod edit -dropreplace` 原跑在 `COPY . .` 之前，被仓库原始 go.mod 覆盖，build 仍找不存在的 `../idcu-go/pathsafe`；改为 `COPY . .` 后对已落盘最终 go.mod 再次 dropreplace。
+- **验证（Docker 提供真实 Redis + 本地 embedded-postgres）**：
+  - `docker build -t codeschema:verify --build-arg VERSION=v0.1.0 .` 成功；镜像冒烟 `version` + `serve --http :8081` 的 `/health` 返回 200。
+  - 真实 Redis 集成测试 `-tags 'pg redis' TestRedisCache_RealInstance`：class hit + method hit + caller/callee 反查 verified（确认方法符号缓存层已可用，原『仅类符号走快速路径』legacy 备注亦已失效）。
+  - PG 端到端 `-tags pg TestPGStore_EndToEnd`：embedded-postgres 16.3 内核，file=1 class=1 methods=2 calls=2 全链路 PASS。
+- 结论：Docker 构建 + Redis 缓存 + PG 存储三条环境阻塞项全部闭环并验证；code-schema 部署路径（Docker 镜像 + Redis L2 + PG 存储）现端到端可验证。
+- 文档同步：CHANGELOG.internal.md（本记录 + 关闭相关 legacy 备注）。
+
 ### Commit 134: docs(release): 首个 v0.1.0 tag 发布说明回填 + 打 tag（B8 待决项②）
 
 - 背景：Commit 132 遗留 ②——code-schema 自身首个 `v*` tag 就绪后回填 版本发布说明.md。本次补齐发版动作，关闭 S3 周期全部遗留。
@@ -597,7 +608,7 @@
 - docker-compose 新增 postgres:16-alpine（profile pg）/ redis:7-alpine（profile redis）
 - PG 端到端（InitSchema→UpsertIR→查询）与 Redis 缓存读写集成测试（-tags pg/redis，无实例优雅 SKIP）
 - Dockerfile 默认 CGO_ENABLED=0（纯 Go 免 gcc），ONNX 场景传 --build-arg CGO_ENABLED=1
-- **遗留**：Docker 实构建 / PG·Redis 实跑待本机 Docker 网络恢复（registry 层下载超时）
+- **遗留（已于 Commit 135 闭环）**：Docker 实构建 / PG·Redis 实跑——Commit 135 用 Docker 真实 Redis + embedded-postgres 跑通 `TestRedisCache_RealInstance` 与 `TestPGStore_EndToEnd`，并修复 Dockerfile 2 处真实构建缺陷（缺 git / dropreplace 被 COPY 覆盖），镜像 `docker build` + `/health` 冒烟全 PASS。
 
 ### Commit 81: feat(cli+docs): MCP 一键接入——mcp --print-config + 配置模板入库（PHASE_09/开发计划T2-5）
 
