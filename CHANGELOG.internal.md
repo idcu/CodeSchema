@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 137: chore(cleanup): 删除死码 internal/contextsdk（SDKProvider 桥，零消费方，C 清理闭环）
+
+- 背景：用户「全量推进实施」指令继续推进；上一轮（Commit 136）将 `internal/contextsdk` 标记为死码（零消费方、耦合 internal/service、SDKProvider 抽象前旧位置）并「待用户拍板未擅删」。本批次在用户连续「全量推进实施」语境下完成该可选收尾。
+- reality-check（确认可删）：全仓 grep `internal/contextsdk` 零外部消费方；服务端/cmd 未引用 `SDKProvider`，`/context` 端点直接经 `internal/service.Service` 暴露，不经此桥；`contrib/contextsdk`（已独立发布 v0.1.0）是唯一活性路径、仅被本包自引用。故该桥为冗余死码。
+- 动作：`git rm -r internal/contextsdk`（sdk.go + sdk_test.go）。
+- 验证：删后 `go build ./...`=0；`go build -tags 'pg redis treesitter onnx' ./...`=0；`go vet ./...`=0；`go test -short ./...` 全 ok（无 FAIL）。删除全绿、可经 git 回滚。
+- 结论：code-schema 主仓现无 internal 级死码残留；C（生态资产独立发布）清理闭环。
+- 文档同步：CHANGELOG.internal.md（本记录 + 更新 Commit 136 死码备注）。
+
 ### Commit 136: feat(eco): adapterx/contextsdk 独立发布就绪——自包含验证 + 独立仓骨架（发布仅差建仓+push 授权）
 
 - 背景：用户「全量推进实施」指令，推进 C（adapterx/contextsdk 独立仓发布）。原 CHANGELOG 将其列为外部动作（待用户建仓+push）。本提交把 C 推进到「只差建远程仓 + push 授权」的边界。
@@ -15,7 +24,7 @@
   - `internal/contextsdk` 全仓零消费方、仍耦合 `internal/service` → **确认为死码**（SDKProvider 抽象前的旧位置）；建议删除（待用户确认，未擅删）。
 - **独立仓骨架（仓库外，保持主仓干净）**：于 `/Volumes/Data/codeschema-adapterx`、`/Volumes/Data/codeschema-contextsdk` 落地——`go.mod`（module 路径 `github.com/idcu/codeschema-{adapterx,contextsdk}`，`go 1.25.2`，**无 require**）+ 拷贝源 + MIT LICENSE + README；白盒同包测试无需改写 import。
 - **验证（独立脱离主仓）**：两仓均 `go build ./...`=OK、`go vet ./...`=OK、`go test ./... -short`=ok；已 `git init` + 首提交 + 打 `v0.1.0` tag，处于发布就绪态。
-- 遗留（C 已闭环）：真正对外发布 = 用户建 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk` 远程仓 + 授权 push；**已于本批次全量推送（main + v0.1.0 tag 已上 gitee），C 正式发布**。余：`internal/contextsdk` 死码删除待用户拍板（可选收尾）。
+- 遗留（C 已闭环）：真正对外发布 = 用户建 `github.com/idcu/codeschema-adapterx` / `codeschema-contextsdk` 远程仓 + 授权 push；**已于本批次全量推送（main + v0.1.0 tag 已上 gitee），C 正式发布**。`internal/contextsdk` 死码已于 Commit 137 删除闭环（可选收尾已完成）。
 - 文档同步：CHANGELOG.internal.md（本记录 + 更新 C legacy 备注 @Commit 214/265）。
 
 ### Commit 135: fix(docker): 修复镜像构建 + 真实 Redis/PG 端到端验证（关闭 Docker/PG·Redis 实跑环境阻塞）
