@@ -174,6 +174,15 @@ func NewClangdAdapter() *LSPAdapter {
 	return NewLSPAdapter("clangd", "clangd", nil, "cpp", 10*time.Second)
 }
 
+// NewRustAnalyzerAdapter 创建 rust-analyzer 适配器。
+//
+// rust-analyzer 启动比 gopls/clangd 略重（需 cargo metadata 建立 workspace 视图），
+// 默认超时放宽到 20s；其余走通用 JSON-RPC + documentSymbol 映射（struct→STRUCT、
+// fn→Method、enum→ENUM），无需工程上下文即可抽取单文件符号。
+func NewRustAnalyzerAdapter() *LSPAdapter {
+	return NewLSPAdapter("rust-analyzer", "rust-analyzer", nil, "rust", 20*time.Second)
+}
+
 // Name 返回适配器唯一标识。
 func (a *LSPAdapter) Name() string { return a.name }
 
@@ -551,6 +560,16 @@ func (a *LSPAdapter) addSymbolInfo(ir *parser.IRDocument, sym symbolInfo) *parse
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
+	case 10: // Enum
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      sym.Name,
+			FullName:  sym.ContainerName + "." + sym.Name,
+			Type:      "ENUM",
+			StartLine: sym.Location.Range.Start.Line + 1,
+			StartCol:  sym.Location.Range.Start.Character + 1,
+			EndLine:   sym.Location.Range.End.Line + 1,
+			EndCol:    sym.Location.Range.End.Character + 1,
+		})
 	case 23: // Struct
 		ir.Classes = append(ir.Classes, parser.ClassIR{
 			Name:      sym.Name,
@@ -592,6 +611,16 @@ func (a *LSPAdapter) addDocumentSymbol(ir *parser.IRDocument, ds documentSymbol)
 			Name:      ds.Name,
 			FullName:  ds.Name,
 			Type:      "CLASS",
+			StartLine: ds.Range.Start.Line + 1,
+			StartCol:  ds.Range.Start.Character + 1,
+			EndLine:   ds.Range.End.Line + 1,
+			EndCol:    ds.Range.End.Character + 1,
+		})
+	case 10: // Enum
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name:      ds.Name,
+			FullName:  ds.Name,
+			Type:      "ENUM",
 			StartLine: ds.Range.Start.Line + 1,
 			StartCol:  ds.Range.Start.Character + 1,
 			EndLine:   ds.Range.End.Line + 1,

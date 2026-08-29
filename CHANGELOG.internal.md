@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 140: feat(lsp): 新增 rust-analyzer 适配器 + 端到端 e2e 验证（D 扩展，Docker 内实跑通过）
+
+- 背景：用户「全量推进实施，调试测试可以在docker中进行」——解锁 D 的环境阻塞项。原 D 仅接线 gopls/jdtls/clangd（jdtls/pyright/ts 等运行时缺失），本机 rust-analyzer 亦未装。最低摩擦、无需工程上下文即可抽取符号的新语言服务器 = **rust-analyzer**（单静态二进制）。
+- 改动：
+  - `adapter.go`：新增 `NewRustAnalyzerAdapter()`（lang=rust，默认超时 20s，rust-analyzer 启动略重需 cargo metadata）；`documentSymbol→IR` 映射补 `enum(kind 10)→ClassIR{Type:"ENUM"}`（两处 `addSymbolInfo`/`addDocumentSymbol`），struct(23)/fn(12) 已有。
+  - `runtime.go`：`NewParserRegistry` 的 `lspAdapters` slice 注册 `NewRustAnalyzerAdapter()`；`SetPriority("rust", ["rust-analyzer","codegraph","scip","treesitter"])`（原仅 codegraph/scip/treesitter）；注释同步列出 rust-analyzer。
+  - `e2e_test.go`：新增 `TestLSPAdapter_RealRustAnalyzer`（跳过门槛 `ResolveServerPath("rust-analyzer")==""`，无则 SKIP，CI 绿）+ `writeRustProject`（最小 Cargo 工程：struct Calculator + impl fn add/sub + enum Op）；断言提取 Calculator 类 + add 方法。与 Commit 139 一致改用同包 `ResolveServerPath`。
+  - `docker/lsp-test/Dockerfile`：落库**已验证可用**的 LSP 测试镜像（debian:bookworm + rustup/rust-analyzer + go1.25 + gopls），供 Docker 内实跑 e2e 复现；含卷挂载命令与网络注意（proxy.golang.org 本环境不可达→goproxy.cn；rust:latest 加速器繁忙时退 debian+rustup）。
+- 验证：
+  - 主机：`go build ./...`=0；`go vet ./internal/parser/adapter/lsp/ ./internal/runtime/`=0；`go test -short ./...` 无 FAIL（rust e2e 因主机无 rust-analyzer SKIP；clangd/gopls e2e PASS）。
+  - Docker（cs-lsp-test:latest，卷挂载 code-schema+idcu-go+module cache）：`rust-analyzer --version`=1.98.0、`gopls version`=v0.23.0；`TestLSPAdapter_RealRustAnalyzer`→**PASS(0.07s)**，`TestLSPAdapter_RealGopls`→PASS(0.19s)；全仓 `go test -short ./...`→exit 0 全包 ok（clangd 镜像未装 SKIP）。D 的 rust 扩展端到端实跑验证通过。
+- 结论：D 由「仅接线」推进到「rust 真实解析已验证」；LSP 注册表现支持 gopls / java(jdtls) / cpp(clangd) / rust(rust-analyzer) 四语言高精度路径，缺运行时仍优雅降级 tree-sitter。其余（jdtls/pyright/ts-language-server）仍待对应运行时——Docker 工作流已就绪，装好即重复上述验证。用户授权「调试测试可在 docker 中进行」闭环。
+- 文档同步：CHANGELOG.internal.md（本记录）+ `docker/lsp-test/Dockerfile`。
+
 ### Commit 139: test(lsp): LSP 端到端 e2e 跳过门槛改用 ResolveServerPath——开发机 gopls 从 SKIP 变真跑
 
 - 背景：用户「全量实施」。Commit 138 让 `NewLSPAdapter`/`runtime.commandAvailable` 经 `lsp.ResolveServerPath` 发现位于 `$GOPATH/bin`（非 PATH）的 gopls，修复注册层静默失效。但 `internal/parser/adapter/lsp/e2e_test.go` 的两个真实 LSP 端到端测试（`TestLSPAdapter_RealClangd`、`TestLSPAdapter_RealGopls`）的跳过门槛仍用 `exec.LookPath(name)`（仅判 PATH）——本机 gopls 在 `$GOPATH/bin`（`/Users/huyu/go/bin/gopls`）→ `TestLSPAdapter_RealGopls` 直接 SKIP。**gopls 真实解析路径此前从未在开发机实跑验证**：上一轮「全绿」中 lsp 包仅为 `TestLSPAdapter_RealClangd` PASS + `TestLSPAdapter_RealGopls` SKIP。这是 Commit 138 发现机制在验证层未闭环的缺口（发现用解析器、跳过却只用 PATH，二者不一致）。

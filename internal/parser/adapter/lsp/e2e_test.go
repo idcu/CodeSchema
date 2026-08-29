@@ -241,3 +241,86 @@ func dirURI(lspPath string) string {
 	}
 	return "file://" + lspPath[:idx]
 }
+
+// TestLSPAdapter_RealRustAnalyzer 使用真实 rust-analyzer 验证 LSP 适配器端到端（Rust 为 D 扩展语言）。
+//
+// rust-analyzer 可能未安装（如本机/常规 CI 环境），缺失时优雅跳过（CI 保持绿色）。
+// 提供了 rust-analyzer + cargo 的 Docker 测试镜像可真正验证 Rust 高精度解析路径。
+func TestLSPAdapter_RealRustAnalyzer(t *testing.T) {
+	if ResolveServerPath("rust-analyzer") == "" {
+		t.Skip("rust-analyzer not discoverable via PATH or GOPATH/bin; skipping real LSP validation (install via 'rustup component add rust-analyzer')")
+	}
+
+	path, rootAbs := writeRustProject(t)
+
+	a := NewRustAnalyzerAdapter()
+	if err := a.Init(context.Background(), map[string]any{"rootUri": "file://" + toLSPPath(rootAbs)}); err != nil {
+		t.Fatalf("rust-analyzer Init failed: %v", err)
+	}
+	defer a.Close()
+
+	ir := parseWithRetry(t, a, path, 1)
+	if ir.Source != "rust-analyzer" {
+		t.Errorf("source = %q, want rust-analyzer", ir.Source)
+	}
+	if len(ir.Classes) < 1 {
+		t.Fatalf("expected >=1 class/struct from rust-analyzer, got %d", len(ir.Classes))
+	}
+	classNames := make([]string, 0, len(ir.Classes))
+	for _, c := range ir.Classes {
+		classNames = append(classNames, c.Name)
+	}
+	if !containsName(classNames, "Calculator") {
+		t.Errorf("expected struct 'Calculator' in %v", classNames)
+	}
+	if len(ir.Methods) < 1 {
+		t.Fatalf("expected >=1 method from rust-analyzer, got %d", len(ir.Methods))
+	}
+	names := make([]string, 0, len(ir.Methods))
+	for _, m := range ir.Methods {
+		names = append(names, m.Name)
+	}
+	if !containsName(names, "add") {
+		t.Errorf("expected method 'add' in %v", names)
+	}
+}
+
+// writeRustProject 构造一个最小 Rust 工程（Cargo.toml + src/lib.rs，含 struct/impl/fn/enum），
+// 使 rust-analyzer 能建立 cargo workspace 视图并抽取符号。
+// 返回 (源文件 LSP 路径, 工程根目录绝对路径)。目录落在 t.TempDir()（仓库外），自动清理。
+func writeRustProject(t *testing.T) (string, string) {
+	t.Helper()
+	abs := filepath.Join(t.TempDir(), "rust_proj")
+	if err := os.MkdirAll(filepath.Join(abs, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir proj: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(abs) })
+
+	src := `pub struct Calculator {
+    precision: i32,
+}
+
+impl Calculator {
+    pub fn add(&self, a: i32, b: i32) -> i32 {
+        a + b
+    }
+    pub fn sub(&self, a: i32, b: i32) -> i32 {
+        a - b
+    }
+}
+
+pub enum Op {
+    Add,
+    Sub,
+}
+`
+	libRS := filepath.Join(abs, "src", "lib.rs")
+	if err := os.WriteFile(libRS, []byte(src), 0o644); err != nil {
+		t.Fatalf("write lib.rs: %v", err)
+	}
+	cargo := "[package]\nname = \"cs_lsp_tmp_rust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+	if err := os.WriteFile(filepath.Join(abs, "Cargo.toml"), []byte(cargo), 0o644); err != nil {
+		t.Fatalf("write Cargo.toml: %v", err)
+	}
+	return toLSPPath(libRS), abs
+}
