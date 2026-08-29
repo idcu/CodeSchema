@@ -3,15 +3,16 @@ package search
 import (
 	"context"
 	"fmt"
+	"math"
 )
 
 // SearchMode 搜索模式。
 type SearchMode string
 
 const (
-	SearchModeExact   SearchMode = "exact"   // 仅 FTS 精确搜索
+	SearchModeExact    SearchMode = "exact"    // 仅 FTS 精确搜索
 	SearchModeSemantic SearchMode = "semantic" // 仅向量语义搜索
-	SearchModeBoth    SearchMode = "both"    // 双路融合检索（默认）
+	SearchModeBoth     SearchMode = "both"     // 双路融合检索（默认）
 )
 
 // Searcher 双路检索器。
@@ -85,7 +86,7 @@ func (s *Searcher) searchWithThreshold(ctx context.Context, query string, mode S
 		if err != nil {
 			return nil, 0, fmt.Errorf("fts search: %w", err)
 		}
-		// 纯 FTS：Score 为 TF-IDF（无上界），按集合最大值归一化为相对置信度 [0,1]。
+		// 纯 FTS：Score 为 BM25 绝对相关度，映射为绝对置信度 [0,1)（B8 待决项①）。
 		results = withExactConfidence(results)
 
 	case SearchModeSemantic:
@@ -136,19 +137,17 @@ func (s *Searcher) searchWithThreshold(ctx context.Context, query string, mode S
 	return results, filtered, nil
 }
 
-// withExactConfidence 将纯 FTS 结果按集合最大值归一化为相对置信度 [0,1]。
+// exactConfidenceTau 绝对置信度标定常数：纯 FTS 模式 Confidence = 1 - exp(-BM25/tau)，
+// 与结果集大小无关（B8 待决项①落地）。BM25 已含 IDF + 文档长度归一，属绝对相关度量纲。
+const exactConfidenceTau = 0.3
+
+// withExactConfidence 将纯 FTS（BM25）结果映射为绝对置信度 [0,1)（B8 待决项①）。
+//
+// 与旧实现（按本结果集最大值归一化的相对尺度）不同，此处为绝对映射：
+// 同一文档+查询始终得到同一置信度，使 MinScore 可作绝对阈值而不受结果集强弱影响。
 func withExactConfidence(results []SearchResult) []SearchResult {
-	max := 0.0
-	for _, r := range results {
-		if r.Score > max {
-			max = r.Score
-		}
-	}
-	if max > 0 {
-		for i := range results {
-			results[i].Confidence = results[i].Score / max
-		}
+	for i := range results {
+		results[i].Confidence = 1 - math.Exp(-results[i].Score/exactConfidenceTau)
 	}
 	return results
 }
-

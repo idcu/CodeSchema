@@ -61,7 +61,8 @@ func TestRerank_ConfidenceFTSFallback(t *testing.T) {
 	}
 }
 
-// TestSearcher_ExactConfidence 验证纯 FTS 模式置信度按集合最大值归一化为 [0,1]。
+// TestSearcher_ExactConfidence 验证纯 FTS 模式置信度为绝对量纲 [0,1)（B8 待决项①）：
+// 同一文档+查询始终得到同一置信度，不再按结果集最大值归一化为 1.0。
 func TestSearcher_ExactConfidence(t *testing.T) {
 	fts := NewMemoryFTS()
 	ctx := context.Background()
@@ -73,8 +74,16 @@ func TestSearcher_ExactConfidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if results[0].Confidence != 1.0 {
-		t.Errorf("top Confidence expected 1.0, got %v", results[0].Confidence)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (only Hello matches), got %d: %+v", len(results), results)
+	}
+	top := results[0]
+	if top.Symbol != "x/Hello.java" {
+		t.Errorf("top expected x/Hello.java, got %s", top.Symbol)
+	}
+	// 绝对置信度：严格 < 1.0（BM25 有限值经 1-exp(-s/τ) 映射），且 > 0。
+	if top.Confidence <= 0 || top.Confidence >= 1.0 {
+		t.Errorf("absolute Confidence expected in (0,1), got %v", top.Confidence)
 	}
 }
 
@@ -154,20 +163,23 @@ func TestSearcher_SearchWithOptionsMinScore_Both(t *testing.T) {
 	}
 }
 
-// TestSearcher_SearchWithOptionsMinScore_Exact 验证纯 FTS 模式按归一化置信度过滤。
+// TestSearcher_SearchWithOptionsMinScore_Exact 验证纯 FTS 模式按绝对置信度过滤（B8 待决项①）。
+//
+// High 为单 token 短文档（匹配强），Low 为含 alpha 的长文档（匹配弱）；
+// 绝对置信度下 High≈0.56、Low≈0.38，MinScore=0.5 应保留 High、过滤 Low。
 func TestSearcher_SearchWithOptionsMinScore_Exact(t *testing.T) {
 	fts := NewMemoryFTS()
 	ctx := context.Background()
-	_ = fts.Index(ctx, "x/High.java", "alpha")                 // 单 token，归一化置信度=1.0
-	_ = fts.Index(ctx, "x/Low.java", "alpha beta gamma delta") // alpha 出现 1 次且 tokens 多，归一化<0.99
+	_ = fts.Index(ctx, "x/High.java", "alpha")                 // 单 token 短文档，匹配最强
+	_ = fts.Index(ctx, "x/Low.java", "alpha beta gamma delta") // alpha 出现 1 次且 tokens 多，置信度更低
 	s := NewSearcher(fts, nil, nil)
 
-	results, filtered, err := s.SearchWithOptions(ctx, "alpha", SearchOptions{Mode: SearchModeExact, Limit: 10, MinScore: 0.99})
+	results, filtered, err := s.SearchWithOptions(ctx, "alpha", SearchOptions{Mode: SearchModeExact, Limit: 10, MinScore: 0.5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if filtered != 1 {
-		t.Errorf("exact MinScore=0.99: expected 1 filtered, got %d (results=%d)", filtered, len(results))
+		t.Errorf("exact MinScore=0.5: expected 1 filtered, got %d (results=%d)", filtered, len(results))
 	}
 	if len(results) != 1 || results[0].Symbol != "x/High.java" {
 		t.Errorf("expected only x/High.java kept, got %+v", results)

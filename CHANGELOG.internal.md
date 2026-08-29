@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 133: feat(search): FTS exact 模式绝对置信度——BM25 归一 + 1-exp(-s/τ) 映射（B8 待决项①）
+
+- 背景：Commit 132 遗留 ①——纯 FTS（`exact`）模式 `MinScore` 基于「结果集最大值归一化」的相对尺度，作绝对阈值受结果集强弱影响（同一文档+查询在不同查询集合下置信度漂移）。B8 要求置信度可作绝对阈值，故将纯 FTS 置信度改为基于 BM25 的绝对相关度量纲。
+
+- **search 包（fts.go）**：`MemoryFTS.scoreDoc` 由长度敏感的无界 TF-IDF 改为 **BM25**（`idf = log(1+(n-d+0.5)/(d+0.5))`，`tfNorm = (tf*(k1+1))/(tf+k1*(1-b+b*dl/avgdl))`，`k1=1.5, b=0.75`）；`Search` 先按语料统计 `n/avgdl/df` 再逐文档打分。`FTSEngine`/`MemoryFTS` 注释同步，Score 即 BM25 绝对相关度。
+- **search 包（searcher.go）**：`withExactConfidence` 由「按集合最大值归一」改为绝对映射 `Confidence = 1 - exp(-Score/τ)`（`τ=0.3`），与结果集大小无关；同一文档+查询恒定同一置信度，`MinScore` 可作绝对阈值。
+- **生产路径覆盖**：`PersistentFTS.Search` 委托 `MemoryFTS`（`fts_persistent.go`），BM25 自动覆盖 JSON 持久化生产引擎，无需改持久化层。
+- **重排无回归**：`Reranker.Rerank` 对 FTS `Score` 内部 max 归一化融合（`both` 模式尺度无关）；`both` 模式 `Confidence` 取向量原始余弦（绝对），FTS-only 回退归一化 FTS——引擎原始得分尺度变更不影响 `both` 行为。
+- **测试**：`b8_test.go` 两组 exact 模式断言随绝对尺度更新——`TestSearcher_ExactConfidence` 改判 top 置信度 ∈(0,1)（不再恒为 1.0）；`TestSearcher_SearchWithOptionsMinScore_Exact` 改用 `MinScore=0.5`（High≈0.56 / Low≈0.38，保留强匹配、过滤弱匹配）。
+- 验证：`GOWORK=off go build ./...`=0；`go vet ./internal/search/...`=0；`go test ./internal/search/... ./internal/service/... ./internal/server/... -short -count=1`=ok。
+- 文档同步：CHANGELOG.internal.md（本记录 + 关闭 Commit 132 遗留①）。
+
 ### Commit 131: feat(search): B8 检索低置信度不返回（MinScore 量化阈值 + trim_reason 回传）
 
 - 背景：DEV_PROGRESS 维护优化（2026-08-29）遗留项 `B8`（空结果优于误导结果）原「待有阈值量化口径后再落地」。
@@ -42,7 +54,7 @@
 - **R2 潜能点亮（核对）**：B1–B9 全落地，无新增 planned 候选；唯一历史待拍板项 B8 已闭环。
 - 验证：`go build ./...` = 0；`go test ./internal/search/... ./internal/service/... ./internal/server/... -short -count=1` = ok（含 B8 8 组）；仅文档改动，无代码回归风险。
 - 文档同步：analysis/.../fastcontext-analysis.md（B8 状态更正 + 修订记录）、11-配置部署与路线图.md（语义检索风险更正）、docs/4-决策层/S3-守护报告-2026-08-29.md（本周期增量报告）、CHANGELOG.internal.md（本记录）。
-- 遗留（待拍板，非本次范围）：① 纯 FTS `min_score` 绝对尺度化（IDF/BM25 归一）；② code-schema 自身首个 `v*` tag 就绪后回填 版本发布说明.md。
+- 遗留（①已闭环，②待 Commit 134）：① 纯 FTS `min_score` 绝对尺度化（IDF/BM25 归一）——已于 Commit 133 落地；② code-schema 首个 `v*` tag + 版本发布说明.md 回填——待发版提交。
 
 ### Commit 130: ci(deps): idcu-go 三模块发布 v0.1.0（push + tag）+ CI/Release 检出步骤 + Docker 按 tag 拉取
 

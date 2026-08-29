@@ -21,7 +21,7 @@ type SearchResult struct {
 	Score      float64 `json:"score"`
 	Snippet    string  `json:"snippet,omitempty"`
 	Source     string  `json:"source"`     // "fts" 或 "vector" 或 "fused"
-	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]：语义=余弦相似度，FTS=归一化得分（B8）
+	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]：语义=余弦相似度，FTS=BM25 映射（B8）
 }
 
 // FTSMode 搜索模式。
@@ -31,6 +31,12 @@ const (
 	FTSModeExact   FTSMode = "exact"   // 精确匹配
 	FTSModeFuzzy   FTSMode = "fuzzy"   // 模糊匹配（前缀 + 子串）
 	FTSModeBoolean FTSMode = "boolean" // 布尔查询
+)
+
+// BM25 参数（B8 待决项①：纯 FTS 模式改用 BM25 绝对相关度，替代原 TF-IDF 相对归一）。
+const (
+	bm25K1 = 1.5
+	bm25B  = 0.75
 )
 
 // FTSEngine 全文搜索引擎接口。
@@ -45,7 +51,7 @@ type FTSEngine interface {
 	// BatchIndex 批量索引文档。
 	BatchIndex(ctx context.Context, ids, contents []string) error
 
-	// Search 执行全文搜索，返回匹配结果。
+	// Search 执行全文搜索，返回匹配结果（Score 为 BM25 绝对相关度）。
 	Search(ctx context.Context, query string, mode FTSMode, limit int) ([]SearchResult, error)
 
 	// Remove 删除指定 ID 的文档索引。
@@ -69,7 +75,7 @@ type DocEntry struct {
 //   - 前缀模式：前缀匹配（`term*`）
 //   - 模糊模式：子串匹配
 //   - 布尔模式：AND/OR/NOT 简单运算
-//   - 得分：TF-IDF 简化版（词频占比）
+//   - 得分：BM25（IDF + 文档长度归一，绝对量纲，B8 待决项①）
 type MemoryFTS struct {
 	mu      sync.RWMutex
 	docs    map[string]*DocEntry
@@ -111,7 +117,7 @@ func (m *MemoryFTS) BatchIndex(_ context.Context, ids, contents []string) error 
 	return nil
 }
 
-// Search 执行全文搜索。
+// Search 执行全文搜索，返回 BM25 相关度得分（绝对量纲，B8 待决项①）。
 func (m *MemoryFTS) Search(_ context.Context, query string, mode FTSMode, limit int) ([]SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -131,10 +137,35 @@ func (m *MemoryFTS) Search(_ context.Context, query string, mode FTSMode, limit 
 		return nil, nil
 	}
 
-	results := make([]SearchResult, 0)
-
+	// 语料统计：文档频率 df 与平均文档长度 avgdl（BM25 需要）。
+	n := float64(len(m.docs))
+	var totalTokens int
+	querySet := make(map[string]struct{}, len(queryTokens))
+	for _, qt := range queryTokens {
+		querySet[strings.ToLower(qt)] = struct{}{}
+	}
+	df := make(map[string]int, len(queryTokens))
 	for _, doc := range m.docs {
-		score := m.scoreDoc(doc, queryTokens, mode, isPrefix)
+		totalTokens += len(doc.Tokens)
+		seen := make(map[string]struct{})
+		for _, t := range doc.Tokens {
+			lt := strings.ToLower(t)
+			if _, ok := querySet[lt]; ok {
+				if _, done := seen[lt]; !done {
+					df[lt]++
+					seen[lt] = struct{}{}
+				}
+			}
+		}
+	}
+	avgdl := 1.0
+	if n > 0 {
+		avgdl = float64(totalTokens) / n
+	}
+
+	results := make([]SearchResult, 0)
+	for _, doc := range m.docs {
+		score := m.scoreDoc(doc, queryTokens, mode, isPrefix, df, n, avgdl)
 		if score > 0 {
 			results = append(results, SearchResult{
 				Symbol:  doc.ID,
@@ -157,7 +188,8 @@ func (m *MemoryFTS) Search(_ context.Context, query string, mode FTSMode, limit 
 	return results, nil
 }
 
-func (m *MemoryFTS) scoreDoc(doc *DocEntry, queryTokens []string, mode FTSMode, isPrefix bool) float64 {
+// scoreDoc 计算单文档 BM25 相关度（B8 待决项①：绝对量纲，含 IDF 与文档长度归一）。
+func (m *MemoryFTS) scoreDoc(doc *DocEntry, queryTokens []string, mode FTSMode, isPrefix bool, df map[string]int, n, avgdl float64) float64 {
 	var score float64
 	lowerContent := strings.ToLower(doc.Content)
 
@@ -192,11 +224,17 @@ func (m *MemoryFTS) scoreDoc(doc *DocEntry, queryTokens []string, mode FTSMode, 
 			found = strings.Contains(lowerContent, qt)
 		}
 
-		if found {
-			// 简单 TF 计算：查询词在文档中出现的次数占比
-			count := float64(strings.Count(lowerContent, qt))
-			score += count / math.Log2(float64(len(doc.Tokens)+1))
+		if !found {
+			continue
 		}
+
+		// BM25：idf * 长度归一化 tf。
+		d := float64(df[qt])
+		idf := math.Log(1 + (n-d+0.5)/(d+0.5))
+		tf := float64(strings.Count(lowerContent, qt))
+		dl := float64(len(doc.Tokens))
+		tfNorm := (tf * (bm25K1 + 1)) / (tf + bm25K1*(1-bm25B+bm25B*dl/avgdl))
+		score += idf * tfNorm
 	}
 
 	return score
