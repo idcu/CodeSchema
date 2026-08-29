@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 134: docs(release): 首个 v0.1.0 tag 发布说明回填 + 打 tag（B8 待决项②）
+
+- 背景：Commit 132 遗留 ②——code-schema 自身首个 `v*` tag 就绪后回填 版本发布说明.md。本次补齐发版动作，关闭 S3 周期全部遗留。
+- **docs/4-决策层/版本发布说明.md**：`未发布（Next）` 草稿段落提升为 `已发布` 正式段落；`v0.1.0（待首个 v* tag，日期待定）` → `v0.1.0（2026-08-29）`，补「对应 git tag v0.1.0」说明；修订记录追加 2026-08-29 发布行。
+- **tag**：`git tag v0.1.0`（指向本提交），推送 origin 触发 `release.yml` 5 平台制品构建；code-schema 自此进入有版本号、可溯源的发布态。
+- 验证：无代码改动，仅文档；`GOWORK=off go build ./...` 不受影响。
+- 文档同步：CHANGELOG.internal.md（本记录 + 关闭 Commit 132 遗留②）。
+
 ### Commit 133: feat(search): FTS exact 模式绝对置信度——BM25 归一 + 1-exp(-s/τ) 映射（B8 待决项①）
 
 - 背景：Commit 132 遗留 ①——纯 FTS（`exact`）模式 `MinScore` 基于「结果集最大值归一化」的相对尺度，作绝对阈值受结果集强弱影响（同一文档+查询在不同查询集合下置信度漂移）。B8 要求置信度可作绝对阈值，故将纯 FTS 置信度改为基于 BM25 的绝对相关度量纲。
@@ -54,7 +62,7 @@
 - **R2 潜能点亮（核对）**：B1–B9 全落地，无新增 planned 候选；唯一历史待拍板项 B8 已闭环。
 - 验证：`go build ./...` = 0；`go test ./internal/search/... ./internal/service/... ./internal/server/... -short -count=1` = ok（含 B8 8 组）；仅文档改动，无代码回归风险。
 - 文档同步：analysis/.../fastcontext-analysis.md（B8 状态更正 + 修订记录）、11-配置部署与路线图.md（语义检索风险更正）、docs/4-决策层/S3-守护报告-2026-08-29.md（本周期增量报告）、CHANGELOG.internal.md（本记录）。
-- 遗留（①已闭环，②待 Commit 134）：① 纯 FTS `min_score` 绝对尺度化（IDF/BM25 归一）——已于 Commit 133 落地；② code-schema 首个 `v*` tag + 版本发布说明.md 回填——待发版提交。
+- 遗留（已全部闭环）：① 纯 FTS `min_score` 绝对尺度化（IDF/BM25 归一）——Commit 133 落地；② code-schema 首个 `v*` tag + 版本发布说明.md 回填——Commit 134 落地（tag v0.1.0 @ 2026-08-29）。
 
 ### Commit 130: ci(deps): idcu-go 三模块发布 v0.1.0（push + tag）+ CI/Release 检出步骤 + Docker 按 tag 拉取
 
