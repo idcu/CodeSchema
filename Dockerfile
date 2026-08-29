@@ -25,7 +25,7 @@ ARG CGO_ENABLED=0
 # Go 模块代理：国内网络默认走 goproxy.cn（避免 proxy.golang.org 超时）；
 # 其他环境可 --build-arg GOPROXY=https://proxy.golang.org,direct 覆盖
 ARG GOPROXY=https://goproxy.cn,direct
-RUN if [ "$CGO_ENABLED" = "1" ]; then apk add --no-cache gcc musl-dev; fi
+RUN apk add --no-cache git && if [ "$CGO_ENABLED" = "1" ]; then apk add --no-cache gcc musl-dev; fi
 
 WORKDIR /src
 
@@ -46,6 +46,11 @@ RUN go mod download
 
 # 复制全部源码并构建
 COPY . .
+# COPY . . 会用仓库原始 go.mod 覆盖上一步的 dropreplace 结果；在最终源码上再次去掉
+# idcu-go 本地 replace（Docker 上下文拿不到 ../idcu-go/*，必须改按已发布 v0.1.0 拉取）。
+RUN go mod edit -dropreplace=gitee.com/idcu-go/trim \
+    -dropreplace=gitee.com/idcu-go/ttlcache \
+    -dropreplace=gitee.com/idcu-go/pathsafe
 ARG VERSION=dev
 RUN CGO_ENABLED=${CGO_ENABLED} go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
