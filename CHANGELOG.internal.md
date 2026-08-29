@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 139: test(lsp): LSP 端到端 e2e 跳过门槛改用 ResolveServerPath——开发机 gopls 从 SKIP 变真跑
+
+- 背景：用户「全量实施」。Commit 138 让 `NewLSPAdapter`/`runtime.commandAvailable` 经 `lsp.ResolveServerPath` 发现位于 `$GOPATH/bin`（非 PATH）的 gopls，修复注册层静默失效。但 `internal/parser/adapter/lsp/e2e_test.go` 的两个真实 LSP 端到端测试（`TestLSPAdapter_RealClangd`、`TestLSPAdapter_RealGopls`）的跳过门槛仍用 `exec.LookPath(name)`（仅判 PATH）——本机 gopls 在 `$GOPATH/bin`（`/Users/huyu/go/bin/gopls`）→ `TestLSPAdapter_RealGopls` 直接 SKIP。**gopls 真实解析路径此前从未在开发机实跑验证**：上一轮「全绿」中 lsp 包仅为 `TestLSPAdapter_RealClangd` PASS + `TestLSPAdapter_RealGopls` SKIP。这是 Commit 138 发现机制在验证层未闭环的缺口（发现用解析器、跳过却只用 PATH，二者不一致）。
+- 修复：`e2e_test.go` 两处跳过门槛由 `exec.LookPath(name)` 改为 `ResolveServerPath(name) == ""`（同包直接调用，无需 import）；同步移除测试文件不再使用的 `"os/exec"` import。`NewLSPAdapter` 内部已在 Commit 138 将 `a.cmd` 解析为绝对路径，故 gopls 现从 `/Users/huyu/go/bin/gopls` 真实拉起、走完整 JSON-RPC + documentSymbol，跳过门槛与 spawn 解析一致。
+- 验证：
+  - `go test -run TestLSPAdapter_RealGopls -v -timeout 180s` → **PASS（0.30s）**，证明 gopls 真实提取 `Calculator` 类 + `Add`/`Sub` 方法（此前 SKIP）。
+  - 全 lsp 包 `go test -timeout 300s ./internal/parser/adapter/lsp/` → ok（clangd + gopls 双 e2e 均 PASS）。
+  - 完整回归 `go test -short ./...` → exit 0、NO FAIL；`go vet ./...`=0；`go build ./...`=0；`go build -tags 'pg redis treesitter onnx' ./...`=0。
+- 结论：LSP 端到端真实解析现对本机可用语言服务器（clangd 在 PATH、gopls 在 `$GOPATH/bin`）均**真正实跑验证**，不再因「发现解析器 ≠ 跳过门槛」而漏验。D 的「真实 LSP 路径可信」闭环再进一步；新增 jdtls/rust-analyzer/pyright/typescript-language-server 仍依赖对应运行时安装（环境依赖不变）。
+- 文档同步：CHANGELOG.internal.md（本记录）。
+
 ### Commit 138: fix(lsp): LSP server 命令发现增强——PATH + $GOPATH/bin + $HOME/go/bin 回退（修复 gopls 静默失效）
 
 - 背景：用户「全量实施下一步方向」推进 D（LSP 可靠性）。reality-check 发现本机 `gopls` 位于 `$GOPATH/bin`（`/Users/huyu/go/bin/gopls`）但**不在 PATH**；而 `runtime.NewParserRegistry` 注册前用 `commandAvailable(name)=exec.LookPath(name)`（仅 PATH）检测，`gopls` 未命中 → gopls 适配器被 skip；`NewLSPAdapter` 拉起也用字面命令名 `gopls` 经 PATH 解析。结果：Go 符号走 LSP 高精度路径**静默降级到 tree-sitter**（clangd 因在 PATH 故正常）。这是 D 的真实可靠性缺口，且本机可验证。

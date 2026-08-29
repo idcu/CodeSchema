@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,8 +81,8 @@ func parseWithRetry(t *testing.T, a *LSPAdapter, path string, wantMin int) *pars
 //   - 无 clangd → 跳过；
 //   - clangd 在工程上下文下仍无法登记/返回符号 → 记录缺口并跳过（CI 保持绿色）。
 func TestLSPAdapter_RealClangd(t *testing.T) {
-	if _, err := exec.LookPath("clangd"); err != nil {
-		t.Skip("clangd not found in PATH; skipping real LSP validation")
+	if ResolveServerPath("clangd") == "" {
+		t.Skip("clangd not discoverable via PATH or GOPATH/bin; skipping real LSP validation")
 	}
 
 	path, rootAbs := writeClangdProject(t)
@@ -161,8 +160,8 @@ public:
 //
 // gopls 可能未安装（如 CI 环境），缺失时优雅跳过。本地开发机若已安装 gopls 即可真正验证。
 func TestLSPAdapter_RealGopls(t *testing.T) {
-	if _, err := exec.LookPath("gopls"); err != nil {
-		t.Skip("gopls not found in PATH; skipping real LSP validation (install via 'go install golang.org/x/tools/gopls@latest')")
+	if ResolveServerPath("gopls") == "" {
+		t.Skip("gopls not discoverable via PATH or GOPATH/bin; skipping real LSP validation (install via 'go install golang.org/x/tools/gopls@latest')")
 	}
 
 	src := `package calc
