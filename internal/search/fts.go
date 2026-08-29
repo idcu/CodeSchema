@@ -15,12 +15,13 @@ import (
 
 // SearchResult 检索结果。
 type SearchResult struct {
-	Symbol    string  `json:"symbol"`
-	Kind      string  `json:"kind"`
-	File      string  `json:"file"`
-	Score     float64 `json:"score"`
-	Snippet   string  `json:"snippet,omitempty"`
-	Source    string  `json:"source"` // "fts" 或 "vector"
+	Symbol     string  `json:"symbol"`
+	Kind       string  `json:"kind"`
+	File       string  `json:"file"`
+	Score      float64 `json:"score"`
+	Snippet    string  `json:"snippet,omitempty"`
+	Source     string  `json:"source"`     // "fts" 或 "vector" 或 "fused"
+	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]：语义=余弦相似度，FTS=归一化得分（B8）
 }
 
 // FTSMode 搜索模式。

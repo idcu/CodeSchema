@@ -1002,14 +1002,38 @@ func (s *Service) GetTests(ctx context.Context, method string, minConfidence int
 
 // SearchResult 搜索结果项。
 type SearchResult struct {
-	Symbol  string  `json:"symbol"`
-	Kind    string  `json:"kind"`
-	File    string  `json:"file"`
-	Score   float64 `json:"score"`
-	Snippet string  `json:"snippet,omitempty"`
+	Symbol     string  `json:"symbol"`
+	Kind       string  `json:"kind"`
+	File       string  `json:"file"`
+	Score      float64 `json:"score"`
+	Snippet    string  `json:"snippet,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]（B8）
+}
+
+// SearchOutcome 检索响应信封（含 B8 低置信度过滤元信息）。
+type SearchOutcome struct {
+	Results    []SearchResult `json:"results"`
+	TrimReason string         `json:"trim_reason,omitempty"` // below_threshold：有结果被低置信度阈值过滤
+	Filtered   int            `json:"filtered,omitempty"`    // 被过滤掉的条数
 }
 
 // Search 搜索符号，支持双路检索（FTS 精确匹配 + 向量语义搜索）。
+//
+// 等价于 SearchWithOptions(ctx, query, mode, limit, 0)，不启用低置信度过滤，
+// 向后兼容既有调用方（HTTP/MCP 旧路径）。
+func (s *Service) Search(ctx context.Context, query string, mode string, limit int) ([]SearchResult, error) {
+	out, err := s.SearchWithOptions(ctx, query, mode, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	return out.Results, nil
+}
+
+// SearchWithOptions 搜索符号，支持双路检索与 B8 低置信度过滤。
+//
+// minScore>0 时，过滤掉置信度低于阈值的检索结果（空结果优于误导结果）；
+// 被过滤的条数通过 SearchOutcome.Filtered 返回，并置 TrimReason="below_threshold"。
+// minScore<=0 表示不启用过滤（向后兼容）。
 //
 // mode 参数：
 //   - "exact": 仅 FTS 精确搜索
@@ -1017,13 +1041,15 @@ type SearchResult struct {
 //   - "both"（默认）: FTS + 向量融合检索
 //
 // 当 searcher 未设置时，回退到 P0 占位行为（返回空结果）。
-func (s *Service) Search(ctx context.Context, query string, mode string, limit int) ([]SearchResult, error) {
+func (s *Service) SearchWithOptions(ctx context.Context, query, mode string, limit int, minScore float64) (*SearchOutcome, error) {
 	if query == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "query is required"}
 	}
 	if limit <= 0 {
 		limit = 20
 	}
+
+	outcome := &SearchOutcome{}
 
 	// 如果有搜索器，使用双路检索
 	if s.searcher != nil {
@@ -1035,9 +1061,18 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 			searchMode = search.SearchModeSemantic
 		}
 
-		results, err := s.searcher.Search(ctx, query, searchMode, limit)
+		results, filtered, err := s.searcher.SearchWithOptions(ctx, query, search.SearchOptions{
+			Mode:     searchMode,
+			Limit:    limit,
+			MinScore: minScore,
+		})
 		if err != nil {
 			return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search: %v", err)}
+		}
+
+		if filtered > 0 {
+			outcome.TrimReason = "below_threshold"
+			outcome.Filtered = filtered
 		}
 
 		// 富化搜索结果：从 Store 查询 Kind 和 File 信息
@@ -1051,18 +1086,21 @@ func (s *Service) Search(ctx context.Context, query string, mode string, limit i
 		svcResults := make([]SearchResult, 0, len(results))
 		for _, r := range results {
 			svcResults = append(svcResults, SearchResult{
-				Symbol:  r.Symbol,
-				Kind:    r.Kind,
-				File:    r.File,
-				Score:   r.Score,
-				Snippet: r.Snippet,
+				Symbol:     r.Symbol,
+				Kind:       r.Kind,
+				File:       r.File,
+				Score:      r.Score,
+				Snippet:    r.Snippet,
+				Confidence: r.Confidence,
 			})
 		}
-		return svcResults, nil
+		outcome.Results = svcResults
+		return outcome, nil
 	}
 
 	// 回退到 P0 占位行为
-	return []SearchResult{}, nil
+	outcome.Results = []SearchResult{}
+	return outcome, nil
 }
 
 // disambiguateMethodResults 对搜索结果中的同名方法候选做 AI 消歧（可选）。

@@ -40,49 +40,115 @@ func NewSearcher(fts FTSEngine, vector VectorSearcher, reranker *Reranker) *Sear
 	}
 }
 
-// Search 执行双路检索。
+// SearchOptions 检索选项。
 //
-// mode 参数：
-//   - "exact": 仅 FTS 精确搜索
-//   - "semantic": 仅向量语义搜索
-//   - "both"（默认）: FTS + 向量融合检索
-//
-// limit 控制返回结果数上限，传 0 使用默认值 20。
+// MinScore 为绝对置信度阈值（[0,1]），B8「空结果优于误导结果」使用：
+// 低于阈值的结果被过滤。MinScore<=0 表示不启用过滤（向后兼容）。
+type SearchOptions struct {
+	Mode     SearchMode
+	Limit    int
+	MinScore float64
+}
+
+// Search 执行双路检索（MinScore=0，不启用低置信度过滤，向后兼容）。
 func (s *Searcher) Search(ctx context.Context, query string, mode SearchMode, limit int) ([]SearchResult, error) {
+	results, _, err := s.searchWithThreshold(ctx, query, mode, limit, 0)
+	return results, err
+}
+
+// SearchWithOptions 执行双路检索并支持低置信度过滤（B8）。
+//
+// MinScore>0 时过滤掉 Confidence < MinScore 的结果，返回被过滤条数 filtered；
+// MinScore<=0 时不启用过滤。
+func (s *Searcher) SearchWithOptions(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, int, error) {
+	return s.searchWithThreshold(ctx, query, opts.Mode, opts.Limit, opts.MinScore)
+}
+
+// searchWithThreshold 统一检索 + 置信度赋值 + 低置信度过滤。
+func (s *Searcher) searchWithThreshold(ctx context.Context, query string, mode SearchMode, limit int, minScore float64) ([]SearchResult, int, error) {
 	if query == "" {
-		return nil, fmt.Errorf("query must not be empty")
+		return nil, 0, fmt.Errorf("query must not be empty")
 	}
 
 	if limit <= 0 {
 		limit = 20
 	}
 
+	var (
+		results []SearchResult
+		err     error
+	)
+
 	switch mode {
 	case SearchModeExact:
-		return s.fts.Search(ctx, query, FTSModeFuzzy, limit)
+		results, err = s.fts.Search(ctx, query, FTSModeFuzzy, limit)
+		if err != nil {
+			return nil, 0, fmt.Errorf("fts search: %w", err)
+		}
+		// 纯 FTS：Score 为 TF-IDF（无上界），按集合最大值归一化为相对置信度 [0,1]。
+		results = withExactConfidence(results)
 
 	case SearchModeSemantic:
 		if s.vector == nil {
-			return nil, fmt.Errorf("vector search not available")
+			return nil, 0, fmt.Errorf("vector search not available")
 		}
-		return s.vector.Search(ctx, query, limit)
+		results, err = s.vector.Search(ctx, query, limit)
+		if err != nil {
+			return nil, 0, fmt.Errorf("vector search: %w", err)
+		}
+		// 语义模式：Score 即 chromem 余弦相似度（绝对 [0,1]），直接作为置信度。
+		for i := range results {
+			results[i].Confidence = results[i].Score
+		}
 
 	default: // SearchModeBoth
 		ftsResults, err := s.fts.Search(ctx, query, FTSModeFuzzy, limit*2)
 		if err != nil {
-			return nil, fmt.Errorf("fts search: %w", err)
+			return nil, 0, fmt.Errorf("fts search: %w", err)
 		}
 
 		var vectorResults []SearchResult
 		if s.vector != nil {
-			vecResults, err := s.vector.Search(ctx, query, limit*2)
-			if err == nil {
+			vecResults, verr := s.vector.Search(ctx, query, limit*2)
+			if verr == nil {
 				vectorResults = vecResults
 			}
 		}
 
-		// 融合重排
-		return s.reranker.Rerank(ftsResults, vectorResults, limit), nil
+		// 融合重排（Rerank 已为每条结果计算绝对 Confidence）
+		results = s.reranker.Rerank(ftsResults, vectorResults, limit)
 	}
+
+	// B8：低置信度过滤（空结果优于误导结果）
+	filtered := 0
+	if minScore > 0 {
+		kept := results[:0]
+		for _, r := range results {
+			if r.Confidence >= minScore {
+				kept = append(kept, r)
+			} else {
+				filtered++
+			}
+		}
+		results = kept
+	}
+
+	return results, filtered, nil
+}
+
+// withExactConfidence 将纯 FTS 结果按集合最大值归一化为相对置信度 [0,1]。
+func withExactConfidence(results []SearchResult) []SearchResult {
+	max := 0.0
+	for _, r := range results {
+		if r.Score > max {
+			max = r.Score
+		}
+	}
+	if max > 0 {
+		for i := range results {
+			results[i].Confidence = results[i].Score / max
+		}
+	}
+	return results
 }
 

@@ -44,6 +44,12 @@ func (r *Reranker) Rerank(ftsResults, vectorResults []SearchResult, limit int) [
 	maxVec := maxScore(vectorResults)
 	normalizedVec := normalize(vectorResults, maxVec)
 
+	// 2.1 记录向量原始余弦相似度（绝对量纲 [0,1]），用于 B8 绝对置信度阈值
+	vectorRaw := make(map[string]float64, len(vectorResults))
+	for _, r := range vectorResults {
+		vectorRaw[r.Symbol] = r.Score
+	}
+
 	// 3. 建立 ID → 融合得分的映射
 	merged := make(map[string]*mergedResult)
 
@@ -77,17 +83,24 @@ func (r *Reranker) Rerank(ftsResults, vectorResults []SearchResult, limit int) [
 		}
 	}
 
-	// 4. 计算融合得分
+	// 4. 计算融合得分与绝对置信度
 	results := make([]SearchResult, 0, len(merged))
 	for _, mr := range merged {
 		fused := r.FTSWeight*mr.FTSScore + r.VectorWeight*mr.VectorScore
+		// 置信度口径（B8）：优先使用向量原始余弦相似度（绝对 [0,1]）；
+		// 仅 FTS 命中的结果回退到归一化 FTS 得分（相对 [0,1]）。
+		conf := mr.FTSScore
+		if v, ok := vectorRaw[mr.Symbol]; ok {
+			conf = v
+		}
 		results = append(results, SearchResult{
-			Symbol:  mr.Symbol,
-			Kind:    mr.Kind,
-			File:    mr.File,
-			Score:   fused,
-			Snippet: mr.Snippet,
-			Source:  "fused",
+			Symbol:     mr.Symbol,
+			Kind:       mr.Kind,
+			File:       mr.File,
+			Score:      fused,
+			Snippet:    mr.Snippet,
+			Source:     "fused",
+			Confidence: conf,
 		})
 	}
 

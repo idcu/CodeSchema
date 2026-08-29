@@ -6,6 +6,30 @@
 
 ## 提交记录
 
+### Commit 131: feat(search): B8 检索低置信度不返回（MinScore 量化阈值 + trim_reason 回传）
+
+- 背景：DEV_PROGRESS 维护优化（2026-08-29）遗留项 `B8`（空结果优于误导结果）原「待有阈值量化口径后再落地」。
+  本提交定义量化口径并落地：置信度取**向量余弦相似度（chromem 返回，绝对量纲 [0,1]）**（语义/融合模式），
+  纯 FTS 模式回退到按集合最大值归一化的相对得分；`Confidence < MinScore` 的结果过滤，默认 `MinScore=0` 关闭（向后兼容）。
+
+- **search 包**：
+  - `SearchResult` 增 `Confidence float64`（绝对置信度 [0,1]）；
+  - `Reranker.Rerank` 为每条融合结果计算 `Confidence`：有向量命中取原始余弦（绝对），否则回退归一化 FTS；
+  - 新增 `SearchOptions{Mode,Limit,MinScore}` 与 `SearchWithOptions`（返回过滤计数）；`Search` 保持旧签名委托 `MinScore=0`。
+
+- **service 包**：新增 `SearchOutcome{Results,TrimReason,Filtered}` 与 `SearchWithOptions`；
+  过滤发生时置 `TrimReason="below_threshold"`、`Filtered`=被过滤条数；`Service.Search` 旧签名保持 `[]SearchResult` 向后兼容。
+
+- **HTTP / MCP**：`GET /search?min_score=` 与 `search_symbols` 的 `min_score` 参数接线，
+  响应改为 envelope `{results,trim_reason,filtered}`，每条结果带 `confidence`。
+
+- 验证：
+  - `go build ./...` 通过；`go vet ./internal/search/... ./internal/service/... ./internal/server/...` 通过；
+  - `go test ./internal/search/... ./internal/service/...` 全绿（新增 8 组 B8 测试：置信度绝对量纲 / FTS 回退 / 三模式 MinScore 过滤计数 / envelope 透传）；
+  - `GOOS=linux GOARCH=arm CGO_ENABLED=0 go build ./...` 交叉编译通过。
+- 文档同步：DEV_PROGRESS.md（B8 遗留项 [ ]→[x] + 量化口径）、README.md（检索低置信度过滤小节）、CHANGELOG.internal.md（本记录）。
+- 遗留：纯 FTS（`exact`）模式的 `MinScore` 基于相对归一化得分，作绝对阈值须谨慎（已在 README 注明）。
+
 ### Commit 130: ci(deps): idcu-go 三模块发布 v0.1.0（push + tag）+ CI/Release 检出步骤 + Docker 按 tag 拉取
 
 - 背景：Commit 129 把 `trim` / `ttlcache` / `pathsafe` 抽成 idcu-go 公共模块后，`go.mod` 以

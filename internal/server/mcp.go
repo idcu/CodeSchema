@@ -511,11 +511,12 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 		query, _ := args["q"].(string)
 		mode, _ := args["mode"].(string)
 		limit, _ := toInt(args["limit"])
-		result, err := svc.Search(ctx, query, mode, limit)
+		minScore := toFloatOr(args["min_score"], 0)
+		outcome, err := svc.SearchWithOptions(ctx, query, mode, limit, minScore)
 		if err != nil {
 			return mcpError(id, err)
 		}
-		return mcpResult(id, result)
+		return mcpResult(id, outcome)
 
 	case "get_tags":
 		symbol, _ := args["symbol"].(string)

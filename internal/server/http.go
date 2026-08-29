@@ -498,13 +498,14 @@ func (h *HTTPServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	mode := r.URL.Query().Get("mode")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	minScore, _ := strconv.ParseFloat(r.URL.Query().Get("min_score"), 64)
 
-	result, err := h.serviceForRequest(r).Search(r.Context(), query, mode, limit)
+	outcome, err := h.serviceForRequest(r).SearchWithOptions(r.Context(), query, mode, limit, minScore)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, outcome)
 }
 
 // ---- 标签路由处理函数 ----

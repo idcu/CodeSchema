@@ -22,6 +22,19 @@
 - **配置热重载**：YAML/JSON 配置 + 环境变量覆盖 + 运行时热重载
 - **生产级健壮性**：优雅关闭 / 重试机制 / Panic 恢复 / 安全中间件
 
+### 检索低置信度过滤（B8）
+
+「空结果优于误导结果」：检索结果置信度低于阈值时予以过滤，避免向 Agent 返回可能误导的弱匹配。
+
+- **置信度口径（量化、不误杀）**：
+  - 语义检索（`semantic` / `both`）：取向量余弦相似度（chromem 返回，绝对量纲 [0,1]，1=完全相同）；
+  - 纯 FTS（`exact`）：取按集合最大值归一化的相对得分 [0,1]（仅作相对排序参考，作绝对阈值须谨慎）。
+- **阈值 `min_score`**：绝对置信度阈值 [0,1]，默认 `0`（关闭过滤，完全向后兼容）；`Confidence < min_score` 的结果被丢弃。
+- **响应（envelope）**：`search_symbols` / `GET /search?min_score=` 返回
+  `{ "results": [...], "trim_reason": "below_threshold", "filtered": N }`；`results[].confidence` 为每条结果绝对置信度，
+  有结果被过滤时 `trim_reason="below_threshold"`、`filtered` 为被过滤条数。
+- 建议起点：语义/融合模式 `min_score=0.3~0.5`（bge-small-zh-v1.5 实测弱匹配常 <0.3）。
+
 ## 技术栈
 
 - 语言：Go 1.25.2

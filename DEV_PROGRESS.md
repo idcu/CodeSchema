@@ -397,7 +397,11 @@ P18      [████████████████████] 100%
       `require` 升到 v0.1.0（保留 `replace` 供本地即时改模块），go.sum 补齐三模块校验和；
       CI（7 个 job）与 Release 新增「Checkout idcu-go modules」按 tag 检出步骤；Dockerfile 改在镜像内
       dropreplace + `GOPRIVATE` 按 tag 拉取。两条构建路径（replace / tag）均实测通过。
-- [ ] **遗留** — `B8`（检索低置信度不返回）待有阈值量化口径后再落地。
+- [x] **B8（检索低置信度不返回）** — 量化口径已落地（2026-08-29）：`Search` 增 `MinScore` 阈值，
+      置信度取**向量余弦相似度（绝对 [0,1]）**（语义/融合）或归一化 FTS 得分（纯 FTS 回退）；
+      `Confidence < MinScore` 的结果过滤，`Service.SearchWithOptions` 回传 `trim_reason=below_threshold` + `filtered` 计数；
+      默认 `MinScore=0` 关闭过滤（完全向后兼容）。HTTP `GET /search?min_score=` 与 MCP `search_symbols` 的 `min_score` 参数均已接线，
+      响应改为 envelope `{results,trim_reason,filtered}`，每条结果带 `confidence`。新增 8 组测试（search + service）全绿。
 
 ## 已知问题
 
