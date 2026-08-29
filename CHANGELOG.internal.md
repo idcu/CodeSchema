@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 142: feat(lsp): 新增 jdtls(Java) 端到端 e2e + Docker 镜像补齐 clangd/jdtls，LSP 六语言全部实跑验证（D 闭环）
+
+- 背景：用户「全量推进实施下一步选项」——继续 D，闭环 option 1（jdtls/clangd 纳入 `cs-lsp-test` 镜像实跑）。Commit 141 后 D 已接线 go/java/cpp/py/ts/rust 六语言，但 java(jdtls)/cpp(clangd) 代码路径已接线、镜像/本机未装对应运行时 → e2e SKIP。本轮补齐两者运行时并在 Docker 内实跑验证。
+- 改动：
+  - `e2e_test.go`：新增 `TestLSPAdapter_RealJDTLS`（跳过门槛 `ResolveServerPath("jdtls")==""`，invisible-project 模式直接解析单 .java 文件，断言提取 Calculator 类 + add 方法）；`containsName` 增强兼容 jdtls 的 `add(int, int)` 形式（新增 `target+"("` 前缀判定）。
+  - `adapter.go`：`NewJDTLSAdapter` 默认超时 15s→**30s**（jdtls JVM 冷启动 + bundle 解析在容器内首启偏重，15s 会 initialize 超时）。
+  - `docker/lsp-test/Dockerfile`：① 基础 `debian:bookworm`→**`debian:trixie`**（trixie 默认 JDK=21；jdtls latest 要求 class file 65.0=Java 21，bookworm 默认 JDK 17 会 `UnsupportedClassVersionError`）；② rustup→**apt `rust-analyzer`+`cargo`**（免 rustup 工具链长下载，本环境曾卡 30min+）；③ 新增 `clangd clang`(apt)、`default-jdk`(JDK21)、jdtls tarball 解 `/opt/jdtls` + `jdtls.sh` 包装脚本 COPY 到 `/usr/local/bin/jdtls`；④ Go 二进制下载 `go.dev/dl`→**`golang.google.cn/dl`** 镜像（go.dev 在本环境 wget 退出码 4 网络失败）。
+  - `docker/lsp-test/jdtls.sh`（新增）：jdtls 非单二进制，以 `java -jar org.eclipse.equinox.launcher_*.jar` 拉起，补全 equinox 启动参数 + `config_linux` + `mktemp` 独立 `-data` workspace；`NewJDTLSAdapter` 以命令名 `jdtls`（无参数）调用之。
+- 验证：
+  - 主机（clangd 已装、jdtls 未装）：`go build ./...`=0；`go vet`=0；`go test -short ./...`→exit 0（RealClangd PASS；RealJDTLS SKIP；gopls/rust/pyright/ts 一致）。
+  - Docker（cs-lsp-test:latest，trixie）：`java -version`=21.0.12.1、`rust-analyzer`/`clangd`/`jdtls` 均在位；**6 个 Real* e2e 全部 PASS**——RealClangd(0.27s)/RealGopls(0.28s)/RealRustAnalyzer(0.08s)/RealPyright(0.55s)/RealTSLanguageServer(1.36s)/RealJDTLS(3.94s)。
+  - Docker 全仓 short 套件：除 `internal/agentbench` 的 `TestRunMulti_RepoHintFilter` 预存失败（见 Commit 141：主机 PASS、干净 HEAD bcc91cd 复现确认与本次无关）外全 ok；该失败不构成本轮 regression。
+- 结论：D 的 LSP 六语言 **go/java/cpp/py/ts/rust 适配器全部接线且均在 Docker 或主机真实拉起语言服务器端到端验证抽取符号**（java 经 JDK21+jdtls、cpp 经 clangd）。D 语言服务器高精度路径实跑验证至此闭环。镜像构建踩坑已固化：①jdtls latest 需 Java21（bookworm JDK17 `UnsupportedClassVersionError`）；②rustup 本环境下载极慢（换 apt `rust-analyzer`）；③`go.dev/dl` 二进制本环境网络失败（换 `golang.google.cn/dl` 镜像）；④trixie 基础层首次拉取慢、BuildKit 缓存后续快。
+- 文档同步：CHANGELOG.internal.md（本记录）+ `docker/lsp-test/Dockerfile` + `docker/lsp-test/jdtls.sh`；SKILL.md 补 jdtls(JDK21+包装脚本)/clangd 安装要点、Go 镜像、rustup→apt 替代。
+
 ### Commit 141: feat(lsp): 新增 pyright + typescript-language-server 适配器与端到端 e2e，Docker 内实跑验证 D 扩展
 
 - 背景：用户「全量推进实施」继续推进 D（LSP 多语言高精度）。Commit 140 已实跑验证 rust-analyzer；D 剩余两个「单文件即可解析、无需工程上下文」的语言服务器为 **pyright（Python）** 与 **typescript-language-server（TypeScript）**——均基于 Node，本机/CI 未装故此前仅接线未验证。沿用「调试测试可在 docker 中进行」授权，在已落库的 `cs-lsp-test` 镜像内装 node 运行时后实跑验证。

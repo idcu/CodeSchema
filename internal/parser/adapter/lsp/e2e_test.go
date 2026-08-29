@@ -222,11 +222,15 @@ func (c *Calculator) Sub(a, b int) int {
 }
 
 // containsName 方法名匹配：真实 LSP 的 documentSymbol 名称可能带接收者前缀，
-// 例如 gopls 的 Go 方法为 "(*Calculator).Add"，clangd 的 C++ 方法为 "Add"。
-// 用「精确相等或 . 结尾」判定，兼容两种命名风格。
+// 例如 gopls 的 Go 方法为 "(*Calculator).Add"，clangd 的 C++ 方法为 "Add"，
+// jdtls 的 Java 方法为 "add(int, int)" 或 "Calculator.add(int, int)"。
+// 用「精确相等 / . 结尾 / ) 结尾 / 名(参数 开头」判定，兼容多种命名风格。
 func containsName(ss []string, target string) bool {
 	for _, s := range ss {
-		if s == target || strings.HasSuffix(s, "."+target) || strings.HasSuffix(s, ")"+target) {
+		if s == target ||
+			strings.HasSuffix(s, "."+target) ||
+			strings.HasSuffix(s, ")"+target) ||
+			strings.HasPrefix(s, target+"(") {
 			return true
 		}
 	}
@@ -467,6 +471,62 @@ func TestLSPAdapter_RealTSLanguageServer(t *testing.T) {
 	}
 	if len(ir.Methods) < 1 {
 		t.Fatalf("expected >=1 method from typescript-language-server, got %d", len(ir.Methods))
+	}
+	names := make([]string, 0, len(ir.Methods))
+	for _, m := range ir.Methods {
+		names = append(names, m.Name)
+	}
+	if !containsName(names, "add") {
+		t.Errorf("expected method 'add' in %v", names)
+	}
+}
+
+// TestLSPAdapter_RealJDTLS 使用真实 jdtls 验证 LSP 适配器端到端（Java 为 D 扩展语言）。
+//
+// jdtls 可能未安装（需 JDK 17 + eclipse.jdt.ls，并以 "jdtls" 命令名置于 PATH），
+// 缺失时优雅跳过（CI 保持绿色）。提供了 jdtls + JDK 的 Docker 测试镜像可真正验证
+// Java 高精度解析路径。jdtls 以 invisible-project 模式直接解析单文件，无需 pom.xml。
+func TestLSPAdapter_RealJDTLS(t *testing.T) {
+	if ResolveServerPath("jdtls") == "" {
+		t.Skip("jdtls not discoverable via PATH or GOPATH/bin; skipping real LSP validation (install eclipse.jdt.ls + JDK 17, wrap as 'jdtls' on PATH)")
+	}
+
+	src := `public class Calculator {
+    private int precision;
+
+    public int add(int a, int b) {
+        return a + b;
+    }
+
+    public int sub(int a, int b) {
+        return a - b;
+    }
+}
+`
+	path := writeTempSource(t, ".java", src)
+
+	a := NewJDTLSAdapter()
+	if err := a.Init(context.Background(), map[string]any{"rootUri": dirURI(path)}); err != nil {
+		t.Fatalf("jdtls Init failed: %v", err)
+	}
+	defer a.Close()
+
+	ir := parseWithRetry(t, a, path, 1)
+	if ir.Source != "jdtls" {
+		t.Errorf("source = %q, want jdtls", ir.Source)
+	}
+	if len(ir.Classes) < 1 {
+		t.Fatalf("expected >=1 class from jdtls, got %d", len(ir.Classes))
+	}
+	classNames := make([]string, 0, len(ir.Classes))
+	for _, c := range ir.Classes {
+		classNames = append(classNames, c.Name)
+	}
+	if !containsName(classNames, "Calculator") {
+		t.Errorf("expected class 'Calculator' in %v", classNames)
+	}
+	if len(ir.Methods) < 1 {
+		t.Fatalf("expected >=1 method from jdtls, got %d", len(ir.Methods))
 	}
 	names := make([]string, 0, len(ir.Methods))
 	for _, m := range ir.Methods {

@@ -165,8 +165,11 @@ func NewGoplsAdapter() *LSPAdapter {
 }
 
 // NewJDTLSAdapter 创建 jdtls 适配器。
+//
+// jdtls 基于 Eclipse JDT LS，需 JDK 21 + java -jar 启动（非单二进制）；JVM 冷启动
+// 与 bundle 解析在容器/CI 内首启偏重，默认超时放宽到 30s（其余 LSP 多为 10–20s）。
 func NewJDTLSAdapter() *LSPAdapter {
-	return NewLSPAdapter("jdtls", "jdtls", nil, "java", 15*time.Second)
+	return NewLSPAdapter("jdtls", "jdtls", nil, "java", 30*time.Second)
 }
 
 // NewClangdAdapter 创建 clangd 适配器。
