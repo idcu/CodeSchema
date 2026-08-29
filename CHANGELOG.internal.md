@@ -30,6 +30,20 @@
 - 文档同步：DEV_PROGRESS.md（B8 遗留项 [ ]→[x] + 量化口径）、README.md（检索低置信度过滤小节）、CHANGELOG.internal.md（本记录）。
 - 遗留：纯 FTS（`exact`）模式的 `MinScore` 基于相对归一化得分，作绝对阈值须谨慎（已在 README 注明）。
 
+### Commit 132: docs(s3): S3 周期性守护首周期——文档一致性修复（R1）+ 版本/合规核对（R3/T4）
+
+- 背景：B8（Commit 131）收口后，DEV_PROGRESS 全部勾选，特征阶段结束，转入 S0 协议 **S3 周期性守护**。本提交为首个 S3 周期增量报告，仅修文档态滞后、不改动代码。
+
+- **R1 文档一致性（修复）**：
+  - `analysis/2026-08-29-fastcontext-analysis.md`：B8 状态表原 `⏸ 未做`（line 139）与代码态矛盾 → 补 B8 ✅ 行（line 138，落地位置 = `Search`/`Service.SearchWithOptions` 的 `MinScore` 量化阈值 + `trim_reason=below_threshold` 回传）+ 修订记录补正（line 153）；
+  - `docs/1-生产层/开发文档/11-配置部署与路线图.md:179`：风险表「语义检索未落地」与已落地事实矛盾 → 更正为「已落地（历史风险已解除）」，注明 P6/P6_2 + Recall@1=1.00。
+- **R3 版本一致性（核对）**：`go.mod` 对 `gitee.com/idcu-go/{pathsafe,trim,ttlcache}` 锁定 `v0.1.0`（与 Commit 130 发布 tag 一致），并保留 `replace => ../idcu-go/*` 本地开发路径；复测 `GOWORK=off go build ./...` = 0，确认本地 replace 源可编译、无偏离。
+- **T4 合规（核对）**：B8 新增公共 API（`SearchWithOptions` / `SearchOutcome` / `SearchResult.Confidence`）已文档化、向后兼容、双消费者（HTTP+MCP）接线、无 secret、复用 chromem 余弦+FTS 归一化无复制；三 idcu-go 模块纯标准库零依赖、v0.1.0 合规。本周期无新增公共抽象抽取。
+- **R2 潜能点亮（核对）**：B1–B9 全落地，无新增 planned 候选；唯一历史待拍板项 B8 已闭环。
+- 验证：`go build ./...` = 0；`go test ./internal/search/... ./internal/service/... ./internal/server/... -short -count=1` = ok（含 B8 8 组）；仅文档改动，无代码回归风险。
+- 文档同步：analysis/.../fastcontext-analysis.md（B8 状态更正 + 修订记录）、11-配置部署与路线图.md（语义检索风险更正）、docs/4-决策层/S3-守护报告-2026-08-29.md（本周期增量报告）、CHANGELOG.internal.md（本记录）。
+- 遗留（待拍板，非本次范围）：① 纯 FTS `min_score` 绝对尺度化（IDF/BM25 归一）；② code-schema 自身首个 `v*` tag 就绪后回填 版本发布说明.md。
+
 ### Commit 130: ci(deps): idcu-go 三模块发布 v0.1.0（push + tag）+ CI/Release 检出步骤 + Docker 按 tag 拉取
 
 - 背景：Commit 129 把 `trim` / `ttlcache` / `pathsafe` 抽成 idcu-go 公共模块后，`go.mod` 以
