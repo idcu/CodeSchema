@@ -39,10 +39,11 @@ import (
 // 注册策略：
 //  1. tree-sitter 适配器始终注册（30 语言正则，零依赖兜底）；
 //  2. 配置 parser.lsp.enabled=true 且系统存在对应语言服务器时，注册
-//     gopls/jdtls/clangd/rust-analyzer 适配器（FallbackParser 包装：LSP 失败自动回退 tree-sitter）；
+//     gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server 适配器
+//     （FallbackParser 包装：LSP 失败自动回退 tree-sitter）；
 //  3. SCIP / CodeGraph 适配器按配置注册（可选），同样是「高精度优先、失败回退」。
 //
-// 语言优先级（高精度优先）：LSP(go/java/cpp) > SCIP > CodeGraph > tree-sitter。
+// 语言优先级（高精度优先）：LSP(go/java/cpp/py/ts/rust) > SCIP > CodeGraph > tree-sitter。
 func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) *parser.Registry {
 	reg := parser.NewRegistry()
 
@@ -57,6 +58,8 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 			lspadapter.NewJDTLSAdapter(),
 			lspadapter.NewClangdAdapter(),
 			lspadapter.NewRustAnalyzerAdapter(),
+			lspadapter.NewPyrightAdapter(),
+			lspadapter.NewTSLanguageServerAdapter(),
 		}
 		registered := 0
 		for _, la := range lspAdapters {
@@ -99,8 +102,8 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 	reg.SetPriority("go", []string{"gopls", "codegraph", "scip", "treesitter"})
 	reg.SetPriority("java", []string{"jdtls", "codegraph", "scip", "treesitter"})
 	reg.SetPriority("cpp", []string{"clangd", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("ts", []string{"codegraph", "scip", "treesitter"})
-	reg.SetPriority("py", []string{"codegraph", "scip", "treesitter"})
+	reg.SetPriority("ts", []string{"typescript-language-server", "codegraph", "scip", "treesitter"})
+	reg.SetPriority("py", []string{"pyright-langserver", "codegraph", "scip", "treesitter"})
 	reg.SetPriority("rust", []string{"rust-analyzer", "codegraph", "scip", "treesitter"})
 
 	return reg

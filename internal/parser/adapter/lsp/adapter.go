@@ -183,6 +183,25 @@ func NewRustAnalyzerAdapter() *LSPAdapter {
 	return NewLSPAdapter("rust-analyzer", "rust-analyzer", nil, "rust", 20*time.Second)
 }
 
+// NewPyrightAdapter 创建 pyright 适配器（Python）。
+//
+// pyright 是基于 Node 的 Python 语言服务器（类型检查 + LSP），需 node 运行时。
+// 其 LSP 入口二进制为 `pyright-langserver`（而非 `pyright` CLI），以 --stdio 进入 LSP 模式；
+// `pyright` 直接跑会卡在 initialize。通用 documentSymbol 映射覆盖 Python class(5)/method(6)/function(12)，
+// 无需虚拟环境即可抽取单文件符号（类型错误仅影响诊断，不影响符号提取）。
+func NewPyrightAdapter() *LSPAdapter {
+	return NewLSPAdapter("pyright-langserver", "pyright-langserver", []string{"--stdio"}, "py", 20*time.Second)
+}
+
+// NewTSLanguageServerAdapter 创建 typescript-language-server 适配器（TypeScript）。
+//
+// typescript-language-server 基于 Node，以 --stdio 进入 LSP 模式；需 typescript 同伴安装。
+// 通用 documentSymbol 映射覆盖 TS class(5)/method(6)/function(12)/interface(24)，
+// 单文件即可抽取符号（tsconfig 缺失时退化为单文件语义，不影响符号提取）。
+func NewTSLanguageServerAdapter() *LSPAdapter {
+	return NewLSPAdapter("typescript-language-server", "typescript-language-server", []string{"--stdio"}, "ts", 20*time.Second)
+}
+
 // Name 返回适配器唯一标识。
 func (a *LSPAdapter) Name() string { return a.name }
 

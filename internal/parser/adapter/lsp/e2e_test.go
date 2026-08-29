@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -323,4 +324,155 @@ pub enum Op {
 		t.Fatalf("write Cargo.toml: %v", err)
 	}
 	return toLSPPath(libRS), abs
+}
+
+// TestLSPAdapter_RealPyright 使用真实 pyright 验证 LSP 适配器端到端（Python 为 D 扩展语言）。
+//
+// pyright 可能未安装（需 node 运行时），缺失时优雅跳过（CI 保持绿色）。提供了
+// pyright + node 的 Docker 测试镜像可真正验证 Python 高精度解析路径。
+func TestLSPAdapter_RealPyright(t *testing.T) {
+	if ResolveServerPath("pyright-langserver") == "" {
+		t.Skip("pyright-langserver not discoverable via PATH or GOPATH/bin; skipping real LSP validation (install via 'npm install -g pyright')")
+	}
+
+	src := `class Calculator:
+    precision: int = 0
+
+    def add(self, a: int, b: int) -> int:
+        return a + b
+
+    def sub(self, a: int, b: int) -> int:
+        return a - b
+`
+	path := writeTempSource(t, ".py", src)
+
+	a := NewPyrightAdapter()
+	if err := a.Init(context.Background(), map[string]any{"rootUri": dirURI(path)}); err != nil {
+		t.Fatalf("pyright Init failed: %v", err)
+	}
+	defer a.Close()
+
+	ir := parseWithRetry(t, a, path, 1)
+	if ir.Source != "pyright-langserver" {
+		t.Errorf("source = %q, want pyright-langserver", ir.Source)
+	}
+	if len(ir.Classes) < 1 {
+		t.Fatalf("expected >=1 class from pyright, got %d", len(ir.Classes))
+	}
+	classNames := make([]string, 0, len(ir.Classes))
+	for _, c := range ir.Classes {
+		classNames = append(classNames, c.Name)
+	}
+	if !containsName(classNames, "Calculator") {
+		t.Errorf("expected class 'Calculator' in %v", classNames)
+	}
+	if len(ir.Methods) < 1 {
+		t.Fatalf("expected >=1 method from pyright, got %d", len(ir.Methods))
+	}
+	names := make([]string, 0, len(ir.Methods))
+	for _, m := range ir.Methods {
+		names = append(names, m.Name)
+	}
+	if !containsName(names, "add") {
+		t.Errorf("expected method 'add' in %v", names)
+	}
+}
+
+// linkGlobalTypescript 将全局安装的 typescript 软链到被测工程的 node_modules，
+// 供 typescript-language-server 在其 peerDep 解析路径内找到 tsserver。
+//
+// typescript-language-server 把 typescript 列为 peerDep，必须能在「被分析工程」的
+// node_modules 内解析到 typescript（全局安装 + NODE_PATH 均不被采纳，这是此前 Docker
+// e2e 报 "Could not find a valid TypeScript installation" 的根因）。本机未装
+// typescript-language-server 时 e2e 直接 skip，不会执行到此；Docker 测试镜像以
+// `npm install -g typescript` 装全局，npm root -g 即全局 node_modules 目录。
+//
+// 全局 typescript 不存在时本函数静默 no-op（不影响其它分支，亦不会污染本机工程）。
+func linkGlobalTypescript(t *testing.T, projDir string) {
+	t.Helper()
+	// 解析 npm 全局根（如 /usr/local/lib/node_modules）
+	out, err := exec.Command("npm", "root", "-g").Output()
+	if err != nil {
+		t.Logf("linkGlobalTypescript: npm root -g failed (%v), skipping symlink", err)
+		return
+	}
+	globalRoot := strings.TrimSpace(string(out))
+	globalTS := filepath.Join(globalRoot, "typescript")
+	if fi, err := os.Stat(globalTS); err != nil || !fi.IsDir() {
+		t.Logf("linkGlobalTypescript: global typescript not found at %s, skipping symlink", globalTS)
+		return
+	}
+	nm := filepath.Join(projDir, "node_modules")
+	if err := os.MkdirAll(nm, 0o755); err != nil {
+		t.Fatalf("linkGlobalTypescript: mkdir node_modules: %v", err)
+	}
+	link := filepath.Join(nm, "typescript")
+	// 已存在则跳过（避免重复软链或覆盖真实安装）
+	if _, err := os.Lstat(link); err == nil {
+		return
+	}
+	if err := os.Symlink(globalTS, link); err != nil {
+		t.Fatalf("linkGlobalTypescript: symlink %s -> %s: %v", link, globalTS, err)
+	}
+	t.Logf("linkGlobalTypescript: linked %s -> %s", link, globalTS)
+}
+
+// TestLSPAdapter_RealTSLanguageServer 使用真实 typescript-language-server 验证 LSP 适配器端到端
+// （TypeScript 为 D 扩展语言）。
+//
+// typescript-language-server 可能未安装（需 node 运行时），缺失时优雅跳过（CI 保持绿色）。
+// 提供了 typescript-language-server + node 的 Docker 测试镜像可真正验证 TS 高精度解析路径。
+func TestLSPAdapter_RealTSLanguageServer(t *testing.T) {
+	if ResolveServerPath("typescript-language-server") == "" {
+		t.Skip("typescript-language-server not discoverable via PATH or GOPATH/bin; skipping real LSP validation (install via 'npm install -g typescript-language-server typescript')")
+	}
+
+	src := `export class Calculator {
+    precision: number = 0;
+
+    add(a: number, b: number): number {
+        return a + b;
+    }
+
+    sub(a: number, b: number): number {
+        return a - b;
+    }
+}
+`
+	path := writeTempSource(t, ".ts", src)
+	// ts-language-server 把 typescript 列为 peerDep，需在被分析工程内可解析；
+	// Docker 测试镜像将 typescript 装为全局，这里软链到工程 node_modules 供验证
+	// （本机 skip 不会执行到此；仅 Docker 内 typescript 全局路径存在时生效）。
+	linkGlobalTypescript(t, filepath.Dir(lspPathToOSPath(path)))
+
+	a := NewTSLanguageServerAdapter()
+	if err := a.Init(context.Background(), map[string]any{"rootUri": dirURI(path)}); err != nil {
+		t.Fatalf("typescript-language-server Init failed: %v", err)
+	}
+	defer a.Close()
+
+	ir := parseWithRetry(t, a, path, 1)
+	if ir.Source != "typescript-language-server" {
+		t.Errorf("source = %q, want typescript-language-server", ir.Source)
+	}
+	if len(ir.Classes) < 1 {
+		t.Fatalf("expected >=1 class from typescript-language-server, got %d", len(ir.Classes))
+	}
+	classNames := make([]string, 0, len(ir.Classes))
+	for _, c := range ir.Classes {
+		classNames = append(classNames, c.Name)
+	}
+	if !containsName(classNames, "Calculator") {
+		t.Errorf("expected class 'Calculator' in %v", classNames)
+	}
+	if len(ir.Methods) < 1 {
+		t.Fatalf("expected >=1 method from typescript-language-server, got %d", len(ir.Methods))
+	}
+	names := make([]string, 0, len(ir.Methods))
+	for _, m := range ir.Methods {
+		names = append(names, m.Name)
+	}
+	if !containsName(names, "add") {
+		t.Errorf("expected method 'add' in %v", names)
+	}
 }

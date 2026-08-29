@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 141: feat(lsp): 新增 pyright + typescript-language-server 适配器与端到端 e2e，Docker 内实跑验证 D 扩展
+
+- 背景：用户「全量推进实施」继续推进 D（LSP 多语言高精度）。Commit 140 已实跑验证 rust-analyzer；D 剩余两个「单文件即可解析、无需工程上下文」的语言服务器为 **pyright（Python）** 与 **typescript-language-server（TypeScript）**——均基于 Node，本机/CI 未装故此前仅接线未验证。沿用「调试测试可在 docker 中进行」授权，在已落库的 `cs-lsp-test` 镜像内装 node 运行时后实跑验证。
+- 改动：
+  - `adapter.go`：新增 `NewPyrightAdapter()`（命令 `pyright-langserver --stdio`，lang=py，超时 20s）+ `NewTSLanguageServerAdapter()`（命令 `typescript-language-server --stdio`，lang=ts，超时 20s）。
+    - **坑 1**：pyright 的 LSP 入口二进制是 `pyright-langserver`（非 `pyright` CLI）——用 `pyright` 跑会卡在 initialize 触发 20s 超时失败；已修正为 `pyright-langserver`。
+    - **坑 2**：typescript-language-server 把 `typescript` 列为 **peerDep**，必须能在其「被分析工程」的 `node_modules` 内解析到 `typescript`，全局安装 + `NODE_PATH` 均不被采纳（这是首跑报 "Could not find a valid TypeScript installation" 的根因）。
+  - `runtime.go`：① `lspAdapters` slice 注册 `NewPyrightAdapter()` + `NewTSLanguageServerAdapter()`；② `SetPriority("py", ["pyright-langserver","codegraph","scip","treesitter"])`（正确含 LSP）；③ **修复 `SetPriority("ts", ...)` 漏 `typescript-language-server` 的真实 bug**——`Registry.Select` 按 priorityMap 白名单遍历，漏列则 ts 语言即便装了 tsls 也永不被选中；改为 `["typescript-language-server","codegraph","scip","treesitter"]`；④ 顶部注释 LSP 覆盖语言由 `go/java/cpp` 更正为 `go/java/cpp/py/ts/rust`。
+  - `e2e_test.go`：新增 `TestLSPAdapter_RealPyright`（跳过门槛 `ResolveServerPath("pyright-langserver")==""`，断言 Calculator 类 + add 方法）+ `TestLSPAdapter_RealTSLanguageServer`（跳过门槛 `ResolveServerPath("typescript-language-server")==""`）；新增 `linkGlobalTypescript(t, projDir)` helper——`npm root -g` 解析全局 typescript，软链进被测工程 `node_modules/typescript`（全局缺失则静默 no-op）；回加 `"os/exec"` import（Commit 139 移除，此处需 `npm` 解析路径）。
+  - `docker/lsp-test/Dockerfile`：`npm install -g pyright typescript-language-server` **`typescript@5`**（typescript 7.0 为 Go 原生重写、已移除 `tsserver.js`，而 typescript-language-server@6 依赖经典 JS 版 `tsserver.js` → 钉 5.x，镜像实测 5.9.3 含 `lib/tsserver.js`）。
+- 验证：
+  - 主机（未装 pyright/tsls）：`go build ./...`=0；`go vet ./...`=0；`go test -short ./...`→exit 0、NO FAIL（pyright/ts e2e SKIP；gopls/clangd e2e PASS）。单测 verbose 确认 RealPyright/RealTSLanguageServer 均为 SKIP、RealGopls/RealClangd PASS。
+  - Docker（cs-lsp-test:latest，卷挂载 code-schema+idcu-go+module cache）：`TestLSPAdapter_RealPyright`→**PASS(0.65s)**；`TestLSPAdapter_RealTSLanguageServer`→**PASS(1.76s)**（symlink 生效、tsserver.js 解析成功）；`TestLSPAdapter_RealGopls`→PASS(0.23s)；`TestLSPAdapter_RealRustAnalyzer`→PASS(0.03s)；`TestLSPAdapter_RealClangd`→SKIP（镜像未装 clangd，符合预期）。LSP 六语言中四语言（go/py/ts/rust）已在 Docker/主机实跑验证。
+  - 全仓 short 套件 Docker：除 `internal/agentbench` 的 `TestRunMulti_RepoHintFilter` 在 Docker 内 FAIL 外其余全 ok。**经干净 HEAD(bcc91cd) git worktree 在 Docker 内复现，确认该失败为 Docker 环境特有预存问题（repo1 active tasks=1 want 5，与本次改动无关，agentbench 走 tree-sitter 未触碰），主机 PASS**——不构成本次 regression，已单列待后续排查（见下「遗留」）。
+- 结论：D 的 LSP 语言服务器覆盖推进到 go/java/cpp/py/ts/rust 六语言全部接线；其中 go/py/ts/rust 已在 Docker 或主机真实拉起语言服务器端到端验证抽取符号，cpp(jangd)/java(jdtls) 代码路径已接线但镜像/本机未装对应运行时 → 优雅降级 SKIP。本轮额外**修复 `SetPriority("ts")` 遗漏 typescript-language-server 的真实选择 bug**，确保 tsls 装好即被 `ts` 语言正确选中。
+- 遗留：① `TestRunMulti_RepoHintFilter` Docker 环境失败（预存、非本次引入，建议另开排查：疑似 tree-sitter 并行符号预检在 Docker 绑定挂载 FS / 调度下非确定性，或依赖某 Docker 缺失的外部条件）；② jdtls/clangd 仍未纳入 `cs-lsp-test` 镜像（如需 Java/C++ 实跑验证，镜像补 `npm i -g vscode-java-language-server`/apt 装 clangd 后重复本验证流程）。
+- 文档同步：CHANGELOG.internal.md（本记录）+ `docker/lsp-test/Dockerfile`；SKILL.md 待补 pyright-langserver / typescript@5 两坑（见下轮）。
+
 ### Commit 140: feat(lsp): 新增 rust-analyzer 适配器 + 端到端 e2e 验证（D 扩展，Docker 内实跑通过）
 
 - 背景：用户「全量推进实施，调试测试可以在docker中进行」——解锁 D 的环境阻塞项。原 D 仅接线 gopls/jdtls/clangd（jdtls/pyright/ts 等运行时缺失），本机 rust-analyzer 亦未装。最低摩擦、无需工程上下文即可抽取符号的新语言服务器 = **rust-analyzer**（单静态二进制）。
