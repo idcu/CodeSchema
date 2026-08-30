@@ -1,8 +1,9 @@
 package config
 
 import (
+	cfgconv "gitee.com/idcu-go/config"
 	"encoding/json"
-	"strconv"
+
 )
 
 // applyToConfig 将解析后的 map 数据合并到默认配置中。
@@ -183,12 +184,12 @@ func applyAI(cfg *AIConfig, m map[string]any) {
 		cfg.Model = v
 	}
 	if v, ok := m["budget_per_scan"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.BudgetPerScan = n
 		}
 	}
 	if v, ok := m["budget_per_query"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.BudgetPerQuery = n
 		}
 	}
@@ -205,7 +206,7 @@ func applyServer(cfg *ServerConfig, m map[string]any) {
 		cfg.AuthToken = v
 	}
 	if v, ok := m["rate_limit"]; ok {
-		if n, ok := toInt(v); ok && n >= 0 {
+		if n, ok := cfgconv.ToInt(v); ok && n >= 0 {
 			cfg.RateLimit = n
 		}
 	}
@@ -218,7 +219,7 @@ func applyWatcher(cfg *WatcherConfig, m map[string]any) {
 		}
 	}
 	if v, ok := m["debounce_ms"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.DebounceMs = n
 		}
 	}
@@ -234,7 +235,7 @@ func applyWatcher(cfg *WatcherConfig, m map[string]any) {
 		}
 	}
 	if v, ok := m["batch_size"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.BatchSize = n
 		}
 	}
@@ -242,34 +243,24 @@ func applyWatcher(cfg *WatcherConfig, m map[string]any) {
 
 func applyScanner(cfg *ScannerConfig, m map[string]any) {
 	if v, ok := m["workers"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.Workers = n
 		}
 	}
 	if v, ok := m["file_size_limit_mb"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.FileSizeLimitMB = n
 		}
 	}
 	if v, ok := m["line_count_limit"]; ok {
-		if n, ok := toInt(v); ok {
+		if n, ok := cfgconv.ToInt(v); ok {
 			cfg.LineCountLimit = n
 		}
 	}
 }
 
 func toInt(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case float64:
-		return int(n), true
-	case string:
-		if i, err := strconv.Atoi(n); err == nil {
-			return i, true
-		}
-	}
-	return 0, false
+	return cfgconv.ToInt(v)
 }
 
 // jsonUnmarshal 是 json.Unmarshal 的封装，用于 JSON 配置解析。

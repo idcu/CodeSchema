@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/idcu/codeschema/internal/log"
+	log "gitee.com/idcu-go/log"
 )
 
 // 共享中间件：CORS 与 panic 恢复。

@@ -13,7 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/idcu/codeschema/internal/robust"
+	"gitee.com/idcu-go/recovery"
 	"github.com/idcu/codeschema/internal/scheduler"
 	"github.com/idcu/codeschema/internal/scanner"
 )
@@ -87,7 +87,7 @@ func (pw *PollWatcher) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			robust.SafeCall(func() {
+			recovery.SafeCall(func() {
 				pw.poll(ctx)
 			})
 		}
@@ -216,7 +216,7 @@ func (fw *FsWatcher) Start(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			robust.SafeCall(func() {
+			recovery.SafeCall(func() {
 				fw.handleEvent(ctx, event)
 			})
 		case err, ok := <-fw.watcher.Errors:

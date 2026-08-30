@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"gitee.com/idcu-go/pathsafe"
 )
 
 // fileLock Windows 平台的进程锁（简化实现：基于独占创建锁文件的原子性）。
@@ -22,7 +22,7 @@ type fileLock struct {
 
 // acquireLock 获取指定目录的进程锁。Windows 简化实现。
 func acquireLock(rootDir string) (*fileLock, error) {
-	if err := fsperm.MkdirAll(rootDir); err != nil {
+	if err := pathsafe.MkdirAll(rootDir); err != nil {
 		return nil, fmt.Errorf("mkdir lock dir: %w", err)
 	}
 	path := filepath.Join(rootDir, "store.lock")

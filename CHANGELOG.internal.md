@@ -6,6 +6,26 @@
 
 ## 提交记录
 
+### Commit 143: refactor(common): 通用模块深度抽取归并落地（retry/metrics/log/trace/graceful/recovery/config 迁移 idcu-go）
+
+- 背景：按 `analysis/2026-08-30-common-modules-extract-audit.md` §7 已确认决策全量推进（用户拍板）：「trace 对齐 OTel、graceful 拆两包、fsutil 并入 pathsafe、metrics 回填、log 先走草案」。取向以 idcu-go 为准，改 idcu-go 即同步改 code-schema 调用。
+- 改动（code-schema 侧）：
+  - `internal/robust` 删除：`retry` → `gitee.com/idcu-go/retry`（4 处 `Do`）；`graceful` → `gitee.com/idcu-go/graceful`；`recovery` → `gitee.com/idcu-go/recovery`（watcher/scheduler 切换）。
+  - `internal/metrics` 删除：8 处改用 `gitee.com/idcu-go/metrics` 全局便捷 API（`RegisterCounter/IncCounter/RegisterGauge/SetGauge/Render`）。
+  - `internal/log` 删除：12 处 import 切换为 `gitee.com/idcu-go/log`（包名 `logutil`，alias `log`；mcp.go 用 alias `slog`）。基于 slog 的模块化 `WithModule/Init/L()/Debug/Info/Warn/Error` 形态，草案 α（API 可破）。
+  - `internal/trace` 删除：3 处切换为 `gitee.com/idcu-go/trace`（trace.go/http.go/scanner.go），API 形态对齐 OTel（`Tracer.Start`/`Span.End/AddEvent/SetTag/StartChild`/`Trace`），轻量纯 stdlib 实现 + `*slog.Logger` 注入（用户确认不引入重 OTel SDK）。
+  - `internal/config`：通用片段 `toInt` 回灌 `gitee.com/idcu-go/config`（导出 `ToInt`），本地 `toInt` 改为薄封装委托（alias `cfgconv`，避免与包内 `cfg` 变量名冲突）；领域结构（Config/Tenant/…）全部保留。
+  - `go.mod`：新增 require+replace `{retry, graceful, recovery, metrics, log, trace, config}`（双模式接线，与既有 trim/ttlcache/pathsafe 一致）；`go mod tidy` 补 go.sum。
+- idcu-go 侧新增/更新：
+  - 新模块 `trace`（go.mod + trace.go + trace_test.go + README 待补），加入 go.work。
+  - `log` 草案 α：module.go 补包级 `Debug/Info/Warn/Error` 便捷函数后 module_test.go 全过。
+  - `config` 新增 `toint.go`（`ToInt`）。
+  - scheduler 档二 planned 登记：`meta/modules/modules.yaml` infra 段加 planned 条目（触发条件=第二真实消费方）。
+- 验证：
+  - code-schema：`go build ./...`=0；`go test ./...` 全 ok；`go test -race ./internal/... ./cmd/...` 全 ok。
+  - idcu-go：`log/trace/config/metrics/graceful/recovery/pathsafe/retry` 单测全 ok。
+- 文档同步：README.md 依赖清单扩充、CHANGELOG.internal.md（本记录）、审计文档 §7 决策打 ✅ + 执行记录；README/COVERAGE 台账后续按现状刷新。
+
 ### Commit 142: feat(lsp): 新增 jdtls(Java) 端到端 e2e + Docker 镜像补齐 clangd/jdtls，LSP 六语言全部实跑验证（D 闭环）
 
 - 背景：用户「全量推进实施下一步选项」——继续 D，闭环 option 1（jdtls/clangd 纳入 `cs-lsp-test` 镜像实跑）。Commit 141 后 D 已接线 go/java/cpp/py/ts/rust 六语言，但 java(jdtls)/cpp(clangd) 代码路径已接线、镜像/本机未装对应运行时 → e2e SKIP。本轮补齐两者运行时并在 Docker 内实跑验证。

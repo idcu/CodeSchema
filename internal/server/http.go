@@ -15,11 +15,11 @@ import (
 	"time"
 
 	cerrors "github.com/idcu/codeschema/internal/errors"
-	"github.com/idcu/codeschema/internal/log"
-	"github.com/idcu/codeschema/internal/metrics"
+	log "gitee.com/idcu-go/log"
+	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
-	"github.com/idcu/codeschema/internal/trace"
+	trace "gitee.com/idcu-go/trace"
 )
 
 // init 注册 HTTP 服务器模块的监控指标。

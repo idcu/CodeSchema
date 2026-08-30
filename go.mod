@@ -16,7 +16,21 @@ require (
 )
 
 require (
+	gitee.com/idcu-go/auth v0.1.0 // indirect
+	gitee.com/idcu-go/httputil v0.2.0 // indirect
+	gitee.com/idcu-go/timefmt v0.1.0 // indirect
+	gitee.com/idcu-go/yamlutil v0.1.0 // indirect
+)
+
+require (
+	gitee.com/idcu-go/config v0.1.0
+	gitee.com/idcu-go/graceful v0.1.0
+	gitee.com/idcu-go/log v0.1.0
+	gitee.com/idcu-go/metrics v0.1.0
 	gitee.com/idcu-go/pathsafe v0.1.0
+	gitee.com/idcu-go/recovery v0.1.0
+	gitee.com/idcu-go/retry v0.1.0
+	gitee.com/idcu-go/trace v0.1.0
 	gitee.com/idcu-go/trim v0.1.0
 	gitee.com/idcu-go/ttlcache v0.1.0
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -41,3 +55,17 @@ replace gitee.com/idcu-go/trim => ../idcu-go/trim
 replace gitee.com/idcu-go/ttlcache => ../idcu-go/ttlcache
 
 replace gitee.com/idcu-go/pathsafe => ../idcu-go/pathsafe
+
+replace gitee.com/idcu-go/retry => ../idcu-go/retry
+
+replace gitee.com/idcu-go/graceful => ../idcu-go/graceful
+
+replace gitee.com/idcu-go/recovery => ../idcu-go/recovery
+
+replace gitee.com/idcu-go/metrics => ../idcu-go/metrics
+
+replace gitee.com/idcu-go/log => ../idcu-go/log
+
+replace gitee.com/idcu-go/trace => ../idcu-go/trace
+
+replace gitee.com/idcu-go/config => ../idcu-go/config

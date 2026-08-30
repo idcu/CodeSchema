@@ -19,7 +19,7 @@ import (
 	"sync"
 
 	"github.com/idcu/codeschema/internal/config"
-	"github.com/idcu/codeschema/internal/metrics"
+	"gitee.com/idcu-go/metrics"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"

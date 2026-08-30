@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/idcu/codeschema/internal/metrics"
+	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/parser"
 )
 

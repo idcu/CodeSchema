@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/idcu/codeschema/internal/ai"
-	"github.com/idcu/codeschema/internal/log"
-	"github.com/idcu/codeschema/internal/metrics"
+	log "gitee.com/idcu-go/log"
+	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/store"
-	"github.com/idcu/codeschema/internal/trace"
+	trace "gitee.com/idcu-go/trace"
 )
 
 // init 注册分析器模块的监控指标。

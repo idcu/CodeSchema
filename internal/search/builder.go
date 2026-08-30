@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/idcu/codeschema/internal/fsperm"
-	"github.com/idcu/codeschema/internal/log"
+	"gitee.com/idcu-go/pathsafe"
+	log "gitee.com/idcu-go/log"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/vector"
 )
@@ -402,7 +402,7 @@ func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
 
 	// 保存一次（立即执行）
 	dir := filepath.Dir(path)
-	if err := fsperm.MkdirAll(dir); err == nil && b.idf != nil {
+	if err := pathsafe.MkdirAll(dir); err == nil && b.idf != nil {
 		b.idf.SaveIDF(path) // 忽略错误，后续定时保存会重试
 	}
 
@@ -415,7 +415,7 @@ func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
 			case <-ticker.C:
 				dir := filepath.Dir(path)
 				if b.idf != nil {
-				if err := fsperm.MkdirAll(dir); err != nil {
+				if err := pathsafe.MkdirAll(dir); err != nil {
 					logger.Warn("auto save IDF: mkdir", "dir", dir, "error", err)
 					continue
 				}

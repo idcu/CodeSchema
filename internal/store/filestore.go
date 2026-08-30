@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"gitee.com/idcu-go/pathsafe"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -84,7 +84,7 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 		fs.rootDir = "./data"
 	}
 
-	if err := fsperm.MkdirAll(fs.rootDir); err != nil {
+	if err := pathsafe.MkdirAll(fs.rootDir); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
@@ -621,7 +621,7 @@ func (fs *FileStore) saveToDisk() error {
 	tmpPath := filepath.Join(fs.rootDir, "store.json.tmp")
 	finalPath := filepath.Join(fs.rootDir, "store.json")
 
-	if err := fsperm.WriteFile(tmpPath, b); err != nil {
+	if err := pathsafe.WriteFile(tmpPath, b); err != nil {
 		return fmt.Errorf("write temp store: %w", err)
 	}
 	return os.Rename(tmpPath, finalPath)

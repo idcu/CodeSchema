@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/idcu/codeschema/internal/errors"
-	"github.com/idcu/codeschema/internal/metrics"
+	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/idcu/codeschema/internal/robust"
+	"gitee.com/idcu-go/recovery"
 )
 
 // Scheduler 是事件调度器，负责防抖合并与排队。
@@ -116,7 +116,7 @@ func (s *Scheduler) Start(ctx context.Context, processFn func(context.Context, s
 				case <-ctx.Done():
 					return
 				default:
-					robust.SafeCall(func() {
+					recovery.SafeCall(func() {
 						_ = processFn(ctx, path) // 错误已由 processFn 内部处理
 					})
 				}

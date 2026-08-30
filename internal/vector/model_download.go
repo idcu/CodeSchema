@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/idcu/codeschema/internal/log"
+	log "gitee.com/idcu-go/log"
 )
 
 // localSourcePath 判断 URL 是否为本地分发源并返回本地路径。

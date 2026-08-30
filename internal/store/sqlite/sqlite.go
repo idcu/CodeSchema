@@ -16,7 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"gitee.com/idcu-go/pathsafe"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -840,7 +840,7 @@ func ensureDir(dir string) error {
 	if dir == "" {
 		return nil
 	}
-	return fsperm.MkdirAll(dir)
+	return pathsafe.MkdirAll(dir)
 }
 
 // BulkUpsert 批量入库多个文件的 IR（语义同逐文件 UpsertIR，但置于单事务 +

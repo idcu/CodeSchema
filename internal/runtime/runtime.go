@@ -19,7 +19,6 @@ import (
 	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/config"
-	"github.com/idcu/codeschema/internal/fsperm"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter/codegraph"
 	lspadapter "github.com/idcu/codeschema/internal/parser/adapter/lsp"
@@ -217,7 +216,7 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 		}
 		// chromem 库自管文件权限（默认受 umask 影响），此处纵深收敛：
 		// 父目录收紧 0700、已存在的持久化文件收紧 0600，与 fsperm 其他索引数据一致。
-		_ = fsperm.MkdirAll(filepath.Dir(persist))
+		_ = pathsafe.MkdirAll(filepath.Dir(persist))
 		if fi, err := os.Stat(persist); err == nil && fi.Mode().IsRegular() {
 			_ = os.Chmod(persist, 0o600)
 		}
@@ -346,7 +345,7 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	WithImpactAnalyzer(svc, st)
 	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
+	if err := pathsafe.MkdirAll(filepath.Dir(idfFile)); err == nil {
 		if err := builder.SaveIDF(idfFile); err != nil {
 			log.Printf("WARN: save IDF dictionary: %v", err)
 		}

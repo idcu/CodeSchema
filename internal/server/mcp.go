@@ -12,7 +12,7 @@ import (
 	"time"
 
 	cerrors "github.com/idcu/codeschema/internal/errors"
-	slog "github.com/idcu/codeschema/internal/log"
+	slog "gitee.com/idcu-go/log"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
 )

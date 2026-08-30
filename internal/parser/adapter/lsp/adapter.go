@@ -29,10 +29,10 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/errors"
-	"github.com/idcu/codeschema/internal/log"
-	"github.com/idcu/codeschema/internal/metrics"
+	log "gitee.com/idcu-go/log"
+	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/parser"
-	"github.com/idcu/codeschema/internal/robust"
+	"gitee.com/idcu-go/retry"
 )
 
 // LSPAdapter 通用 LSP 适配器，通过 JSON-RPC 2.0 与 LSP 服务器通信。
@@ -449,24 +449,23 @@ func (a *LSPAdapter) maybeReportEmptySymbols(path, text string, ir *parser.IRDoc
 func (a *LSPAdapter) requestWithRetry(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	var result json.RawMessage
 	var calls int
-	err := robust.Retry(ctx, func(c context.Context) error {
+	err := retry.Do(ctx, func() error {
 		calls++
 		if calls > 1 {
 			metrics.IncCounter("lsp_retries_total", method)
 			a.logger.Warn("retrying LSP request after transient failure",
 				"server", a.name, "method", method, "attempt", calls)
 		}
-		r, e := a.sendRequest(c, method, params)
+		r, e := a.sendRequest(ctx, method, params)
 		if e != nil {
 			return e
 		}
 		result = r
 		return nil
 	},
-		robust.WithMaxAttempts(a.retryAttempts),
-		robust.WithBaseDelay(a.retryBaseDelay),
-		robust.WithMaxDelay(a.retryMaxDelay),
-		robust.WithRetryable(robust.RetryableError),
+		retry.WithMaxAttempts(a.retryAttempts),
+		retry.WithExponentialBackoff(a.retryBaseDelay, a.retryMaxDelay),
+		retry.WithRetryIf(retry.RetryableError),
 	)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/errors"
-	"github.com/idcu/codeschema/internal/log"
+	log "gitee.com/idcu-go/log"
 )
 
 // HTTPClientConfig OpenAI 兼容 Chat Completions 客户端的配置。

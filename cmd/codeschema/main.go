@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/idcu/codeschema/internal/config"
-	"github.com/idcu/codeschema/internal/robust"
+	gcm "gitee.com/idcu-go/graceful"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/scheduler"
@@ -89,8 +89,8 @@ Use "codeschema <command> -h" for more information about a command.
 	config.LoadFromEnv(cfg)
 
 	// 优雅关闭管理器（30s 全局超时）
-	graceful := robust.NewGracefulManager(30 * time.Second)
-	robust.ForceExitOnSecondSignal(graceful)
+	graceful := gcm.NewGracefulManager(30 * time.Second)
+	gcm.ForceExitOnSecondSignal(graceful)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/idcu/codeschema/internal/log"
-	"github.com/idcu/codeschema/internal/metrics"
+	log "gitee.com/idcu-go/log"
+	"gitee.com/idcu-go/metrics"
 )
 
 // FallbackParser 包装「高精度主适配器 + 兜底适配器」：

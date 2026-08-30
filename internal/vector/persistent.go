@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"gitee.com/idcu-go/pathsafe"
 )
 
 // PersistentStore 磁盘持久化的向量存储。
@@ -166,7 +166,7 @@ func (ps *PersistentStore) save() error {
 	if ps.filePath == "" {
 		return nil
 	}
-	if err := fsperm.MkdirAll(filepath.Dir(ps.filePath)); err != nil {
+	if err := pathsafe.MkdirAll(filepath.Dir(ps.filePath)); err != nil {
 		return fmt.Errorf("persistent: mkdir: %w", err)
 	}
 	data := persistentData{Vectors: ps.vecs, Contents: ps.contents}
@@ -174,7 +174,7 @@ func (ps *PersistentStore) save() error {
 	if err != nil {
 		return fmt.Errorf("persistent: marshal: %w", err)
 	}
-	if err := fsperm.WriteFile(ps.filePath, raw); err != nil {
+	if err := pathsafe.WriteFile(ps.filePath, raw); err != nil {
 		return fmt.Errorf("persistent: write: %w", err)
 	}
 	ps.dirties = 0

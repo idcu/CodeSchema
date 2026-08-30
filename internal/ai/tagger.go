@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/idcu/codeschema/internal/log"
+	log "gitee.com/idcu-go/log"
 	"github.com/idcu/codeschema/internal/store"
 )
 
