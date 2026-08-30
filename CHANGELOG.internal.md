@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 145: refactor(config): env-merge 通用化回灌 idcu-go/config.ApplyEnv，LoadFromEnv 改领域薄层
+
+- 背景：审计 §4 把 config 的 loader/env/watch 均判为通用片段，但此前只回灌了 include-loader、toInt、watch；env-merge 仍是本仓 ~130 行硬编码逐字段映射（CODESCHEMA_<SECTION>_<KEY>），领域绑定未收敛。本轮补齐。
+- 改动（idcu-go/config）：
+  - 新增 `env.go`：泛型反射 `ApplyEnv(prefix string, v any) error`——按 camelCase→UPPER_SNAKE 展开字段路径（含连续大写缩写识别：APIKey→API_KEY、ModelDownloadURL→MODEL_DOWNLOAD_URL、MCPAddr→MCP_ADDR、SCIP→SCIP），嵌套结构逐层下钻、匿名嵌入扁平化；类型安全解析（string 非空覆盖 / bool 容忍 1|t|true|yes 与 0|f|false|no / int 族拒绝负值 / uint / float）；`env:"-"` 标签显式排除；解析失败保留默认值；切片/map 自动跳过。
+  - 新增 `env_test.go`：6 用例（标量+嵌套/跳过 env-dash/非法与负值保留默认/布尔容忍/嵌入扁平化/非法入参报错）。
+- 改动（code-schema/internal/config）：
+  - `LoadFromEnv` 收敛为：领域特殊逻辑（CODESCHEMA_PRESET→ValidPreset+ApplyPreset，幂等）保留 + 其余字段委托 `cfgconv.ApplyEnv("CODESCHEMA", cfg)`；删除 ~125 行硬编码映射；`Preset` 字段加 `env:"-"` 排除出通用遍历；`strconv` 导入移除。
+  - 行为一致性：全部 28 个 env 变量映射名不变（命名算法与既有硬编码一致）；现有测试契约保持——字符串/整数/布尔覆盖、非法整数保留原值全部通过。边际差异（文档化）：int 从「>0 / >=0 混合」统一为「非负即接受」；bool 从「仅 true/1/yes（大小写敏感）」放宽为容忍解析（大小写不敏感，新增 no/f/0→false）。
+- 验证：
+  - idcu-go/config：`go test ./...` 全绿，覆盖率 83.3%（门禁 73 达标）。
+  - code-schema：`go build ./...`=0；`go vet ./...`=0；全包 `go test ./...` 全绿（config 包含 TestLoadFromEnv/TestLoadFromEnv_InvalidInt 通过）。
+- 说明：本提交未推 tag（config ApplyEnv 仍为草案，审计「待第二消费方再正式化」逻辑，与 watcher/graceful/recovery/trace 一致）。
+
 ### Commit 144: refactor(config): ConfigWatcher 热重载下沉 idcu-go/config 泛型 Watcher，领域层改薄封装
 
 - 背景：审计 §4 已把 `watch` 判为 config 通用片段（不依赖 Config 任一具体字段，只做「轮询检测 + 原子切换 + OnReload 回调」），但首轮只回灌了 `toInt`。本轮补齐。

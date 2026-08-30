@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +34,7 @@ const (
 type Config struct {
 	// Preset 能力层预设（建议 3）：minimal / semantic / multitenant / ""（默认）。
 	// 用单个字段组合整组能力配置，见 ApplyPreset。
-	Preset  Preset        `yaml:"preset" json:"preset"`
+	Preset  Preset        `yaml:"preset" json:"preset" env:"-"`
 	Project ProjectConfig `yaml:"project" json:"project"`
 	Storage StorageConfig `yaml:"storage" json:"storage"`
 	Parser  ParserConfig  `yaml:"parser" json:"parser"`
@@ -552,9 +551,15 @@ func Validate(cfg *Config) []error {
 //	CODESCHEMA_WATCHER_DEBOUNCE_MS="500"
 //	CODESCHEMA_AI_BUDGET_PER_SCAN="200"
 //
+// 覆盖机制（逐字段遍历 + 类型解析）复用 idcu-go/config.ApplyEnv：
+//   - 字符串非空覆盖；整数十进制解析且拒绝负值；布尔容忍解析（1/t/true/yes 与 0/f/false/no）。
+//   - 解析失败或值不满足约束时跳过、保留默认值。
+//
+// 领域特殊逻辑保留在本层：CODESCHEMA_PRESET（能力层预设，设置后立即应用 ApplyPreset）。
+//
 // LoadFromEnv 会直接修改传入的 cfg 实例，优先级高于配置文件但低于 CLI 参数。
 func LoadFromEnv(cfg *Config) {
-	// preset（能力层预设，设置后立即应用，幂等）
+	// preset（能力层预设，设置后立即应用，幂等）——领域特殊逻辑，不走通用 env 遍历
 	if v := os.Getenv("CODESCHEMA_PRESET"); v != "" {
 		if ValidPreset(v) {
 			cfg.Preset = Preset(v)
@@ -562,121 +567,8 @@ func LoadFromEnv(cfg *Config) {
 		}
 	}
 
-	// project
-	if v := os.Getenv("CODESCHEMA_PROJECT_ROOT"); v != "" {
-		cfg.Project.Root = v
-	}
-	if v := os.Getenv("CODESCHEMA_PROJECT_NAME"); v != "" {
-		cfg.Project.Name = v
-	}
-
-	// storage
-	if v := os.Getenv("CODESCHEMA_STORAGE_DRIVER"); v != "" {
-		cfg.Storage.Driver = v
-	}
-	if v := os.Getenv("CODESCHEMA_STORAGE_DSN"); v != "" {
-		cfg.Storage.DSN = v
-	}
-	if v := os.Getenv("CODESCHEMA_STORAGE_KV"); v != "" {
-		cfg.Storage.KV = v
-	}
-	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_DIR"); v != "" {
-		cfg.Storage.Vector.ModelDir = v
-	}
-	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_DOWNLOAD_URL"); v != "" {
-		cfg.Storage.Vector.ModelDownloadURL = v
-	}
-	if v := os.Getenv("CODESCHEMA_STORAGE_VECTOR_MODEL_SHA256"); v != "" {
-		cfg.Storage.Vector.ModelSHA256 = v
-	}
-
-	// server
-	if v := os.Getenv("CODESCHEMA_SERVER_MCP_ADDR"); v != "" {
-		cfg.Server.MCPAddr = v
-	}
-	if v := os.Getenv("CODESCHEMA_SERVER_HTTP_ADDR"); v != "" {
-		cfg.Server.HTTPAddr = v
-	}
-	if v := os.Getenv("CODESCHEMA_SERVER_AUTH_TOKEN"); v != "" {
-		cfg.Server.AuthToken = v
-	}
-	if v := os.Getenv("CODESCHEMA_SERVER_RATE_LIMIT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.Server.RateLimit = n
-		}
-	}
-
-	// scanner
-	if v := os.Getenv("CODESCHEMA_SCANNER_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.Scanner.Workers = n
-		}
-	}
-	if v := os.Getenv("CODESCHEMA_SCANNER_FILE_SIZE_LIMIT_MB"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.Scanner.FileSizeLimitMB = n
-		}
-	}
-	if v := os.Getenv("CODESCHEMA_SCANNER_LINE_COUNT_LIMIT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.Scanner.LineCountLimit = n
-		}
-	}
-
-	// watcher
-	if v := os.Getenv("CODESCHEMA_WATCHER_ENABLED"); v != "" {
-		cfg.Watcher.Enabled = v == "true" || v == "1" || v == "yes"
-	}
-	if v := os.Getenv("CODESCHEMA_WATCHER_DEBOUNCE_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.Watcher.DebounceMs = n
-		}
-	}
-	if v := os.Getenv("CODESCHEMA_WATCHER_BATCH_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.Watcher.BatchSize = n
-		}
-	}
-	if v := os.Getenv("CODESCHEMA_WATCHER_USE_FSNOTIFY"); v != "" {
-		cfg.Watcher.UseFsnotify = v == "true" || v == "1" || v == "yes"
-	}
-
-	// ai
-	if v := os.Getenv("CODESCHEMA_AI_PROVIDER"); v != "" {
-		cfg.AI.Provider = v
-	}
-	if v := os.Getenv("CODESCHEMA_AI_MODEL"); v != "" {
-		cfg.AI.Model = v
-	}
-	if v := os.Getenv("CODESCHEMA_AI_BASE_URL"); v != "" {
-		cfg.AI.BaseURL = v
-	}
-	if v := os.Getenv("CODESCHEMA_AI_API_KEY"); v != "" {
-		cfg.AI.APIKey = v
-	}
-	if v := os.Getenv("CODESCHEMA_AI_BUDGET_PER_SCAN"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.AI.BudgetPerScan = n
-		}
-	}
-	if v := os.Getenv("CODESCHEMA_AI_BUDGET_PER_QUERY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			cfg.AI.BudgetPerQuery = n
-		}
-	}
-
-	// parser
-	if v := os.Getenv("CODESCHEMA_PARSER_SCIP_INDEX_DIR"); v != "" {
-		cfg.Parser.SCIP.IndexDir = v
-	}
-	if v := os.Getenv("CODESCHEMA_PARSER_CODEGRAPH_DB"); v != "" {
-		cfg.Parser.CodeGraph.DB = v
-	}
-	if v := os.Getenv("CODESCHEMA_PARSER_LSP_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Parser.LSP.Enabled = b
-		}
-	}
+	// 其余字段走通用反射 env-merge（CODESCHEMA_<路径> 命名）
+	_ = cfgconv.ApplyEnv("CODESCHEMA", cfg)
 }
 
 // Merge 合并两个配置实例，overlay 中的非零值字段会覆盖 base 的对应字段。
