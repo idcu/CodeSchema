@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 144: refactor(config): ConfigWatcher 热重载下沉 idcu-go/config 泛型 Watcher，领域层改薄封装
+
+- 背景：审计 §4 已把 `watch` 判为 config 通用片段（不依赖 Config 任一具体字段，只做「轮询检测 + 原子切换 + OnReload 回调」），但首轮只回灌了 `toInt`。本轮补齐。
+- 改动（idcu-go/config）：
+  - 新增 `watcher.go`：泛型 `Watcher[T]`（`NewWatcher[T]`/`SetPollInterval`/`SetOnReload`/`Get`/`Start`/`Stop`），`load func(path) (T, error)` 由调用方注入，变更检测用 mtime+size，默认 2s 轮询，纯标准库零第三方依赖。
+  - 新增 `watcher_test.go`：6 个用例（Get 初始值/变更重载+onReload 携带新旧值/加载失败保留旧配置/Start 后注册回调仍生效/Start 响应 ctx 取消/多次 Stop 幂等）。
+- 改动（code-schema/internal/config）：
+  - `ConfigWatcher` 改为 `cfgconv.Watcher[*Config]` 薄封装：加载逻辑（Load + LoadFromEnv）注入为 load 回调，复用通用变更检测/原子切换/回调机制；原地删除约 120 行领域重复实现；行为不变（默认 2s、SetOnReload 可在 Start 后调用、加载失败保留旧配置）。
+  - 结果：`sync` 导入移除、`cfgconv` 引用 idcu-go/config，领域 Config 结构保留。
+- 验证：
+  - idcu-go/config：`go test -run TestWatcher` 6/6 PASS。
+  - code-schema：`go build ./...`=0；`go vet ./internal/config/`=0；全包 `go test ./...` 全 ok（config 3 用例全过）。
+- 说明：本提交未推 tag（config 通用 Watcher 仍为草案，审计「待第二消费方再正式化」逻辑，与 graceful/recovery/trace 一致）。
+
 ### Commit 143: refactor(common): 通用模块深度抽取归并落地（retry/metrics/log/trace/graceful/recovery/config 迁移 idcu-go）
 
 - 背景：按 `analysis/2026-08-30-common-modules-extract-audit.md` §7 已确认决策全量推进（用户拍板）：「trace 对齐 OTel、graceful 拆两包、fsutil 并入 pathsafe、metrics 回填、log 先走草案」。取向以 idcu-go 为准，改 idcu-go 即同步改 code-schema 调用。

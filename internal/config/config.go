@@ -16,9 +16,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	cfgconv "gitee.com/idcu-go/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -975,32 +975,20 @@ func cloneTenantSlice(s []TenantConfig) []TenantConfig {
 
 // ---------------------------------------------------------------------------
 // P9: 配置热重载
+//
+// 通用「轮询 + 原子切换 + OnReload 回调」机制已下沉至 idcu-go/config 的
+// 泛型 Watcher[T]；此处保留领域层薄封装（绑定具体 Config 结构与加载逻辑）。
 // ---------------------------------------------------------------------------
 
 // OnReload 是配置重载完成后的回调函数类型。
 // 参数为旧的配置和新的配置，回调中可以安全地读取新配置。
 type OnReload func(oldCfg, newCfg *Config)
 
-// ConfigWatcher 监听配置文件变更并自动重载。
-//
-// 使用轮询方式检测文件变更（因为 fsnotify 需要外部依赖），
-// 默认轮询间隔为 2 秒。当检测到文件内容变更时，自动重新加载配置
-// 并通过 OnReload 回调通知应用层。
-//
-// 线程安全：cfgMu 保护配置的原子切换；reloadMu 保护 OnReload 回调
-// 的注册与读取（SetOnReload 允许在 Start 之后调用）。
+// ConfigWatcher 监听配置文件变更并自动重载，是 idcu-go/config.Watcher[*Config]
+// 的领域层薄封装。加载逻辑绑定本包（Load + LoadFromEnv），变更检测/原子切换
+// /回调机制复用通用实现。
 type ConfigWatcher struct {
-	path         string
-	cfg          *Config
-	cfgMu        sync.RWMutex
-	reloadMu     sync.Mutex
-	onReload     OnReload
-	pollInterval time.Duration
-	lastModTime  time.Time
-	lastSize     int64
-	stopCh       chan struct{}
-	stopped      bool
-	stopMu       sync.Mutex
+	w *cfgconv.Watcher[*Config]
 }
 
 // NewConfigWatcher 创建一个新的配置监听器。
@@ -1009,109 +997,50 @@ type ConfigWatcher struct {
 //   - cfg: 初始配置（加载后的 Config 实例）
 //   - onReload: 重载完成后的回调，可以为 nil
 func NewConfigWatcher(path string, cfg *Config, onReload OnReload) *ConfigWatcher {
-	fi, _ := os.Stat(path)
-	var modTime time.Time
-	var size int64
-	if fi != nil {
-		modTime = fi.ModTime()
-		size = fi.Size()
-	}
-	return &ConfigWatcher{
-		path:         path,
-		cfg:          cfg,
-		onReload:     onReload,
-		pollInterval: 2 * time.Second,
-		lastModTime:  modTime,
-		lastSize:     size,
-		stopCh:       make(chan struct{}),
-	}
+	inner := cfgconv.NewWatcher(path, cfg,
+		func(p string) (*Config, error) {
+			c, err := Load(p)
+			if err != nil {
+				return nil, err
+			}
+			LoadFromEnv(c)
+			return c, nil
+		},
+		func(oldCfg, newCfg *Config) {
+			if onReload != nil {
+				onReload(oldCfg, newCfg)
+			}
+		})
+	return &ConfigWatcher{w: inner}
 }
 
 // SetPollInterval 设置轮询间隔。默认 2 秒。
 func (cw *ConfigWatcher) SetPollInterval(d time.Duration) {
-	if d > 0 {
-		cw.pollInterval = d
-	}
+	cw.w.SetPollInterval(d)
 }
 
 // SetOnReload 注册配置重载完成后的回调。可在 Start 前后任意时刻调用，
 // 替换旧的回调；传 nil 可取消回调。回调在轮询 goroutine 中同步执行，
 // 应快速返回，避免阻塞后续配置监听。
 func (cw *ConfigWatcher) SetOnReload(fn OnReload) {
-	cw.reloadMu.Lock()
-	defer cw.reloadMu.Unlock()
-	cw.onReload = fn
+	cw.w.SetOnReload(func(oldCfg, newCfg *Config) {
+		if fn != nil {
+			fn(oldCfg, newCfg)
+		}
+	})
 }
 
 // GetConfig 返回当前配置（线程安全，原子切换）。
 func (cw *ConfigWatcher) GetConfig() *Config {
-	cw.cfgMu.RLock()
-	defer cw.cfgMu.RUnlock()
-	return cw.cfg
+	return cw.w.Get()
 }
 
 // Start 启动配置文件监听。阻塞直到 context 取消或 Stop 被调用。
 func (cw *ConfigWatcher) Start(ctx context.Context) error {
-	ticker := time.NewTicker(cw.pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-cw.stopCh:
-			return nil
-		case <-ticker.C:
-			cw.checkAndReload(ctx)
-		}
-	}
+	return cw.w.Start(ctx)
 }
 
 // Stop 停止配置文件监听。
 func (cw *ConfigWatcher) Stop() {
-	cw.stopMu.Lock()
-	defer cw.stopMu.Unlock()
-	if !cw.stopped {
-		close(cw.stopCh)
-		cw.stopped = true
-	}
-}
-
-// checkAndReload 检查文件是否变更，若变更则重新加载配置。
-func (cw *ConfigWatcher) checkAndReload(ctx context.Context) {
-	fi, err := os.Stat(cw.path)
-	if err != nil {
-		return // 文件不存在或无法访问，跳过
-	}
-
-	if fi.ModTime() == cw.lastModTime && fi.Size() == cw.lastSize {
-		return // 文件未变更
-	}
-
-	// 文件已变更，重新加载
-	newCfg, err := Load(cw.path)
-	if err != nil {
-		// 加载失败时保留旧配置，不中断
-		return
-	}
-
-	// 应用环境变量覆盖
-	LoadFromEnv(newCfg)
-
-	oldCfg := cw.GetConfig()
-
-	// 原子切换配置
-	cw.cfgMu.Lock()
-	cw.cfg = newCfg
-	cw.lastModTime = fi.ModTime()
-	cw.lastSize = fi.Size()
-	cw.cfgMu.Unlock()
-
-	// 通知回调
-	cw.reloadMu.Lock()
-	fn := cw.onReload
-	cw.reloadMu.Unlock()
-	if fn != nil {
-		fn(oldCfg, newCfg)
-	}
+	cw.w.Stop()
 }
