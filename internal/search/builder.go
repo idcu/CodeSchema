@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"gitee.com/idcu-go/pathsafe"
 	log "gitee.com/idcu-go/log"
+	"gitee.com/idcu-go/pathsafe"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/vector"
 )
@@ -415,16 +415,16 @@ func (b *IndexBuilder) AutoSaveIDF(path string, interval time.Duration) func() {
 			case <-ticker.C:
 				dir := filepath.Dir(path)
 				if b.idf != nil {
-				if err := pathsafe.MkdirAll(dir); err != nil {
-					logger.Warn("auto save IDF: mkdir", "dir", dir, "error", err)
-					continue
+					if err := pathsafe.MkdirAll(dir); err != nil {
+						logger.Warn("auto save IDF: mkdir", "dir", dir, "error", err)
+						continue
+					}
+					if err := b.idf.SaveIDF(path); err != nil {
+						logger.Warn("auto save IDF failed", "path", path, "error", err)
+					} else {
+						logger.Debug("auto saved IDF", "path", path)
+					}
 				}
-				if err := b.idf.SaveIDF(path); err != nil {
-					logger.Warn("auto save IDF failed", "path", path, "error", err)
-				} else {
-					logger.Debug("auto saved IDF", "path", path)
-				}
-			}
 			case <-ch:
 				return
 			}

@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 	"testing"
+
+	"github.com/idcu/codeschema/internal/retrieval"
 )
 
 func TestMemoryFTS_IndexAndSize(t *testing.T) {
@@ -56,8 +58,8 @@ func TestMemoryFTS_ExactSearch(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("expected at least 1 result")
 	}
-	if results[0].Symbol != "usr/UserService.java" {
-		t.Errorf("expected UserService, got %q", results[0].Symbol)
+	if results[0].ID != "usr/UserService.java" {
+		t.Errorf("expected UserService, got %q", results[0].ID)
 	}
 }
 
@@ -75,8 +77,8 @@ func TestMemoryFTS_FuzzySearch(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("expected at least 1 result")
 	}
-	if results[0].Symbol != "src/UserService.java" {
-		t.Errorf("expected UserService, got %q", results[0].Symbol)
+	if results[0].ID != "src/UserService.java" {
+		t.Errorf("expected UserService, got %q", results[0].ID)
 	}
 }
 
@@ -288,7 +290,7 @@ func rpad(i int) string {
 }
 
 func TestTokenize(t *testing.T) {
-	tokens := tokenize("HelloWorld_Test")
+	tokens := retrieval.Tokenize("HelloWorld_Test")
 	if len(tokens) == 0 {
 		t.Fatal("expected non-empty tokens")
 	}
@@ -334,8 +336,8 @@ func TestPersistentFTS_Search(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].Symbol != "test/Hello.java" {
-		t.Errorf("expected 'test/Hello.java', got %q", results[0].Symbol)
+	if results[0].ID != "test/Hello.java" {
+		t.Errorf("expected 'test/Hello.java', got %q", results[0].ID)
 	}
 }
 

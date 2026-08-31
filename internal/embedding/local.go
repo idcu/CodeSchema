@@ -1,4 +1,4 @@
-package vector
+package embedding
 
 import (
 	"context"
@@ -31,7 +31,7 @@ type LocalEmbedder struct {
 	dim    int
 	mu     sync.RWMutex
 	df     map[string]int // 文档频率（词出现在多少个文档中）
-	docCnt int             // 总文档数
+	docCnt int            // 总文档数
 }
 
 // NewLocalEmbedder 创建本地统计 Embedder。
@@ -155,8 +155,8 @@ func (l *LocalEmbedder) SaveIDF(path string) error {
 	l.mu.RUnlock()
 
 	data := idfSaveData{
-		DocCnt: docCnt,
-		DF:     dfCopy,
+		DocCount: docCnt,
+		DF:       dfCopy,
 	}
 
 	raw, err := json.MarshalIndent(data, "", "  ")
@@ -186,15 +186,15 @@ func (l *LocalEmbedder) LoadIDF(path string) error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.docCnt = data.DocCnt
+	l.docCnt = data.DocCount
 	l.df = data.DF
 	return nil
 }
 
 // idfSaveData IDF 持久化数据结构。
 type idfSaveData struct {
-	DocCnt int            `json:"doc_cnt"`
-	DF     map[string]int `json:"df"`
+	DocCount int            `json:"doc_count"`
+	DF       map[string]int `json:"df"`
 }
 
 // hashToken 使用 FNV-1a 哈希将 token 映射到 uint64。
@@ -207,7 +207,7 @@ func hashToken(token string) uint64 {
 	return h
 }
 
-// localTokenize 分词器，与 search 包 tokenize 保持一致。
+// localTokenize 分词器。
 func localTokenize(s string) []string {
 	var tokens []string
 	var current strings.Builder

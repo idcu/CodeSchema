@@ -1,4 +1,4 @@
-package vector
+package embedding
 
 import (
 	"context"
@@ -22,7 +22,7 @@ type Indexer struct {
 
 type indexJob struct {
 	ctx  context.Context
-	ent  TextEmbeddable
+	ent  Embeddable
 	errC chan error
 }
 
@@ -72,7 +72,7 @@ func (idx *Indexer) Stop() {
 }
 
 // BuildIndex 同步构建单个实体的向量索引。
-func (idx *Indexer) BuildIndex(ctx context.Context, ent TextEmbeddable) error {
+func (idx *Indexer) BuildIndex(ctx context.Context, ent Embeddable) error {
 	vec, err := idx.model.Embed(ctx, ent.Text())
 	if err != nil {
 		return fmt.Errorf("embedding %s: %w", ent.ID(), err)
@@ -95,7 +95,7 @@ func (idx *Indexer) SetDocContent(ctx context.Context, id, content string) error
 }
 
 // Enqueue 异步入队一个实体的索引构建任务。
-func (idx *Indexer) Enqueue(ctx context.Context, ent TextEmbeddable) <-chan error {
+func (idx *Indexer) Enqueue(ctx context.Context, ent Embeddable) <-chan error {
 	errC := make(chan error, 1)
 	select {
 	case idx.queue <- indexJob{ctx: ctx, ent: ent, errC: errC}:
@@ -106,7 +106,7 @@ func (idx *Indexer) Enqueue(ctx context.Context, ent TextEmbeddable) <-chan erro
 }
 
 // BatchBuild 同步批量构建实体的向量索引。
-func (idx *Indexer) BatchBuild(ctx context.Context, ents []TextEmbeddable) error {
+func (idx *Indexer) BatchBuild(ctx context.Context, ents []Embeddable) error {
 	ids := make([]string, 0, len(ents))
 	vectors := make([][]float32, 0, len(ents))
 

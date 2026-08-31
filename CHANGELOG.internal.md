@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 146: refactor(vector,search): 抽取通用嵌入/检索机制为本地中性包 embedding/retrieval（档二封档）
+
+- 背景：按 meta 标准 §3.17 中立性审计 code-schema，vector/search 的通用核心（向量存储/索引/本地 Embedder、FTS 引擎/融合重排/双路检索）中性、可插拔、零领域依赖，但仅 code-schema 单消费者，未过双消费者门槛。按档二在源项目内先抽独立包，封档待第二消费方。
+- 新增（code-schema/internal/embedding）：Embedder/Embeddable/MockEmbedder/SearchResult/VectorStore/DocContentStore/MemoryStore/PersistentStore/cosineSimilarity/Indexer/LocalEmbedder，纯机制零领域语义，仅依赖 idcu-go/pathsafe。
+- 新增（code-schema/internal/retrieval）：FTSEngine/MemoryFTS/PersistentFTS/Reranker/Searcher/VectorSearcher/Result（中性，领域字段入 Meta）+ 融合重排与绝对置信度标定（1-exp(-BM25/τ)）。
+- 兼容层（零调用点改动）：vector 包用 type alias 重导出全部符号（DefaultText/chromem/ONNX/模型分发留领域）；search 包保留领域 SearchResult（含 symbol/kind/file/snippet/source）并加投影函数，Searcher/Reranker 包一层委托 retrieval，对外签名不变。
+- 不归并：internal/store/filestore 的原子写机制虽通用，但数据模型全绑代码符号语义，归并风险>收益，判不归并；config 已下沉 idcu-go/config，无重复造轮子。
+- 验证：go build ./...=0；go vet ./...（含测试）=0；internal/{embedding,retrieval,vector,search,service} 单测全绿（search Reranker/Searcher、service Search/B8/Enrich/Disambiguate 行为等价验证通过）。
+- 注册：idcu-go/meta/modules/modules.yaml 追加 planned embedding/retrieval/fswatch（state=planned, version=0.0.0），meta.version 8→9。未 push（待授权）；fswatch 待 watcher 与 scanner/Scheduler 解耦后再议。
+
 ### Commit 145: refactor(config): env-merge 通用化回灌 idcu-go/config.ApplyEnv，LoadFromEnv 改领域薄层
 
 - 背景：审计 §4 把 config 的 loader/env/watch 均判为通用片段，但此前只回灌了 include-loader、toInt、watch；env-merge 仍是本仓 ~130 行硬编码逐字段映射（CODESCHEMA_<SECTION>_<KEY>），领域绑定未收敛。本轮补齐。

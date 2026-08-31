@@ -1,4 +1,4 @@
-package vector
+package embedding
 
 import (
 	"context"
@@ -9,17 +9,17 @@ import (
 
 // SearchResult 向量检索结果。
 type SearchResult struct {
-	ID     string  `json:"id"`
-	Score  float64 `json:"score"`
+	ID     string    `json:"id"`
+	Score  float64   `json:"score"`
 	Vector []float32 `json:"-"`
 }
 
 // VectorStore 向量库存储接口。
 //
 // 支持多种实现：
-//   - MemoryStore: 纯内存实现（P0 测试用）
-//   - ChromemStore: chromem-go 嵌入式实现（P2 生产路径）
-//   - MilvusStore: Milvus 集群（P3 扩展）
+//   - MemoryStore: 纯内存实现
+//   - PersistentStore: JSON 持久化实现
+//   - 领域后端（chromem / Milvus 等）在调用方实现本接口
 type VectorStore interface {
 	// Add 添加向量到索引。
 	Add(ctx context.Context, id string, vector []float32) error
@@ -43,11 +43,9 @@ type VectorStore interface {
 	Close() error
 }
 
-// DocContentStore 可选接口：向量存储额外保存文档原文（用于 /viz 可视化展示）。
+// DocContentStore 可选接口：向量存储额外保存文档原文（用于可视化展示）。
 //
-// 默认栈（PersistentStore / MemoryStore）实现；chromem 通过 ListDocuments 自带
-// Content 字段（但 Add 只存向量、原文为空）。IndexBuilder 写入索引时同步保存原文，
-// cmd 层 viz 适配器读取展示。
+// 默认栈（PersistentStore / MemoryStore）实现。
 type DocContentStore interface {
 	// SetContent 保存指定文档的原文。
 	SetContent(ctx context.Context, id, content string) error
@@ -169,6 +167,12 @@ func (m *MemoryStore) ListIDs(_ context.Context) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// CosineSimilarity 计算两个向量的余弦相似度（导出，供测试与调用方复用）。
+// 返回 [-1, 1] 之间的值，1 表示完全相似。
+func CosineSimilarity(a, b []float32) float64 {
+	return cosineSimilarity(a, b)
 }
 
 // cosineSimilarity 计算两个向量的余弦相似度。

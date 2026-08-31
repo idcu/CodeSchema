@@ -103,16 +103,12 @@ func TestMemoryStore_Content(t *testing.T) {
 // TestIndexer_SetDocContent 验证 Indexer 转发（Persistent/Memory 保存；非实现后端跳过）。
 func TestIndexer_SetDocContent(t *testing.T) {
 	// Memory 后端 → 保存
-	idx := NewIndexer(NewMemoryStore(), NewLocalEmbedder(8), 1)
+	ms := NewMemoryStore()
+	idx := NewIndexer(ms, NewLocalEmbedder(8), 1)
 	if err := idx.SetDocContent(context.Background(), "id1", "hello world"); err != nil {
 		t.Fatalf("SetDocContent (memory): %v", err)
 	}
-	if cs, ok := idx.store.(DocContentStore); ok {
-		c, _ := cs.Content(context.Background(), "id1")
-		if c != "hello world" {
-			t.Fatalf("content = %q, want hello world", c)
-		}
-	} else {
-		t.Fatal("MemoryStore should implement DocContentStore")
+	if c, _ := ms.Content(context.Background(), "id1"); c != "hello world" {
+		t.Fatalf("content = %q, want hello world", c)
 	}
 }

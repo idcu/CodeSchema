@@ -199,6 +199,7 @@ func TestChromemStore_Size(t *testing.T) {
 		t.Errorf("expected Size()=0 for new chromem store, got %d", s.Size())
 	}
 }
+
 // TestPersistentChromemStore_RestartRestore 验证持久化 chromem 存储「重启恢复」：
 // 写入 → 用同一路径重新打开（模拟进程重启）→ 数据与检索一致性保持。
 // 覆盖 P6_1 未做项（chromem 持久化重启恢复验证）。

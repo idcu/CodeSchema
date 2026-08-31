@@ -91,18 +91,18 @@ func TestIndexBuilder_BuildFromStore_WithData(t *testing.T) {
 	// 插入方法（批量插入，UpsertMethods 会全量替换）
 	methods := []parser.MethodIR{
 		{
-			Name:        "BuildFromStore",
-			Signature:   "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
-			ReturnType:  "(*BuildResult, error)",
-			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
-			Doc:         "从 Store 读取所有数据，构建 FTS 和向量索引",
+			Name:       "BuildFromStore",
+			Signature:  "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
+			ReturnType: "(*BuildResult, error)",
+			ClassFQN:   "github.com/idcu/codeschema/internal/search.IndexBuilder",
+			Doc:        "从 Store 读取所有数据，构建 FTS 和向量索引",
 		},
 		{
-			Name:        "BuildAndIndex",
-			Signature:   "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
-			ReturnType:  "error",
-			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
-			Doc:         "从 Store 读取单个文件的类和方法，构建索引文档并入库",
+			Name:       "BuildAndIndex",
+			Signature:  "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
+			ReturnType: "error",
+			ClassFQN:   "github.com/idcu/codeschema/internal/search.IndexBuilder",
+			Doc:        "从 Store 读取单个文件的类和方法，构建索引文档并入库",
 		},
 	}
 	err = st.UpsertMethods(ctx, 2, methods)
@@ -206,14 +206,14 @@ func TestIndexBuilder_BuildFromStore_MultipleFiles(t *testing.T) {
 	st.UpsertClasses(ctx, file1, classes1)
 	methods1 := []parser.MethodIR{
 		{
-			Name:        "Health",
-			Signature:   "Health(ctx context.Context) *HealthStatus",
-			ClassFQN:    "github.com/idcu/codeschema/internal/service.Service",
+			Name:      "Health",
+			Signature: "Health(ctx context.Context) *HealthStatus",
+			ClassFQN:  "github.com/idcu/codeschema/internal/service.Service",
 		},
 		{
-			Name:        "Search",
-			Signature:   "Search(ctx context.Context, q string, mode string, limit int) ([]SearchResult, error)",
-			ClassFQN:    "github.com/idcu/codeschema/internal/service.Service",
+			Name:      "Search",
+			Signature: "Search(ctx context.Context, q string, mode string, limit int) ([]SearchResult, error)",
+			ClassFQN:  "github.com/idcu/codeschema/internal/service.Service",
 		},
 	}
 	st.UpsertMethods(ctx, 2, methods1)
@@ -303,10 +303,10 @@ func TestIndexBuilder_BuildAndIndex(t *testing.T) {
 
 	methods := []parser.MethodIR{
 		{
-			Name:        "BuildAndIndex",
-			Signature:   "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
-			ReturnType:  "error",
-			ClassFQN:    "github.com/idcu/codeschema/internal/search.IndexBuilder",
+			Name:       "BuildAndIndex",
+			Signature:  "BuildAndIndex(ctx context.Context, st store.Store, filePath string) error",
+			ReturnType: "error",
+			ClassFQN:   "github.com/idcu/codeschema/internal/search.IndexBuilder",
 		},
 	}
 	st.UpsertMethods(ctx, 2, methods)
@@ -377,10 +377,10 @@ func TestBuildMethodIndexText(t *testing.T) {
 		FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
 	}
 	m := store.MethodRecord{
-		Name:        "BuildFromStore",
-		Signature:   "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
-		ReturnType:  "(*BuildResult, error)",
-		Doc:         "从 Store 读取所有数据构建索引",
+		Name:       "BuildFromStore",
+		Signature:  "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
+		ReturnType: "(*BuildResult, error)",
+		Doc:        "从 Store 读取所有数据构建索引",
 	}
 	text := buildMethodIndexText(c, m, "pkg/search/builder.go")
 

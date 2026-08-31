@@ -1,4 +1,4 @@
-package search
+package retrieval
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 //
 // 在 MemoryFTS 的基础上增加 Save/Load 机制，使用 JSON 序列化。
 // 每次 Index/BatchIndex/Remove 后自动保存到磁盘文件。
-// 适用于开发和小规模生产场景，无需 SQLite 依赖。
+// 适用于开发和小规模生产场景，无需外部数据库依赖。
 type PersistentFTS struct {
 	mu       sync.RWMutex
 	docs     map[string]*DocEntry
@@ -55,7 +55,7 @@ func (pf *PersistentFTS) Index(ctx context.Context, id, content string) error {
 	pf.docs[id] = &DocEntry{
 		ID:      id,
 		Content: content,
-		Tokens:  tokenize(content),
+		Tokens:  Tokenize(content),
 	}
 	pf.dirties++
 	pf.mu.Unlock()
@@ -72,7 +72,7 @@ func (pf *PersistentFTS) BatchIndex(ctx context.Context, ids, contents []string)
 		pf.docs[ids[i]] = &DocEntry{
 			ID:      ids[i],
 			Content: contents[i],
-			Tokens:  tokenize(contents[i]),
+			Tokens:  Tokenize(contents[i]),
 		}
 	}
 	pf.dirties += len(ids)
@@ -81,7 +81,7 @@ func (pf *PersistentFTS) BatchIndex(ctx context.Context, ids, contents []string)
 }
 
 // Search 执行全文搜索。
-func (pf *PersistentFTS) Search(ctx context.Context, query string, mode FTSMode, limit int) ([]SearchResult, error) {
+func (pf *PersistentFTS) Search(ctx context.Context, query string, mode FTSMode, limit int) ([]Result, error) {
 	pf.mu.RLock()
 	// 临时复制到 MemoryFTS 复用搜索逻辑
 	mem := &MemoryFTS{docs: pf.docs}

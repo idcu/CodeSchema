@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"testing"
+
+	"github.com/idcu/codeschema/internal/embedding"
 )
 
 type testEntity struct {
@@ -110,31 +112,31 @@ func TestMemoryStore_Delete(t *testing.T) {
 
 func TestCosineSimilarity(t *testing.T) {
 	// 完全相同
-	s := cosineSimilarity([]float32{1, 0, 0}, []float32{1, 0, 0})
+	s := embedding.CosineSimilarity([]float32{1, 0, 0}, []float32{1, 0, 0})
 	if math.Abs(s-1.0) > 0.001 {
 		t.Errorf("expected 1.0, got %f", s)
 	}
 
 	// 正交
-	s = cosineSimilarity([]float32{1, 0}, []float32{0, 1})
+	s = embedding.CosineSimilarity([]float32{1, 0}, []float32{0, 1})
 	if math.Abs(s-0.0) > 0.001 {
 		t.Errorf("expected 0.0, got %f", s)
 	}
 
 	// 相反
-	s = cosineSimilarity([]float32{1, 0}, []float32{-1, 0})
+	s = embedding.CosineSimilarity([]float32{1, 0}, []float32{-1, 0})
 	if math.Abs(s+1.0) > 0.001 {
 		t.Errorf("expected -1.0, got %f", s)
 	}
 
 	// 零向量
-	s = cosineSimilarity([]float32{0, 0}, []float32{1, 0})
+	s = embedding.CosineSimilarity([]float32{0, 0}, []float32{1, 0})
 	if math.Abs(s-0.0) > 0.001 {
 		t.Errorf("expected 0.0 for zero vector, got %f", s)
 	}
 
 	// 不同长度
-	s = cosineSimilarity([]float32{1}, []float32{1, 0})
+	s = embedding.CosineSimilarity([]float32{1}, []float32{1, 0})
 	if math.Abs(s-0.0) > 0.001 {
 		t.Errorf("expected 0.0 for mismatched lengths, got %f", s)
 	}

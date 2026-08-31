@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/idcu/codeschema/internal/embedding"
 )
 
 // testModelDir 返回模型目录相对于测试包目录的路径。
@@ -162,7 +164,7 @@ func TestONNXEmbedder_Deterministic(t *testing.T) {
 
 // cosSim 计算余弦相似度，返回 float32。
 func cosSim(a, b []float32) float32 {
-	return float32(cosineSimilarity(a, b))
+	return float32(embedding.CosineSimilarity(a, b))
 }
 func TestONNXEmbedderConfig_Defaults(t *testing.T) {
 	// 验证默认值推导：OutputLayer / InputNames / Dim / Precision 可配且默认合理
