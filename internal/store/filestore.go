@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gitee.com/idcu-go/pathsafe"
+	"github.com/idcu/codeschema/internal/lock"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -18,7 +19,7 @@ import (
 type FileStore struct {
 	mu            sync.RWMutex
 	rootDir       string
-	lock          *fileLock                // 进程锁（防止多进程并发写坏 store.json）
+	lock          *lock.Lock               // 进程锁（防止多进程并发写坏 store.json）
 	files         map[string]*FileRecord   // absolute_path -> FileRecord
 	classes       map[int64][]ClassRecord  // fileID -> classes
 	methods       map[int64][]MethodRecord // classID -> methods
@@ -89,11 +90,11 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 	}
 
 	// 获取进程锁：防止多进程（scan + serve 同目录）并发写坏 store.json
-	lock, err := acquireLock(fs.rootDir)
+	lk, err := lock.Acquire(fs.rootDir)
 	if err != nil {
 		return err
 	}
-	fs.lock = lock
+	fs.lock = lk
 
 	fs.files = make(map[string]*FileRecord)
 	fs.classes = make(map[int64][]ClassRecord)
@@ -115,7 +116,7 @@ func (fs *FileStore) Close() error {
 	fs.mu.Lock()
 	err := fs.saveToDisk()
 	if fs.lock != nil {
-		fs.lock.release()
+		fs.lock.Release()
 		fs.lock = nil
 	}
 	fs.mu.Unlock()
