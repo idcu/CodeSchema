@@ -367,7 +367,7 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 	WithImpactAnalyzer(svc, st)
 	ApplyContextConfig(svc, cfg)
 
-	sched := scheduler.NewScheduler(cfg.Watcher.DebounceMs, 1000)
+	sched := scheduler.NewScheduler[string](cfg.Watcher.DebounceMs, 1000)
 
 	builder.StartAsync(ctx, 64, 2)
 	stopAutoSave := builder.AutoSaveIDF(filepath.Join(cfg.Storage.Search.IDFDir, "idf.json"), 60*time.Second)

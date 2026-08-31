@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 147: refactor(watcher,scheduler): 抽取通用文件监听 fswatch 与泛型防抖队列 scheduler（档二续）
+
+- 背景：档二封档时 fswatch 标 planned 但因 watcher 耦 scanner/Scheduler 未落实。本轮把文件监听与事件调度两个中性内核从领域管线解耦，真正落地为可复用原语。
+- 新增（code-schema/internal/fswatch，中性）：Watcher 接口 + PollWatcher（轮询）/FsWatcher（fsnotify 递归），构造只收 `onChange func(string)`，剔除 scanner/scheduler 依赖；默认忽略目录集（.git/node_modules/build/...）+ 导出 IsIgnored；纯机制零领域语义，仅依赖 fsnotify 与 idcu-go/recovery。
+- 新增（code-schema/internal/scheduler，中性·泛型）：`Scheduler[K comparable]` —— Enqueue(K)/Ready() []K/Start(ctx, func(ctx,K) error)/Len/Clear + 阈值降级信号 DegradeSignal；path 语义泛型化，与业务 key 解耦。
+- 兼容层（零生产调用点改动）：internal/watcher 改薄封装，保留旧签名 `(root, scan, sched, ...)`，内部以 `func(p){ sched.Enqueue(p) }` 把变更路径接入领域调度器；runtime.go/main.go 仅给 NewScheduler 加 `[string]` 一处改动。
+- 测试迁移：watcher_test.go 整体迁到 fswatch 包（用 onChange 闭包捕获、访问同包未导出字段），scheduler_test.go 泛型化；fswatch/scheduler/runtime 单测全绿。
+- 验证：go build ./...=0；go vet ./...=0；go test ./...（全仓）全绿；gofmt 干净。
+- 注册：idcu-go/meta/modules/modules.yaml 修正 fswatch 描述为已落地中性实现、新增 scheduler planned（primitive），meta.version 9→10，modules.md 同步。未 push（待授权）。
+
 ### Commit 146: refactor(vector,search): 抽取通用嵌入/检索机制为本地中性包 embedding/retrieval（档二封档）
 
 - 背景：按 meta 标准 §3.17 中立性审计 code-schema，vector/search 的通用核心（向量存储/索引/本地 Embedder、FTS 引擎/融合重排/双路检索）中性、可插拔、零领域依赖，但仅 code-schema 单消费者，未过双消费者门槛。按档二在源项目内先抽独立包，封档待第二消费方。

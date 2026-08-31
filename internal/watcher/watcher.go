@@ -1,299 +1,37 @@
-// Package watcher 提供文件系统变更监听能力。
+// Package watcher 是领域层对中性文件监听能力 fswatch 的薄封装。
 //
-// P0 阶段实现基于轮询的简化监听（PollWatcher），
-// 不依赖 fsnotify 外部包，适合纯 Go 环境运行。
-// P1 阶段可切换为 fsnotify 原生监听以获得更好的性能。
+// 历史签名 (root, scan, sched, ...) 保持不变，仅把变更路径通过 sched.Enqueue
+// 接入领域调度器；scan 仅保留以兼容既有调用点，实际不参与监听逻辑。
+// 真正的实现与解耦见 internal/fswatch。
 package watcher
 
 import (
-	"context"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-
-	"gitee.com/idcu-go/recovery"
-	"github.com/idcu/codeschema/internal/scheduler"
+	"github.com/idcu/codeschema/internal/fswatch"
 	"github.com/idcu/codeschema/internal/scanner"
+	"github.com/idcu/codeschema/internal/scheduler"
 )
 
-// Watcher 是文件监听器的统一接口。
-type Watcher interface {
-	// Start 启动监听，阻塞直到 context 取消或发生不可恢复错误。
-	Start(ctx context.Context) error
-	// Stop 停止监听。
-	Stop() error
+// Watcher 是文件监听器的统一接口（别名 fswatch.Watcher）。
+type Watcher = fswatch.Watcher
+
+// PollWatcher 基于轮询的文件监听器（别名 fswatch.PollWatcher）。
+type PollWatcher = fswatch.PollWatcher
+
+// FsWatcher 基于 fsnotify 的原生监听器（别名 fswatch.FsWatcher）。
+type FsWatcher = fswatch.FsWatcher
+
+// NewPollWatcher 构造轮询监听器，并把变更路径上报给领域调度器 sched。
+func NewPollWatcher(root string, scan *scanner.Scanner, sched *scheduler.Scheduler[string], interval time.Duration, ignoreDirs []string) *PollWatcher {
+	return fswatch.NewPollWatcher(root, func(path string) {
+		sched.Enqueue(path)
+	}, interval, ignoreDirs)
 }
 
-// PollWatcher 基于轮询的简化文件监听器。
-// 每秒扫描目录，检测文件变更（mtime + size）并推入调度器。
-type PollWatcher struct {
-	root       string
-	scanner    *scanner.Scanner
-	scheduler  *scheduler.Scheduler
-	ignoreDirs map[string]bool
-	interval   time.Duration
-
-	// 缓存文件状态，用于检测变更
-	fileStates map[string]fileState
-}
-
-type fileState struct {
-	modTime time.Time
-	size    int64
-}
-
-// NewPollWatcher 创建轮询监听器。
-// root: 监听根目录。
-// scan: Scanner 实例，用于处理变更文件。
-// sched: Scheduler 实例，用于防抖排队。
-// interval: 轮询间隔（默认 1s）。
-// ignoreDirs: 忽略的目录名列表。
-func NewPollWatcher(root string, scan *scanner.Scanner, sched *scheduler.Scheduler, interval time.Duration, ignoreDirs []string) *PollWatcher {
-	if interval <= 0 {
-		interval = 1 * time.Second
-	}
-	ign := make(map[string]bool)
-	for _, d := range ignoreDirs {
-		ign[d] = true
-	}
-	// 默认忽略目录
-	defaultIgnores := []string{".git", "node_modules", "target", "build", "vendor", ".idea", ".vscode", "__pycache__"}
-	for _, d := range defaultIgnores {
-		ign[d] = true
-	}
-
-	return &PollWatcher{
-		root:       root,
-		scanner:    scan,
-		scheduler:  sched,
-		ignoreDirs: ign,
-		interval:   interval,
-		fileStates: make(map[string]fileState),
-	}
-}
-
-// Start 启动轮询监听，阻塞直到 context 取消。
-func (pw *PollWatcher) Start(ctx context.Context) error {
-	ticker := time.NewTicker(pw.interval)
-	defer ticker.Stop()
-
-	// 先初始化文件状态缓存
-	pw.buildInitialState()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			recovery.SafeCall(func() {
-				pw.poll(ctx)
-			})
-		}
-	}
-}
-
-// Stop 停止监听。
-func (pw *PollWatcher) Stop() error {
-	return nil
-}
-
-// buildInitialState 构建初始文件状态缓存。
-func (pw *PollWatcher) buildInitialState() {
-	filepath.Walk(pw.root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() && pw.ignoreDirs[info.Name()] {
-			return filepath.SkipDir
-		}
-		if !info.IsDir() {
-			pw.fileStates[path] = fileState{
-				modTime: info.ModTime(),
-				size:    info.Size(),
-			}
-		}
-		return nil
-	})
-}
-
-// poll 执行一次轮询检测。
-func (pw *PollWatcher) poll(ctx context.Context) {
-	current := make(map[string]fileState)
-
-	filepath.Walk(pw.root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() && pw.ignoreDirs[info.Name()] {
-			return filepath.SkipDir
-		}
-		if !info.IsDir() {
-			state := fileState{modTime: info.ModTime(), size: info.Size()}
-			current[path] = state
-
-			oldState, exists := pw.fileStates[path]
-			if !exists || oldState.modTime != state.modTime || oldState.size != state.size {
-				pw.scheduler.Enqueue(path)
-			}
-		}
-		return nil
-	})
-
-	// 检测已删除的文件
-	for path := range pw.fileStates {
-		if _, exists := current[path]; !exists {
-			// 文件已删除，通知扫描器
-			pw.scheduler.Enqueue(path)
-		}
-	}
-
-	pw.fileStates = current
-}
-
-// ---------------------------------------------------------------------------
-// FsWatcher — 基于 fsnotify 的原生文件系统监听器
-// ---------------------------------------------------------------------------
-
-// FsWatcher 使用 fsnotify 实现原生文件系统事件监听。
-// 自动递归监听所有子目录，当新目录创建时自动加入监听。
-// 适合生产环境，比 PollWatcher 有更低的延迟和 CPU 开销。
-type FsWatcher struct {
-	root       string
-	scanner    *scanner.Scanner
-	scheduler  *scheduler.Scheduler
-	ignoreDirs map[string]bool
-	watcher    *fsnotify.Watcher
-	done       chan struct{}
-}
-
-// NewFsWatcher 创建 fsnotify 原生监听器。
-// root: 监听根目录。
-// scan: Scanner 实例，用于处理变更文件。
-// sched: Scheduler 实例，用于防抖排队。
-// ignoreDirs: 忽略的目录名列表。
-func NewFsWatcher(root string, scan *scanner.Scanner, sched *scheduler.Scheduler, ignoreDirs []string) (*FsWatcher, error) {
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	ign := make(map[string]bool)
-	for _, d := range ignoreDirs {
-		ign[d] = true
-	}
-	// 默认忽略目录
-	defaultIgnores := []string{".git", "node_modules", "target", "build", "vendor", ".idea", ".vscode", "__pycache__"}
-	for _, d := range defaultIgnores {
-		ign[d] = true
-	}
-
-	return &FsWatcher{
-		root:       root,
-		scanner:    scan,
-		scheduler:  sched,
-		ignoreDirs: ign,
-		watcher:    w,
-		done:       make(chan struct{}),
-	}, nil
-}
-
-// Start 启动 fsnotify 原生监听，阻塞直到 context 取消。
-func (fw *FsWatcher) Start(ctx context.Context) error {
-	// 递归添加所有子目录到监听列表
-	if err := fw.addRecursive(fw.root); err != nil {
-		return err
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-fw.done:
-			return nil
-		case event, ok := <-fw.watcher.Events:
-			if !ok {
-				return nil
-			}
-			recovery.SafeCall(func() {
-				fw.handleEvent(ctx, event)
-			})
-		case err, ok := <-fw.watcher.Errors:
-			if !ok {
-				return nil
-			}
-			// 非致命错误，继续监听
-			_ = err
-		}
-	}
-}
-
-// Stop 停止 fsnotify 监听。
-func (fw *FsWatcher) Stop() error {
-	select {
-	case <-fw.done:
-		// 已经关闭
-	default:
-		close(fw.done)
-	}
-	return fw.watcher.Close()
-}
-
-// addRecursive 递归添加目录及其子目录到 fsnotify 监听。
-func (fw *FsWatcher) addRecursive(root string) error {
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // 跳过无法访问的路径
-		}
-		if info.IsDir() {
-			// 检查是否应该忽略此目录
-			if fw.ignoreDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			// 添加目录到 fsnotify 监听
-			if err := fw.watcher.Add(path); err != nil {
-				// 非致命错误，跳过此目录
-				return nil
-			}
-		}
-		return nil
-	})
-}
-
-// handleEvent 处理 fsnotify 事件。
-func (fw *FsWatcher) handleEvent(ctx context.Context, event fsnotify.Event) {
-	// 检查文件是否在忽略目录下
-	if fw.isIgnored(event.Name) {
-		return
-	}
-
-	// 如果是新创建的目录，递归添加到监听
-	if event.Has(fsnotify.Create) {
-		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-			if !fw.ignoreDirs[info.Name()] {
-				// 非阻塞添加子目录监听
-				fw.addRecursive(event.Name)
-			}
-		}
-	}
-
-	// 将所有变更事件推入调度器
-	fw.scheduler.Enqueue(event.Name)
-}
-
-// isIgnored 检查路径是否在忽略目录下。
-func (fw *FsWatcher) isIgnored(path string) bool {
-	dir := filepath.Dir(path)
-	for {
-		if fw.ignoreDirs[filepath.Base(dir)] {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir || parent == "." || parent == string(filepath.Separator) {
-			break
-		}
-		dir = parent
-	}
-	return false
+// NewFsWatcher 构造 fsnotify 原生监听器，并把变更路径上报给领域调度器 sched。
+func NewFsWatcher(root string, scan *scanner.Scanner, sched *scheduler.Scheduler[string], ignoreDirs []string) (*FsWatcher, error) {
+	return fswatch.NewFsWatcher(root, func(path string) {
+		sched.Enqueue(path)
+	}, ignoreDirs)
 }

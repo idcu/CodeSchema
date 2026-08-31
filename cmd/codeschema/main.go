@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/idcu/codeschema/internal/config"
 	gcm "gitee.com/idcu-go/graceful"
+	"github.com/idcu/codeschema/internal/config"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/scheduler"
@@ -271,7 +271,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	s := scanner.NewScanner(st, reg, *workers)
 
 	// 创建调度器
-	sched := scheduler.NewScheduler(*debounceMs, 1000)
+	sched := scheduler.NewScheduler[string](*debounceMs, 1000)
 
 	// 创建搜索组件
 	searcher, builder := rt.NewSearcher(cfg)

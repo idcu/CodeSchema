@@ -8,7 +8,7 @@ import (
 )
 
 func TestEnqueue_Duplicate(t *testing.T) {
-	s := NewScheduler(50, 100)
+	s := NewScheduler[string](50, 100)
 
 	s.Enqueue("/path/a.go")
 	s.Enqueue("/path/a.go") // 重复
@@ -19,7 +19,7 @@ func TestEnqueue_Duplicate(t *testing.T) {
 }
 
 func TestEnqueue_DifferentPaths(t *testing.T) {
-	s := NewScheduler(50, 100)
+	s := NewScheduler[string](50, 100)
 
 	s.Enqueue("/path/a.go")
 	s.Enqueue("/path/b.go")
@@ -31,7 +31,7 @@ func TestEnqueue_DifferentPaths(t *testing.T) {
 }
 
 func TestReady_Debounce(t *testing.T) {
-	s := NewScheduler(100, 100)
+	s := NewScheduler[string](100, 100)
 
 	s.Enqueue("/path/a.go")
 
@@ -54,7 +54,7 @@ func TestReady_Debounce(t *testing.T) {
 }
 
 func TestReady_DebounceRefresh(t *testing.T) {
-	s := NewScheduler(200, 100)
+	s := NewScheduler[string](200, 100)
 
 	s.Enqueue("/path/a.go")
 	time.Sleep(100 * time.Millisecond)
@@ -75,7 +75,7 @@ func TestReady_DebounceRefresh(t *testing.T) {
 }
 
 func TestDegradeSignal(t *testing.T) {
-	s := NewScheduler(10, 3) // 阈值 3
+	s := NewScheduler[string](10, 3) // 阈值 3
 
 	s.Enqueue("/path/a.go")
 	s.Enqueue("/path/b.go")
@@ -90,7 +90,7 @@ func TestDegradeSignal(t *testing.T) {
 }
 
 func TestStart_ProcessesEvents(t *testing.T) {
-	s := NewScheduler(50, 100)
+	s := NewScheduler[string](50, 100)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,7 +113,7 @@ func TestStart_ProcessesEvents(t *testing.T) {
 }
 
 func TestClear(t *testing.T) {
-	s := NewScheduler(50, 100)
+	s := NewScheduler[string](50, 100)
 
 	s.Enqueue("/path/a.go")
 	s.Enqueue("/path/b.go")
