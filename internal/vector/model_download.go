@@ -4,8 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/idcu/codeschema/internal/hash"
 	log "gitee.com/idcu-go/log"
 )
 
@@ -189,7 +188,7 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 
 	// 场景：上次下载已完整（校验通过）但未解包（如解包前中断）→ 直接复用
 	if d.SHA256 != "" {
-		if sum, err := sha256File(partPath); err == nil && strings.EqualFold(sum, d.SHA256) {
+		if sum, err := hash.File(partPath); err == nil && strings.EqualFold(sum, d.SHA256) {
 			d.logger.Debug("reusing complete .part archive, skipping download", "path", partPath)
 			if err := extractTarGz(partPath, d.ModelDir); err != nil {
 				return fmt.Errorf("extract archive: %w", err)
@@ -270,7 +269,7 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 	// 校验和：从 .part 重新读取计算（覆盖续传场景的完整内容）。
 	// 校验失败保留 .part 供下次续传（可能是上一轮下载残留的不完整数据）。
 	if d.SHA256 != "" {
-		sum, err := sha256File(partPath)
+		sum, err := hash.File(partPath)
 		if err != nil {
 			return fmt.Errorf("hash part file: %w", err)
 		}
@@ -286,20 +285,6 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 	}
 	_ = os.Remove(partPath)
 	return nil
-}
-
-// sha256File 计算文件的 SHA-256 十六进制摘要。
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // extractTarGz 解包 tar.gz 到目标目录（防路径穿越：拒绝绝对路径与 .. 段）。

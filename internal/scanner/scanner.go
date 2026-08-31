@@ -9,6 +9,7 @@ import (
 
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
+	"github.com/idcu/codeschema/internal/hash"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter"
 	"github.com/idcu/codeschema/internal/store"
@@ -96,7 +97,7 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	}
 
 	// 1. 计算哈希，如果文件不存在则触发删除处理
-	h, err := sha256sum(path)
+	h, err := hash.File(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 文件已被删除，触发删除回调

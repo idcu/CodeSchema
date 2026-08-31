@@ -12,6 +12,7 @@ import (
 	"time"
 
 	cerrors "github.com/idcu/codeschema/internal/errors"
+	auth "gitee.com/idcu-go/auth"
 	slog "gitee.com/idcu-go/log"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
@@ -704,12 +705,9 @@ func toInt(v any) (int, bool) {
 // 每次请求读取运行时快照中的认证令牌：支持热更新（SetAuthToken），即时生效。
 func (m *MCPServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token, _ := m.authToken.Load().(string); token != "" {
-			auth := r.Header.Get("Authorization")
-			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
+		if token, _ := m.authToken.Load().(string); token != "" && !auth.Check(r, token) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

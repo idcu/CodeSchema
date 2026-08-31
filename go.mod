@@ -3,6 +3,8 @@ module github.com/idcu/codeschema
 go 1.25.2
 
 require (
+	gitee.com/idcu-go/auth v0.1.0
+	gitee.com/idcu-go/httputil v0.2.0
 	github.com/fergusstrange/embedded-postgres v1.28.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/lib/pq v1.12.3
@@ -16,8 +18,6 @@ require (
 )
 
 require (
-	gitee.com/idcu-go/auth v0.1.0 // indirect
-	gitee.com/idcu-go/httputil v0.2.0 // indirect
 	gitee.com/idcu-go/timefmt v0.1.0 // indirect
 	gitee.com/idcu-go/yamlutil v0.1.0 // indirect
 )

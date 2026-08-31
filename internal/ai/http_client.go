@@ -1,17 +1,16 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/idcu/codeschema/internal/errors"
+	httputil "gitee.com/idcu-go/httputil"
 	log "gitee.com/idcu-go/log"
 )
 
@@ -42,8 +41,7 @@ func NewOpenAICompatClient(cfg HTTPClientConfig) LLMClient {
 		baseURL: strings.TrimSuffix(cfg.BaseURL, "/"),
 		apiKey:  cfg.APIKey,
 		model:   cfg.Model,
-		timeout: cfg.Timeout,
-		http:    &http.Client{Timeout: cfg.Timeout},
+		client:  &http.Client{Timeout: cfg.Timeout},
 		logger:  log.WithModule("ai.http"),
 	}
 }
@@ -53,8 +51,7 @@ type openAICompatClient struct {
 	baseURL string
 	apiKey  string
 	model   string
-	timeout time.Duration
-	http    *http.Client
+	client  *http.Client
 	logger  *log.Logger
 }
 
@@ -133,41 +130,23 @@ func (c *openAICompatClient) Choose(ctx context.Context, prompt string) (int, er
 
 // chat 执行一次 Chat Completions 调用。
 func (c *openAICompatClient) chat(ctx context.Context, prompt string) (string, error) {
-	body, err := json.Marshal(chatRequest{
+	data, statusCode, err := httputil.DoRaw(ctx, http.MethodPost, c.baseURL+"/chat/completions", chatRequest{
 		Model:     c.model,
 		Messages:  []chatMessage{{Role: "user", Content: prompt}},
 		MaxTokens: 512,
-	})
-	if err != nil {
-		return "", fmt.Errorf("%w: marshal request: %v", errors.ErrEnhanceFailed, err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("%w: new request: %v", errors.ErrLLMUnavailable, err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.http.Do(req)
+	}, httputil.WithClient(c.client), httputil.WithToken(c.apiKey))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", errors.ErrLLMUnavailable, err)
 	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", fmt.Errorf("%w: read response: %v", errors.ErrEnhanceFailed, err)
-	}
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		var errResp chatResponse
 		_ = json.Unmarshal(data, &errResp)
 		msg := "non-200 status"
 		if errResp.Error != nil && errResp.Error.Message != "" {
 			msg = errResp.Error.Message
 		}
-		c.logger.Warn("llm call failed", "status", resp.StatusCode, "error", msg)
-		return "", fmt.Errorf("%w: status %d: %s", errors.ErrLLMUnavailable, resp.StatusCode, msg)
+		c.logger.Warn("llm call failed", "status", statusCode, "error", msg)
+		return "", fmt.Errorf("%w: status %d: %s", errors.ErrLLMUnavailable, statusCode, msg)
 	}
 
 	var parsed chatResponse

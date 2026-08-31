@@ -15,6 +15,7 @@ import (
 	"time"
 
 	cerrors "github.com/idcu/codeschema/internal/errors"
+	auth "gitee.com/idcu-go/auth"
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
 	"github.com/idcu/codeschema/internal/service"
@@ -705,12 +706,9 @@ func atofOr(s string, def float64) float64 {
 // 每次请求读取运行时快照中的认证令牌：支持热更新（UpdateRuntime），即时生效。
 func (h *HTTPServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token := h.runtime.Load().(httpRuntimeConfig).authToken; token != "" {
-			auth := r.Header.Get("Authorization")
-			if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
-				writeError(w, "ERR_UNAUTHORIZED", "invalid or missing auth token", 401)
-				return
-			}
+		if token := h.runtime.Load().(httpRuntimeConfig).authToken; token != "" && !auth.Check(r, token) {
+			writeError(w, "ERR_UNAUTHORIZED", "invalid or missing auth token", 401)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

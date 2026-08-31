@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/idcu/codeschema/internal/hash"
 )
 
 func TestSha256sum_EmptyFile(t *testing.T) {
@@ -13,9 +15,9 @@ func TestSha256sum_EmptyFile(t *testing.T) {
 		t.Fatalf("write empty file: %v", err)
 	}
 
-	h, err := sha256sum(path)
+	h, err := hash.File(path)
 	if err != nil {
-		t.Fatalf("sha256sum: %v", err)
+		t.Fatalf("hash.File: %v", err)
 	}
 	// SHA-256 of empty string
 	expected := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -32,10 +34,10 @@ func TestSha256sum_Consistency(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	h1, _ := sha256sum(path)
-	h2, _ := sha256sum(path)
+	h1, _ := hash.File(path)
+	h2, _ := hash.File(path)
 	if h1 != h2 {
-		t.Errorf("sha256sum should be consistent: %s vs %s", h1, h2)
+		t.Errorf("hash.File should be consistent: %s vs %s", h1, h2)
 	}
 }
 
@@ -46,15 +48,15 @@ func TestSha256sum_DifferentContent(t *testing.T) {
 	os.WriteFile(path1, []byte("package a"), 0644)
 	os.WriteFile(path2, []byte("package b"), 0644)
 
-	h1, _ := sha256sum(path1)
-	h2, _ := sha256sum(path2)
+	h1, _ := hash.File(path1)
+	h2, _ := hash.File(path2)
 	if h1 == h2 {
 		t.Error("different files should have different hashes")
 	}
 }
 
 func TestSha256sum_FileNotFound(t *testing.T) {
-	_, err := sha256sum("/nonexistent/file.go")
+	_, err := hash.File("/nonexistent/file.go")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}
