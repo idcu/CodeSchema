@@ -1,0 +1,335 @@
+server:
+  http_addr: ":8081"
+  mcp_addr: ":8080"
+project:
+  name: "idcu-go"
+  root: /repo
+tenants:
+  - id: agent-core
+    name: "agent-core"
+    root: /repo/agent-core
+    storage:
+      driver: sqlite
+      dsn: /app/data/agent-core
+    auto_scan: true
+    watch: false
+  - id: auth
+    name: "auth"
+    root: /repo/auth
+    storage:
+      driver: sqlite
+      dsn: /app/data/auth
+    auto_scan: true
+    watch: false
+  - id: cfgutil
+    name: "cfgutil"
+    root: /repo/cfgutil
+    storage:
+      driver: sqlite
+      dsn: /app/data/cfgutil
+    auto_scan: true
+    watch: false
+  - id: config
+    name: "config"
+    root: /repo/config
+    storage:
+      driver: sqlite
+      dsn: /app/data/config
+    auto_scan: true
+    watch: false
+  - id: contractalign
+    name: "contractalign"
+    root: /repo/contractalign
+    storage:
+      driver: sqlite
+      dsn: /app/data/contractalign
+    auto_scan: true
+    watch: false
+  - id: crypto
+    name: "crypto"
+    root: /repo/crypto
+    storage:
+      driver: sqlite
+      dsn: /app/data/crypto
+    auto_scan: true
+    watch: false
+  - id: graceful
+    name: "graceful"
+    root: /repo/graceful
+    storage:
+      driver: sqlite
+      dsn: /app/data/graceful
+    auto_scan: true
+    watch: false
+  - id: httputil
+    name: "httputil"
+    root: /repo/httputil
+    storage:
+      driver: sqlite
+      dsn: /app/data/httputil
+    auto_scan: true
+    watch: false
+  - id: idempotency
+    name: "idempotency"
+    root: /repo/idempotency
+    storage:
+      driver: sqlite
+      dsn: /app/data/idempotency
+    auto_scan: true
+    watch: false
+  - id: idgen
+    name: "idgen"
+    root: /repo/idgen
+    storage:
+      driver: sqlite
+      dsn: /app/data/idgen
+    auto_scan: true
+    watch: false
+  - id: jsonstore
+    name: "jsonstore"
+    root: /repo/jsonstore
+    storage:
+      driver: sqlite
+      dsn: /app/data/jsonstore
+    auto_scan: true
+    watch: false
+  - id: kvlease
+    name: "kvlease"
+    root: /repo/kvlease
+    storage:
+      driver: sqlite
+      dsn: /app/data/kvlease
+    auto_scan: true
+    watch: false
+  - id: kvstore
+    name: "kvstore"
+    root: /repo/kvstore
+    storage:
+      driver: sqlite
+      dsn: /app/data/kvstore
+    auto_scan: true
+    watch: false
+  - id: kvsync
+    name: "kvsync"
+    root: /repo/kvsync
+    storage:
+      driver: sqlite
+      dsn: /app/data/kvsync
+    auto_scan: true
+    watch: false
+  - id: log
+    name: "log"
+    root: /repo/log
+    storage:
+      driver: sqlite
+      dsn: /app/data/log
+    auto_scan: true
+    watch: false
+  - id: metrics
+    name: "metrics"
+    root: /repo/metrics
+    storage:
+      driver: sqlite
+      dsn: /app/data/metrics
+    auto_scan: true
+    watch: false
+  - id: monitor
+    name: "monitor"
+    root: /repo/monitor
+    storage:
+      driver: sqlite
+      dsn: /app/data/monitor
+    auto_scan: true
+    watch: false
+  - id: mqtt
+    name: "mqtt"
+    root: /repo/mqtt
+    storage:
+      driver: sqlite
+      dsn: /app/data/mqtt
+    auto_scan: true
+    watch: false
+  - id: notify
+    name: "notify"
+    root: /repo/notify
+    storage:
+      driver: sqlite
+      dsn: /app/data/notify
+    auto_scan: true
+    watch: false
+  - id: outbox
+    name: "outbox"
+    root: /repo/outbox
+    storage:
+      driver: sqlite
+      dsn: /app/data/outbox
+    auto_scan: true
+    watch: false
+  - id: parking-agent
+    name: "parking-agent"
+    root: /repo/parking-agent
+    storage:
+      driver: sqlite
+      dsn: /app/data/parking-agent
+    auto_scan: true
+    watch: false
+  - id: parking-contracts
+    name: "parking-contracts"
+    root: /repo/parking-contracts
+    storage:
+      driver: sqlite
+      dsn: /app/data/parking-contracts
+    auto_scan: true
+    watch: false
+  - id: parking-server
+    name: "parking-server"
+    root: /repo/parking-server
+    storage:
+      driver: sqlite
+      dsn: /app/data/parking-server
+    auto_scan: true
+    watch: false
+  - id: pathsafe
+    name: "pathsafe"
+    root: /repo/pathsafe
+    storage:
+      driver: sqlite
+      dsn: /app/data/pathsafe
+    auto_scan: true
+    watch: false
+  - id: ping
+    name: "ping"
+    root: /repo/ping
+    storage:
+      driver: sqlite
+      dsn: /app/data/ping
+    auto_scan: true
+    watch: false
+  - id: ratelimit
+    name: "ratelimit"
+    root: /repo/ratelimit
+    storage:
+      driver: sqlite
+      dsn: /app/data/ratelimit
+    auto_scan: true
+    watch: false
+  - id: realtime-ping
+    name: "realtime-ping"
+    root: /repo/realtime-ping
+    storage:
+      driver: sqlite
+      dsn: /app/data/realtime-ping
+    auto_scan: true
+    watch: false
+  - id: recovery
+    name: "recovery"
+    root: /repo/recovery
+    storage:
+      driver: sqlite
+      dsn: /app/data/recovery
+    auto_scan: true
+    watch: false
+  - id: retry
+    name: "retry"
+    root: /repo/retry
+    storage:
+      driver: sqlite
+      dsn: /app/data/retry
+    auto_scan: true
+    watch: false
+  - id: schedule
+    name: "schedule"
+    root: /repo/schedule
+    storage:
+      driver: sqlite
+      dsn: /app/data/schedule
+    auto_scan: true
+    watch: false
+  - id: server-core
+    name: "server-core"
+    root: /repo/server-core
+    storage:
+      driver: sqlite
+      dsn: /app/data/server-core
+    auto_scan: true
+    watch: false
+  - id: shell
+    name: "shell"
+    root: /repo/shell
+    storage:
+      driver: sqlite
+      dsn: /app/data/shell
+    auto_scan: true
+    watch: false
+  - id: sqlstore
+    name: "sqlstore"
+    root: /repo/sqlstore
+    storage:
+      driver: sqlite
+      dsn: /app/data/sqlstore
+    auto_scan: true
+    watch: false
+  - id: timefmt
+    name: "timefmt"
+    root: /repo/timefmt
+    storage:
+      driver: sqlite
+      dsn: /app/data/timefmt
+    auto_scan: true
+    watch: false
+  - id: trace
+    name: "trace"
+    root: /repo/trace
+    storage:
+      driver: sqlite
+      dsn: /app/data/trace
+    auto_scan: true
+    watch: false
+  - id: transport
+    name: "transport"
+    root: /repo/transport
+    storage:
+      driver: sqlite
+      dsn: /app/data/transport
+    auto_scan: true
+    watch: false
+  - id: trim
+    name: "trim"
+    root: /repo/trim
+    storage:
+      driver: sqlite
+      dsn: /app/data/trim
+    auto_scan: true
+    watch: false
+  - id: ttlcache
+    name: "ttlcache"
+    root: /repo/ttlcache
+    storage:
+      driver: sqlite
+      dsn: /app/data/ttlcache
+    auto_scan: true
+    watch: false
+  - id: versionvector
+    name: "versionvector"
+    root: /repo/versionvector
+    storage:
+      driver: sqlite
+      dsn: /app/data/versionvector
+    auto_scan: true
+    watch: false
+  - id: webutil
+    name: "webutil"
+    root: /repo/webutil
+    storage:
+      driver: sqlite
+      dsn: /app/data/webutil
+    auto_scan: true
+    watch: false
+  - id: yamlutil
+    name: "yamlutil"
+    root: /repo/yamlutil
+    storage:
+      driver: sqlite
+      dsn: /app/data/yamlutil
+    auto_scan: true
+    watch: false

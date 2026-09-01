@@ -33,7 +33,7 @@
 # 构建：docker build -f Dockerfile.mirror -t codeschema:onnx .
 
 # === 构建阶段 ===
-FROM golang:1.25-bookworm AS builder
+FROM docker.m.daocloud.io/library/golang:1.25-bookworm AS builder
 
 # 默认启用 ONNX 语义检索（CGO + onnxruntime 动态库）；纯 Go 免 CGO 可传 --build-arg CGO_ENABLED=0。
 ARG CGO_ENABLED=1
@@ -70,7 +70,7 @@ RUN CGO_ENABLED=${CGO_ENABLED} go build -mod=vendor \
     ./cmd/codeschema
 
 # === 运行阶段 ===
-FROM debian:bookworm-slim
+FROM docker.m.daocloud.io/library/debian:bookworm-slim
 
 # 运行时需 glibc 系的 onnxruntime 依赖库：libstdc++.so.6（C++ 运行时）、
 # libgomp（OpenMP，onnxruntime CPU 推理依赖）。ca-certificates / tzdata 供网络与时间。

@@ -1,0 +1,15 @@
+server:
+  http_addr: ":18099"
+  mcp_addr: ":18098"
+project:
+  name: "idcu-go-config"
+  root: /Volumes/Data/idcu-go/config
+tenants:
+  - id: config
+    name: "config"
+    root: /Volumes/Data/idcu-go/config
+    storage:
+      driver: sqlite
+      dsn: /tmp/cs-test-data/config
+    auto_scan: true
+    watch: false

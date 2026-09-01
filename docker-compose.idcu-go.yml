@@ -1,0 +1,60 @@
+# =============================================================================
+# CodeSchema × idcu-go — 多租户扫描（方案 A：SQLite 内置 + 全 Docker）
+# =============================================================================
+# 将 idcu-go 的 41 个顶级 Go module 作为 41 个独立租户接入单个 CodeSchema 进程，
+# 每租户隔离 SQLite 存储（dsn 按 tenant id 派生），启动时自动全量扫描入库。
+#
+# 使用方式（在本文件所在目录执行）：
+#   1. 先构建镜像：docker build -t codeschema:onnx -f Dockerfile .
+#   2. 启动：      docker compose -f docker-compose.idcu-go.yml up -d
+#   3. 看日志：    docker compose -f docker-compose.idcu-go.yml logs -f
+#   4. 健康检查：  curl -s localhost:18081/health
+#   5. 列租户：    curl -s localhost:18081/projects
+#   6. 语义检索：  curl -s "localhost:18081/search?tenant=config&q=解析配置"
+#   7. 停止：      docker compose -f docker-compose.idcu-go.yml down
+#
+# 租户清单由 build/gen_idcu_mt.py 生成（build/idcu-go-mt.docker.yaml），
+# 仅取 idcu-go 的 41 个 depth-1 module（devbox 嵌套副本已排除，避免重复索引）。
+# =============================================================================
+
+services:
+  codeschema-idcu:
+    # 复用已构建的 ONNX 镜像（CGO + onnxruntime，语义检索真实可用）；
+    # 若需重新构建可改为 build: { context: ., args: { VERSION: onnx } }
+    image: codeschema:onnx
+    container_name: codeschema-idcu
+    restart: unless-stopped
+
+    ports:
+      - "18080:8080"   # MCP Server
+      - "18081:8081"   # HTTP API
+
+    volumes:
+      # idcu-go 整树（只读扫描源）；容器内各租户 root = /repo/<module>
+      - /Volumes/Data/idcu-go:/repo:ro
+      # 41 租户多租户配置（tenants: 列表，auto_scan: true）
+      - ./build/idcu-go-mt.docker.yaml:/app/config.yaml:ro
+      # 每租户 SQLite 索引数据（持久化）
+      - codeschema-idcu-data:/app/data
+
+    # --config 是根命令级 flag，必须放在子命令 serve 之前：
+    # /app/codeschema --config /app/config.yaml serve --http :8081
+    command: ["--config", "/app/config.yaml", "serve", "--http", ":8081"]
+
+    healthcheck:
+      test: ["CMD", "/app/codeschema", "version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    # 41 租户并发扫描 + 每租户向量索引驻留内存；已通过 ONNX 全局单例将模型加载从
+    # ~41× 收敛到 ~1×，此处 4g 仅作安全余量（覆盖每租户 vector.json 驻留内存）。
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+volumes:
+  codeschema-idcu-data:
+    name: codeschema-idcu-data

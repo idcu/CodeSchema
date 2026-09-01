@@ -1,0 +1,335 @@
+server:
+  http_addr: ":18081"
+  mcp_addr: ":18080"
+project:
+  name: "idcu-go"
+  root: /Volumes/Data/idcu-go
+tenants:
+  - id: agent-core
+    name: "agent-core"
+    root: /Volumes/Data/idcu-go/agent-core
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/agent-core
+    auto_scan: true
+    watch: false
+  - id: auth
+    name: "auth"
+    root: /Volumes/Data/idcu-go/auth
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/auth
+    auto_scan: true
+    watch: false
+  - id: cfgutil
+    name: "cfgutil"
+    root: /Volumes/Data/idcu-go/cfgutil
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/cfgutil
+    auto_scan: true
+    watch: false
+  - id: config
+    name: "config"
+    root: /Volumes/Data/idcu-go/config
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/config
+    auto_scan: true
+    watch: false
+  - id: contractalign
+    name: "contractalign"
+    root: /Volumes/Data/idcu-go/contractalign
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/contractalign
+    auto_scan: true
+    watch: false
+  - id: crypto
+    name: "crypto"
+    root: /Volumes/Data/idcu-go/crypto
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/crypto
+    auto_scan: true
+    watch: false
+  - id: graceful
+    name: "graceful"
+    root: /Volumes/Data/idcu-go/graceful
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/graceful
+    auto_scan: true
+    watch: false
+  - id: httputil
+    name: "httputil"
+    root: /Volumes/Data/idcu-go/httputil
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/httputil
+    auto_scan: true
+    watch: false
+  - id: idempotency
+    name: "idempotency"
+    root: /Volumes/Data/idcu-go/idempotency
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/idempotency
+    auto_scan: true
+    watch: false
+  - id: idgen
+    name: "idgen"
+    root: /Volumes/Data/idcu-go/idgen
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/idgen
+    auto_scan: true
+    watch: false
+  - id: jsonstore
+    name: "jsonstore"
+    root: /Volumes/Data/idcu-go/jsonstore
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/jsonstore
+    auto_scan: true
+    watch: false
+  - id: kvlease
+    name: "kvlease"
+    root: /Volumes/Data/idcu-go/kvlease
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/kvlease
+    auto_scan: true
+    watch: false
+  - id: kvstore
+    name: "kvstore"
+    root: /Volumes/Data/idcu-go/kvstore
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/kvstore
+    auto_scan: true
+    watch: false
+  - id: kvsync
+    name: "kvsync"
+    root: /Volumes/Data/idcu-go/kvsync
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/kvsync
+    auto_scan: true
+    watch: false
+  - id: log
+    name: "log"
+    root: /Volumes/Data/idcu-go/log
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/log
+    auto_scan: true
+    watch: false
+  - id: metrics
+    name: "metrics"
+    root: /Volumes/Data/idcu-go/metrics
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/metrics
+    auto_scan: true
+    watch: false
+  - id: monitor
+    name: "monitor"
+    root: /Volumes/Data/idcu-go/monitor
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/monitor
+    auto_scan: true
+    watch: false
+  - id: mqtt
+    name: "mqtt"
+    root: /Volumes/Data/idcu-go/mqtt
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/mqtt
+    auto_scan: true
+    watch: false
+  - id: notify
+    name: "notify"
+    root: /Volumes/Data/idcu-go/notify
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/notify
+    auto_scan: true
+    watch: false
+  - id: outbox
+    name: "outbox"
+    root: /Volumes/Data/idcu-go/outbox
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/outbox
+    auto_scan: true
+    watch: false
+  - id: parking-agent
+    name: "parking-agent"
+    root: /Volumes/Data/idcu-go/parking-agent
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/parking-agent
+    auto_scan: true
+    watch: false
+  - id: parking-contracts
+    name: "parking-contracts"
+    root: /Volumes/Data/idcu-go/parking-contracts
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/parking-contracts
+    auto_scan: true
+    watch: false
+  - id: parking-server
+    name: "parking-server"
+    root: /Volumes/Data/idcu-go/parking-server
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/parking-server
+    auto_scan: true
+    watch: false
+  - id: pathsafe
+    name: "pathsafe"
+    root: /Volumes/Data/idcu-go/pathsafe
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/pathsafe
+    auto_scan: true
+    watch: false
+  - id: ping
+    name: "ping"
+    root: /Volumes/Data/idcu-go/ping
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/ping
+    auto_scan: true
+    watch: false
+  - id: ratelimit
+    name: "ratelimit"
+    root: /Volumes/Data/idcu-go/ratelimit
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/ratelimit
+    auto_scan: true
+    watch: false
+  - id: realtime-ping
+    name: "realtime-ping"
+    root: /Volumes/Data/idcu-go/realtime-ping
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/realtime-ping
+    auto_scan: true
+    watch: false
+  - id: recovery
+    name: "recovery"
+    root: /Volumes/Data/idcu-go/recovery
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/recovery
+    auto_scan: true
+    watch: false
+  - id: retry
+    name: "retry"
+    root: /Volumes/Data/idcu-go/retry
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/retry
+    auto_scan: true
+    watch: false
+  - id: schedule
+    name: "schedule"
+    root: /Volumes/Data/idcu-go/schedule
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/schedule
+    auto_scan: true
+    watch: false
+  - id: server-core
+    name: "server-core"
+    root: /Volumes/Data/idcu-go/server-core
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/server-core
+    auto_scan: true
+    watch: false
+  - id: shell
+    name: "shell"
+    root: /Volumes/Data/idcu-go/shell
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/shell
+    auto_scan: true
+    watch: false
+  - id: sqlstore
+    name: "sqlstore"
+    root: /Volumes/Data/idcu-go/sqlstore
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/sqlstore
+    auto_scan: true
+    watch: false
+  - id: timefmt
+    name: "timefmt"
+    root: /Volumes/Data/idcu-go/timefmt
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/timefmt
+    auto_scan: true
+    watch: false
+  - id: trace
+    name: "trace"
+    root: /Volumes/Data/idcu-go/trace
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/trace
+    auto_scan: true
+    watch: false
+  - id: transport
+    name: "transport"
+    root: /Volumes/Data/idcu-go/transport
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/transport
+    auto_scan: true
+    watch: false
+  - id: trim
+    name: "trim"
+    root: /Volumes/Data/idcu-go/trim
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/trim
+    auto_scan: true
+    watch: false
+  - id: ttlcache
+    name: "ttlcache"
+    root: /Volumes/Data/idcu-go/ttlcache
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/ttlcache
+    auto_scan: true
+    watch: false
+  - id: versionvector
+    name: "versionvector"
+    root: /Volumes/Data/idcu-go/versionvector
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/versionvector
+    auto_scan: true
+    watch: false
+  - id: webutil
+    name: "webutil"
+    root: /Volumes/Data/idcu-go/webutil
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/webutil
+    auto_scan: true
+    watch: false
+  - id: yamlutil
+    name: "yamlutil"
+    root: /Volumes/Data/idcu-go/yamlutil
+    storage:
+      driver: sqlite
+      dsn: /Volumes/Data/code-schema/build/idcu-mt/yamlutil
+    auto_scan: true
+    watch: false

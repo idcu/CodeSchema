@@ -1,7 +1,7 @@
 gitee.com/idcu-go/auth v0.1.0 h1:Rfz2bgiadPdoogZlEufSe9CpqQ4+ljz6L9BLeeTFw+4=
 gitee.com/idcu-go/auth v0.1.0/go.mod h1:77C15rqFMWoYfjV+O+YeyapVyzj6K33YbMmVjPfur/o=
-gitee.com/idcu-go/httputil v0.2.0 h1:1NM4AM9RjuLhAIL2Fdhuq0capnzJagBc6MMF/8wYR7E=
-gitee.com/idcu-go/httputil v0.2.0/go.mod h1:PoNMmchp0PU3BsnuMKRXuXAMn4+COxucWsCCF/x4Lvo=
+gitee.com/idcu-go/httputil v0.3.0 h1:2+d5PiZ0cx9dyjLPbiUU1o8EKXjzQs4CF17MBnEh2W4=
+gitee.com/idcu-go/httputil v0.3.0/go.mod h1:PoNMmchp0PU3BsnuMKRXuXAMn4+COxucWsCCF/x4Lvo=
 gitee.com/idcu-go/timefmt v0.1.0 h1:OqbmsltMiSpuCq/h4+BlqUFzjJhlCN54I1LTZhJw53w=
 gitee.com/idcu-go/timefmt v0.1.0/go.mod h1:Pciv7SuHtXUERIW6bjzqDCpPtkyl6vvzW90PqTqdTJY=
 gitee.com/idcu-go/yamlutil v0.1.0 h1:/8fQsPF7/6wTmjJcC/AYzVm+6510B3s19PBhpZ2OAqU=

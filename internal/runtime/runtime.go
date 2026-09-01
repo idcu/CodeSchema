@@ -184,20 +184,28 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	var em vector.Embedder
 
 	if dl := vector.NewModelDownloader(modelDir, cfg.Storage.Vector.ModelDownloadURL, cfg.Storage.Vector.ModelSHA256); dl != nil {
-		if ok, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
-			log.Printf("WARN: ONNX model remote fetch failed (%v), falling back to LocalEmbedder", err)
-		} else if ok {
-			log.Printf("semantic: ONNX model ensured at %s", modelDir)
+		if _, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
+			log.Printf("WARN: ONNX model remote fetch failed (%v), will use LocalEmbedder", err)
 		}
 	}
 
-	onnxEm := vector.NewONNXEmbedderOrFallback(modelDir, 512, libDir)
+	// 关键修复（多租户 OOM）：使用 vector 包提供的进程级全局单例
+	// GetONNXEmbedderGlobal，而非每次 NewONNXEmbedderOrFallback 新建独立 session。
+	// 41 个租户共享同一份 bge 模型 + onnxruntime 会话，将启动内存峰值从 ~41× 降到 ~1×，
+	// 否则在 2GB 容器上限下触发 ONNX 模型重复加载 → OOM kill → restart 死循环。
+	// 各租户 modelDir/libDir 均为默认 down/models/bge-small-zh-v1.5 + down/onnxruntime，
+	// 共享单例安全；Embed 内部有 mu 锁，并发查询串行化执行。
+	onnxEm := vector.GetONNXEmbedderGlobal(modelDir, 512, libDir)
 	if onnxEm != nil {
-		log.Printf("semantic: using ONNX embedder (%s, dim=%d)", cfg.Storage.Vector.EmbeddingModel, onnxEm.Dim())
+		log.Printf("semantic: ONNX embedder active (%s, dim=%d)", cfg.Storage.Vector.EmbeddingModel, onnxEm.Dim())
 		em = onnxEm
 	} else {
-		log.Printf("semantic: ONNX model not found, falling back to LocalEmbedder (dim=%d)",
-			cfg.Storage.Search.VectorDim)
+		// 未启用 -tags onnx 构建时 NewONNXEmbedderOrFallback 返回 nil（桩实现），
+		// 即便模型/运行时文件存在也不会加载；此时使用 LocalEmbedder（确定性哈希向量，
+		// 仅保证 FTS/向量索引结构可用，语义相似度不具真实意义）。真实语义检索需
+		// `go build -tags onnx`（并提供 onnxruntime 动态库）构建。
+		log.Printf("semantic: ONNX embedder not loaded (need `go build -tags onnx` + onnxruntime lib; model dir=%s) → using LocalEmbedder (dim=%d)",
+			modelDir, cfg.Storage.Search.VectorDim)
 		model := vector.NewLocalEmbedder(cfg.Storage.Search.VectorDim)
 		idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
 		if err := model.LoadIDF(idfFile); err != nil {

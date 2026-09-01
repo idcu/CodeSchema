@@ -46,6 +46,7 @@ type Tenant struct {
 	Runtime   *rt.Runtime
 	AutoScan  bool // 构建时是否执行启动全量扫描
 	Watch     bool // 构建时是否启动后台增量监听
+	ScanErr   error // auto-scan 失败原因（非 nil 表示该租户以空数据提供服务，供运维可见）
 	stopWatch func()
 }
 
@@ -86,6 +87,7 @@ func NewManager(ctx context.Context, base *config.Config, openStore OpenStoreFun
 		openStore: openStore,
 		defaultID: "default",
 	}
+	var scanFails []string
 	for _, tgt := range resolveTargets(base) {
 		t, err := m.buildTenant(ctx, tgt)
 		if err != nil {
@@ -93,6 +95,16 @@ func NewManager(ctx context.Context, base *config.Config, openStore OpenStoreFun
 		}
 		m.tenants[tgt.id] = t
 		m.order = append(m.order, tgt.id)
+		if t.ScanErr != nil {
+			scanFails = append(scanFails, tgt.id)
+		}
+	}
+	// 启动汇总：多租户（尤其数十个仓库）运维时一眼看清扫描结果。
+	if len(scanFails) > 0 {
+		log.Printf("[tenant] manager ready: %d tenant(s), %d auto-scan FAILED: %v",
+			len(m.order), len(scanFails), scanFails)
+	} else {
+		log.Printf("[tenant] manager ready: %d tenant(s) (all auto-scanned)", len(m.order))
 	}
 	if len(m.order) > 0 {
 		m.defaultID = m.order[0]
@@ -137,10 +149,12 @@ func (m *Manager) buildTenant(ctx context.Context, tgt tenantTarget) (*Tenant, e
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
+	var scanErr error
 	if tgt.autoScan && tgt.cfg.Project.Root != "" {
 		log.Printf("tenant %q: auto-scan %s", tgt.id, tgt.cfg.Project.Root)
 		if err := rt.ScanRepository(ctx, st, tgt.cfg, tgt.cfg.Project.Root); err != nil {
-			log.Printf("tenant %q: auto-scan failed: %v", tgt.id, err)
+			scanErr = err
+			log.Printf("tenant %q: auto-scan FAILED (tenant will serve with empty data): %v", tgt.id, err)
 		}
 	}
 	run, err := rt.BuildRuntime(ctx, st, tgt.cfg)
@@ -151,6 +165,7 @@ func (m *Manager) buildTenant(ctx context.Context, tgt tenantTarget) (*Tenant, e
 	t := &Tenant{
 		ID: tgt.id, Name: tgt.name, Cfg: tgt.cfg,
 		Store: st, Runtime: run, AutoScan: tgt.autoScan, Watch: tgt.watch,
+		ScanErr: scanErr,
 	}
 	if tgt.watch && tgt.cfg.Project.Root != "" {
 		stop, err := rt.StartWatchBackground(ctx, st, tgt.cfg, tgt.cfg.Project.Root)
@@ -344,6 +359,11 @@ func (m *Manager) Apply(ctx context.Context, base *config.Config) error {
 	n := len(m.tenants)
 	m.mu.RUnlock()
 	metrics.SetGauge("tenant_instances_total", float64(n))
+	if len(errs) > 0 {
+		log.Printf("[tenant] apply complete: %d tenant(s), %d build FAILED", n, len(errs))
+	} else {
+		log.Printf("[tenant] apply complete: %d tenant(s)", n)
+	}
 
 	// 锁外释放旧实例资源。
 	for _, id := range release {

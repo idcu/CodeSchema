@@ -403,6 +403,25 @@ P18      [████████████████████] 100%
       默认 `MinScore=0` 关闭过滤（完全向后兼容）。HTTP `GET /search?min_score=` 与 MCP `search_symbols` 的 `min_score` 参数均已接线，
       响应改为 envelope `{results,trim_reason,filtered}`，每条结果带 `confidence`。新增 8 组测试（search + service）全绿。
 
+### 维护优化（2026-09-01）：idcu-go 多租户扫描（方案 A：SQLite + Docker）+ code-schema 自身完善
+
+承接「如何用 code-schema 将 idcu-go 代码结构化，数据库用 Docker」的诉求，落地多租户方案 A，并同步修复 code-schema 自身三处缺陷：
+
+- [x] **方案 A 落地：idcu-go 41 模块多租户扫描** — 新增 `build/gen_idcu_mt.py`（仅取 idcu-go 41 个 depth-1 module 作租户，排除 `devbox/workspace/modules/*` 嵌套副本避免重复索引），生成 `build/idcu-go-mt.local.yaml`（本地路径 + `build/idcu-mt/<m>` 数据卷）与 `build/idcu-go-mt.docker.yaml`（容器内 `/repo/<m>` + `/app/data/<m>`）；新增 `docker-compose.idcu-go.yml`（复用 `codeschema:onnx` 镜像，挂载 `/Volumes/Data/idcu-go:/repo` + 数据卷）。实测：41 租户启动全量 auto-scan 通过，日志 `[tenant] manager ready: 41 tenant(s) (all auto-scanned)`，`/health` 返回 `store_ok:true, store_type:sqlite`，`/projects` 列出 41 租户，每租户独立 SQLite dsn 目录隔离确认。
+- [x] **Fix A（多租户启动可见性）** — `internal/tenant/tenant.go`：新增 `Tenant.ScanErr` 字段；`buildTenant` 自动扫描失败时记录错误并日志 `auto-scan FAILED (tenant will serve with empty data)`；`NewManager` / `Apply` 增加汇总日志（成功 / 失败租户数）。原失败仅静默 log，运维无法感知。
+- [x] **Fix B（ONNX 日志澄清）** — `internal/runtime/runtime.go`：`NewSearcherWithStore` 将误导性的 `ONNX model ensured at %s` 改为明确两态：`semantic: ONNX embedder active (bge-small-zh-v1.5, dim=512)` 与 `semantic: ONNX embedder not loaded (need go build -tags onnx + onnxruntime lib; model dir=%s) → using LocalEmbedder (dim=%d)`，避免「模型已就位」误判。
+- [x] **Dockerfile 三处实质修正（修复自身缺陷）**：
+  1. **基础镜像 alpine/musl → Debian bookworm（glibc）**：onnxruntime 预编译 `libonnxruntime.so` 依赖 `libstdc++.so.6`/`libgomp`（glibc），原 alpine/musl 无法加载该 `.so`，导致 ONNX **静默降级为 LocalEmbedder**（日志 `ONNX embedder not loaded → using LocalEmbedder`）。Dockerfile 已改为 Debian bookworm 基础 + 运行期装 `libstdc++6 libgomp1`（代码修正完成）。**验证说明（已闭环，2026-09-01）**：Debian/glibc 版 `docker build` 经 `Dockerfile.mirror`（daocloud 国内源 `docker.m.daocloud.io/library/...`）成功构建 `codeschema:onnx`（约 1.5min，构建缓存命中）；本地 macOS `-tags onnx` 与容器内均确认 `semantic: ONNX embedder active (bge-small-zh-v1.5, dim=512)`。容器端到端验证：41 租户 `manager ready` + `/health` 200 + `/projects` 41 + 语义检索 `q=解析配置&mode=semantic` 返回真实相关结果（config/docs/api.md、README.md，score 0.61/0.60…）。**ONNX 在 Debian 容器内真实生效，非 musl 降级**。
+  2. **vendor 替代 dropreplace+gitee**：原 Dockerfile 构建期 `go mod edit -dropreplace` 去掉 `../idcu-go/*` 本地 replace、改从 gitee 拉发布版，但 `gitee.com/idcu-go/recovery` 与 `trace` **从未发布到 gitee**（去掉 replace 后 `go mod download` 直接 `unknown revision`），构建必失败。改为 `go mod vendor`（把全部本地 replace 固化进 vendor/），Docker 以 `-mod=vendor` 离线构建，代码与本地开发一致、且不依赖 gitee 可用性。修改 go.mod 后须重跑 `go mod vendor`。
+  3. **ONNX 默认开启**：`CGO_ENABLED=1 -tags onnx` 为镜像默认（与本地 `make build` 纯 Go 默认不同），语义检索用真实 ONNX 向量化。
+- [x] **回归验证** — `go build -mod=vendor ./...` 全树编译通过；`go test ./internal/tenant/... ./internal/runtime/...` 全绿；`Dockerfile.mirror`（daocloud 源）`docker build -t codeschema:onnx` 成功（Debian bookworm + glibc，ONNX 容器内真实生效，非 musl 降级）；alpine 版镜像仅作对照（vendoring + ONNX 尝试，容器内 ONNX 因 musl 降级 LocalEmbedder，结构化/FTS/多租户全链路可用）。本地 macOS `-tags onnx` 构建已确认 ONNX active；容器内 41 租户 `manager ready` + `/health` 200 + `/projects` 41 + 语义检索真实返回已验证。
+
+### 维护优化续（2026-09-01）：多租户 OOM 根因修复 + 配置热重载防御
+
+- [x] **Fix C（多租户 OOM 根因修复：ONNX 嵌入器进程级单例）** — `internal/runtime/runtime.go`：`NewSearcherWithStore` 改用 `vector.GetONNXEmbedderGlobal`（vector 包已有进程级单例，含 `onnxGlobal` 锁保护，`Embed` 内部 `mu` 串行化并发查询），替代原 `NewONNXEmbedderOrFallback` 每租户独立加载 bge 模型 + onnxruntime 会话。**根因**：41 租户各自加载 bge-small-zh-v1.5（~数百 MB/份）→ 启动内存峰值 > 2GB 容器上限 → OOM kill → `restart: unless-stopped` 死循环 → `NewManager` 永远跑不完 → 服务永不监听（`docker inspect` 实锤 `RestartCount` 累增、`1.58GiB/2GiB` 扫描中、每租户 auto-scan 重复 3× = 3 次重启）；本地无内存上限故正常。**修复效果**：模型仅加载 1 次，启动内存从 ~41× 收敛到 ~1×；实测容器 `183MiB/4GiB`、`RestartCount=0`、无 OOM、`manager ready` 正常打印。各租户 `modelDir`/`libDir` 均为默认 `down/models/bge-small-zh-v1.5` + `down/onnxruntime`，共享单例安全。
+- [x] **Fix D（配置热重载误触发防御）** — `vendor/gitee.com/idcu-go/config/watcher.go`：`checkAndReload` / `ReloadNow` 在 `mtime+size` 不匹配后追加 **内容 sha256 二次确认**（bind-mount / NFS 等 mtime 不稳定文件系统下避免误判变更 → 触发 `mgr.Apply` 全量 rescan 死循环），仅内容真变才重载并刷新 `lastHash` 作排障指纹。注：本件为 vendor 副本直改（Dockerfile 以 `go mod vendor` 固化，`COPY . .` 不重跑 `go mod vendor`，故镜像内含此加固）；上游源 `../idcu-go/config/watcher.go` 为原始版，如需长期固化建议同步上游（本次未越仓提交）。
+- [x] **Docker 部署资源上限 2g→4g** — `docker-compose.idcu-go.yml`：`deploy.resources.limits.memory` 由 2g 提到 4g 作安全余量（覆盖每租户 `vector.json` 驻留内存；主因 ONNX 单例已消除重复模型加载，4g 仅为余量）。
+
 ## 已知问题
 
 1. ~~**网络不可用**：无法下载外部包。~~ **已解决（依赖口径已更正）**：实际本地依赖为 `chromem-go` + `modernc.org/sqlite`（纯 Go，非 `go-sqlite3`）+ `onnxruntime_go` + `yaml.v3` + `fsnotify`。**注：`go-sqlite3` 与 `go-tree-sitter` 从未进入 go.mod**——SQLite 走 modernc 纯 Go 驱动，tree-sitter 适配器为 30 语言正则解析（非 CGO 语法树，`-tags treesitter` 切真语法树）。
