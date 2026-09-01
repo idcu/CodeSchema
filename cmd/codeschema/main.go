@@ -391,6 +391,7 @@ func mcpCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWa
 func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWatcher, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("http", cfg.Server.HTTPAddr, "监听地址")
+	mcpAddr := fs.String("mcp", cfg.Server.MCPAddr, "MCP Server 监听地址（空则不启动 MCP，纯 HTTP 模式）")
 	storeDir := fs.String("store", cfg.Storage.DSN, "存储目录")
 	authToken := fs.String("auth-token", cfg.Server.AuthToken, "Bearer token 认证")
 	fs.Parse(args)
@@ -416,6 +417,19 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 		httpSrv.SetRateLimit(cfg.Server.RateLimit)
 	}
 
+	// 可选：单进程同时起 MCP Server，与 HTTP 共享同一 mgr（一次全量扫描、零额外
+	// ONNX 模型加载，避免再起一个 mcp 进程重复扫描 41 租户引发的启动内存翻倍）。
+	// 默认地址取 cfg.Server.MCPAddr；为空则不启动 MCP（纯 HTTP 模式，向后兼容）。
+	var mcpSrv *server.MCPServer
+	if *mcpAddr != "" {
+		mcpSrv = server.NewMCPServer(nil, *mcpAddr)
+		mcpSrv.SetTenantManager(mgr)
+		mcpSrv.SetContextDefaults(rt.ContextOptionsFromConfig(cfg))
+		if *authToken != "" {
+			mcpSrv.SetAuthToken(*authToken)
+		}
+	}
+
 	// 全局能力热重载（单一回调，避免覆盖）：配置文件变更时，无需重启进程，
 	// 自动增量应用租户集合 + 监听地址 / 认证令牌 / 限流（preset 变更经
 	// config.Load 重新应用，其影响的服务端字段在此连带生效；以配置文件为
@@ -427,6 +441,9 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 			}
 			if err := httpSrv.UpdateRuntime(newCfg.Server.HTTPAddr, newCfg.Server.AuthToken, newCfg.Server.RateLimit); err != nil {
 				log.Printf("server hot-reload error: %v", err)
+			}
+			if mcpSrv != nil {
+				mcpSrv.SetAuthToken(newCfg.Server.AuthToken)
 			}
 		})
 	}
@@ -466,6 +483,14 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 	}
 
 	fmt.Printf("HTTP API Server listening on %s\n", *addr)
+	if mcpSrv != nil {
+		go func() {
+			fmt.Printf("MCP Server listening on %s\n", *mcpAddr)
+			if err := mcpSrv.Start(ctx); err != nil {
+				log.Printf("MCP server error: %v", err)
+			}
+		}()
+	}
 	return httpSrv.Start(ctx)
 }
 

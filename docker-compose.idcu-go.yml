@@ -11,7 +11,9 @@
 #   4. 健康检查：  curl -s localhost:18081/health
 #   5. 列租户：    curl -s localhost:18081/projects
 #   6. 语义检索：  curl -s "localhost:18081/search?tenant=config&q=解析配置"
-#   7. 停止：      docker compose -f docker-compose.idcu-go.yml down
+#   7. MCP 接入：   serve 已同进程起 MCP（SSE, :8080）；客户端连 http://localhost:18080/sse
+#                （或 `codeschema --config build/idcu-go-mt.docker.yaml mcp --print-config` 取接入片段）
+#   8. 停止：      docker compose -f docker-compose.idcu-go.yml down
 #
 # 租户清单由 build/gen_idcu_mt.py 生成（build/idcu-go-mt.docker.yaml），
 # 仅取 idcu-go 的 41 个 depth-1 module（devbox 嵌套副本已排除，避免重复索引）。
@@ -38,8 +40,10 @@ services:
       - codeschema-idcu-data:/app/data
 
     # --config 是根命令级 flag，必须放在子命令 serve 之前：
-    # /app/codeschema --config /app/config.yaml serve --http :8081
-    command: ["--config", "/app/config.yaml", "serve", "--http", ":8081"]
+    # /app/codeschema --config /app/config.yaml serve --http :8081 --mcp :8080
+    # --mcp 与 --http 同进程、共享同一 mgr（一次全量扫描、零额外 ONNX 加载）；
+    # 不传 --mcp 则纯 HTTP 模式。默认 --mcp 取 cfg.server.mcp_addr（本配置 :8080）。
+    command: ["--config", "/app/config.yaml", "serve", "--http", ":8081", "--mcp", ":8080"]
 
     healthcheck:
       test: ["CMD", "/app/codeschema", "version"]
