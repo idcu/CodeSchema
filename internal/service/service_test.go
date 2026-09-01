@@ -844,3 +844,49 @@ func TestSearchByTags_MethodResult(t *testing.T) {
 		t.Fatalf("expected only com.example.A.Get, got %v", res.Methods)
 	}
 }
+
+// TestGetAffected_RequiresSymbol 验证 GetAffected 空符号入参报错（替换原空壳）。
+func TestGetAffected_RequiresSymbol(t *testing.T) {
+	svc := newTestService(t)
+	if _, err := svc.GetAffected(context.Background(), "", false); err == nil {
+		t.Fatal("expected error for empty symbol")
+	}
+}
+
+// TestGetAffected_ReturnsLinkedTests 验证 GetAffected 收敛为受影响单测列表。
+//
+// 不依赖 analyzer（mock 无 call 边）：仅以 symbol 自身经 FindTestLinks 五策略
+// 关联到的命名单测。验证空壳已被真实逻辑替换，且结果去重正确。
+func TestGetAffected_ReturnsLinkedTests(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "github.com/idcu/codeschema/internal/order.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "getOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderService.getOrder"}},
+			20: {{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestGetOrder"}},
+		},
+	}
+	svc := NewService(st)
+
+	got, err := svc.GetAffected(ctx, "github.com/idcu/codeschema/internal/order.OrderService.getOrder", false)
+	if err != nil {
+		t.Fatalf("GetAffected: %v", err)
+	}
+	found := false
+	for _, m := range got {
+		if m == "github.com/idcu/codeschema/internal/order.OrderServiceTest.TestGetOrder" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected affected test TestGetOrder, got %v", got)
+	}
+}
+

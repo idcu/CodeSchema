@@ -1550,12 +1550,55 @@ func (s *Service) SearchConfig(ctx context.Context, pattern string) ([]string, e
 	return []string{}, nil
 }
 
-// GetAffected 获取受影响内容（P0 骨架）。
+// GetAffected 获取受指定符号变更影响的单测列表。
+//
+// 语义：给定符号（方法 FQN），返回「可能因该符号变更而需要重跑」的单测集合。
+// 计算方式（与 impact/tests 共用同一套 FQN 口径，保证链路一致）：
+//  1. 受影响符号集 = {symbol} ∪ 其传递调用者（callers，向上追溯谁调用了它）；
+//     未注入 analyzer 时退化为仅 {symbol}（仍有命名/same_tag 关联单测可用）。
+//  2. 对每个受影响符号调用 FindTestLinks（五策略）收集关联单测，全局去重返回。
+//
+// 与 GetImpact 的区别：GetImpact 返回调用图节点（影响面），GetAffected 直接收敛为
+// 「需要重跑的测试」列表，供 CI 增量测试选择（T4-2 验收口径的自然延伸）。
 func (s *Service) GetAffected(ctx context.Context, symbol string, recursive bool) ([]string, error) {
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
-	return []string{}, nil
+
+	// 1. 受影响符号集：symbol 本身 + 其传递调用者。
+	affected := map[string]bool{symbol: true}
+	if s.analyzer != nil {
+		depth := 1
+		if recursive {
+			depth = 10 // 传递追溯上限
+		}
+		callers, _, err := s.analyzer.FindImpactNodes(ctx, symbol, depth)
+		if err == nil {
+			for _, c := range callers {
+				if c != "" {
+					affected[c] = true
+				}
+			}
+		}
+	}
+
+	// 2. 对每个受影响符号收集关联单测，去重。
+	seen := make(map[string]bool)
+	result := make([]string, 0)
+	for sym := range affected {
+		links, err := s.FindTestLinks(ctx, sym, 60)
+		if err != nil {
+			continue
+		}
+		for _, l := range links {
+			if l.TestMethod == "" || seen[l.TestMethod] {
+				continue
+			}
+			seen[l.TestMethod] = true
+			result = append(result, l.TestMethod)
+		}
+	}
+	return result, nil
 }
 
 // ServiceError 业务错误，包含错误码和消息。

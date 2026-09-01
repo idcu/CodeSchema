@@ -454,3 +454,32 @@ P18      [████████████████████] 100%
 - 重部署：`docker compose -f docker-compose.idcu-go.yml up -d --force-recreate`（同 tag 须强重建），容器 `codeschema-idcu` 重新全量扫描 41 租户，`manager ready: 41 tenant(s)`（~105s），`/health`=`{"status":"ok","store_ok":true,"store_type":"sqlite"}`、`/projects` 列 41 租户。
 - **容器内 Fix G 端到端验证（MCP + HTTP 双通道）**：`scripts/mcp_probe.py`（`MCP_BASE=http://localhost:18080`）→ `initialize` 握手正常、`search_symbols` 首条返回 `symbol:"method:27"` **+ `fqn:"testCfg.TestWatcher_MultipleStops"`**、`context(fqn)` 成功返回真实上下文（`/repo/config/watcher_test.go:278`，`trimmed_lines=333`），探针结论 `[CHAIN search→context via fqn]: OK`；HTTP `/search?tenant=config&q=Watch` 同样回 `fqn`（如 `method:24`→`testCfg.TestWatcher_StartRespectsContext`）。search→context 工作流在 41 租户多租户场景已打通。
 - 至此「授权 全量推进」三项全部落地并上线：Fix G（search→context fqn 一致化）、watcher sha256 加固固化源 `../idcu-go/config/watcher.go` + 重 `go mod vendor`、全量 push（`f34cde2..1380796`）。
+
+## 方向 A 审计（impact/tests/affected FQN 口径，2026-09-02）
+
+> **结论先行**：impact/tests/affected 的「FQN 口径不一致」**不是**本次根因——API 层 FQN 流水线本身正确（FQN in → FQN out，analyzer 已接入，live trace `trim_reason:"depth_limit"` 即证）。真正缺陷在**上游调用边数据**：Go 调用图抽取产出畸形记录，调用图 0 条有效边，故 impact/tests/`get_call_graph` 对任何真实方法恒空。GetAffected 原为空壳，已落地为真实实现。
+
+### 实证证据（config 租户 SQLite，docker volume 拷贝核验）
+- `call` 表共 **501 行**，全部来自真实 Go 文件（`watcher.go`/`env.go`/`loader.go`/`watcher_test.go` 等，language=go, parse_ok）+ 2 个 bash 脚本。
+- **`caller_fqn` 在 100% 行中为空**（SQL `COUNT(*) WHERE caller_fqn<>'' = 0`）。
+- **0 行 callee 指向真实 Go 包 FQN**（`testCfg.`/`envOpts.` 计数为 0）；callee 多为被截断的标识符碎片（`MOD_DI`/`GO_MO`/`SELF_MO`/`PREFI`/`req_ve`…）。
+- 对照：method FQN 正确无缺（`testCfg.TestWatcher_MultipleStops`、`testCfg.Watcher.ReloadNow` 等合法 FQN 已在库）。
+- 容器内 `gopls/codegraph/scip/clangd` **全部 MISSING** → 默认正则适配器（`//go:build !treesitter`，Dockerfile 无 `treesitter` tag）是 Go 唯一实际解析器。
+
+### 根因（代码级，双构建路径同病）
+- 默认正则 `detectCalls`（`internal/parser/adapter/treesitter/adapter.go`）：正则逐行匹配 callee，**只设 `CalleeFQN`，从不设 `CallerFQN`**（裸名、无包前缀）。
+- 真语法树 `adapter_ast.go`（`-tags treesitter`）：call 节点同样**仅 `CalleeFQN`、缺 `CallerFQN`**，且 callee 名被截断。
+- 二者都导致 `analyzer.BuildCallGraph` 建出的边全是 `"" → 碎片`；查询任何真实方法 FQN 时图中无对应节点 → `GetImpact`/`GetTests` 返回 0/0，`get_call_graph` 同样空。
+- 即便补上 `CallerFQN`，callee 仍缺包前缀（`testCfg.`），与 method FQN 对不上 → impact 仍空，需同步做 FQN 对齐。
+
+### 修复状态
+- [x] **GetAffected 空壳→真实实现**（`internal/service/service.go`）：以 symbol 为起点，analyzer 可用时收集其传递调用者（callers，recursive 上限 depth=10），对每个受影响符号调 `FindTestLinks`（五策略）收集关联单测并去重返回；无 analyzer 时退化为仅 symbol 自身（仍有命名/same_tag 关联单测）。新增 `TestGetAffected_RequiresSymbol` + `TestGetAffected_ReturnsLinkedTests`，`go test ./internal/service/` 全量通过。
+- [ ] **impact/tests 真实可用（依赖调用边抽取修复）**：需修 treesitter 默认正则/真语法树 call 抽取——(1) 跟踪 enclosing function 作为 `CallerFQN`；(2) callee 带包前缀以匹配 method FQN。此为共享解析器改动（跨 30 语言），需 per-language 守卫 + 单测，建议作为独立任务推进（见下「待决策」）。
+- [ ] **GetAffected HTTP 路由**：当前仅 MCP 暴露，`/affected` HTTP 404（MCP-only）。如需 HTTP 端，补 `GET /affected` 路由。
+
+### 待决策（调用边抽取修复方向，多方案）
+- **方案 A（推荐，部署可行）**：修 treesitter 默认正则适配器——逐语言跟踪当前 `func`/`def` 作为 caller，并以 `package` 声明为前缀限定 callee FQN。改动集中、免 CGO、随现有镜像即生效。
+- **方案 B**：容器内装 `gopls` 并启用 LSP 调用图（优先级 `gopls > codegraph > scip > treesitter` 已就绪），由 gopls 产出正确 Go call 图。需确认 LSP 适配器确实 emit call 边 + 镜像增重。
+- **方案 C（数据卫生，治标）**：`UpsertCalls` 丢弃 `caller_fqn=''` 的脏行，避免图被污染；不解决 impact 可用性，须配合 A 或 B。
+
+（注：方案 A/B/C 涉及共享 parser，按治理需用户拍板后实施。）
