@@ -18,6 +18,31 @@ func (m *MCPServer) handleRequest(req jsonRPCRequest) jsonRPCResponse {
 	}
 
 	switch req.Method {
+	case "initialize":
+		// MCP 初始化握手：标准 MCP 客户端（VS Code / JetBrains / SDK）连上来
+		// 第一步必发 initialize 并期待 protocolVersion + capabilities 返回，否则直接断开。
+		// 原实现缺此分支 → 所有真实客户端握手失败（端口虽通但协议不干活）。
+		protoVer := "2024-11-05"
+		if p, ok := req.Params.(map[string]any); ok {
+			if v, ok := p["protocolVersion"].(string); ok && v != "" {
+				protoVer = v // 回显客户端请求的版本，最大化客户端兼容
+			}
+		}
+		return jsonRPCResponse{
+			JSONRPC: "2.0",
+			ID:      id,
+			Result: map[string]any{
+				"protocolVersion": protoVer,
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "codeschema", "version": "dev"},
+			},
+		}
+
+	case "notifications/initialized":
+		// 通知类消息：MCP 规范不要求返回，但本传输在 POST 响应中回写，
+		// 返回空 result 让客户端忽略即可（严格客户端不读通知响应）。
+		return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]any{}}
+
 	case "tools/list":
 		return jsonRPCResponse{
 			JSONRPC: "2.0",
