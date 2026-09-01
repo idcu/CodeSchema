@@ -2,11 +2,12 @@
 """MCP 协议级探针：直接对 POST /message 走 JSON-RPC，验证 initialize 握手 +
 tools/list + tools/call 在 41 租户多租户场景是否成立。纯 stdlib，无第三方依赖。"""
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
 
-BASE = "http://localhost:18080"
+BASE = os.environ.get("MCP_BASE", "http://localhost:18080")
 
 
 def rpc(method, params=None, rid=1, notify=False):
