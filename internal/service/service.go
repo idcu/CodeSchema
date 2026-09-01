@@ -1002,12 +1002,13 @@ func (s *Service) GetTests(ctx context.Context, method string, minConfidence int
 
 // SearchResult 搜索结果项。
 type SearchResult struct {
-	Symbol     string  `json:"symbol"`
-	Kind       string  `json:"kind"`
-	File       string  `json:"file"`
-	Score      float64 `json:"score"`
-	Snippet    string  `json:"snippet,omitempty"`
-	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]（B8）
+	Symbol        string  `json:"symbol"`
+	QualifiedName string  `json:"fqn,omitempty"` // 全限定名（类 FQN 或 类FQN.方法名），供 context/impact/tests 链式调用（search→context 一致化 Fix）
+	Kind          string  `json:"kind"`
+	File          string  `json:"file"`
+	Score         float64 `json:"score"`
+	Snippet       string  `json:"snippet,omitempty"`
+	Confidence    float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]（B8）
 }
 
 // SearchOutcome 检索响应信封（含 B8 低置信度过滤元信息）。
@@ -1086,12 +1087,13 @@ func (s *Service) SearchWithOptions(ctx context.Context, query, mode string, lim
 		svcResults := make([]SearchResult, 0, len(results))
 		for _, r := range results {
 			svcResults = append(svcResults, SearchResult{
-				Symbol:     r.Symbol,
-				Kind:       r.Kind,
-				File:       r.File,
-				Score:      r.Score,
-				Snippet:    r.Snippet,
-				Confidence: r.Confidence,
+				Symbol:        r.Symbol,
+				QualifiedName: r.QualifiedName,
+				Kind:          r.Kind,
+				File:          r.File,
+				Score:         r.Score,
+				Snippet:       r.Snippet,
+				Confidence:    r.Confidence,
 			})
 		}
 		outcome.Results = svcResults
@@ -1226,21 +1228,28 @@ func (s *Service) loadMethodIR(ctx context.Context, id int64) (parser.MethodIR, 
 // 对于找不到的符号，留空（不阻断搜索流程）。
 func (s *Service) enrichResults(ctx context.Context, results []search.SearchResult) {
 	for i, r := range results {
-		if r.Kind != "" && r.File != "" {
-			continue // 已经填充过
+		if r.QualifiedName != "" {
+			continue // 已经填充过（fqn 最后填充，作为已完成标记）
 		}
-		kind, file := s.resolveSymbol(ctx, r.Symbol)
+		kind, file, fqn := s.resolveSymbol(ctx, r.Symbol)
 		if kind != "" {
 			results[i].Kind = kind
 		}
 		if file != "" {
 			results[i].File = file
 		}
+		if fqn != "" {
+			results[i].QualifiedName = fqn
+		}
 	}
 }
 
-// resolveSymbol 解析符号 ID 为 Kind 和 File 路径。
-func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file string) {
+// resolveSymbol 解析符号 ID 为 Kind、File 路径与全限定名（FQN）。
+//
+// FQN 格式与 context/impact/tests 的解析口径一致：类为 ClassFQN，方法为
+// ClassFQN + "." + Name（见 resolveSymbolLocation / buildMethodIndexText）。
+// 这样 search_symbols 返回的 fqn 可直接喂给 context 工具，打通 search→context 链路。
+func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file, fqn string) {
 	const (
 		filePrefix   = "file:"
 		classPrefix  = "class:"
@@ -1249,17 +1258,17 @@ func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file 
 
 	switch {
 	case strings.HasPrefix(symbol, filePrefix):
-		return "file", symbol[len(filePrefix):]
+		return "file", symbol[len(filePrefix):], ""
 
 	case strings.HasPrefix(symbol, classPrefix):
 		id := parseInt64(symbol[len(classPrefix):])
 		if id <= 0 {
-			return "", ""
+			return "", "", ""
 		}
 		// 遍历所有文件查找类
 		files, err := s.store.GetAllFiles(ctx)
 		if err != nil {
-			return "", ""
+			return "", "", ""
 		}
 		for _, f := range files {
 			classes, err := s.store.GetClassesByFileID(ctx, f.ID)
@@ -1272,7 +1281,7 @@ func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file 
 					if c.Type != "" {
 						kind = strings.ToLower(c.Type)
 					}
-					return kind, f.AbsolutePath
+					return kind, f.AbsolutePath, c.FullName
 				}
 			}
 		}
@@ -1280,12 +1289,12 @@ func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file 
 	case strings.HasPrefix(symbol, methodPrefix):
 		id := parseInt64(symbol[len(methodPrefix):])
 		if id <= 0 {
-			return "", ""
+			return "", "", ""
 		}
 		// 遍历所有文件查找方法
 		files, err := s.store.GetAllFiles(ctx)
 		if err != nil {
-			return "", ""
+			return "", "", ""
 		}
 		for _, f := range files {
 			classes, err := s.store.GetClassesByFileID(ctx, f.ID)
@@ -1299,14 +1308,14 @@ func (s *Service) resolveSymbol(ctx context.Context, symbol string) (kind, file 
 				}
 				for _, m := range methods {
 					if m.ID == id {
-						return "method", f.AbsolutePath
+						return "method", f.AbsolutePath, c.FullName + "." + m.Name
 					}
 				}
 			}
 		}
 	}
 
-	return "", ""
+	return "", "", ""
 }
 
 // parseInt64 简单解析 int64，解析失败返回 0。

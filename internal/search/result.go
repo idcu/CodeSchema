@@ -13,13 +13,14 @@ import (
 
 // SearchResult 检索结果（领域结构）。
 type SearchResult struct {
-	Symbol     string  `json:"symbol"`
-	Kind       string  `json:"kind"`
-	File       string  `json:"file"`
-	Score      float64 `json:"score"`
-	Snippet    string  `json:"snippet,omitempty"`
-	Source     string  `json:"source"`               // "fts" 或 "vector" 或 "fused"
-	Confidence float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]
+	Symbol        string  `json:"symbol"`
+	QualifiedName string  `json:"fqn,omitempty"` // 全限定名（类 FQN 或 类FQN.方法名），供 context/impact/tests 链式消费（search→context 一致化 Fix）
+	Kind          string  `json:"kind"`
+	File          string  `json:"file"`
+	Score         float64 `json:"score"`
+	Snippet       string  `json:"snippet,omitempty"`
+	Source        string  `json:"source"`               // "fts" 或 "vector" 或 "fused"
+	Confidence    float64 `json:"confidence,omitempty"` // 绝对置信度 [0,1]
 }
 
 // projectTo 将领域结果投影为中性 retrieval.Result。
@@ -35,6 +36,7 @@ func projectTo(in []SearchResult) []retrieval.Result {
 				"file":    r.File,
 				"snippet": r.Snippet,
 				"source":  r.Source,
+				"fqn":     r.QualifiedName,
 			},
 		}
 	}
@@ -46,13 +48,14 @@ func projectFrom(in []retrieval.Result) []SearchResult {
 	out := make([]SearchResult, len(in))
 	for i, r := range in {
 		out[i] = SearchResult{
-			Symbol:     r.ID,
-			Score:      r.Score,
-			Confidence: r.Confidence,
-			Kind:       metaOf(r, "kind"),
-			File:       metaOf(r, "file"),
-			Snippet:    metaOf(r, "snippet"),
-			Source:     metaOf(r, "source"),
+			Symbol:        r.ID,
+			Score:         r.Score,
+			Confidence:    r.Confidence,
+			Kind:          metaOf(r, "kind"),
+			File:          metaOf(r, "file"),
+			Snippet:       metaOf(r, "snippet"),
+			Source:        metaOf(r, "source"),
+			QualifiedName: metaOf(r, "fqn"),
 		}
 	}
 	return out

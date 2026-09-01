@@ -265,7 +265,7 @@ func TestResolveSymbol_File(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 
-	kind, file := svc.resolveSymbol(ctx, "file:/path/to/my/file.go")
+	kind, file, _ := svc.resolveSymbol(ctx, "file:/path/to/my/file.go")
 	if kind != "file" {
 		t.Errorf("expected kind 'file', got %q", kind)
 	}
@@ -297,12 +297,15 @@ func TestResolveSymbol_Class(t *testing.T) {
 	}
 
 	// Resolve the class (IDs: file=1, class=2)
-	kind, file := svc.resolveSymbol(ctx, "class:2")
+	kind, file, fqn := svc.resolveSymbol(ctx, "class:2")
 	if kind != "class" {
 		t.Errorf("expected kind 'class', got %q", kind)
 	}
 	if file != "pkg/search/builder.go" {
 		t.Errorf("expected file 'pkg/search/builder.go', got %q", file)
+	}
+	if fqn != "github.com/idcu/codeschema/internal/search.IndexBuilder" {
+		t.Errorf("expected class fqn, got %q", fqn)
 	}
 }
 
@@ -322,7 +325,7 @@ func TestResolveSymbol_ClassWithInterfaceType(t *testing.T) {
 	st.UpsertClasses(ctx, fileID, classes)
 
 	// IDs: file=1, class=2
-	kind, _ := svc.resolveSymbol(ctx, "class:2")
+	kind, _, _ := svc.resolveSymbol(ctx, "class:2")
 	if kind != "interface" {
 		t.Errorf("expected kind 'interface', got %q (should lower-case type)", kind)
 	}
@@ -360,12 +363,15 @@ func TestResolveSymbol_Method(t *testing.T) {
 	}
 
 	// IDs: file=1, class=2, method=3
-	kind, file := svc.resolveSymbol(ctx, "method:3")
+	kind, file, fqn := svc.resolveSymbol(ctx, "method:3")
 	if kind != "method" {
 		t.Errorf("expected kind 'method', got %q", kind)
 	}
 	if file != "pkg/search/builder.go" {
 		t.Errorf("expected file 'pkg/search/builder.go', got %q", file)
+	}
+	if fqn != "github.com/idcu/codeschema/internal/search.IndexBuilder.BuildFromStore" {
+		t.Errorf("expected method fqn, got %q", fqn)
 	}
 }
 
@@ -374,21 +380,65 @@ func TestResolveSymbol_Invalid(t *testing.T) {
 	ctx := context.Background()
 
 	// No prefix
-	kind, file := svc.resolveSymbol(ctx, "invalid-id")
+	kind, file, _ := svc.resolveSymbol(ctx, "invalid-id")
 	if kind != "" || file != "" {
 		t.Errorf("expected empty for invalid id, got (%q, %q)", kind, file)
 	}
 
 	// Invalid number
-	kind, file = svc.resolveSymbol(ctx, "class:abc")
+	kind, file, _ = svc.resolveSymbol(ctx, "class:abc")
 	if kind != "" || file != "" {
 		t.Errorf("expected empty for invalid number, got (%q, %q)", kind, file)
 	}
 
 	// Not found
-	kind, file = svc.resolveSymbol(ctx, "class:999")
+	kind, file, _ = svc.resolveSymbol(ctx, "class:999")
 	if kind != "" || file != "" {
 		t.Errorf("expected empty for not found, got (%q, %q)", kind, file)
+	}
+}
+
+// TestResolveSymbol_FQN 验证 resolveSymbol 同时返回与 context/impact/tests 解析口径一致的全限定名：
+// 类 = ClassFQN，方法 = ClassFQN + "." + Name。这是 search→context 一致化 Fix 的回归锚点。
+func TestResolveSymbol_FQN(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	st := svc.store
+	fileID, err := st.UpsertFile(ctx, "pkg/search/builder.go", "hash123", 250, 12345)
+	if err != nil {
+		t.Fatalf("upsert file: %v", err)
+	}
+	classes := []parser.ClassIR{
+		{
+			Name:     "IndexBuilder",
+			FullName: "github.com/idcu/codeschema/internal/search.IndexBuilder",
+			Type:     "CLASS",
+		},
+	}
+	if err := st.UpsertClasses(ctx, fileID, classes); err != nil {
+		t.Fatalf("upsert classes: %v", err)
+	}
+	methods := []parser.MethodIR{
+		{
+			Name:      "BuildFromStore",
+			Signature: "BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error)",
+		},
+	}
+	if err := st.UpsertMethods(ctx, 2, methods); err != nil {
+		t.Fatalf("upsert methods: %v", err)
+	}
+
+	// IDs: file=1, class=2, method=3
+	_, _, classFQN := svc.resolveSymbol(ctx, "class:2")
+	if classFQN != "github.com/idcu/codeschema/internal/search.IndexBuilder" {
+		t.Errorf("class fqn mismatch: got %q", classFQN)
+	}
+
+	_, _, methodFQN := svc.resolveSymbol(ctx, "method:3")
+	want := "github.com/idcu/codeschema/internal/search.IndexBuilder.BuildFromStore"
+	if methodFQN != want {
+		t.Errorf("method fqn mismatch: got %q, want %q", methodFQN, want)
 	}
 }
 

@@ -58,21 +58,35 @@ def main():
 
     # 若 search 返回了符号，进一步用 context 取真实代码上下文
     sym = None
+    fqn = None
     try:
         if r and r.get("result", {}).get("content"):
             txt = r["result"]["content"][0].get("text", "")
             sj = json.loads(txt)
             if sj.get("results"):
                 sym = sj["results"][0].get("symbol")
+                fqn = sj["results"][0].get("fqn")
+                print("\n[search 首条] symbol=%r fqn=%r" % (sym, fqn))
     except Exception as e:
         print("(parse symbol failed:", e, ")")
+
     if sym:
         print(f"\n=== 5) tools/call context (project=config, symbol={sym!r}) ===")
         r2 = rpc("tools/call", {
             "name": "context",
             "arguments": {"symbol": sym, "project": "config", "mode": "minimal"},
         }, rid=4)
-        print(json.dumps(r2, ensure_ascii=False)[:900])
+        print(json.dumps(r2, ensure_ascii=False)[:600])
+
+    if fqn:
+        print(f"\n=== 6) tools/call context (project=config, fqn={fqn!r}) ===")
+        r3 = rpc("tools/call", {
+            "name": "context",
+            "arguments": {"symbol": fqn, "project": "config", "mode": "minimal"},
+        }, rid=5)
+        print(json.dumps(r3, ensure_ascii=False)[:600])
+        ok = bool(r3) and "result" in r3 and "error" not in r3
+        print("\n[CHAIN search→context via fqn]:", "OK" if ok else "FAIL")
 
 
 if __name__ == "__main__":
