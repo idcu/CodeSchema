@@ -145,6 +145,13 @@ verify-tags:
 	$(GO) list -tags 'onnx pg redis' ./...
 	@echo "==> Tag-isolated packages resolve OK."
 
+# 项目计数审计（P3#10）：脚本化输出包数 / LoC / MCP 工具数 / HTTP 路由数，
+# 取代手工数字，防止文档口径长期漂移（此前出现过 27/31/32/36 四处包数不一）。
+# 用法：make counts ｜ make counts JSON=1（等价 python3 scripts/project_counts.py --json）
+.PHONY: counts
+counts:
+	@python3 ./scripts/project_counts.py $(if $(JSON),--json,)
+
 # 交叉编译（无 CGO，纯 Go 二进制）
 CROSS_TARGETS = \
 	linux/amd64 \
@@ -197,6 +204,7 @@ help:
 	@echo "  bench        Run benchmarks"
 	@echo "  lint         Run go vet"
 	@echo "  verify-tags  Verify onnx/pg/redis tag-isolated packages compile"
+	@echo "  counts       Print project counts (packages/LoC/MCP tools/HTTP routes)"
 	@echo "  cross        Cross-compile for all platforms (CGO_ENABLED=0)"
 	@echo "  clean        Clean build artifacts"
 	@echo "  run          Build and run (pass ARGS=... for arguments)"

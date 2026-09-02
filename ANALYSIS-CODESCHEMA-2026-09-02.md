@@ -139,7 +139,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 ### P3（增强）
 9. 增加标签隔离代码 CI 校验——✅ **已应用（2026-09-02）**：`.github/workflows/ci.yml` 新增 `tag-guard` job（运行 `go list -tags 'onnx pg redis' ./...`，仅解析+类型检查、不链接 onnxruntime 运行时）；`Makefile` 新增 `verify-tags` target + `help` 说明。验证：`make verify-tags` exit 0。
-10. 模块文档计数、版本号等「计数类」字段改为脚本生成，避免人工漂移。
+10. 模块文档计数类字段脚本化——✅ **已应用（2026-09-02）**：新增 `scripts/project_counts.py`（从 `go list` 取权威包数、正则计数 MCP 工具/HTTP 路由、统计非 vendor LoC），`Makefile` 加 `counts` / `counts JSON=1` target。此前文档出现过「包数量 27/31/32/36 四处不一」，现统一以脚本输出为准（internal=32、total=36、MCP=12、HTTP=16、LoC≈51329），文档口径核对改为跑 `make counts` 而非手填数字。
 
 ---
 
@@ -198,5 +198,5 @@ grep -n 'CallerFQN' internal/parser/adapter/treesitter/adapter.go internal/parse
 - ✅ P2#7 子模块完成度：扫描 42 份 P*.md，头部=正文 100% 一致、0 不一致，无需改动。
 - ✅ P2#8 CallerFQN 回填：代码侧根因修复已落地（adapter.go + adapter_ast.go），build+单测通过。
 - ✅ P3#9 CI 标签隔离校验：ci.yml 新增 tag-guard job + Makefile verify-tags，已验证。
-- ⬜ P3#10 计数类字段脚本生成：仍待做（低优先，属长期防漂移优化）。
+- ✅ P3#10 计数类字段脚本生成：已落地 `scripts/project_counts.py` + `make counts`（包数/LoC/MCP/HTTP 计数脚本化，取代手工数字）。
 （注：上表 #8/#9 的 CallerFQN 代码侧根因修复已于 2026-09-02 落地并验证通过，原列于「未做」现已转入「已应用」。）
