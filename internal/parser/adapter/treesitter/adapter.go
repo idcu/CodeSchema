@@ -353,6 +353,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	goPkg := ""          // 当前 Go 文件 package 声明（调用图 FQN 包限定用）
 	curRecvVar := ""     // 当前方法 receiver 变量名（自调用 callee 限定用）
 	curRecvType := ""    // 当前方法 receiver 类型名
+	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
+	curStructIdx := -1      // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
+	curStructOpenDepth := 0 // struct 体起始深度（type X struct { 的 `{` 计入前）
+	curStructName := ""     // 当前 struct 名（field 的 ClassFQN 归属）
+	constBlock := false     // 是否处于 const ( ... ) 块内
 
 	for scanner.Scan() {
 		select {
@@ -402,6 +407,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 					Doc:       strings.TrimSpace(docComment.String()),
 				}
 				doc.Classes = append(doc.Classes, class)
+				// struct 体跟踪（成员变量提取用）：classType==CLASS 即 `type X struct {`
+				if classType == "CLASS" {
+					curStructIdx = len(doc.Classes) - 1
+					curStructName = className
+					curStructOpenDepth = goDepth // 该行 `{` 计入前的深度
+				}
 				goDepth += braceNet(code)
 				docComment.Reset()
 				continue
@@ -417,44 +428,82 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 					EndLine:   lineNum,
 					Doc:       strings.TrimSpace(docComment.String()),
 				}
-			// receiver 存在 → 方法归属 receiver 类型；否则为顶层函数，
-			// ClassFQN 留空（不再误挂到最近 class——旧 currentClass 永不闭合）。
-			if recvType := parseGoReceiver(matches[1]); recvType != "" {
-				method.ClassFQN = recvType
-				// 记录当前方法 receiver 变量名/类型，供 callee 自调用限定
-				curRecvType = recvType
-				curRecvVar = goRecvVar(matches[1])
-			} else {
-				curRecvVar = ""
-				curRecvType = ""
+				// receiver 存在 → 方法归属 receiver 类型；否则为顶层函数，
+				// ClassFQN 留空（不再误挂到最近 class——旧 currentClass 永不闭合）。
+				if recvType := parseGoReceiver(matches[1]); recvType != "" {
+					method.ClassFQN = recvType
+					// 记录当前方法 receiver 变量名/类型，供 callee 自调用限定
+					curRecvType = recvType
+					curRecvVar = goRecvVar(matches[1])
+				} else {
+					curRecvVar = ""
+					curRecvType = ""
+				}
+				doc.Methods = append(doc.Methods, method)
+				curMethodIdx = len(doc.Methods) - 1
+				methodOpenDepth = goDepth // 定义行 `{` 尚未计入
+				goDepth += braceNet(code)
+				docComment.Reset()
+				continue
 			}
-			doc.Methods = append(doc.Methods, method)
-			curMethodIdx = len(doc.Methods) - 1
-			methodOpenDepth = goDepth // 定义行 `{` 尚未计入
-			goDepth += braceNet(code)
-			docComment.Reset()
-			continue
-		}
 
-		// 普通行：先判定是否仍在方法体内（基于进入本行前的深度），
-		// 再更新深度；深度回落至 methodOpenDepth 即方法体闭合。
-		caller := ""
-		if curMethodIdx >= 0 && goDepth > methodOpenDepth {
-			m := &doc.Methods[curMethodIdx]
-			if m.ClassFQN != "" {
-				caller = goPkg + "." + m.ClassFQN + "." + m.Name
-			} else {
-				caller = goPkg + "." + m.Name
+			// 常量（包级）：const X [Type] = v；const ( ... ) 块内行 X [Type] = v。
+			// 仅方法外（curMethodIdx<0）产出为包级常量；方法内 const 忽略（局部常量不入库）。
+			// 注意：条件须在 constBlock 激活时整体命中，否则闭合行 `)` 永远进不来，
+			// constBlock 无法复位，会吞掉其后所有行（含 struct 字段行）。
+			if strings.HasPrefix(trimmed, "const") || constBlock {
+				switch {
+				case trimmed == "const (" || trimmed == "const(":
+					constBlock = true
+				case trimmed == ")":
+					constBlock = false
+				case curMethodIdx < 0:
+					if name, typ, val := parseGoConstLine(trimmed); name != "" {
+						doc.Constants = append(doc.Constants, parser.ConstantIR{
+							Name: name, Type: typ, Value: val,
+							FilePath: path,
+						})
+					}
+				}
+				docComment.Reset()
+				continue
 			}
-		}
-		if strings.Contains(code, "(") {
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType)
-		}
+
+			// 成员变量：struct 体（type X struct { ... }）内的字段行。
+			// 仅非方法体内（curMethodIdx<0）且深度处于 struct 体内时提取。
+			if curStructIdx >= 0 && curMethodIdx < 0 && goDepth > curStructOpenDepth {
+				if fname, ftype, ok := parseGoStructField(code); ok {
+					doc.Fields = append(doc.Fields, parser.FieldIR{
+						Name: fname, Type: ftype, ClassFQN: curStructName,
+						StartLine: lineNum,
+					})
+				}
+			}
+
+			// 普通行：先判定是否仍在方法体内（基于进入本行前的深度），
+			// 再更新深度；深度回落至 methodOpenDepth 即方法体闭合。
+			caller := ""
+			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
+				m := &doc.Methods[curMethodIdx]
+				if m.ClassFQN != "" {
+					caller = goPkg + "." + m.ClassFQN + "." + m.Name
+				} else {
+					caller = goPkg + "." + m.Name
+				}
+			}
+			if strings.Contains(code, "(") {
+				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType)
+			}
 			goDepth += braceNet(code)
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
 				curMethodIdx = -1 // 方法体已闭合
-				curRecvVar = ""  // 重置 receiver 跟踪
+				curRecvVar = ""   // 重置 receiver 跟踪
 				curRecvType = ""
+			}
+			// struct 体闭合检测（深度回落至起始深度）
+			if curStructIdx >= 0 && goDepth <= curStructOpenDepth {
+				curStructIdx = -1
+				curStructName = ""
 			}
 			docComment.Reset()
 			continue
@@ -533,6 +582,40 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	}
 
 	return doc, nil
+}
+
+// —— Go 变量/常量提取辅助（2026-09-03 新增，仅 Go 精确路径） ——
+
+var (
+	// goConstPattern：const X [Type] = v；const ( ... ) 块内行 X [Type] = v
+	goConstPattern = regexp.MustCompile(`^\s*(?:const\s+)?(\w+)\s+(?:([\w\[\]*.<>]+)\s+)?=\s*(.+)$`)
+	// goFieldPattern：struct 字段行 `Name Type [tag]`
+	goFieldPattern = regexp.MustCompile(`^\s*(\w+)\s+([\w\[\]*.<>]+)\s*(?:\x60[^\x60]*\x60)?\s*$`)
+)
+
+// parseGoConstLine 解析 Go 常量声明行（含 const ( ... ) 块内行，正则已兼容无 const 前缀）。
+// 返回 name/type/value；无法识别（const ( 等）返回空 name。
+func parseGoConstLine(line string) (name, typ, val string) {
+	m := goConstPattern.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", ""
+	}
+	return m[1], m[2], m[3]
+}
+
+// parseGoStructField 解析 struct 字段行 `Name Type [tag]`。
+// 排除 struct/interface/map/func/chan/type 等关键字类型（嵌套类型定义等伪字段），
+// 正则本身排除含 `{`/`}`/`(`/`=` 的行（嵌套/方法/初始化）。无法识别返回 ok=false。
+func parseGoStructField(line string) (name, typ string, ok bool) {
+	m := goFieldPattern.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", false
+	}
+	switch m[2] {
+	case "struct", "interface", "map", "func", "chan", "type":
+		return "", "", false
+	}
+	return m[1], m[2], true
 }
 
 // detectClassType 根据语言和匹配结果推断类类型。

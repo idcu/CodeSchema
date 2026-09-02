@@ -101,3 +101,105 @@ func (w *Watcher[T]) ReloadNow() {
 
 	var _ *parser.IRDocument = doc
 }
+
+// TestGoFieldAndConstantExtraction 验证 Go 路径的变量/常量 IR 产出（2026-09-03 新增）：
+//  1. 包级常量：单行 const X [Type] = v 与 const ( ... ) 块内行 X = v 均产出为
+//     ConstantIR{FilePath}（包/文件级常量）；
+//  2. 成员变量：struct 体（type X struct { ... }）内的字段行（含 tag）产出为
+//     FieldIR{ClassFQN}，方法内/顶层局部变量不产出；
+//  3. 值/类型/行列信息完整。
+func TestGoFieldAndConstantExtraction(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "svc.go")
+	src := `package svc
+
+const AppVersion = "1.0"
+const MaxItems int = 100
+
+const (
+	KB = 1024
+	MB = 1024 * KB
+)
+
+type Service struct {
+	name string
+	port int
+	tags []string
+	max  int ` + "`json:\"max\"`" + `
+}
+
+func (s *Service) Start() {
+	local := 5
+	_ = local
+}
+`
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewTreeSitterAdapter()
+	doc, err := a.Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	t.Logf("FIELDS:")
+	for _, f := range doc.Fields {
+		t.Logf("  name=%q type=%q class_fqn=%q", f.Name, f.Type, f.ClassFQN)
+	}
+	t.Logf("CONSTANTS:")
+	for _, c := range doc.Constants {
+		t.Logf("  name=%q type=%q value=%q file=%q", c.Name, c.Type, c.Value, c.FilePath)
+	}
+
+	// 1. 常量：单行 + 块内均产出为包级常量
+	wantConsts := map[string]struct{ typ, val string }{
+		"AppVersion": {"", "\"1.0\""},
+		"MaxItems":   {"int", "100"},
+		"KB":         {"", "1024"},
+		"MB":         {"", "1024 * KB"},
+	}
+	gotConsts := map[string]struct{ typ, val string }{}
+	for _, c := range doc.Constants {
+		if c.FilePath != p {
+			t.Errorf("常量 %s 应归属当前文件 %s，实际 file=%q", c.Name, p, c.FilePath)
+		}
+		gotConsts[c.Name] = struct{ typ, val string }{c.Type, c.Value}
+	}
+	if len(gotConsts) != len(wantConsts) {
+		t.Fatalf("常量数量不匹配：want=%v got=%v", wantConsts, gotConsts)
+	}
+	for name, want := range wantConsts {
+		got, ok := gotConsts[name]
+		if !ok || got != want {
+			t.Errorf("常量 %s：want=%v got=%v", name, want, got)
+		}
+	}
+
+	// 2. 成员变量：struct 字段产出（含 tag 行），局部变量不产出
+	wantFields := map[string]string{
+		"name": "string",
+		"port": "int",
+		"tags": "[]string",
+		"max":  "int",
+	}
+	gotFields := map[string]string{}
+	for _, f := range doc.Fields {
+		if f.ClassFQN != "Service" {
+			t.Errorf("字段 %s 应归属类 Service，实际 class_fqn=%q", f.Name, f.ClassFQN)
+		}
+		gotFields[f.Name] = f.Type
+	}
+	if len(gotFields) != len(wantFields) {
+		t.Fatalf("成员变量数量不匹配：want=%v got=%v", wantFields, gotFields)
+	}
+	for name, typ := range wantFields {
+		if gotFields[name] != typ {
+			t.Errorf("字段 %s：want=%q got=%q", name, typ, gotFields[name])
+		}
+	}
+	// 局部变量 local 不应被产出为成员变量
+	if _, ok := gotFields["local"]; ok {
+		t.Errorf("局部变量 local 不应产出为成员变量：%v", gotFields)
+	}
+}

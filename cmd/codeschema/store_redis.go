@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/idcu/codeschema/internal/config"
@@ -141,4 +142,82 @@ func (c *redisCacheStore) CalleesOf(ctx context.Context, fqn string) ([]string, 
 // ClassesOfFile 返回文件包含的类 FQN 集合。
 func (c *redisCacheStore) ClassesOfFile(ctx context.Context, path string) ([]string, error) {
 	return c.cache.ClassesOfFile(ctx, path)
+}
+
+// —— store.FieldConstantStore 透传（2026-09-03 新增）——
+// field/constant 表读写仅底层关系型后端（PG）实现，Redis 层不缓存、仅转发；
+// 底层未实现该接口时返回错误，由调用方回退。
+
+var _ store.FieldConstantStore = (*redisCacheStore)(nil)
+
+func (c *redisCacheStore) fcs() (store.FieldConstantStore, error) {
+	fcs, ok := c.Store.(store.FieldConstantStore)
+	if !ok {
+		return nil, errors.New("base store does not implement store.FieldConstantStore")
+	}
+	return fcs, nil
+}
+
+func (c *redisCacheStore) UpsertClassFields(ctx context.Context, classID int64, fields []store.FieldRecord) error {
+	fcs, err := c.fcs()
+	if err != nil {
+		return err
+	}
+	return fcs.UpsertClassFields(ctx, classID, fields)
+}
+
+func (c *redisCacheStore) UpsertMethodFields(ctx context.Context, methodID int64, fields []store.FieldRecord) error {
+	fcs, err := c.fcs()
+	if err != nil {
+		return err
+	}
+	return fcs.UpsertMethodFields(ctx, methodID, fields)
+}
+
+func (c *redisCacheStore) GetClassFields(ctx context.Context, classID int64) ([]store.FieldRecord, error) {
+	fcs, err := c.fcs()
+	if err != nil {
+		return nil, err
+	}
+	return fcs.GetClassFields(ctx, classID)
+}
+
+func (c *redisCacheStore) GetMethodFields(ctx context.Context, methodID int64) ([]store.FieldRecord, error) {
+	fcs, err := c.fcs()
+	if err != nil {
+		return nil, err
+	}
+	return fcs.GetMethodFields(ctx, methodID)
+}
+
+func (c *redisCacheStore) UpsertFileConstants(ctx context.Context, fileID int64, constants []store.ConstantRecord) error {
+	fcs, err := c.fcs()
+	if err != nil {
+		return err
+	}
+	return fcs.UpsertFileConstants(ctx, fileID, constants)
+}
+
+func (c *redisCacheStore) UpsertClassConstants(ctx context.Context, classID int64, constants []store.ConstantRecord) error {
+	fcs, err := c.fcs()
+	if err != nil {
+		return err
+	}
+	return fcs.UpsertClassConstants(ctx, classID, constants)
+}
+
+func (c *redisCacheStore) GetFileConstants(ctx context.Context, fileID int64) ([]store.ConstantRecord, error) {
+	fcs, err := c.fcs()
+	if err != nil {
+		return nil, err
+	}
+	return fcs.GetFileConstants(ctx, fileID)
+}
+
+func (c *redisCacheStore) GetClassConstants(ctx context.Context, classID int64) ([]store.ConstantRecord, error) {
+	fcs, err := c.fcs()
+	if err != nil {
+		return nil, err
+	}
+	return fcs.GetClassConstants(ctx, classID)
 }

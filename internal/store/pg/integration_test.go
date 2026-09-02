@@ -414,3 +414,124 @@ func TestPGStore_FieldConstantIO(t *testing.T) {
 	}
 	t.Log("field/constant read-write interfaces OK")
 }
+
+// TestPGStore_UpsertIRFieldsConstants 验证解析器产出的 FieldIR/ConstantIR 经
+// UpsertIR 自动落库（2026-09-03 新增）：
+//  1. 成员变量（FieldIR.ClassFQN）落 field.class_id，局部变量
+//     （FieldIR.MethodFQN=ClassFQN.MethodName）落 field.method_id；
+//  2. 包/文件级常量（ConstantIR.FilePath）落 constant.file_id，
+//     类级常量（ConstantIR.ClassFQN）落 constant.class_id；
+//  3. 再次 UpsertIR（字段/常量收敛）按类/文件全量替换，无残留旧行。
+func TestPGStore_UpsertIRFieldsConstants(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	uniquePath := fmt.Sprintf("/tmp/pg-irfc/file-%d.go", time.Now().UnixNano())
+	ir := &parser.IRDocument{
+		Source: "pg-irfc", Language: "go",
+		FilePath: uniquePath, FileHash: "hash-irfc-1",
+		LineCount: 20, ByteSize: 200,
+	}
+	ir.Classes = []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}
+	ir.Methods = []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.Svc"}}
+	ir.Fields = []parser.FieldIR{
+		{Name: "count", Type: "int", ClassFQN: "pkg.Svc", StartLine: 3},
+		{Name: "tmp", Type: "string", MethodFQN: "pkg.Svc.Run", StartLine: 9},
+	}
+	ir.Constants = []parser.ConstantIR{
+		{Name: "Pi", Type: "float64", Value: "3.14", FilePath: uniquePath},
+		{Name: "Max", Type: "int", Value: "100", ClassFQN: "pkg.Svc"},
+	}
+	if err := s.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("UpsertIR: %v", err)
+	}
+
+	file, err := s.GetFileByPath(ctx, uniquePath)
+	if err != nil || file == nil {
+		t.Fatalf("GetFileByPath: %v (file=%v)", err, file)
+	}
+	var classID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM class WHERE file_id=$1 AND full_name='pkg.Svc'`, file.ID).Scan(&classID); err != nil {
+		t.Fatalf("query class id: %v", err)
+	}
+
+	fcs, ok := any(s).(store.FieldConstantStore)
+	if !ok {
+		t.Fatal("PGStore must implement store.FieldConstantStore")
+	}
+
+	// 1) 成员变量 / 局部变量已落库
+	mf, err := fcs.GetClassFields(ctx, classID)
+	if err != nil || len(mf) != 1 || mf[0].Name != "count" || mf[0].Type != "int" || mf[0].StartLine != 3 {
+		t.Fatalf("member field via UpsertIR mismatch: %+v err=%v", mf, err)
+	}
+	var methodID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM method WHERE class_id=$1 AND name='Run'`, classID).Scan(&methodID); err != nil {
+		t.Fatalf("query method id: %v", err)
+	}
+	lf, err := fcs.GetMethodFields(ctx, methodID)
+	if err != nil || len(lf) != 1 || lf[0].Name != "tmp" || lf[0].Type != "string" {
+		t.Fatalf("local field via UpsertIR mismatch: %+v err=%v", lf, err)
+	}
+
+	// 2) 包级 / 类级常量已落库
+	pc, err := fcs.GetFileConstants(ctx, file.ID)
+	if err != nil || len(pc) != 1 || pc[0].Name != "Pi" || pc[0].Value != "3.14" {
+		t.Fatalf("package constant via UpsertIR mismatch: %+v err=%v", pc, err)
+	}
+	cc, err := fcs.GetClassConstants(ctx, classID)
+	if err != nil || len(cc) != 1 || cc[0].Name != "Max" || cc[0].Value != "100" {
+		t.Fatalf("class constant via UpsertIR mismatch: %+v err=%v", cc, err)
+	}
+
+	// 3) 再次 UpsertIR（字段/常量收敛）→ 全量替换，无残留
+	ir2 := &parser.IRDocument{
+		Source: "pg-irfc", Language: "go",
+		FilePath: uniquePath, FileHash: "hash-irfc-2",
+		LineCount: 20, ByteSize: 200,
+	}
+	ir2.Classes = []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}
+	ir2.Methods = []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.Svc"}}
+	ir2.Fields = []parser.FieldIR{{Name: "only", Type: "string", ClassFQN: "pkg.Svc"}}
+	ir2.Constants = []parser.ConstantIR{{Name: "Only", Type: "int", Value: "1", FilePath: uniquePath}}
+	if err := s.UpsertIR(ctx, ir2); err != nil {
+		t.Fatalf("re-UpsertIR: %v", err)
+	}
+	// 类被全量重插（新 ID），field/constant 随旧类级联删除；重新定位类 ID。
+	classID2 := int64(0)
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM class WHERE file_id=$1 AND full_name='pkg.Svc'`, file.ID).Scan(&classID2); err != nil {
+		t.Fatalf("query new class id: %v", err)
+	}
+	mf, err = fcs.GetClassFields(ctx, classID2)
+	if err != nil || len(mf) != 1 || mf[0].Name != "only" {
+		t.Fatalf("member field replace failed: %+v err=%v", mf, err)
+	}
+	lf, err = fcs.GetMethodFields(ctx, methodID)
+	if err != nil || len(lf) != 0 {
+		t.Fatalf("local field should be cleared after replace, got %+v err=%v", lf, err)
+	}
+	pc, err = fcs.GetFileConstants(ctx, file.ID)
+	if err != nil || len(pc) != 1 || pc[0].Name != "Only" {
+		t.Fatalf("package constant replace failed: %+v err=%v", pc, err)
+	}
+	cc, err = fcs.GetClassConstants(ctx, classID2)
+	if err != nil || len(cc) != 0 {
+		t.Fatalf("class constant should be cleared after replace, got %+v err=%v", cc, err)
+	}
+	t.Log("UpsertIR field/constant auto-persistence OK")
+
+	// 清理
+	_ = s.DeleteFile(ctx, file.ID)
+}

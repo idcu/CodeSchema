@@ -99,6 +99,18 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 			return err
 		}
 	}
+	// 变量/常量随类与方法写入（2026-09-03 新增；须在 upsertClassesTx/upsertMethodsTx 之后，
+	// 因为 class 被全量重插、method 需按 class_id+name 回查 id）。
+	if len(ir.Fields) > 0 {
+		if err := upsertFieldsTx(ctx, tx, ir.Fields, ir.Source); err != nil {
+			return err
+		}
+	}
+	if len(ir.Constants) > 0 {
+		if err := upsertConstantsTx(ctx, tx, fileID, ir.Constants, ir.Source); err != nil {
+			return err
+		}
+	}
 	if len(ir.Calls) > 0 {
 		if err := upsertCallsTx(ctx, tx, fileID, ir.Calls, ir.Source); err != nil {
 			return err
@@ -178,6 +190,153 @@ func upsertCallsTx(ctx context.Context, tx *sql.Tx, fileID int64, calls []parser
 			VALUES ($1,$2,$3,$4,$5,$6)`
 		if _, err := tx.ExecContext(ctx, q, fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, src); err != nil {
 			return fmt.Errorf("pg insert call %s->%s: %w", c.CallerFQN, c.CalleeFQN, err)
+		}
+	}
+	return nil
+}
+
+// upsertFieldsTx 写入变量记录（FieldConstantStore 全量替换语义的事务版，供 UpsertIR/BulkUpsert 调用）。
+// 归属二选一（与 field 表 CHECK 约束一致）：
+//   - FieldIR.ClassFQN 非空 → 成员变量，按 class_id 删除后插入；
+//   - FieldIR.MethodFQN 非空（ClassFQN.MethodName）→ 局部变量，按 method_id 删除后插入。
+//
+// 关联需 class 表 full_name 命中、method 存在；否则跳过（顶层函数局部变量 method 不落库）。
+func upsertFieldsTx(ctx context.Context, tx *sql.Tx, fields []parser.FieldIR, src string) error {
+	classIDByFQN := make(map[string]int64, len(fields))
+	for _, f := range fields {
+		fqn := f.ClassFQN
+		if f.MethodFQN != "" {
+			if i := strings.LastIndexByte(f.MethodFQN, '.'); i > 0 {
+				fqn = f.MethodFQN[:i]
+			} else {
+				continue // 无类归属（顶层函数局部变量）
+			}
+		}
+		if fqn == "" {
+			continue
+		}
+		if _, ok := classIDByFQN[fqn]; ok {
+			continue
+		}
+		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		var id int64
+		if err := tx.QueryRowContext(ctx, q, fqn).Scan(&id); err != nil {
+			classIDByFQN[fqn] = -1
+			continue
+		}
+		classIDByFQN[fqn] = id
+	}
+	deletedClass := make(map[int64]bool)
+	deletedMethod := make(map[int64]bool)
+	for _, f := range fields {
+		classID, methodID := int64(0), int64(0)
+		switch {
+		case f.MethodFQN != "":
+			i := strings.LastIndexByte(f.MethodFQN, '.')
+			if i <= 0 {
+				continue
+			}
+			cid, ok := classIDByFQN[f.MethodFQN[:i]]
+			if !ok || cid <= 0 {
+				continue
+			}
+			const q = `SELECT id FROM method WHERE class_id=$1 AND name=$2 LIMIT 1`
+			var mid int64
+			if err := tx.QueryRowContext(ctx, q, cid, f.MethodFQN[i+1:]).Scan(&mid); err != nil {
+				continue
+			}
+			methodID = mid
+		case f.ClassFQN != "":
+			cid, ok := classIDByFQN[f.ClassFQN]
+			if !ok || cid <= 0 {
+				continue
+			}
+			classID = cid
+		default:
+			continue
+		}
+		extra, _ := json.Marshal(f.Extra)
+		if methodID > 0 {
+			if !deletedMethod[methodID] {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM field WHERE method_id=$1`, methodID); err != nil {
+					return fmt.Errorf("pg delete stale method fields: %w", err)
+				}
+				deletedMethod[methodID] = true
+			}
+			if _, err := tx.ExecContext(ctx, qFieldInsert, nil, methodID, f.Name, f.Type,
+				boolToInt(f.IsStatic), boolToInt(f.IsConst), f.Modifier,
+				f.StartLine, f.StartCol, f.EndLine, f.EndCol, src, string(extra)); err != nil {
+				return fmt.Errorf("pg insert method field %s: %w", f.Name, err)
+			}
+		} else {
+			if !deletedClass[classID] {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM field WHERE class_id=$1`, classID); err != nil {
+					return fmt.Errorf("pg delete stale class fields: %w", err)
+				}
+				deletedClass[classID] = true
+			}
+			if _, err := tx.ExecContext(ctx, qFieldInsert, classID, nil, f.Name, f.Type,
+				boolToInt(f.IsStatic), boolToInt(f.IsConst), f.Modifier,
+				f.StartLine, f.StartCol, f.EndLine, f.EndCol, src, string(extra)); err != nil {
+				return fmt.Errorf("pg insert class field %s: %w", f.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// upsertConstantsTx 写入常量记录（FieldConstantStore 全量替换语义的事务版，供 UpsertIR/BulkUpsert 调用）。
+// 归属二选一（与 constant 表 CHECK 约束一致）：
+//   - ConstantIR.ClassFQN 非空 → 类级常量，按 class_id 删除后插入；
+//   - ConstantIR.FilePath 非空 → 包/文件级常量，按 fileID 删除后插入（解析器只产当前文件常量）。
+func upsertConstantsTx(ctx context.Context, tx *sql.Tx, fileID int64, constants []parser.ConstantIR, src string) error {
+	classIDByFQN := make(map[string]int64, len(constants))
+	for _, c := range constants {
+		if c.ClassFQN == "" {
+			continue
+		}
+		if _, ok := classIDByFQN[c.ClassFQN]; ok {
+			continue
+		}
+		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		var id int64
+		if err := tx.QueryRowContext(ctx, q, c.ClassFQN).Scan(&id); err != nil {
+			classIDByFQN[c.ClassFQN] = -1
+			continue
+		}
+		classIDByFQN[c.ClassFQN] = id
+	}
+	deletedFile := false
+	deletedClass := make(map[int64]bool)
+	for _, c := range constants {
+		extra, _ := json.Marshal(c.Extra)
+		switch {
+		case c.ClassFQN != "":
+			cid, ok := classIDByFQN[c.ClassFQN]
+			if !ok || cid <= 0 {
+				continue
+			}
+			if !deletedClass[cid] {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM constant WHERE class_id=$1`, cid); err != nil {
+					return fmt.Errorf("pg delete stale class constants: %w", err)
+				}
+				deletedClass[cid] = true
+			}
+			if _, err := tx.ExecContext(ctx, qConstantInsert, nil, cid, c.Name, c.Type, c.Value, c.Modifier, src, string(extra)); err != nil {
+				return fmt.Errorf("pg insert class constant %s: %w", c.Name, err)
+			}
+		case c.FilePath != "":
+			if !deletedFile {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM constant WHERE file_id=$1`, fileID); err != nil {
+					return fmt.Errorf("pg delete stale file constants: %w", err)
+				}
+				deletedFile = true
+			}
+			if _, err := tx.ExecContext(ctx, qConstantInsert, fileID, nil, c.Name, c.Type, c.Value, c.Modifier, src, string(extra)); err != nil {
+				return fmt.Errorf("pg insert file constant %s: %w", c.Name, err)
+			}
+		default:
+			continue
 		}
 	}
 	return nil
@@ -854,6 +1013,17 @@ func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) erro
 					boolToInt(m.IsStatic), boolToInt(m.IsAbstract), boolToInt(m.IsConstructor), "", string(extra)); err != nil {
 					return fmt.Errorf("bulk insert method %s: %w", m.Name, err)
 				}
+			}
+		}
+		// 变量/常量落库（2026-09-03 新增；须在 class/method 插入之后）
+		if len(ir.Fields) > 0 {
+			if err := upsertFieldsTx(ctx, tx, ir.Fields, ir.Source); err != nil {
+				return err
+			}
+		}
+		if len(ir.Constants) > 0 {
+			if err := upsertConstantsTx(ctx, tx, fileID, ir.Constants, ir.Source); err != nil {
+				return err
 			}
 		}
 		if len(ir.Calls) > 0 {
