@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS file (
   language TEXT DEFAULT '',
   parse_status TEXT DEFAULT 'parse_ok'
 );
+CREATE INDEX IF NOT EXISTS idx_file_hash ON file(content_hash);
 CREATE TABLE IF NOT EXISTS class (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   file_id INTEGER,
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS method (
   source TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_method_class ON method(class_id);
+CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
 CREATE TABLE IF NOT EXISTS call (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   file_id INTEGER,

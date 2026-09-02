@@ -537,6 +537,7 @@ CREATE TABLE IF NOT EXISTS file (
 ALTER TABLE file ADD COLUMN IF NOT EXISTS imports TEXT DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS idx_file_category ON file(file_category);
 CREATE INDEX IF NOT EXISTS idx_file_language ON file(language);
+CREATE INDEX IF NOT EXISTS idx_file_hash ON file(content_hash);
 CREATE TABLE IF NOT EXISTS class (
   id SERIAL PRIMARY KEY, file_id INTEGER, name TEXT, full_name TEXT, type TEXT, parent_class_id INTEGER,
   start_line INTEGER, start_col INTEGER, end_line INTEGER, end_col INTEGER, modifier TEXT DEFAULT '',
@@ -544,6 +545,7 @@ CREATE TABLE IF NOT EXISTS class (
 );
 CREATE INDEX IF NOT EXISTS idx_class_file_line ON class(file_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_class_full_name ON class(full_name);
+CREATE INDEX IF NOT EXISTS idx_class_parent ON class(parent_class_id);
 CREATE TABLE IF NOT EXISTS class_parent (
   class_id INTEGER, parent_class_id INTEGER, parent_fqn TEXT, relation_type TEXT,
   PRIMARY KEY(class_id, parent_class_id, parent_fqn)
@@ -556,6 +558,7 @@ CREATE TABLE IF NOT EXISTS method (
 );
 CREATE INDEX IF NOT EXISTS idx_method_class_line ON method(class_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_method_class_id ON method(class_id);
+CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
 CREATE TABLE IF NOT EXISTS parameter (
   id SERIAL PRIMARY KEY, method_id INTEGER, name TEXT, type TEXT, idx INTEGER, annotation TEXT
 );

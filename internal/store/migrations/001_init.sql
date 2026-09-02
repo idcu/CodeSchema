@@ -1,6 +1,12 @@
 -- 001_init.sql
 -- CodeSchema P0 基础 DDL
--- 适用数据库：SQLite 3.x
+-- 适用数据库：SQLite 3.x / PostgreSQL
+--
+-- ⚠️ 本文件是「12 表 ID 型」目标设计稿 / PG 参考 DDL，运行时不加载执行。
+-- 实际后端 schema 以内联 DDL 为准：
+--   · 默认 SQLite 运行时 → internal/store/sqlite/sqlite.go（FQN 型轻量 schema）
+--   · PG 后端 → internal/store/pg/pg.go（本文件等价平移：SERIAL 替代 AUTOINCREMENT）
+-- 两处行为级 schema（call 用 caller_fqn/callee_fqn、file 含 imports 等）以代码为准。
 
 -- project：项目元信息
 CREATE TABLE IF NOT EXISTS project (
@@ -24,6 +30,7 @@ CREATE TABLE IF NOT EXISTS file (
   line_count INTEGER DEFAULT 0,          -- 文件总行数，规模感知/裁剪限流
   byte_size INTEGER DEFAULT 0,           -- 字节大小，大文件旁路/分批
   referenced_by_files TEXT DEFAULT '[]', -- JSONB，反向引用本文件的文件清单
+  imports TEXT DEFAULT '[]',             -- JSONB，文件 import 快照
   language TEXT DEFAULT '',              -- 文件主语言，高频查询免 join project
   last_indexed_at TEXT,                  -- 本次成功索引时间
   parse_status TEXT DEFAULT 'parse_ok',  -- parse_ok / parse_skipped / parse_error
@@ -32,6 +39,7 @@ CREATE TABLE IF NOT EXISTS file (
 );
 CREATE INDEX IF NOT EXISTS idx_file_category ON file(file_category);
 CREATE INDEX IF NOT EXISTS idx_file_language ON file(language);
+CREATE INDEX IF NOT EXISTS idx_file_hash ON file(content_hash);
 
 -- class：类/接口/枚举/抽象类
 CREATE TABLE IF NOT EXISTS class (
@@ -52,6 +60,7 @@ CREATE TABLE IF NOT EXISTS class (
 );
 CREATE INDEX IF NOT EXISTS idx_class_file_line ON class(file_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_class_full_name ON class(full_name);
+CREATE INDEX IF NOT EXISTS idx_class_parent ON class(parent_class_id);   -- 按父类枚举子类/实现类
 
 -- class_parent：继承/实现关系
 CREATE TABLE IF NOT EXISTS class_parent (
@@ -84,6 +93,7 @@ CREATE TABLE IF NOT EXISTS method (
 );
 CREATE INDEX IF NOT EXISTS idx_method_class_line ON method(class_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_method_class_id ON method(class_id);
+CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
 
 -- parameter：方法参数
 CREATE TABLE IF NOT EXISTS parameter (
@@ -122,17 +132,18 @@ CREATE TABLE IF NOT EXISTS method_tag (
   PRIMARY KEY(method_id, tag_id)
 );
 
--- call：调用关系（source 区分数据来源）
+-- call：调用关系（FQN 口径，与运行时 sqlite/pg 后端一致；caller/callee 以全限定名串接 method）
 CREATE TABLE IF NOT EXISTS call (
   id INTEGER PRIMARY KEY,
-  caller_method_id INTEGER,
-  callee_method_id INTEGER,
+  file_id INTEGER,
+  caller_fqn TEXT,
+  callee_fqn TEXT,
   call_type TEXT DEFAULT '',            -- direct / interface / dynamic / unknown
   line_number INTEGER,
   source TEXT DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_method_id);
-CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_method_id);
+CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
+CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);
 
 -- method_test_link：方法-测试关联（五种策略）
 CREATE TABLE IF NOT EXISTS method_test_link (
