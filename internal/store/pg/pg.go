@@ -521,13 +521,22 @@ func idCol(ctx context.Context, db *sql.DB, q string, args ...interface{}) ([]in
 }
 
 // pgSchemaDDL 返回 PG 适配版 DDL（由 001_init.sql 平移：SERIAL 替代 AUTOINCREMENT、now() 替代 datetime('now')）。
+//
+// FK 约束设计（2026-09-03 落地）：
+//   - 必填且必有目标 的列加 FOREIGN KEY + ON DELETE CASCADE（file.project_id、class.file_id、
+//     method.class_id、parameter.method_id、ret_type.method_id、call.file_id、class_parent.class_id、
+//     class_tag.*、method_tag.*、method_test_link.*）；删除 file/class/method 时级联清理从属数据。
+//   - 可空兜底列不加 FK：class.parent_class_id（父类可不在当前索引，靠 parent_fqn 兜底）、
+//     call.caller_fqn/callee_fqn（FQN 文本串接，非 id 外键）。
+//   - 注意：本 DDL 用 CREATE TABLE IF NOT EXISTS，仅对新建库生效；既有旧库需手工
+//     ALTER TABLE ... ADD CONSTRAINT FOREIGN KEY 迁移（无 IF NOT EXISTS 语法）。
 func pgSchemaDDL() string {
 	return `
 CREATE TABLE IF NOT EXISTS project (
   id SERIAL PRIMARY KEY, name TEXT NOT NULL, language TEXT, root_path TEXT, version TEXT, created_at TEXT DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS file (
-  id SERIAL PRIMARY KEY, project_id INTEGER, absolute_path TEXT, relative_path TEXT, file_category TEXT DEFAULT 'source',
+  id SERIAL PRIMARY KEY, project_id INTEGER REFERENCES project(id) ON DELETE CASCADE, absolute_path TEXT, relative_path TEXT, file_category TEXT DEFAULT 'source',
   content_hash TEXT, commit_hash TEXT, line_count INTEGER DEFAULT 0, byte_size INTEGER DEFAULT 0,
   referenced_by_files TEXT DEFAULT '[]', imports TEXT DEFAULT '[]', language TEXT DEFAULT '', last_indexed_at TEXT, parse_status TEXT DEFAULT 'parse_ok',
   updated_at TEXT DEFAULT now(), UNIQUE(absolute_path)
@@ -539,7 +548,7 @@ CREATE INDEX IF NOT EXISTS idx_file_category ON file(file_category);
 CREATE INDEX IF NOT EXISTS idx_file_language ON file(language);
 CREATE INDEX IF NOT EXISTS idx_file_hash ON file(content_hash);
 CREATE TABLE IF NOT EXISTS class (
-  id SERIAL PRIMARY KEY, file_id INTEGER, name TEXT, full_name TEXT, type TEXT, parent_class_id INTEGER,
+  id SERIAL PRIMARY KEY, file_id INTEGER REFERENCES file(id) ON DELETE CASCADE, name TEXT, full_name TEXT, type TEXT, parent_class_id INTEGER,
   start_line INTEGER, start_col INTEGER, end_line INTEGER, end_col INTEGER, modifier TEXT DEFAULT '',
   doc_comment TEXT DEFAULT '', annotations TEXT DEFAULT '[]', source TEXT DEFAULT '', extra TEXT, created_at TEXT DEFAULT now()
 );
@@ -547,11 +556,11 @@ CREATE INDEX IF NOT EXISTS idx_class_file_line ON class(file_id, start_line, end
 CREATE INDEX IF NOT EXISTS idx_class_full_name ON class(full_name);
 CREATE INDEX IF NOT EXISTS idx_class_parent ON class(parent_class_id);
 CREATE TABLE IF NOT EXISTS class_parent (
-  class_id INTEGER, parent_class_id INTEGER, parent_fqn TEXT, relation_type TEXT,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, parent_class_id INTEGER, parent_fqn TEXT, relation_type TEXT,
   PRIMARY KEY(class_id, parent_class_id, parent_fqn)
 );
 CREATE TABLE IF NOT EXISTS method (
-  id SERIAL PRIMARY KEY, class_id INTEGER, name TEXT, signature TEXT, return_type TEXT,
+  id SERIAL PRIMARY KEY, class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, name TEXT, signature TEXT, return_type TEXT,
   start_line INTEGER, start_col INTEGER, end_line INTEGER, end_col INTEGER, modifier TEXT DEFAULT '',
   doc_comment TEXT DEFAULT '', annotations TEXT DEFAULT '[]', is_static INTEGER DEFAULT 0, is_abstract INTEGER DEFAULT 0,
   is_constructor INTEGER DEFAULT 0, imports TEXT DEFAULT '[]', source TEXT DEFAULT '', extra TEXT, created_at TEXT DEFAULT now()
@@ -560,24 +569,24 @@ CREATE INDEX IF NOT EXISTS idx_method_class_line ON method(class_id, start_line,
 CREATE INDEX IF NOT EXISTS idx_method_class_id ON method(class_id);
 CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
 CREATE TABLE IF NOT EXISTS parameter (
-  id SERIAL PRIMARY KEY, method_id INTEGER, name TEXT, type TEXT, idx INTEGER, annotation TEXT
+  id SERIAL PRIMARY KEY, method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, name TEXT, type TEXT, idx INTEGER, annotation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_param_method ON parameter(method_id);
 CREATE TABLE IF NOT EXISTS ret_type (
-  method_id INTEGER PRIMARY KEY, type TEXT, generic_type TEXT, description TEXT
+  method_id INTEGER PRIMARY KEY REFERENCES method(id) ON DELETE CASCADE, type TEXT, generic_type TEXT, description TEXT
 );
 CREATE TABLE IF NOT EXISTS tag (
   id SERIAL PRIMARY KEY, name TEXT UNIQUE, category TEXT
 );
-CREATE TABLE IF NOT EXISTS class_tag ( class_id INTEGER, tag_id INTEGER, PRIMARY KEY(class_id, tag_id) );
-CREATE TABLE IF NOT EXISTS method_tag ( method_id INTEGER, tag_id INTEGER, PRIMARY KEY(method_id, tag_id) );
+CREATE TABLE IF NOT EXISTS class_tag ( class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE, PRIMARY KEY(class_id, tag_id) );
+CREATE TABLE IF NOT EXISTS method_tag ( method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE, PRIMARY KEY(method_id, tag_id) );
 CREATE TABLE IF NOT EXISTS call (
-  id SERIAL PRIMARY KEY, file_id INTEGER, caller_fqn TEXT, callee_fqn TEXT, call_type TEXT DEFAULT '', line_number INTEGER, source TEXT DEFAULT ''
+  id SERIAL PRIMARY KEY, file_id INTEGER REFERENCES file(id) ON DELETE CASCADE, caller_fqn TEXT, callee_fqn TEXT, call_type TEXT DEFAULT '', line_number INTEGER, source TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);
 CREATE TABLE IF NOT EXISTS method_test_link (
-  id SERIAL PRIMARY KEY, method_id INTEGER, test_method_id INTEGER, strategy TEXT, confidence INTEGER DEFAULT 70,
+  id SERIAL PRIMARY KEY, method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, test_method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, strategy TEXT, confidence INTEGER DEFAULT 70,
   UNIQUE(method_id, test_method_id)
 );
 CREATE INDEX IF NOT EXISTS idx_mtl_method ON method_test_link(method_id);

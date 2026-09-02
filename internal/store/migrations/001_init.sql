@@ -7,6 +7,13 @@
 --   · 默认 SQLite 运行时 → internal/store/sqlite/sqlite.go（FQN 型轻量 schema）
 --   · PG 后端 → internal/store/pg/pg.go（本文件等价平移：SERIAL 替代 AUTOINCREMENT）
 -- 两处行为级 schema（call 用 caller_fqn/callee_fqn、file 含 imports 等）以代码为准。
+--
+-- FK 约束（2026-09-03，与 internal/store/pg/pg.go 同步落地）：
+--   · 必填且必有目标 的列加 FOREIGN KEY + ON DELETE CASCADE（见各表 REFERENCES）；
+--     删除 file/class/method 时级联清理从属数据，避免悬挂引用。
+--   · 可空兜底列不加 FK：class.parent_class_id（父类可不在当前索引，靠 parent_fqn 兜底）、
+--     call.caller_fqn/callee_fqn（FQN 文本串接，非 id 外键）。
+--   · SQLite 默认不强制 FK（需 PRAGMA foreign_keys=ON）；本文件为设计参考，强制执行见 pg.go。
 
 -- project：项目元信息
 CREATE TABLE IF NOT EXISTS project (
@@ -21,7 +28,7 @@ CREATE TABLE IF NOT EXISTS project (
 -- file：文件元信息（含扩展字段）
 CREATE TABLE IF NOT EXISTS file (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project_id INTEGER,
+  project_id INTEGER REFERENCES project(id) ON DELETE CASCADE,
   absolute_path TEXT,
   relative_path TEXT,
   file_category TEXT DEFAULT 'source',   -- source / header / test / generated
@@ -44,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_file_hash ON file(content_hash);
 -- class：类/接口/枚举/抽象类
 CREATE TABLE IF NOT EXISTS class (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  file_id INTEGER,
+  file_id INTEGER REFERENCES file(id) ON DELETE CASCADE,
   name TEXT,
   full_name TEXT,
   type TEXT,                             -- CLASS / INTERFACE / ABSTRACT / ENUM
@@ -62,9 +69,9 @@ CREATE INDEX IF NOT EXISTS idx_class_file_line ON class(file_id, start_line, end
 CREATE INDEX IF NOT EXISTS idx_class_full_name ON class(full_name);
 CREATE INDEX IF NOT EXISTS idx_class_parent ON class(parent_class_id);   -- 按父类枚举子类/实现类
 
--- class_parent：继承/实现关系
+-- class_parent：继承/实现关系（class_id 必填加 FK；parent_class_id 可空兜底不加）
 CREATE TABLE IF NOT EXISTS class_parent (
-  class_id INTEGER,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
   parent_class_id INTEGER,               -- 可为 NULL（父类不在当前索引中）
   parent_fqn TEXT,                       -- 父类全限定名（兜底）
   relation_type TEXT,                    -- EXTENDS / IMPLEMENTS
@@ -74,7 +81,7 @@ CREATE TABLE IF NOT EXISTS class_parent (
 -- method：方法定义
 CREATE TABLE IF NOT EXISTS method (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  class_id INTEGER,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
   name TEXT,
   signature TEXT,
   return_type TEXT,
@@ -98,7 +105,7 @@ CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
 -- parameter：方法参数
 CREATE TABLE IF NOT EXISTS parameter (
   id INTEGER PRIMARY KEY,
-  method_id INTEGER,
+  method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
   name TEXT,
   type TEXT,
   idx INTEGER,
@@ -106,13 +113,12 @@ CREATE TABLE IF NOT EXISTS parameter (
 );
 CREATE INDEX IF NOT EXISTS idx_param_method ON parameter(method_id);
 
--- ret_type：返回类型
+-- ret_type：返回类型（1:1，method_id 主键兼外键）
 CREATE TABLE IF NOT EXISTS ret_type (
-  method_id INTEGER,
+  method_id INTEGER PRIMARY KEY REFERENCES method(id) ON DELETE CASCADE,
   type TEXT,
   generic_type TEXT,
-  description TEXT,
-  PRIMARY KEY(method_id)
+  description TEXT
 );
 
 -- tag：分类标签（layer / biz / tech / risk / test / lang）
@@ -122,20 +128,20 @@ CREATE TABLE IF NOT EXISTS tag (
   category TEXT
 );
 CREATE TABLE IF NOT EXISTS class_tag (
-  class_id INTEGER,
-  tag_id INTEGER,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
+  tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE,
   PRIMARY KEY(class_id, tag_id)
 );
 CREATE TABLE IF NOT EXISTS method_tag (
-  method_id INTEGER,
-  tag_id INTEGER,
+  method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
+  tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE,
   PRIMARY KEY(method_id, tag_id)
 );
 
 -- call：调用关系（FQN 口径，与运行时 sqlite/pg 后端一致；caller/callee 以全限定名串接 method）
 CREATE TABLE IF NOT EXISTS call (
   id INTEGER PRIMARY KEY,
-  file_id INTEGER,
+  file_id INTEGER REFERENCES file(id) ON DELETE CASCADE,
   caller_fqn TEXT,
   callee_fqn TEXT,
   call_type TEXT DEFAULT '',            -- direct / interface / dynamic / unknown
@@ -145,11 +151,11 @@ CREATE TABLE IF NOT EXISTS call (
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);
 
--- method_test_link：方法-测试关联（五种策略）
+-- method_test_link：方法-测试关联（五种策略；method 与 test_method 均指向 method 表）
 CREATE TABLE IF NOT EXISTS method_test_link (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  method_id INTEGER,
-  test_method_id INTEGER,
+  method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
+  test_method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
   strategy TEXT,                         -- explicit / naming / coverage / same_tag / dependency
   confidence INTEGER DEFAULT 70,
   UNIQUE(method_id, test_method_id)

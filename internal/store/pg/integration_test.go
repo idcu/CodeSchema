@@ -139,3 +139,70 @@ func TestPGStore_EndToEnd(t *testing.T) {
 	// 清理（删除测试文件，幂等）
 	_ = s.DeleteFile(ctx, file.ID)
 }
+
+// TestPGStore_FKConstraints 验证 FK 约束与 ON DELETE CASCADE（2026-09-03 新增）：
+//  1. 引用不存在父记录的写入被 PG 拒绝（FK 生效）；
+//  2. 正常写入后 DeleteFile → class/method/call 级联清空（CASCADE 生效）。
+func TestPGStore_FKConstraints(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// 1) FK 生效：method 引用不存在的 class_id 应被拒绝
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO method (class_id, name) VALUES (999999, 'Orphan')`); err == nil {
+		t.Fatalf("expected FK violation for orphan method.class_id, got nil error")
+	} else {
+		t.Logf("FK violation on orphan method.class_id as expected: %v", err)
+	}
+
+	// 2) CASCADE 生效：正常写入后 DeleteFile 应级联清空 class/method/call
+	uniquePath := fmt.Sprintf("/tmp/pg-fk/file-%d.go", time.Now().UnixNano())
+	ir := &parser.IRDocument{
+		Source: "pg-fk", Language: "go",
+		FilePath: uniquePath, FileHash: "hash-fk-1",
+		LineCount: 10, ByteSize: 100,
+	}
+	ir.Classes = []parser.ClassIR{{Name: "FK", FullName: "pkg.FK", Type: "CLASS"}}
+	ir.Methods = []parser.MethodIR{{Name: "M", ClassFQN: "pkg.FK"}}
+	ir.Calls = []parser.CallIR{{CallerFQN: "pkg.FK.M", CalleeFQN: "pkg.FK.M", CallType: "direct"}}
+	if err := s.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("UpsertIR: %v", err)
+	}
+	file, err := s.GetFileByPath(ctx, uniquePath)
+	if err != nil || file == nil {
+		t.Fatalf("GetFileByPath: %v (file=%v)", err, file)
+	}
+	if err := s.DeleteFile(ctx, file.ID); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+	// 级联后：file/class/call 均应为空
+	if _, err := s.GetFileByPath(ctx, uniquePath); err == nil {
+		t.Fatalf("expected file gone after DeleteFile (CASCADE), got no error")
+	}
+	classes, err := s.GetClassesByFileID(ctx, file.ID)
+	if err != nil {
+		t.Fatalf("GetClassesByFileID after delete: %v", err)
+	}
+	if len(classes) != 0 {
+		t.Fatalf("expected classes cascaded to empty, got %d", len(classes))
+	}
+	calls, err := s.GetCallsByFileID(ctx, file.ID)
+	if err != nil {
+		t.Fatalf("GetCallsByFileID after delete: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected calls cascaded to empty, got %d", len(calls))
+	}
+	t.Log("FK constraints + ON DELETE CASCADE OK")
+}
