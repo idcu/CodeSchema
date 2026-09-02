@@ -525,9 +525,12 @@ func idCol(ctx context.Context, db *sql.DB, q string, args ...interface{}) ([]in
 // FK 约束设计（2026-09-03 落地）：
 //   - 必填且必有目标 的列加 FOREIGN KEY + ON DELETE CASCADE（file.project_id、class.file_id、
 //     method.class_id、parameter.method_id、ret_type.method_id、call.file_id、class_parent.class_id、
-//     class_tag.*、method_tag.*、method_test_link.*）；删除 file/class/method 时级联清理从属数据。
+//     class_tag.*、method_tag.*、method_test_link.*、field.class_id/method_id、constant.file_id/class_id）；
+//     删除 file/class/method 时级联清理从属数据。
 //   - 可空兜底列不加 FK：class.parent_class_id（父类可不在当前索引，靠 parent_fqn 兜底）、
 //     call.caller_fqn/callee_fqn（FQN 文本串接，非 id 外键）。
+//   - field/constant 的归属列用 CHECK 强制「二选一」：field 只能挂 class 或 method 之一，
+//     constant 只能挂 file 或 class 之一，避免悬空或双挂。
 //   - 注意：本 DDL 用 CREATE TABLE IF NOT EXISTS，仅对新建库生效；既有旧库需手工
 //     ALTER TABLE ... ADD CONSTRAINT FOREIGN KEY 迁移（无 IF NOT EXISTS 语法）。
 func pgSchemaDDL() string {
@@ -591,6 +594,30 @@ CREATE TABLE IF NOT EXISTS method_test_link (
 );
 CREATE INDEX IF NOT EXISTS idx_mtl_method ON method_test_link(method_id);
 CREATE INDEX IF NOT EXISTS idx_mtl_test ON method_test_link(test_method_id);
+CREATE TABLE IF NOT EXISTS field (
+  id SERIAL PRIMARY KEY,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
+  method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
+  name TEXT, type TEXT,
+  is_static INTEGER DEFAULT 0,
+  is_const INTEGER DEFAULT 0,            -- 类级常量可复用本表（is_const=1）
+  modifier TEXT DEFAULT '',
+  start_line INTEGER, start_col INTEGER, end_line INTEGER, end_col INTEGER,
+  source TEXT DEFAULT '', extra TEXT, created_at TEXT DEFAULT now(),
+  CHECK ((class_id IS NULL) <> (method_id IS NULL))  -- 成员变量(class)/局部变量(method) 二选一
+);
+CREATE INDEX IF NOT EXISTS idx_field_class ON field(class_id);
+CREATE INDEX IF NOT EXISTS idx_field_method ON field(method_id);
+CREATE TABLE IF NOT EXISTS constant (
+  id SERIAL PRIMARY KEY,
+  file_id INTEGER REFERENCES file(id) ON DELETE CASCADE,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
+  name TEXT, type TEXT, value TEXT,
+  modifier TEXT DEFAULT '', source TEXT DEFAULT '', extra TEXT, created_at TEXT DEFAULT now(),
+  CHECK ((file_id IS NULL) <> (class_id IS NULL))  -- 包/文件级(file) 或 类级(class) 二选一
+);
+CREATE INDEX IF NOT EXISTS idx_const_file ON constant(file_id);
+CREATE INDEX IF NOT EXISTS idx_const_class ON constant(class_id);
 `
 }
 

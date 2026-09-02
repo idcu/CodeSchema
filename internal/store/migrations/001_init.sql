@@ -2,7 +2,7 @@
 -- CodeSchema P0 基础 DDL
 -- 适用数据库：SQLite 3.x / PostgreSQL
 --
--- ⚠️ 本文件是「12 表 ID 型」目标设计稿 / PG 参考 DDL，运行时不加载执行。
+-- ⚠️ 本文件是「14 表 ID 型」目标设计稿 / PG 参考 DDL，运行时不加载执行。
 -- 实际后端 schema 以内联 DDL 为准：
 --   · 默认 SQLite 运行时 → internal/store/sqlite/sqlite.go（FQN 型轻量 schema）
 --   · PG 后端 → internal/store/pg/pg.go（本文件等价平移：SERIAL 替代 AUTOINCREMENT）
@@ -162,3 +162,41 @@ CREATE TABLE IF NOT EXISTS method_test_link (
 );
 CREATE INDEX IF NOT EXISTS idx_mtl_method ON method_test_link(method_id);
 CREATE INDEX IF NOT EXISTS idx_mtl_test ON method_test_link(test_method_id);
+
+-- field：成员变量 / 局部变量（变量表；2026-09-03 新增扩展点）
+--   归属二选一：成员变量挂 class_id，局部变量挂 method_id（CHECK 强制，避免悬空/双挂）。
+--   类级常量可复用本表（is_const=1），仅包/文件级常量走 constant 表。
+CREATE TABLE IF NOT EXISTS field (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
+  method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
+  name TEXT,
+  type TEXT,
+  is_static INTEGER DEFAULT 0,
+  is_const INTEGER DEFAULT 0,
+  modifier TEXT DEFAULT '',
+  start_line INTEGER, start_col INTEGER,
+  end_line INTEGER, end_col INTEGER,
+  source TEXT DEFAULT '',
+  extra TEXT,
+  CHECK ((class_id IS NULL) <> (method_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_field_class ON field(class_id);
+CREATE INDEX IF NOT EXISTS idx_field_method ON field(method_id);
+
+-- constant：包/文件级与类级常量（常量表；2026-09-03 新增扩展点）
+--   归属二选一：包/文件级挂 file_id，类级挂 class_id（CHECK 强制）。
+CREATE TABLE IF NOT EXISTS constant (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_id INTEGER REFERENCES file(id) ON DELETE CASCADE,
+  class_id INTEGER REFERENCES class(id) ON DELETE CASCADE,
+  name TEXT,
+  type TEXT,
+  value TEXT,
+  modifier TEXT DEFAULT '',
+  source TEXT DEFAULT '',
+  extra TEXT,
+  CHECK ((file_id IS NULL) <> (class_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_const_file ON constant(file_id);
+CREATE INDEX IF NOT EXISTS idx_const_class ON constant(class_id);

@@ -206,3 +206,106 @@ func TestPGStore_FKConstraints(t *testing.T) {
 	}
 	t.Log("FK constraints + ON DELETE CASCADE OK")
 }
+
+// TestPGStore_FieldConstantTables 验证常量表/变量表 DDL（2026-09-03 新增）：
+//  1. InitSchema 后 field/constant 表存在；
+//  2. field 正常写入成员变量(class_id) / 局部变量(method_id)，二选一 CHECK 拒绝
+//     双 NULL 与双非空，FK 拒绝引用不存在的 class；
+//  3. constant 正常写入包级(file_id) / 类级(class_id)，二选一 CHECK 拒绝双 NULL，
+//     FK 拒绝引用不存在的 class；
+//  4. ON DELETE CASCADE：删 file 后 field/constant 从属数据级联清空。
+func TestPGStore_FieldConstantTables(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// 1) 表存在
+	for _, tbl := range []string{"field", "constant"} {
+		var n int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name=$1`, tbl).Scan(&n); err != nil {
+			t.Fatalf("check table %s: %v", tbl, err)
+		}
+		if n != 1 {
+			t.Fatalf("table %s not created (n=%d)", tbl, n)
+		}
+	}
+
+	// 准备父数据：file → class → method（直接 SQL，控制 FK 顺序）
+	uniquePath := fmt.Sprintf("/tmp/pg-fc/file-%d.go", time.Now().UnixNano())
+	var fileID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO file (absolute_path) VALUES ($1) RETURNING id`, uniquePath).Scan(&fileID); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+	var classID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO class (file_id, name, full_name) VALUES ($1,'C','pkg.C') RETURNING id`, fileID).Scan(&classID); err != nil {
+		t.Fatalf("insert class: %v", err)
+	}
+	var methodID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO method (class_id, name) VALUES ($1,'M') RETURNING id`, classID).Scan(&methodID); err != nil {
+		t.Fatalf("insert method: %v", err)
+	}
+
+	// 2) field 正常写入：成员变量 + 局部变量
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO field (class_id, name, type, is_static) VALUES ($1,'count','int',1)`, classID); err != nil {
+		t.Fatalf("insert member field: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO field (method_id, name, type) VALUES ($1,'tmp','string')`, methodID); err != nil {
+		t.Fatalf("insert local field: %v", err)
+	}
+	// 二选一 CHECK：双 NULL
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO field (name, type) VALUES ('x','int')`); err == nil {
+		t.Fatal("expected CHECK violation for field with no owner, got nil")
+	}
+	// 二选一 CHECK：双非空
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO field (class_id, method_id, name) VALUES ($1,$1,'x')`, classID); err == nil {
+		t.Fatal("expected CHECK violation for field with dual owner, got nil")
+	}
+	// FK：引用不存在的 class
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO field (class_id, name) VALUES (999999,'x')`); err == nil {
+		t.Fatal("expected FK violation for orphan field.class_id, got nil")
+	}
+
+	// 3) constant 正常写入：包级 + 类级
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO constant (file_id, name, type, value) VALUES ($1,'Pi','float64','3.14')`, fileID); err != nil {
+		t.Fatalf("insert package constant: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO constant (class_id, name, type, value) VALUES ($1,'Max','int','100')`, classID); err != nil {
+		t.Fatalf("insert class constant: %v", err)
+	}
+	// 二选一 CHECK：双 NULL
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO constant (name, value) VALUES ('x','1')`); err == nil {
+		t.Fatal("expected CHECK violation for constant with no owner, got nil")
+	}
+	// FK：引用不存在的 class
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO constant (class_id, name, value) VALUES (999999,'x','1')`); err == nil {
+		t.Fatal("expected FK violation for orphan constant.class_id, got nil")
+	}
+
+	// 4) CASCADE：删 file → class 级联清 field/constant（file 删除级联 class）
+	if err := s.DeleteFile(ctx, fileID); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+	var fields, consts int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM field WHERE class_id=$1 OR method_id=$1`, classID).Scan(&fields); err != nil {
+		t.Fatalf("count field after delete: %v", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM constant WHERE class_id=$1`, classID).Scan(&consts); err != nil {
+		t.Fatalf("count constant after delete: %v", err)
+	}
+	if fields != 0 || consts != 0 {
+		t.Fatalf("expected cascade cleanup, got fields=%d consts=%d", fields, consts)
+	}
+	t.Logf("field/constant tables OK: file=%d class=%d method=%d", fileID, classID, methodID)
+}
