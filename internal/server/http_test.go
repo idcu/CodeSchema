@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/idcu/codeschema/internal/analyzer"
+	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -448,6 +450,7 @@ func TestTestMethodNotAllowedOnAllEndpoints(t *testing.T) {
 		{"context", srv.handleContext},
 		{"impact", srv.handleImpact},
 		{"tests", srv.handleTests},
+		{"affected", srv.handleAffected},
 		{"search", srv.handleSearch},
 		{"tags", srv.handleGetTags},
 		{"tagsSearch", srv.handleSearchByTag},
@@ -750,5 +753,69 @@ func TestHTTPServer_UpdateRuntime_AddrRebind(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+// ---- GET /affected 端点测试（T4：补充 HTTP 侧受影响测试查询，对齐 MCP affected 工具） ----
+
+func TestAffectedEndpoint_EmptySymbol(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/affected", nil)
+	w := httptest.NewRecorder()
+	srv.handleAffected(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty symbol, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestAffectedEndpoint_Success(t *testing.T) {
+	dir := t.TempDir()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	// 写入调用关系（包限定 FQN，与 T1 适配器产出一致）
+	fileID, err := st.UpsertFile(context.Background(), "/project/config/watcher.go", "h1", 100, 2048)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	calls := []parser.CallIR{
+		{CallerFQN: "config.NewWatcher", CalleeFQN: "config.Watcher.ReloadNow"},
+		{CallerFQN: "main.main", CalleeFQN: "config.NewWatcher"},
+	}
+	if err := st.UpsertCalls(context.Background(), fileID, calls); err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+
+	// analyzer 与 service 共用同一 store，并注入以启用真实调用图追溯
+	an := analyzer.NewAnalyzer(st)
+	svc := service.NewService(st).WithImpactAnalyzer(an)
+	srv := NewHTTPServer(svc, ":0")
+
+	req := httptest.NewRequest(http.MethodGet, "/affected?symbol=config.Watcher.ReloadNow&recursive=true", nil)
+	w := httptest.NewRecorder()
+	srv.handleAffected(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Result().StatusCode, w.Body.String())
+	}
+	var resp struct {
+		Symbol        string   `json:"symbol"`
+		Recursive     bool     `json:"recursive"`
+		AffectedTests []string `json:"affected_tests"`
+	}
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Symbol != "config.Watcher.ReloadNow" {
+		t.Errorf("expected symbol config.Watcher.ReloadNow, got %s", resp.Symbol)
+	}
+	if !resp.Recursive {
+		t.Errorf("expected recursive true")
+	}
+	if resp.AffectedTests == nil {
+		t.Errorf("expected non-nil affected_tests slice")
 	}
 }

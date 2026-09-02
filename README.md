@@ -13,7 +13,7 @@
 ## 核心能力
 
 - **精准上下文裁剪**：AI 回答代码问题时，不必喂入整个仓库，大幅节省 token
-- **影响面分析**：改一行代码即可反查受影响方法并定位关联单测（⚠️ 默认 tree-sitter 正则/语法树解析路径仅填被调方 `CalleeFQN`、未填调用方 `CallerFQN`，故 `impact`/`tests`/`get_call_graph` 对真实方法默认返回空；需 LSP/SCIP/CodeGraph 适配器或回填 `CallerFQN` 才生效）
+- **影响面分析**：改一行代码即可反查受影响方法并定位关联单测。`impact`/`tests`/`get_call_graph`/`affected` 在 Go 路径下已真实可用——tree-sitter `detectCalls` 现产出包限定 FQN（`config.Watcher.ReloadNow`），analyzer 侧做双向归一化（查询去包前缀 / 节点按后缀匹配），即使 `search_symbols`/`context` 返回裸名（`Watcher.ReloadNow`）也能命中图谱节点；非 Go 语言与 LSP/SCIP/CodeGraph 适配器仍是更精确的调用边来源
 - **双路检索**：符号图精确检索 + 向量语义检索（FTS + 向量融合重排）
 - **增量监听**：支持 fsnotify 原生文件监听 + 轮询监听，300ms 防抖合并
 - **标签分类**：六类标签自动推导（layer/biz/tech/risk/test/lang）
@@ -131,8 +131,8 @@ docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
    - `-tags onnx`：ONNX 语义检索（需 gcc + onnxruntime 动态库 + glibc，alpine 不可用）
    - `-tags 'pg redis'`：PostgreSQL / Redis 存储后端
    - `-tags treesitter`：tree-sitter **真语法树**解析（CGO）
-3. **影响面分析可用**：`impact` / `tests` / `get_call_graph` 依赖调用边的 `CallerFQN`；默认解析路径与 AST 路径均已回填，可用（LSP/SCIP/CodeGraph 适配器亦提供调用边）。调用方为空时这些工具对真实方法返回空。
-4. **计数类字段禁止手填**：包数（internal=32 / 全仓库=36）、MCP 工具数（12）、HTTP 路由数（16）统一由 `make counts` 生成、`scripts/counts_baseline.json` 锁基线、CI `counts-guard` 漂移断言守护。**改动后 `make counts-check` 必须绿灯**；数字有意为之变时先 `make counts-update` 刷新基线。
+3. **影响面分析可用**：`impact` / `tests` / `get_call_graph` / `affected` 依赖调用边的 `CallerFQN`。Go 路径下 tree-sitter `detectCalls` 已回填包限定 `CallerFQN`/`CalleeFQN`，analyzer 再做双向归一化，对真实方法（含 `search_symbols`/`context` 返回的裸名）可正常命中；非 Go 语言与 LSP/SCIP/CodeGraph 适配器提供更精确的调用边。
+4. **计数类字段禁止手填**：包数（internal=32 / 全仓库=36）、MCP 工具数（12）、HTTP 路由数（23）统一由 `make counts` 生成、`scripts/counts_baseline.json` 锁基线、CI `counts-guard` 漂移断言守护。**改动后 `make counts-check` 必须绿灯**；数字有意为之变时先 `make counts-update` 刷新基线。
 5. **文档分层面向不同人群**（文档地图见 [`docs/README.md`](./docs/README.md)）：新人上手 / 开发者 / 架构师 / 运维部署 / 贡献者各有专属文档，勿把某人群内容塞进另一人群文档。
 6. **改码必改档，文档不得超前于代码**：任何接口/表/CLI/能力边界变更，先改代码再同步文档；提交前 grep 核查旧路径/旧数字残留。提交遵循 Conventional Commits；**仅 `git commit`，push 需显式授权**。
 
@@ -252,7 +252,7 @@ make clean
 
 | 构建命令 | 产物能力 | 说明 |
 |---|---|---|
-| `go build ./cmd/codeschema`（默认） | 正则/tree-sitter 多语言元数据 + SQLite/文件存储 + TF-IDF 语义（LocalEmbedder 降级）+ 12 MCP / 16 HTTP 工具 + 多租户 | 免 CGO/gcc；**影响面分析 `impact`/`tests`/`get_call_graph` 默认对真实方法返回空**（默认解析路径仅填被调方 `CalleeFQN`，未填调用方 `CallerFQN`），需 LSP/SCIP/CodeGraph 适配器或回填 `CallerFQN` 才生效 |
+| `go build ./cmd/codeschema`（默认） | 正则/tree-sitter 多语言元数据 + SQLite/文件存储 + TF-IDF 语义（LocalEmbedder 降级）+ 12 MCP / 23 HTTP 工具 + 多租户 | 免 CGO/gcc；**影响面分析 `impact`/`tests`/`get_call_graph`/`affected` 在 Go 路径下已真实可用**（tree-sitter `detectCalls` 回填包限定 `CallerFQN`/`CalleeFQN` + analyzer 双向归一化，可命中 `search_symbols`/`context` 返回的裸名）；LSP/SCIP/CodeGraph 适配器提供更精确的非 Go 调用边 |
 | `go build -tags onnx ./cmd/codeschema`（产物 `codeschema-onnx`） | 上述 + bge-small-zh-v1.5 ONNX 向量语义（Recall@1=1.00） | 需 gcc + onnxruntime 动态库 + 模型文件 + glibc |
 | `go build -tags 'pg redis' ./cmd/codeschema` | 上述 + PostgreSQL（超大仓横向扩展）+ Redis 热点缓存/调用反查 | 需外部 PG / Redis 实例 |
 

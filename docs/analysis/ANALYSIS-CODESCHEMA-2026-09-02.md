@@ -8,11 +8,11 @@
 > 最后更新：2026-09-02
 ## 0. 一句话结论（先说结论）
 
-CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代码元数据 KV/DB 系统」，定位为面向 AI Agent 的上下文裁剪供给服务。其**默认二进制**能提供：正则/tree-sitter 多语言元数据扫描、文件+SQLite 三层存储、语义/全文混合检索（TF-IDF 降级）、12 个 MCP 工具与 22 个 HTTP 端点（http.go 16 + viz.go 6）、多租户路由。
+CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代码元数据 KV/DB 系统」，定位为面向 AI Agent 的上下文裁剪供给服务。其**默认二进制**能提供：正则/tree-sitter 多语言元数据扫描、文件+SQLite 三层存储、语义/全文混合检索（TF-IDF 降级）、12 个 MCP 工具与 23 个 HTTP 端点（http.go 17 + viz.go 6）、多租户路由。
 
 但**文档显著领先于默认构建的真实能力**，存在三类必须正视的落差：
-1. **头牌能力有条件生效**——调用影响面分析（`impact`/`tests`/`get_call_graph`）在默认解析路径下对真实方法恒返回空（caller 侧未填充）；语义检索的 bge-ONNX Recall=1.00 只在 `-tags onnx` 构建 + 模型文件 + glibc 下成立。
-   - ⚠️ **CallerFQN 根因已于 2026-09-02 完成代码侧修复**（默认 `adapter.go` 的 `detectCalls` 调用处 `adapter.go:846` 与 AST 路径 `adapter_ast.go:342/402` 均已回填 `CallerFQN`；`go build` + 默认路径单测 `ok 0.521s` 通过）。修复已落地工作区，**待 commit/push 后随新构建生效**；语义检索的 ONNX 边界仍维持文档说明（P0/P1 已修正）。
+1. **头牌能力有条件生效**——**调用影响面分析（`impact`/`tests`/`get_call_graph`）在 Go 默认路径下已真实可用**（2026-09-02 修复）：此前默认解析路径 caller 侧 `CallerFQN` 未填充、且调用图节点 FQN 与查询 FQN 命名空间错位，导致对真实方法恒空；现 adapter 包限定产出（`config.Watcher.ReloadNow`）+ analyzer 双向归一化已修复，`GET /affected` 亦已补齐。语义检索的 bge-ONNX Recall=1.00 仍只在 `-tags onnx` 构建 + 模型文件 + glibc 下成立。
+   - ✅ **CallerFQN 根因已于 2026-09-02 完成代码侧修复并随提交落地**（默认 `adapter.go` 的 `detectCalls` 调用处 `adapter.go:846` 与 AST 路径 `adapter_ast.go:342/402` 均已回填 `CallerFQN`；`go build` + 默认路径单测通过；analyzer 双向归一化 `resolveImpactNode` 同步落地）。语义检索的 ONNX 边界仍维持文档说明（P0/P1 已修正）。
 2. **多存储/多语言服务器被构建标签隔离**——PG、Redis 存储与 ONNX 嵌入均不在默认二进制内，需显式 `-tags`。
 3. **文档内部自相矛盾**——存在两套 P 编号体系、包数量 4 处不一致、Docker 基础镜像口径互悖等。
 
@@ -25,7 +25,7 @@ CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代�
 | 一句话定位 | 面向 AI 辅助开发的**代码元数据索引与上下文裁剪服务**，把类/方法/接口/调用关系/标签沉淀为「文件存储(权威源)+内存索引+向量索引」三层，经 MCP Server 向 AI Agent 供给精准裁剪上下文 |
 | 核心目标 | 单文件解析 P95 <20ms；AI 上下文 token 理论节省 99.7%；AI 增强成本 < 总运行成本 5%；解析 100% 外包给 tree-sitter/LSP/SCIP |
 | 接口形态 | CLI（`codeschema scan/watch/serve/mcp/...`）、HTTP API、MCP Server（SSE + stdio 双传输） |
-| 代码印证 | `cmd/codeschema` 提供 scan/watch/rebuild-kv/benchmark/mcp/serve/version 七类命令；`internal/server` 含 HTTP(22 路由：http.go 16 + viz.go 6)+MCP(12 工具)；`internal/store` 实现三层存储接口 ✅ |
+| 代码印证 | `cmd/codeschema` 提供 scan/watch/rebuild-kv/benchmark/mcp/serve/version 七类命令；`internal/server` 含 HTTP(23 路由：http.go 17 + viz.go 6)+MCP(12 工具)；`internal/store` 实现三层存储接口 ✅ |
 
 **结论**：目标与接口形态与代码基本一致，定位清晰。
 
@@ -86,7 +86,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 | # | 阻塞/风险 | 证据 | 影响 |
 |---|---|---|---|
-| B1 | **调用影响面分析在默认路径恒空** | `internal/parser/adapter/treesitter/adapter_ast.go:329,378` 构造 `CallIR` 仅填 `CalleeFQN`；`adapter.go:489` `detectCalls(...,"")` caller 传空 | `impact`/`tests`/`get_call_graph` 对真实方法返回空，仅 codegraph/scip 适配器能填 caller | ✅ **已修复（代码侧，2026-09-02）**：默认 `adapter.go:846` 与 AST `adapter_ast.go:342/402` 均回填 `CallerFQN`，`go build`+单测通过；待 commit/push |
+| B1 | **调用影响面分析曾在默认路径恒空** | `internal/parser/adapter/treesitter/adapter_ast.go:329,378` 构造 `CallIR` 仅填 `CalleeFQN`；`adapter.go:489` `detectCalls(...,"")` caller 传空 | 原 `impact`/`tests`/`get_call_graph` 对真实方法返回空，仅 codegraph/scip 适配器能填 caller | ✅ **已修复并随 2026-09-02 提交落地**：默认 `adapter.go:846` 与 AST `adapter_ast.go:342/402` 均回填 `CallerFQN`，并新增 analyzer 双向归一化（`resolveImpactNode`）+ 真实 `GetCallGraph` + `GET /affected`；`go build`+单测通过 |
 | B2 | **ONNX 语义检索需特殊构建+环境** | `embedder_onnx.go://go:build onnx`；默认 `embedder_onnx_stub.go` 降级 TF-IDF；要求 glibc + 模型文件 | 默认二进制语义 Recall 远低于文档宣称的 1.00 |
 | B3 | **PG/Redis 存储不在默认二进制** | `pg/pg.go://go:build pg`、`redis/redis.go://go:build redis`；`go list` 默认仅见 sqlite | 超大仓横向扩展能力需 `-tags pg,redis` 显式开启 |
 | B4 | **LSP/SCIP 依赖外部二进制** | `lsp/adapter.go` 需 gopls/clangd/jdtls 等；`scip` 需 SCIP 索引工具 | 无外部工具时仅 tree-sitter 正则适配器生效，调用图精度受限 |
@@ -99,7 +99,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 ### 5.1 一致项（文档可信）
 - ✅ MCP 工具数 = 12（代码 `defineTools()` 枚举 12 个 `Name:`）。
-- ✅ HTTP 端点 = 22（`http.go` 注册 /health*/context/impact/tests/search/tags*/projects/metrics/openapi/docs 等 16 个 + `viz.go` 注册 /viz* 6 个）。
+- ✅ HTTP 端点 = 23（`http.go` 注册 /health*/context/impact/tests/affected/search/tags*/projects/metrics/openapi/docs 等 17 个 + `viz.go` 注册 /viz* 6 个）。
 - ✅ 多租户已落地（`internal/tenant` + 双接口注入）。
 - ✅ 三层存储接口 + chromem 向量索引存在。
 
@@ -107,7 +107,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 | 严重度 | 不一致点 | 文档说法 | 代码真相 | 建议修正 |
 |---|---|---|---|---|
-| 🔴 高 | 影响面分析能力 | README 列为「核心能力/已完成」 | 默认路径 caller_fqn 全空，工具对真实方法恒空（DEV_PROGRESS 方向A 亦自认） | ✅ **已修正**：README:16、版本发布说明:29 加 caller 空值警示与生效条件 |
+| 🔴 高 | 影响面分析能力 | README 列为「核心能力/已完成」 | 原默认路径 caller_fqn 全空，工具对真实方法恒空（DEV_PROGRESS 方向A 亦曾自认） | ✅ **已彻底修复（2026-09-02 提交）**：T1 adapter 包限定 `CallerFQN`/`CalleeFQN` + analyzer 双向归一化，Go 默认路径 `impact`/`tests`/`get_call_graph`/`affected` 真实可用；README:16 已由「空值警示」改为「Go 路径真实可用」陈述 |
 | 🔴 高 | 语义检索 Recall=1.00 | 默认即 bge-ONNX | 仅 `-tags onnx`+模型+glibc 成立；默认 TF-IDF 降级 | ✅ **已修正**：版本发布说明:28、系统简介:30 加默认=TF-IDF 降级说明；README 新增「构建变体与能力边界」矩阵 |
 | 🟠 中 | 多存储（PG/Redis） | 作为已落地能力描述 | 被 build tag 隔离，默认二进制不含 | 🟡 部分修正（README 矩阵已标注 `-tags pg,redis` 构建要求；待 P2 在正文显式说明） |
 | 🟠 中 | 包数量（口径） | 27 / 31 / 32 / 36 四处不一 | `internal/`=**32**、`全仓库 go list ./...`=**36**（两者均属实，仅口径不同）；唯 modules/README 旧写 27 为错误 | ✅ **已修正**：modules/README:4 27→32+scope；README/系统简介/版本发布说明 标注「32=internal/，36=全仓库」 |

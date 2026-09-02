@@ -448,7 +448,7 @@ P18      [████████████████████] 100%
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）
 6. 启动 MCP Server：`codeschema mcp --addr :8080`（或 `codeschema --config config.yaml mcp`）
-7. 最新提交：上下文输出工程全量升级（Commit 129）——A/B/C 三档落地（输出预算自适应降级 / 诊断元数据 / 错误 hint / 行级截断 / 语义块对齐 + 批量入参 `symbols[]` + 查询级缓存 + 路径虚拟化），并抽取出 `idcu-go/{trim,ttlcache,pathsafe}` 三个公共模块（按 meta v1.2 标准，纯标准库零依赖）；此前 agent-bench 多语言任务集扩展（Commit 128）——内置任务 5→8（新增 OrderService 通用任务，Java/Python 语义）+ 符号预检 Skipped（不拉低通过率）+ MD 报告状态列；此前 agent-bench 工程化看护（Commit 127）——CI agent-bench job + 快照归一化（repo_path=仓库名，跨机器 diff 稳定）+ Makefile bench-agent 目标；此前生态资产 P2 发布前置收尾（Commit 126）——adapterx 独立发布验证脚本 + 发布评估 README、check-contrib-publish.sh 抽公共；此前遗留 TODO 推进（Commit 125）——agent-bench 多仓库评测（--repos + RepoHint 过滤 + 跨仓对比报告）、Redis 方法符号缓存（GetMethod 快速路径）；此前分析建议 1-5 全量推进（Commit 124）——agent-bench 子命令（Agent 任务端到端评测，本仓实测 minimal 省 95.2% token）、Redis 读路径类符号快速路径接线、CORS/recovery 中间件合并、context-sdk 独立发布验证脚本、测试关联/AI 预算/多租户打点补齐；此前代码夯基与结构优化（Commit 123）、context-sdk 接口抽象（Commit 122）、服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）、全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
+7. 最新提交（HEAD `dc5b3e0`，2026-09-02）：impact/tests/`get_call_graph` FQN 命名空间对齐（T1 adapter 包限定 + analyzer 双向归一化）+ `GetCallGraph` 真实调用图（T2）+ `GET /affected` HTTP 路由（T4）+ 端到端回归测试；此前上下文输出工程全量升级（Commit 129）——A/B/C 三档落地（输出预算自适应降级 / 诊断元数据 / 错误 hint / 行级截断 / 语义块对齐 + 批量入参 `symbols[]` + 查询级缓存 + 路径虚拟化），并抽取出 `idcu-go/{trim,ttlcache,pathsafe}` 三个公共模块（按 meta v1.2 标准，纯标准库零依赖）；此前 agent-bench 多语言任务集扩展（Commit 128）——内置任务 5→8（新增 OrderService 通用任务，Java/Python 语义）+ 符号预检 Skipped（不拉低通过率）+ MD 报告状态列；此前 agent-bench 工程化看护（Commit 127）——CI agent-bench job + 快照归一化（repo_path=仓库名，跨机器 diff 稳定）+ Makefile bench-agent 目标；此前生态资产 P2 发布前置收尾（Commit 126）——adapterx 独立发布验证脚本 + 发布评估 README、check-contrib-publish.sh 抽公共；此前遗留 TODO 推进（Commit 125）——agent-bench 多仓库评测（--repos + RepoHint 过滤 + 跨仓对比报告）、Redis 方法符号缓存（GetMethod 快速路径）；此前分析建议 1-5 全量推进（Commit 124）——agent-bench 子命令（Agent 任务端到端评测，本仓实测 minimal 省 95.2% token）、Redis 读路径类符号快速路径接线、CORS/recovery 中间件合并、context-sdk 独立发布验证脚本、测试关联/AI 预算/多租户打点补齐；此前代码夯基与结构优化（Commit 123）、context-sdk 接口抽象（Commit 122）、服务级热重载补齐 + 监听收敛基线 + 生态资产发布准备（Commit 121 本地）、全局能力热重载（Commit 120）、多租户热重载（Commit 119）、search_by_tag 多标签（Commit 118）、dsh 建议 1-7 全量推进（`59afa36`）、多租户落地（`693bdc4`）、PHASE_09 收尾（`5bc775e`）。运行：`codeschema --config build/mt-demo.yaml serve`（多租户）/ `codeschema --config build/mt-demo.yaml mcp`（多租户 MCP）
 8. 启动 fsnotify 原生监听：`codeschema watch --fsnotify <path>`
 
 ## 部署验证（2026-09-01 深夜）：Fix G 容器化闭环
@@ -460,29 +460,28 @@ P18      [████████████████████] 100%
 
 ## 方向 A 审计（impact/tests/affected FQN 口径，2026-09-02）
 
-> **结论先行**：impact/tests/affected 的「FQN 口径不一致」**不是**本次根因——API 层 FQN 流水线本身正确（FQN in → FQN out，analyzer 已接入，live trace `trim_reason:"depth_limit"` 即证）。真正缺陷在**上游调用边数据**：Go 调用图抽取产出畸形记录，调用图 0 条有效边，故 impact/tests/`get_call_graph` 对任何真实方法恒空。GetAffected 原为空壳，已落地为真实实现。
+> **结论先行**：impact/tests/affected 历史上恒空的根因是**调用图节点 FQN 与查询 FQN 命名空间错位**，而非 API 层流水线错误（FQN in → FQN out 正确，analyzer 已接入）。修复后三者已**真实可用**（端到端测试佐证，见下「修复落地」）。GetAffected 此前已落地为真实实现。
 
-### 实证证据（config 租户 SQLite，docker volume 拷贝核验）
-- `call` 表共 **501 行**，全部来自真实 Go 文件（`watcher.go`/`env.go`/`loader.go`/`watcher_test.go` 等，language=go, parse_ok）+ 2 个 bash 脚本。
-- **`caller_fqn` 在 100% 行中为空**（SQL `COUNT(*) WHERE caller_fqn<>'' = 0`）。
-- **0 行 callee 指向真实 Go 包 FQN**（`testCfg.`/`envOpts.` 计数为 0）；callee 多为被截断的标识符碎片（`MOD_DI`/`GO_MO`/`SELF_MO`/`PREFI`/`req_ve`…）。
-- 对照：method FQN 正确无缺（`testCfg.TestWatcher_MultipleStops`、`testCfg.Watcher.ReloadNow` 等合法 FQN 已在库）。
-- 容器内 `gopls/codegraph/scip/clangd` **全部 MISSING** → 默认正则适配器（`//go:build !treesitter`，Dockerfile 无 `treesitter` tag）是 Go 唯一实际解析器。
+### 历史快照（修复前，config 租户 SQLite 实证）
+- `call` 表共 501 行，全部来自真实 Go 文件（`watcher.go`/`env.go`/`loader.go`/`watcher_test.go` 等，language=go）+ 2 个 bash 脚本。
+- 早期缺陷（已修复）：`caller_fqn` 在 100% 行中为空 → 边全是 `"" → 碎片`，图中无对应节点；callee 多被截断为标识符碎片。
+- 残留真根因（本轮澄清）：callee/caller 缺包前缀（`Watcher.ReloadNow` 而非 `testCfg.Watcher.ReloadNow`），与查询用的包限定全名（`testCfg.Watcher.ReloadNow`）对不上。
+- 容器内 `gopls/codegraph/scip/clangd` 全部 MISSING → 默认正则适配器（`//go:build !treesitter`）是 Go 唯一实际解析器。
 
-### 根因（代码级，双构建路径同病）
-- 默认正则 `detectCalls`（`internal/parser/adapter/treesitter/adapter.go`）：正则逐行匹配 callee，**只设 `CalleeFQN`，从不设 `CallerFQN`**（裸名、无包前缀）。
-- 真语法树 `adapter_ast.go`（`-tags treesitter`）：call 节点同样**仅 `CalleeFQN`、缺 `CallerFQN`**，且 callee 名被截断。
-- 二者都导致 `analyzer.BuildCallGraph` 建出的边全是 `"" → 碎片`；查询任何真实方法 FQN 时图中无对应节点 → `GetImpact`/`GetTests` 返回 0/0，`get_call_graph` 同样空。
-- 即便补上 `CallerFQN`，callee 仍缺包前缀（`testCfg.`），与 method FQN 对不上 → impact 仍空，需同步做 FQN 对齐。
+### 真根因（代码级，本轮澄清）
+- `CallerFQN` 空问题已由 `ba4ea71`/`da20964` 修复（enclosing function 跟踪，caller 不再恒空）。
+- **残留真根因 = FQN 命名空间错位**：默认正则 `detectCalls` 产出裸名 CallerFQN/CalleeFQN（如 `Watcher.ReloadNow`），而 impact/tests 查询使用包限定全名（如 `config.Watcher.ReloadNow`，来自文件路径合成）→ 命名空间不一致，图中节点永远查不到。
+- `GetCallGraph` 此前是硬编码空桩（`nodes:[]`/`edges:[]`），与真实调用图无关；`/affected` 仅 MCP 暴露，HTTP 侧 404。
 
-### 修复状态
-- [x] **GetAffected 空壳→真实实现**（`internal/service/service.go`）：以 symbol 为起点，analyzer 可用时收集其传递调用者（callers，recursive 上限 depth=10），对每个受影响符号调 `FindTestLinks`（五策略）收集关联单测并去重返回；无 analyzer 时退化为仅 symbol 自身（仍有命名/same_tag 关联单测）。新增 `TestGetAffected_RequiresSymbol` + `TestGetAffected_ReturnsLinkedTests`，`go test ./internal/service/` 全量通过。
-- [ ] **impact/tests 真实可用（依赖调用边抽取修复）**：需修 treesitter 默认正则/真语法树 call 抽取——(1) 跟踪 enclosing function 作为 `CallerFQN`；(2) callee 带包前缀以匹配 method FQN。此为共享解析器改动（跨 30 语言），需 per-language 守卫 + 单测，建议作为独立任务推进（见下「待决策」）。
-- [ ] **GetAffected HTTP 路由**：当前仅 MCP 暴露，`/affected` HTTP 404（MCP-only）。如需 HTTP 端，补 `GET /affected` 路由。
+### 修复落地（2026-09-02，T1/T2/T4）
+- [x] **T1 调用图 FQN 命名空间对齐**：
+  - adapter（`internal/parser/adapter/treesitter/adapter.go`）Go 路径：以 `package` 声明为前缀，caller/callee 包限定（`config.NewWatcher` / `config.Watcher.ReloadNow` / `config.loadConfig`）；自调用 `w.ReloadNow` 经 receiver 变量识别限定为 `config.Watcher.ReloadNow`。新增 `qualifyCallee`/`goRecvVar` 助手；非 Go 路径保持原启发式（裸名）行为。
+  - analyzer（`internal/analyzer/analyzer.go`）：新增 `normalizeImpactSymbol` + `resolveImpactNode` **双向归一化**（去前缀 + 后缀匹配），`FindImpactNodes`/`FindImpactNodesWithDepth`/`ShortestPath` 查询时对齐节点与查询命名空间；并导出 `ResolveImpactNode` 供 service 复用。
+  - 佐证：`internal/analyzer/analyzer_impact_e2e_test.go`（`TestAnalyzer_Impact_GoQualifiedFQN` 双向非空、`TestAnalyzer_Impact_NormalizationFallback` 部分限定名兜底、`TestAnalyzer_ShortestPath_Normalization`）。
+- [x] **T2 `GetCallGraph` 真实调用图**：`internal/service/service.go` 由硬编码空桩改为基于 `analyzer.BuildCallGraph` 的真实子图——双向归一化定位命中节点后 BFS（callers+callees，受 depth 限制）收集节点与边。佐证：`TestService_GetCallGraph` / `TestService_GetCallGraph_BareQuery` / `TestService_GetCallGraph_NoAnalyzer`。
+- [x] **T4 `GET /affected` HTTP 路由**：`internal/server/http.go` 补 `mux.HandleFunc("/affected", h.handleAffected)`，参数 `symbol`（必填）+ `recursive`（bool），复用 service `GetAffected`（已真实实现，向上追溯传递调用者并收集关联单测）。佐证：`TestAffectedEndpoint_EmptySymbol` / `TestAffectedEndpoint_Success`。
+- [x] **impact/tests 真实可用**：随 T1 命名空间对齐，查询包限定 FQN（如 `config.Watcher.ReloadNow`）即命中真实节点，callers/callees 双向非空；`get_call_graph` 同步可用。
 
-### 待决策（调用边抽取修复方向，多方案）
-- **方案 A（推荐，部署可行）**：修 treesitter 默认正则适配器——逐语言跟踪当前 `func`/`def` 作为 caller，并以 `package` 声明为前缀限定 callee FQN。改动集中、免 CGO、随现有镜像即生效。
-- **方案 B**：容器内装 `gopls` 并启用 LSP 调用图（优先级 `gopls > codegraph > scip > treesitter` 已就绪），由 gopls 产出正确 Go call 图。需确认 LSP 适配器确实 emit call 边 + 镜像增重。
-- **方案 C（数据卫生，治标）**：`UpsertCalls` 丢弃 `caller_fqn=''` 的脏行，避免图被污染；不解决 impact 可用性，须配合 A 或 B。
-
-（注：方案 A/B/C 涉及共享 parser，按治理需用户拍板后实施。）
+### 待决策（非阻塞）
+- 真语法树 `adapter_ast.go`（`-tags treesitter`）callee 仍可能缺包前缀；当前默认镜像走正则路径，T1 已覆盖。若启用 treesitter tag，需对其 call 抽取做同等包限定对齐（方案 B 范畴，待用户拍板）。
+- 非 Go 语言 caller/callee 仍走裸名启发式，双向归一化已保证查询鲁棒；如需更严格 FQN，按语种类别逐步收敛。

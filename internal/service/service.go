@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1341,7 +1342,11 @@ func (s *Service) FindDependencies(ctx context.Context, symbol string) ([]string
 	return []string{}, nil
 }
 
-// GetCallGraph 获取调用图（P0 骨架）。
+// GetCallGraph 获取指定符号的调用子图（基于真实调用图，T1 修复后可用）。
+//
+// 先按双向归一化定位命中节点（覆盖查询符号与图节点命名空间不一致），
+// 再双向 BFS（callers + callees，受 depth 限制）收集节点与其间边。
+// 未注入 analyzer 时返回空图（向后兼容）。
 func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (map[string]any, error) {
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
@@ -1349,11 +1354,65 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 	if depth <= 0 {
 		depth = 1
 	}
+	if s.analyzer == nil {
+		return map[string]any{
+			"symbol": symbol,
+			"depth":  depth,
+			"nodes":  []string{},
+			"edges":  []string{},
+		}, nil
+	}
+
+	cg, err := s.analyzer.BuildCallGraph(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("build call graph: %v", err)}
+	}
+
+	// 双向归一化定位命中节点；未命中则仍以原始 symbol 作为子图根。
+	resolved := symbol
+	if r, ok := s.analyzer.ResolveImpactNode(ctx, symbol); ok {
+		resolved = r
+	}
+
+	// 双向 BFS 收集节点集合
+	nodeSet := map[string]bool{resolved: true}
+	callers, callees, err := s.analyzer.FindImpactNodes(ctx, resolved, depth)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact: %v", err)}
+	}
+	for _, c := range callers {
+		nodeSet[c] = true
+	}
+	for _, c := range callees {
+		nodeSet[c] = true
+	}
+
+	// 收集节点集合内部的边（caller -> callee）
+	edges := make([]string, 0)
+	for n := range nodeSet {
+		node, ok := cg.Nodes[n]
+		if !ok {
+			continue
+		}
+		for _, callee := range node.Callees {
+			if nodeSet[callee] {
+				edges = append(edges, n+" -> "+callee)
+			}
+		}
+	}
+
+	nodes := make([]string, 0, len(nodeSet))
+	for n := range nodeSet {
+		nodes = append(nodes, n)
+	}
+	sort.Strings(nodes)
+	sort.Strings(edges)
+
 	return map[string]any{
-		"symbol": symbol,
+		"symbol": resolved,
 		"depth":  depth,
-		"nodes":  []string{},
-		"edges":  []string{},
+		"nodes":  nodes,
+		"edges":  edges,
 	}, nil
 }
 

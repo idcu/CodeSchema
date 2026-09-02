@@ -11,15 +11,14 @@ import (
 
 // TestGoCallAndTypeExtraction 实证 + 回归：验证 Go 适配器
 //  1. 泛型类型 type X[T any] struct 应被识别为 class；
-//  2. 调用边应带 CallerFQN，且归属正确：
-//     - NewWatcher（顶层函数）体内的 w.ReloadNow() → caller=NewWatcher；
-//     - ReloadNow（Watcher 方法）体内的 loadConfig() → caller=Watcher.ReloadNow；
-//  3. callee 保持仓库既定形式：receiver 调用为 w.ReloadNow、包级函数为裸名 loadConfig
-//     （与 Java paymentService.pay / realCall 断言一致；带包前缀的解析属 CGO AST 版
-//     或类型推导范畴，超出正则启发式边界）；
+//  2. 调用边 CallerFQN 应带包前缀限定（FQN 命名空间对齐，使影响面分析可查）：
+//     - NewWatcher（顶层函数）体内的 w.ReloadNow() → caller=config.NewWatcher；
+//       （w 是局部变量而非 receiver，类型不可消歧，callee 保持 w.ReloadNow）
+//     - ReloadNow（Watcher 方法，receiver w）体内的 loadConfig() →
+//       caller=config.Watcher.ReloadNow、callee=config.loadConfig（包级函数包限定）；
+//  3. 自接收者调用（recv == 当前方法 receiver 变量）会被限定为 pkg.RecvType.Method；
+//     其余 receiver.Method（如局部变量 w.ReloadNow）保持原样（类型推导范畴）；
 //  4. 顶层函数 NewWatcher 的 ClassFQN 为空（不再被误挂到最近 class）。
-//
-// 先以当前实现跑出真实产出（观察），再据预期实现修复。
 func TestGoCallAndTypeExtraction(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "watcher.go")
@@ -73,22 +72,24 @@ func (w *Watcher[T]) ReloadNow() {
 		t.Errorf("泛型类型 Watcher[T] 未被识别为 class；当前 classes=%v", doc.Classes)
 	}
 
-	// 2. 调用归属精确断言：NewWatcher → w.ReloadNow；Watcher.ReloadNow → loadConfig
+	// 2. 调用归属精确断言（包限定 FQN）：
+	//    config.NewWatcher -> w.ReloadNow（w 为局部变量，callee 不可消歧，保持 w.ReloadNow）；
+	//    config.Watcher.ReloadNow -> config.loadConfig（包级函数包限定）。
 	hasNewWatcherCall := false
 	hasReloadNowCall := false
 	for _, c := range doc.Calls {
-		if c.CallerFQN == "NewWatcher" && c.CalleeFQN == "w.ReloadNow" {
+		if c.CallerFQN == "config.NewWatcher" && c.CalleeFQN == "w.ReloadNow" {
 			hasNewWatcherCall = true
 		}
-		if c.CallerFQN == "Watcher.ReloadNow" && c.CalleeFQN == "loadConfig" {
+		if c.CallerFQN == "config.Watcher.ReloadNow" && c.CalleeFQN == "config.loadConfig" {
 			hasReloadNowCall = true
 		}
 	}
 	if !hasNewWatcherCall {
-		t.Errorf("期望调用 NewWatcher -> w.ReloadNow；当前 calls=%v", doc.Calls)
+		t.Errorf("期望调用 config.NewWatcher -> w.ReloadNow；当前 calls=%v", doc.Calls)
 	}
 	if !hasReloadNowCall {
-		t.Errorf("期望调用 Watcher.ReloadNow -> loadConfig；当前 calls=%v", doc.Calls)
+		t.Errorf("期望调用 config.Watcher.ReloadNow -> config.loadConfig；当前 calls=%v", doc.Calls)
 	}
 
 	// 3. 顶层函数不再被误归属到 class（ClassFQN 为空）

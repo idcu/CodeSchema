@@ -36,7 +36,7 @@ make bench-agent    # agent-bench 端到端评测
 
 ## 3. 本地开发红线
 
-1. **影响面分析依赖 `CallerFQN`**：默认 tree-sitter 正则/语法树路径**仅填被调方 `CalleeFQN`、未填调用方 `CallerFQN`**，故 `impact` / `tests` / `get_call_graph` 对真实方法**默认返回空**。需 LSP / SCIP / CodeGraph 适配器，或显式回填 `CallerFQN` 才生效。这是已知行为，不是 bug。
+1. **影响面分析可用性（2026-09-02 修正）**：默认 tree-sitter 正则路径自 `da20964` 起已回填 `CallerFQN`；但调用图节点 FQN 曾与查询 FQN **命名空间错位**（节点裸名 `Watcher.ReloadNow` vs 查询包限定 `config.Watcher.ReloadNow`），导致 `impact` / `tests` / `get_call_graph` 对真实方法恒空。`T1`（2026-09-02）通过 adapter 包限定产出（`config.Watcher.ReloadNow`）+ analyzer 双向归一化修复后，**Go 默认路径下 `impact`/`tests`/`get_call_graph` 已真实可用**，`GET /affected` 也已提供 HTTP 路由。非 Go 语言 caller/callee 仍走裸名启发式，双向归一化保证查询鲁棒；严格 FQN 对齐按语种类别逐步收敛。
 2. **计数类字段禁手填**：所有「包数/MCP 工具数/HTTP 路由数」以 `scripts/project_counts.py` 为准，文档从它取值；改了接口后跑 `make counts-update` 刷新 `scripts/counts_baseline.json`。CI `counts-guard` 会断言数字漂移。
 3. **改码必改档，且不得超前于代码**：代码变更必须同步受影响文档，同次提交。
 

@@ -586,12 +586,68 @@ func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth 
 		depth = 10 // 默认深度
 	}
 
-	callers = cg.GetCallers(methodFQN, depth)
-	callees = cg.GetCallees(methodFQN, depth)
+	// 调用图节点 FQN 命名空间取决于解析适配器（Go 默认路径产出「包限定全名」，
+	// 其它语言/旧数据可能存「裸名」）；双向归一化定位命中节点。
+	resolved, ok := resolveImpactNode(cg, methodFQN)
+	if ok {
+		callers = cg.GetCallers(resolved, depth)
+		callees = cg.GetCallees(resolved, depth)
+		methodFQN = resolved
+	}
 
 	a.logger.Debug("impact analysis complete", "method", methodFQN, "callers", len(callers), "callees", len(callees))
 
 	return callers, callees, nil
+}
+
+// normalizeImpactSymbol 生成查询符号的候选 FQN 列表，从完全限定到逐级剥离前缀段。
+//
+// 调用图节点 FQN 的命名空间可能因解析适配器而异：
+//   - Go 默认正则路径产出「包限定全名」(config.Watcher.ReloadNow)
+//   - 其它语言或旧数据可能存「裸名」(Watcher.ReloadNow / ReloadNow)
+//
+// 为最大化匹配概率，按从长到短逐级剥离最外层一段，精确匹配优先。
+func normalizeImpactSymbol(methodFQN string) []string {
+	candidates := []string{methodFQN}
+	parts := strings.Split(methodFQN, ".")
+	for len(parts) > 1 {
+		parts = parts[1:] // 剥离最外层一段
+		candidates = append(candidates, strings.Join(parts, "."))
+	}
+	return candidates
+}
+
+// ResolveImpactNode 暴露双向归一化定位能力，供 service 层 GetCallGraph 等
+// 「先定位节点再展开」场景复用，避免逻辑在包外重复。
+func (a *Analyzer) ResolveImpactNode(ctx context.Context, symbol string) (string, bool) {
+	cg, err := a.BuildCallGraph(ctx)
+	if err != nil {
+		return "", false
+	}
+	return resolveImpactNode(cg, symbol)
+}
+
+// resolveImpactNode 在调用图中定位查询符号命中的节点 FQN，返回命中的 FQN。
+//
+// 双向归一化，覆盖调用图节点与查询符号命名空间不一致的所有情况：
+//   - 去前缀：查询比节点更限定（config.Watcher.ReloadNow → 命中 Watcher.ReloadNow）
+//   - 后缀：节点比查询更限定（查询 Watcher.ReloadNow → 命中 config.Watcher.ReloadNow）
+//
+// 先精确/去前缀（确定性高），后后缀（节点多包前缀时可能多命中，取首个，影响面查询容忍）。
+func resolveImpactNode(cg *CallGraph, fqn string) (string, bool) {
+	// 1) 精确匹配 + 逐级去前缀
+	for _, cand := range normalizeImpactSymbol(fqn) {
+		if _, ok := cg.Nodes[cand]; ok {
+			return cand, true
+		}
+	}
+	// 2) 后缀匹配（节点比查询多包前缀）：config.Watcher.ReloadNow 命中查询 Watcher.ReloadNow / ReloadNow
+	for nodeFQN := range cg.Nodes {
+		if nodeFQN == fqn || strings.HasSuffix(nodeFQN, "."+fqn) {
+			return nodeFQN, true
+		}
+	}
+	return "", false
 }
 
 // ImpactNode 影响面节点（带深度层级，供编排层直接消费）。
@@ -619,8 +675,13 @@ func (a *Analyzer) FindImpactNodesWithDepth(ctx context.Context, methodFQN strin
 		depth = 10 // 默认深度
 	}
 
-	callers = cg.GetCallersWithDepth(methodFQN, depth)
-	callees = cg.GetCalleesWithDepth(methodFQN, depth)
+	// 调用图节点 FQN 命名空间可能因解析适配器而异；双向归一化定位命中节点。
+	resolved, ok := resolveImpactNode(cg, methodFQN)
+	if ok {
+		callers = cg.GetCallersWithDepth(resolved, depth)
+		callees = cg.GetCalleesWithDepth(resolved, depth)
+		methodFQN = resolved
+	}
 
 	a.logger.Debug("impact analysis (depth) complete", "method", methodFQN,
 		"callers", len(callers), "callees", len(callees))
@@ -643,11 +704,14 @@ func (a *Analyzer) ShortestPath(ctx context.Context, from, to string) ([]string,
 		return nil, fmt.Errorf("build call graph: %w", err)
 	}
 
-	if _, ok := cg.Nodes[from]; !ok {
+	// 源/目标 FQN 归一化（命名空间可能因解析适配器而异）。
+	fromResolved, fromOK := resolveImpactNode(cg, from)
+	if !fromOK {
 		a.logger.Debug("shortest path: source not found", "from", from)
 		return nil, nil
 	}
-	if _, ok := cg.Nodes[to]; !ok {
+	toResolved, toOK := resolveImpactNode(cg, to)
+	if !toOK {
 		a.logger.Debug("shortest path: target not found", "to", to)
 		return nil, nil
 	}
@@ -655,15 +719,15 @@ func (a *Analyzer) ShortestPath(ctx context.Context, from, to string) ([]string,
 	// BFS 查找最短路径
 	visited := make(map[string]bool)
 	prev := make(map[string]string)
-	queue := []string{from}
-	visited[from] = true
+	queue := []string{fromResolved}
+	visited[fromResolved] = true
 
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
 
-		if current == to {
-			path := reconstructPath(prev, from, to)
+		if current == toResolved {
+			path := reconstructPath(prev, fromResolved, toResolved)
 			a.logger.Debug("shortest path found", "from", from, "to", to, "path_length", len(path))
 			return path, nil
 		}

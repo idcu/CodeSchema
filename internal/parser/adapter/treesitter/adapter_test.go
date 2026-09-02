@@ -449,7 +449,8 @@ func (s *Svc) Run() {
 		switch c.CalleeFQN {
 		case "fakeCall", "commentCall":
 			foundFake = true
-		case "realCall":
+		// Go 默认路径产出包限定 FQN（T1 修复：main.realCall 而非裸 realCall）
+		case "main.realCall":
 			foundReal = true
 		}
 	}

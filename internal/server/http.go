@@ -262,6 +262,7 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/context", h.handleContext)
 	mux.HandleFunc("/impact", h.handleImpact)
 	mux.HandleFunc("/tests", h.handleTests)
+	mux.HandleFunc("/affected", h.handleAffected)
 	mux.HandleFunc("/search", h.handleSearch)
 
 	// 标签相关端点
@@ -488,6 +489,34 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAffected 返回受指定符号变更影响的关联单测（递归时向上追溯传递调用者）。
+// GET /affected?symbol=<fqn>&recursive=<bool>
+func (h *HTTPServer) handleAffected(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
+		return
+	}
+
+	q := r.URL.Query()
+	symbol := q.Get("symbol")
+	if symbol == "" {
+		writeError(w, "ERR_INVALID_PARAMETER", "symbol is required", 400)
+		return
+	}
+	recursive := q.Get("recursive") == "true" || q.Get("recursive") == "1"
+
+	affectedTests, err := h.serviceForRequest(r).GetAffected(r.Context(), symbol, recursive)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"symbol":         symbol,
+		"recursive":      recursive,
+		"affected_tests": affectedTests,
+	})
 }
 
 func (h *HTTPServer) handleSearch(w http.ResponseWriter, r *http.Request) {
