@@ -932,7 +932,15 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 		return result, nil
 	}
 
-	callers, callees, err := s.analyzer.FindImpactNodesWithDepth(ctx, method, depth)
+	// 双向归一化定位命中节点（覆盖查询符号与图节点命名空间不一致），
+	// 与 GetCallGraph 一致地把解析后的 FQN 回填到结果 Method，便于调用方确认实际分析对象。
+	resolved := method
+	if r, ok := s.analyzer.ResolveImpactNode(ctx, method); ok {
+		resolved = r
+	}
+	result.Method = resolved
+
+	callers, callees, err := s.analyzer.FindImpactNodesWithDepth(ctx, resolved, depth)
 	if err != nil {
 		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact nodes: %v", err)}
 	}

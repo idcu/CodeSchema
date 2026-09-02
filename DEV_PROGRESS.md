@@ -36,7 +36,7 @@ P18      [████████████████████] 100%
 ---
 
 > **进度体系说明（消除口径歧义）**：本文件 `当前状态` 的 `P0骨架 / P0 MVP / P1–P18` 是**开发里程碑轴**——记录各能力「首次落地」的先后顺序，现已全部 100%（即均已交付）。而 git 历史（2026-09-02 重构前文档） 下各 `P*.md` 的「完成度」字段是**能力模块当前成熟度轴**（如 `P3_3` SCIP=97%、`P3_4` LSP=97%），多数为 95–98%，表示持续打磨中，**并非未交付**。
-> 两轴度量维度不同（「何时建成」vs「当前多成熟」），共用 P 前缀易误读为「100% 与 95% 自相矛盾」。P10–P18 为 P1–P9 之后的延展能力（多租户、agent-bench、生态资产发布等），本文件不含 P19+ 后续里程碑。
+> 两轴度量维度不同（「何时建成」vs「当前多成熟」），共用 P 前缀易误读为「100% 与 95% 自相矛盾」。P10–P18 为 P1–P9 之后的延展能力（多租户、agent-bench、生态资产发布等）；P19+ 后续里程碑规划见文末「P19+ 后续里程碑（规划）」节。
 
 ## 实际核查结论（2026-08-14 · 代码级）
 
@@ -481,7 +481,54 @@ P18      [████████████████████] 100%
 - [x] **T2 `GetCallGraph` 真实调用图**：`internal/service/service.go` 由硬编码空桩改为基于 `analyzer.BuildCallGraph` 的真实子图——双向归一化定位命中节点后 BFS（callers+callees，受 depth 限制）收集节点与边。佐证：`TestService_GetCallGraph` / `TestService_GetCallGraph_BareQuery` / `TestService_GetCallGraph_NoAnalyzer`。
 - [x] **T4 `GET /affected` HTTP 路由**：`internal/server/http.go` 补 `mux.HandleFunc("/affected", h.handleAffected)`，参数 `symbol`（必填）+ `recursive`（bool），复用 service `GetAffected`（已真实实现，向上追溯传递调用者并收集关联单测）。佐证：`TestAffectedEndpoint_EmptySymbol` / `TestAffectedEndpoint_Success`。
 - [x] **impact/tests 真实可用**：随 T1 命名空间对齐，查询包限定 FQN（如 `config.Watcher.ReloadNow`）即命中真实节点，callers/callees 双向非空；`get_call_graph` 同步可用。
+- [x] **T1 回归加固（`GetImpact` 一致性）**：`Service.GetImpact` 现与 `GetCallGraph` 一致——经 `ResolveImpactNode` 双向归一化定位后将解析后的 FQN 回填 `result.Method`，使 Agent 明确实际分析对象；新增 `internal/service/service_impact_test.go`（`TestService_GetImpact` / `TestService_GetImpact_BareQuery` / `TestService_GetImpact_NoAnalyzer`）锁入 service 层回归。
 
 ### 待决策（非阻塞）
 - 真语法树 `adapter_ast.go`（`-tags treesitter`）callee 仍可能缺包前缀；当前默认镜像走正则路径，T1 已覆盖。若启用 treesitter tag，需对其 call 抽取做同等包限定对齐（方案 B 范畴，待用户拍板）。
 - 非 Go 语言 caller/callee 仍走裸名启发式，双向归一化已保证查询鲁棒；如需更严格 FQN，按语种类别逐步收敛。
+
+## P19+ 后续里程碑（规划，2026-09-02）
+
+> 本节点 P0–P18 开发里程碑轴已全部 100% 交付（均已落地）；各 `P*.md` 的 95–98% 为能力成熟度轴（持续打磨）。以下为 P18 之后的**后续能力里程碑候选**，供下一阶段排期决策（非承诺交付清单）。按优先级与依赖排序，标注所需外部环境。
+
+### P19 — 非 Go 语言调用图 FQN 严格对齐（高优先）
+- **目标**：当前非 Go 路径（Java/TS/Python/Rust/C++）caller/callee 走裸名启发式，双向归一化仅兜底；按语种类别做严格 FQN 解析，使 impact/tests 对非 Go 也与 Go 同样精确。
+- **验收**：用真实 Java/TS/Python 工程 scan→`GetImpact` 双向非空；`resolveImpactNode` 后缀匹配在跨包消歧场景不再误命中。
+- **依赖**：无（纯 analyzer/adapter 侧改造）。
+
+### P20 — 真语法树（tree-sitter AST）多语言扩展（中优先）
+- **目标**：默认构建走 regex（精度低）；`-tags treesitter` CGO 构建仅覆盖部分语言且 callee 仍可能缺包前缀（见「方向 A 审计·待决策」）。扩展到更多语言 + 对 `adapter_ast.go` 的 call 抽取做与 T1 同等的包限定对齐。
+- **验收**：启用 `treesitter` tag 后，受影响语言的 impact 精度不低于默认正则路径且 FQN 对齐。
+- **依赖**：CGO + 各语言 grammar 构建（CI 需 CGO 环境）。
+
+### P21 — AI 标签/文档增强生产化（中优先，依赖 LLM API key）
+- **目标**：`internal/ai` 的 Tagger/DocEnhancer 当前在缺 key 时优雅降级（`ai: enhancement disabled`）。定义接入规范、降级策略、质量评估基准；真实质量端到端验证需 API key。
+- **验收**：有 key 时标签/文档增强可量化提升 agent-bench 任务通过率；无 key 时行为不变（零造假红线）。
+- **依赖**：**LLM API key（用户 2026-09-02 明确暂缓，本里程碑阻塞）**。
+
+### P22 — 单测关联策略增强（中优先）
+- **目标**：`FindTestLinks` 五策略当前覆盖度有限；扩展到更多测试框架识别（Go test / JUnit / pytest / Jest），提升「改动一处列出受影响单测」的召回。
+- **验收**：多框架示例工程 impact 返回的 `RelatedTests` 召回率可量化提升。
+- **依赖**：无。
+
+### P23 — 大规模仓横向扩展生产验证（中优先，依赖 docker 实例）
+- **目标**：PG 关系型存储（`-tags pg`）+ Redis 热点缓存/反查（`-tags redis`）已在代码层完整，但真实实例集成测试受 docker 镜像拉取超时阻塞（`redis_integration_test.go` 已优雅 Skip）。需在可拉取环境跑通并建超大仓扫描性能基线。
+- **验收**：PG + Redis 真实实例集成测试全绿；10k+ 文件仓扫描时延基线建立。
+- **依赖**：docker 实例可达（Redis/PG 镜像拉取；daocloud 源此前已恢复，Redis 拉取需复查）。
+
+### P24 — agent-bench 任务集扩展 + 多语言评测（低优先）
+- **目标**：内置任务已从 5→8（新增 OrderService 通用任务，Java/Python 语义）；继续扩语言/场景，建立回归基线。
+- **验收**：任务集覆盖 ≥3 语言、跨仓对比报告稳定。
+- **依赖**：无（本机轻量评测即可）。
+
+### P25 — 生态资产发布标准化（低优先）
+- **目标**：`context-sdk` / `adapterx` / `dsh` 等公共模块按 meta v1.2 标准独立发布（已部分做发布评估/验证脚本）；补全版本管理与破坏性变更规范。
+- **验收**：各公共模块可独立 `go get` + 语义化版本发布。
+- **依赖**：无。
+
+### P26 — 可观测性与运维完善（低优先）
+- **目标**：metrics 维度细化、链路追踪采样、多租户隔离压测；配合 `docker-compose.idcu-go.yml` 多租户部署文档固化。
+- **验收**：41 租户场景可观测指标完整、压测报告归档。
+- **依赖**：无。
+
+> 决策记录（2026-09-02）：T8（P19+ 里程碑定义）按用户「其它全量推进实施」指令落地为本文档规划节；P21 因 LLM API key 缺失暂缓，P23 因 docker/Redis 实例拉取阻塞需环境就绪后推进；其余 P19/P20/P22/P24/P25/P26 为可自主排期的后续能力，按实际优先级逐步实施。
