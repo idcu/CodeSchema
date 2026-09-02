@@ -232,7 +232,7 @@ P18      [████████████████████] 100%
 
 ### P13 — 构建脚本 / CI 配置 / 容器化 / 部署文档
 - [x] **`Makefile`** — 构建自动化脚本，支持 build/test/clean/cross/lint/bench/run 等 10 个目标，跨平台交叉编译（linux/darwin/windows × amd64/arm64）
-- [x] **`Dockerfile`** — 多阶段构建，golang:1.25-alpine → alpine:3.20，CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
+- [x] **`Dockerfile`** — 多阶段构建，golang:1.25-bookworm → debian:bookworm-slim（glibc，CGO 链接 onnxruntime `.so` 必需；alpine/musl 会导致 ONNX 静默降级 LocalEmbedder），CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
 - [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，8 个 Job（test 跨 ubuntu/macos/windows + bench + nightly-scale + race 竞态检测 + treesitter + cross 交叉编译 + docker 镜像）；actions 已升级为 Node 24 兼容版本（`actions/checkout@v7`、`actions/setup-go@v7`、`actions/upload-artifact@v6`、`docker/setup-qemu-action@v4`、`docker/setup-buildx-action@v4`、`docker/metadata-action@v6`、`docker/build-push-action@v7`、`softprops/action-gh-release@v3`），此前 Node 20 actions 缓存 tar 恢复失败与 Windows 偶发失败均已在 `427fe7b`/`b90271a`/`0c4a1a1` 修复
 - [x] **`docs/1-生产层/开发文档/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
 - [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新

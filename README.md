@@ -13,7 +13,7 @@
 ## 核心能力
 
 - **精准上下文裁剪**：AI 回答代码问题时，不必喂入整个仓库，大幅节省 token
-- **影响面分析**：改一行代码即可反查受影响方法并定位关联单测
+- **影响面分析**：改一行代码即可反查受影响方法并定位关联单测（⚠️ 默认 tree-sitter 正则/语法树解析路径仅填被调方 `CalleeFQN`、未填调用方 `CallerFQN`，故 `impact`/`tests`/`get_call_graph` 对真实方法默认返回空；需 LSP/SCIP/CodeGraph 适配器或回填 `CallerFQN` 才生效）
 - **双路检索**：符号图精确检索 + 向量语义检索（FTS + 向量融合重排）
 - **增量监听**：支持 fsnotify 原生文件监听 + 轮询监听，300ms 防抖合并
 - **标签分类**：六类标签自动推导（layer/biz/tech/risk/test/lang）
@@ -241,6 +241,18 @@ make clean
 - **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md`。
 - **开发文档索引**：`docs/1-生产层/开发文档/` 实际含 `00`–`13` 共 14 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/1-生产层/modules/`。
+
+### 构建变体与能力边界（默认 vs onnx vs 扩展存储）
+
+> 本项目大量能力经 `//go:build` 标签隔离，默认二进制与 `-tags` 构建能力不同，使用前务必确认所在变体。
+
+| 构建命令 | 产物能力 | 说明 |
+|---|---|---|
+| `go build ./cmd/codeschema`（默认） | 正则/tree-sitter 多语言元数据 + SQLite/文件存储 + TF-IDF 语义（LocalEmbedder 降级）+ 12 MCP / 16 HTTP 工具 + 多租户 | 免 CGO/gcc；**影响面分析 `impact`/`tests`/`get_call_graph` 默认对真实方法返回空**（默认解析路径仅填被调方 `CalleeFQN`，未填调用方 `CallerFQN`），需 LSP/SCIP/CodeGraph 适配器或回填 `CallerFQN` 才生效 |
+| `go build -tags onnx ./cmd/codeschema`（产物 `codeschema-onnx`） | 上述 + bge-small-zh-v1.5 ONNX 向量语义（Recall@1=1.00） | 需 gcc + onnxruntime 动态库 + 模型文件 + glibc |
+| `go build -tags 'pg redis' ./cmd/codeschema` | 上述 + PostgreSQL（超大仓横向扩展）+ Redis 热点缓存/调用反查 | 需外部 PG / Redis 实例 |
+
+> **构建前置**：`go.mod` 通过 10 条 `replace gitee.com/idcu-go/* => ../idcu-go/*` 指向本地兄弟仓，克隆后须保证 `../idcu-go` 存在才能构建（`go mod vendor` 后 Docker 镜像离线构建同理）。
 
 ## 测试
 
