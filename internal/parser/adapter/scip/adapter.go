@@ -11,7 +11,6 @@ package scip
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,24 +20,8 @@ import (
 	"github.com/idcu/codeschema/internal/parser"
 )
 
-// SCIPIndex 表示 SCIP index 文件的结构。
-type SCIPIndex struct {
-	Metadata  *SCIPMetadata   `json:"metadata"`
-	Documents []*SCIPDocument `json:"documents"`
-}
-
-// SCIPMetadata 表示 SCIP index 元数据。
-type SCIPMetadata struct {
-	ToolInfo             *SCIPToolInfo `json:"tool_info"`
-	ProjectRoot          string        `json:"project_root"`
-	TextDocumentEncoding string        `json:"text_document_encoding"`
-}
-
-// SCIPToolInfo 表示 SCIP 工具信息。
-type SCIPToolInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
+// SCIP 文档/符号/引用结构见下方 SCIPDocument / SCIPSymbol / SCIPOccurrence。
+// （.scip 为 protobuf 二进制，由 scipwire.go 内极简 wire 解码器解析。）
 
 // SCIPDocument 表示 SCIP index 中的一个文档。
 type SCIPDocument struct {
@@ -230,13 +213,11 @@ func scipDirExists(path string) bool {
 	return info.IsDir()
 }
 
-// loadIndex 流式扫描 indexDir 目录下的 .scip 文件并加载。
+// loadIndex 扫描 indexDir 目录下的 .scip 文件并加载。
 //
-// 采用 json.Decoder 流式解析（不整体 os.ReadFile 全量载入内存）：
-//   - 逐 .scip 文件打开后按顶层对象流式读取 documents 数组，逐文档增量载入；
-//   - 受 a.maxDocs 背压上限约束，达到上限即停止解析并置 truncated=true，
-//     避免超大 index 一次性驻留内存（大项目内存可控）；
-//   - 任一文件格式错误返回错误（不静默跳过），由编排层决定降级。
+// .scip 为 protobuf 二进制（非 JSON）；用极简 protobuf wire 解码器
+// （见 scipwire.go）解析，避免引入外部 protobuf 依赖。
+// 受 a.maxDocs 背压上限约束，达到上限即停止解析并置 truncated=true。
 func (a *SCIPAdapter) loadIndex() error {
 	entries, err := os.ReadDir(a.indexDir)
 	if err != nil {
@@ -253,163 +234,87 @@ func (a *SCIPAdapter) loadIndex() error {
 		}
 		filePath := filepath.Join(a.indexDir, entry.Name())
 
-		file, err := os.Open(filePath)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return fmt.Errorf("cannot open SCIP index file %s: %w", filePath, err)
 		}
 
-		dec := json.NewDecoder(file)
-		// 读取顶层对象
-		tok, err := dec.Token()
-		if err != nil {
-			file.Close()
-			return fmt.Errorf("cannot parse SCIP index file %s: %w", filePath, err)
+		for _, doc := range decodeIndex(data) {
+			if a.maxDocs > 0 && len(a.documents) >= a.maxDocs {
+				a.truncated = true
+				goto done
+			}
+			if doc.RelativePath != "" {
+				doc.RelativePath = filepath.ToSlash(doc.RelativePath)
+			}
+			a.documents = append(a.documents, doc)
 		}
-		if d, ok := tok.(json.Delim); !ok || d != '{' {
-			file.Close()
-			return fmt.Errorf("cannot parse SCIP index file %s: expected top-level object", filePath)
-		}
-
-		// 逐顶层字段流式读取，命中 documents 数组时逐文档增量载入
-		for dec.More() {
-			keyTok, err := dec.Token()
-			if err != nil {
-				file.Close()
-				return fmt.Errorf("cannot parse SCIP index file %s: %w", filePath, err)
-			}
-			key, _ := keyTok.(string)
-			if key != "documents" {
-				// 非 documents 字段（metadata 等）整体跳过（ReadValue 流式丢弃）
-				var raw json.RawMessage
-				if err := dec.Decode(&raw); err != nil {
-					file.Close()
-					return fmt.Errorf("cannot parse SCIP index file %s: field %s: %w", filePath, key, err)
-				}
-				continue
-			}
-
-			// documents 数组：逐元素流式 Decode，支持背压
-			arrTok, err := dec.Token()
-			if err != nil {
-				file.Close()
-				return fmt.Errorf("cannot parse SCIP index file %s: documents: %w", filePath, err)
-			}
-			if d, ok := arrTok.(json.Delim); !ok || d != '[' {
-				file.Close()
-				return fmt.Errorf("cannot parse SCIP index file %s: documents must be an array", filePath)
-			}
-
-			for dec.More() {
-				if a.maxDocs > 0 && len(a.documents) >= a.maxDocs {
-					a.truncated = true
-					// 达到背压上限：停止读取该文件（文件由 defer 关闭）
-					goto done
-				}
-				var doc SCIPDocument
-				if err := dec.Decode(&doc); err != nil {
-					file.Close()
-					return fmt.Errorf("cannot parse SCIP index file %s: document: %w", filePath, err)
-				}
-				if doc.RelativePath != "" {
-					doc.RelativePath = filepath.ToSlash(doc.RelativePath)
-				}
-				a.documents = append(a.documents, &doc)
-			}
-			// 数组闭合 token 消耗
-			_, _ = dec.Token()
-		}
-	done:
-		file.Close()
 	}
-
+done:
 	a.loaded = true
 	return nil
 }
 
 // convertDocument 将 SCIP 文档转换为 IRDocument。
+//
+// 类/方法身份从 SymbolInformation 符号表的符号描述符解析
+// （scip-typescript 0.4.0 的 occurrences 常为空，定义信息落在符号里）。
+// 调用关系从 Occurrence 抽取（若存在）；SCIP symbol_roles 为位掩码：
+// DEFINITION=1、REFERENCE=2。
 func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
 	ir := &parser.IRDocument{
 		Source:   "scip",
-		Language: scipLangToCodeLang(doc.Language),
+		Language: scipLangToCodeLang(docLang(doc)),
 		FilePath: doc.RelativePath,
 	}
 
-	// 构建符号映射（symbolID -> SCIPSymbol）
 	symMap := make(map[string]*SCIPSymbol)
 	for _, sym := range doc.Symbols {
 		symMap[sym.ID] = sym
 	}
 
-	// 构建符号名到定义行的映射
-	typeDefs := make(map[string]struct {
-		SCIPSymbol
-		startLine int
-		startCol  int
-	})
-
-	for _, occ := range doc.Occurrences {
-		if occ.SymbolRole == 0 { // definition
-			sym, ok := symMap[occ.Symbol]
-			if !ok {
-				continue
-			}
-
-			startLine, startCol := 0, 0
-			if len(occ.Range) >= 4 {
-				startLine = occ.Range[0]
-				startCol = occ.Range[1]
-			}
-
-			switch sym.Kind {
-			case 0: // class/interface
-				ir.Classes = append(ir.Classes, parser.ClassIR{
-					Name:      sym.Name,
-					FullName:  sym.ID,
-					Type:      "CLASS",
-					StartLine: startLine,
-					StartCol:  startCol,
-				})
-			case 1: // method/function
-				ir.Methods = append(ir.Methods, parser.MethodIR{
-					Name:      sym.Name,
-					ClassFQN:  sym.EnclosingSymbol,
-					StartLine: startLine,
-					StartCol:  startCol,
-				})
-			}
-
-			typeDefs[occ.Symbol] = struct {
-				SCIPSymbol
-				startLine int
-				startCol  int
-			}{SCIPSymbol: *sym, startLine: startLine, startCol: startCol}
+	// 类/方法从符号表抽取
+	for _, sym := range doc.Symbols {
+		isClass, isMethod, name := classifySymbol(sym.ID)
+		switch {
+		case isClass:
+			ir.Classes = append(ir.Classes, parser.ClassIR{
+				Name:      name,
+				FullName:  sym.ID,
+				Type:      "CLASS",
+			})
+		case isMethod:
+			ir.Methods = append(ir.Methods, parser.MethodIR{
+				Name:     name,
+				ClassFQN: sym.EnclosingSymbol,
+			})
 		}
 	}
 
-	// 提取引用关系（仅当符号同时有定义和引用时）
-	refMap := make(map[string]int) // symbolID -> 引用行号
+	// 调用关系从 occurrences 抽取（若存在）
+	typeDefs := make(map[string]bool)
 	for _, occ := range doc.Occurrences {
-		if occ.SymbolRole == 1 { // reference
-			if _, hasDef := typeDefs[occ.Symbol]; hasDef {
+		if occ.SymbolRole&scipRoleDefinition != 0 {
+			if _, ok := symMap[occ.Symbol]; ok {
+				typeDefs[occ.Symbol] = true
+			}
+		}
+	}
+	for _, occ := range doc.Occurrences {
+		if occ.SymbolRole&scipRoleReference != 0 {
+			if typeDefs[occ.Symbol] {
 				line := 0
 				if len(occ.Range) >= 4 {
 					line = occ.Range[0]
 				}
-				refMap[occ.Symbol] = line
+				ir.Calls = append(ir.Calls, parser.CallIR{
+					CallerFQN:  doc.RelativePath,
+					CalleeFQN:  occ.Symbol,
+					CallType:   "direct",
+					LineNumber: line,
+				})
 			}
 		}
-	}
-
-	for symID, line := range refMap {
-		if _, ok := symMap[symID]; !ok {
-			continue
-		}
-		ir.Calls = append(ir.Calls, parser.CallIR{
-			CallerFQN:  doc.RelativePath,
-			CalleeFQN:  symID,
-			CallType:   "direct",
-			LineNumber: line,
-		})
 	}
 
 	return ir
