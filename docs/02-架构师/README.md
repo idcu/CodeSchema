@@ -12,7 +12,7 @@
 1. **三层存储**：文件（权威源）+ 内存索引（热读）+ 向量/全文（语义检索）。`Store` 接口统一抽象，后端可插拔（file/sqlite/pg/redis）。
 2. **检索融合与置信度过滤（B8）**：空结果优于误导结果。语义取向量余弦相似度 [0,1]；FTS 取归一化相对得分；`min_score` 阈值过滤弱匹配（`trim_reason="below_threshold"`）。建议语义/融合模式 `min_score=0.3~0.5`。
 3. **多租户（单实例多仓库）**：一个进程服务多个隔离仓库，各自独立 store + 索引目录（绝不共享），按 `project`/`X-Tenant`/`?tenant=` 路由；不配 `tenants` 退化为单 `default` 租户。
-4. **解析精度权衡**：默认 tree-sitter 正则零 CGO、覆盖 30 语言，但**不填 `CallerFQN`**（影响面分析需 LSP/SCIP/CodeGraph 或显式回填）。精度与零依赖的取舍是核心设计决策。
+4. **解析精度权衡**：默认 tree-sitter 正则零 CGO、覆盖 30 语言。**自 `da20964` 起，Go 已在默认正则路径回填 `CallerFQN`**，`impact`/`tests`/`get_call_graph` 对 **Go** 默认可用；**非 Go 语言默认仍不填 `CallerFQN`**（影响面分析需 LSP/SCIP/CodeGraph 或显式回填）。Go 之外的高精度影响面依赖 LSP/SCIP/CodeGraph——零依赖与跨语言精度的取舍仍是核心设计决策。
 5. **配置分层**：默认值 < 配置文件 < 环境变量(`CODESCHEMA_*`) < CLI；支持能力预设 `minimal`/`semantic`/`multitenant` 与运行时热重载（监听地址/认证/限流/扫描器）。
 6. **生产健壮性**：优雅关闭、重试、Panic 恢复、安全中间件（CORS/recovery/auth/rate-limit）、可观测性（结构化日志 + Prometheus + 链路追踪）。
 
@@ -24,9 +24,9 @@
 
 ## 关键约束与边界
 
-- 影响面分析默认返回空（CallerFQN 行为，见[开发者文档](../01-开发者/解析适配器.md)）。
+- 影响面分析：**Go 在默认正则路径下已回填 `CallerFQN`（默认可用）**；非 Go 默认返回空，需 LSP/SCIP/CodeGraph 或显式回填（CallerFQN 行为，见[开发者文档](../01-开发者/解析适配器.md)）。
 - SQLite 写入慢于 JSON（已 BulkUpsert 缓解），亿级用 PG。
-- 向量后端当前固定为 PersistentStore + MemoryStore 语义检索；`chromem` 实现存在但未接入生产分发（配置占位）。
+- 向量后端：默认 `PersistentStore`（文件持久化，基于 `MemoryStore`）；`storage.vector.driver=chromem` 时切换为持久化 `ChromemStore`（chromem-go 纯 Go 向量库，**已接入生产分发，可选**）。
 
 ## 模块与目录结构
 

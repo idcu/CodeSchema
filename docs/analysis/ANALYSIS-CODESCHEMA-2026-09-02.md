@@ -8,7 +8,7 @@
 > 最后更新：2026-09-02
 ## 0. 一句话结论（先说结论）
 
-CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代码元数据 KV/DB 系统」，定位为面向 AI Agent 的上下文裁剪供给服务。其**默认二进制**能提供：正则/tree-sitter 多语言元数据扫描、文件+SQLite 三层存储、语义/全文混合检索（TF-IDF 降级）、12 个 MCP 工具与 16 个 HTTP 端点、多租户路由。
+CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代码元数据 KV/DB 系统」，定位为面向 AI Agent 的上下文裁剪供给服务。其**默认二进制**能提供：正则/tree-sitter 多语言元数据扫描、文件+SQLite 三层存储、语义/全文混合检索（TF-IDF 降级）、12 个 MCP 工具与 22 个 HTTP 端点（http.go 16 + viz.go 6）、多租户路由。
 
 但**文档显著领先于默认构建的真实能力**，存在三类必须正视的落差：
 1. **头牌能力有条件生效**——调用影响面分析（`impact`/`tests`/`get_call_graph`）在默认解析路径下对真实方法恒返回空（caller 侧未填充）；语义检索的 bge-ONNX Recall=1.00 只在 `-tags onnx` 构建 + 模型文件 + glibc 下成立。
@@ -25,7 +25,7 @@ CodeSchema 是一个**已具备可用骨架与生产级索引能力**的「代�
 | 一句话定位 | 面向 AI 辅助开发的**代码元数据索引与上下文裁剪服务**，把类/方法/接口/调用关系/标签沉淀为「文件存储(权威源)+内存索引+向量索引」三层，经 MCP Server 向 AI Agent 供给精准裁剪上下文 |
 | 核心目标 | 单文件解析 P95 <20ms；AI 上下文 token 理论节省 99.7%；AI 增强成本 < 总运行成本 5%；解析 100% 外包给 tree-sitter/LSP/SCIP |
 | 接口形态 | CLI（`codeschema scan/watch/serve/mcp/...`）、HTTP API、MCP Server（SSE + stdio 双传输） |
-| 代码印证 | `cmd/codeschema` 提供 scan/watch/rebuild-kv/benchmark/mcp/serve/version 七类命令；`internal/server` 含 HTTP(16 路由)+MCP(12 工具)；`internal/store` 实现三层存储接口 ✅ |
+| 代码印证 | `cmd/codeschema` 提供 scan/watch/rebuild-kv/benchmark/mcp/serve/version 七类命令；`internal/server` 含 HTTP(22 路由：http.go 16 + viz.go 6)+MCP(12 工具)；`internal/store` 实现三层存储接口 ✅ |
 
 **结论**：目标与接口形态与代码基本一致，定位清晰。
 
@@ -99,7 +99,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 ### 5.1 一致项（文档可信）
 - ✅ MCP 工具数 = 12（代码 `defineTools()` 枚举 12 个 `Name:`）。
-- ✅ HTTP 端点 = 16（`http.go` 注册 /health*/context/impact/tests/search/tags*/projects/metrics/openapi/docs 等）。
+- ✅ HTTP 端点 = 22（`http.go` 注册 /health*/context/impact/tests/search/tags*/projects/metrics/openapi/docs 等 16 个 + `viz.go` 注册 /viz* 6 个）。
 - ✅ 多租户已落地（`internal/tenant` + 双接口注入）。
 - ✅ 三层存储接口 + chromem 向量索引存在。
 
@@ -140,7 +140,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 
 ### P3（增强）
 9. 增加标签隔离代码 CI 校验——✅ **已应用（2026-09-02）**：`.github/workflows/ci.yml` 新增 `tag-guard` job（运行 `go list -tags 'onnx pg redis' ./...`，仅解析+类型检查、不链接 onnxruntime 运行时）；`Makefile` 新增 `verify-tags` target + `help` 说明。验证：`make verify-tags` exit 0。
-10. 模块文档计数类字段脚本化——✅ **已应用（2026-09-02）**：新增 `scripts/project_counts.py`（从 `go list` 取权威包数、正则计数 MCP 工具/HTTP 路由、统计非 vendor LoC），`Makefile` 加 `counts` / `counts JSON=1` target。此前文档出现过「包数量 27/31/32/36 四处不一」，现统一以脚本输出为准（internal=32、total=36、MCP=12、HTTP=16、LoC≈51329），文档口径核对改为跑 `make counts` 而非手填数字。
+10. 模块文档计数类字段脚本化——✅ **已应用（2026-09-02）**：新增 `scripts/project_counts.py`（从 `go list` 取权威包数、正则计数 MCP 工具/HTTP 路由、统计非 vendor LoC），`Makefile` 加 `counts` / `counts JSON=1` target。此前文档出现过「包数量 27/31/32/36 四处不一」「/viz 路由归属误写」等问题，现统一以脚本输出为准（internal=32、total=36、MCP=12、HTTP=22、LoC≈51329）；`count_http_routes()` 扫描 `internal/server/*.go`（排除 `mcp*.go` 与 `*_test.go`），覆盖 `http.go` 16 + `viz.go` 6，文档口径核对改为跑 `make counts` 而非手填数字。
 
 ---
 

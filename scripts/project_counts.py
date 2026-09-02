@@ -17,6 +17,7 @@ import re
 import sys
 import os
 import json
+import glob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -62,13 +63,23 @@ def count_mcp_tools():
 
 
 def count_http_routes():
-    """http.go 中注册的路径字面量（去重）数量。"""
-    p = os.path.join(ROOT, "internal", "server", "http.go")
-    if not os.path.exists(p):
-        return 0
-    with open(p, encoding="utf-8", errors="ignore") as fh:
-        txt = fh.read()
-    return len(set(re.findall(r'"(/[a-zA-Z0-9_/:{}.]+)"', txt)))
+    """internal/server 下所有非 mcp / 非测试的 .go 文件中注册的路径字面量（去重）数量。
+
+    覆盖 http.go（核心 API 路由）与 viz.go（向量可视化 /viz、/viz/api/* 等）。
+    排除 mcp*.go（JSON-RPC 传输端点如 /sse、/message，非 HTTP API 路由）与
+    *_test.go（测试桩，会引用大量路由字符串造成污染）。
+
+    此前仅扫 http.go，漏计 viz.go 的 6 个 /viz 路由；基线 http_routes 由 16 升为 22。
+    """
+    total = set()
+    for p in glob.glob(os.path.join(ROOT, "internal", "server", "*.go")):
+        base = os.path.basename(p)
+        if base.startswith("mcp") or base.endswith("_test.go"):
+            continue
+        with open(p, encoding="utf-8", errors="ignore") as fh:
+            txt = fh.read()
+        total |= set(re.findall(r'"(/[a-zA-Z0-9_/:{}.]+)"', txt))
+    return len(total)
 
 
 def main():

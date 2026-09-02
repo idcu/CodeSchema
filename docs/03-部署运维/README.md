@@ -54,6 +54,7 @@ watcher:
 - `sqlite`：跨会话一致、关系查询（生产化用 `BulkUpsert`）。
 - `pg`（`-tags pg`）：亿级横向。
 - Redis（`-tags redis`）：热点 L2 缓存，提升大仓反查。
+- 向量检索后端：`storage.vector.driver` 默认空（文件 `PersistentStore`）；设 `chromem` 切换为持久化 `ChromemStore`（chromem-go 纯 Go，无需额外依赖，已接入生产分发）。
 
 ## 健康与可观测
 
