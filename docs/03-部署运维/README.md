@@ -72,3 +72,14 @@ watcher:
 | tree-sitter | `-tags treesitter` | CGO 真语法树 |
 
 > Dockerfile 默认免 CGO 纯 Go 栈；启用 onnx 需 glibc 对齐的基础镜像。
+
+## 目录与产物（构建 / 数据 / 缓存）
+
+你最关心的几类目录均**不进版本库**（完整清单见 [仓库结构.md](../仓库结构.md)）：
+
+- `build/` — 构建产物（`make build` 产出 `codeschema`，`make build-onnx` 产出 `codeschema-onnx`）、基准 JSON / HTML、规模 sqlite 库。
+- `data/` — 运行期数据（FTS / IDF 索引、向量、store 锁）。
+- `down/` — 第三方下载缓存（ONNX runtime 原生库、bge 等嵌入模型、chromem-go 源码、tree-sitter CLI）。
+- `docker/` — LSP 测试镜像等辅助脚本。
+
+> 镜像构建产物与运行期数据请通过卷挂载（如 `-v ./data:/app/data`）持久化，不要提交进仓库。

@@ -37,6 +37,10 @@ make build
 2. 打印客户端配置：`./codeschema mcp --print-config`（输出 VS Code / JetBrains / Claude Code / Cursor / npx 五类片段）
 3. 在你的客户端粘贴，即可调用 12 个 MCP 工具（`search_symbols` / `context` / `impact` …）
 
+## 项目由哪些部分组成
+
+CodeSchema 按 Go 惯用结构组织：源码在 `cmd/`（入口，8 个子命令）与 `internal/`（26 个顶层业务包），文档在 `docs/`（按人群分层），构建产物在 `build/`、模型与缓存临时目录 `down/` / `data/`（均不进版本库）。完整「每个目录/文件是干嘛的、要不要进版本库」逐项目清单见 [仓库结构.md](../仓库结构.md)。
+
 ## 下一步看哪里
 
 - 想本地改代码 → [01-开发者/README.md](../01-开发者/README.md)

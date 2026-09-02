@@ -16,6 +16,10 @@
 - Body 携带关键验证数据（如 `heapUsed +2.20MB / P95 <50ms`、`go build exit 0`）。
 - **禁止水 commit**（`fix bug` / `update`）。
 
+## 目录结构速查
+
+改动代码前，先对照 [仓库结构.md](../仓库结构.md) 确认影响面与「该放哪个目录」：它逐项目列出了 `cmd/` / `internal/` / `docs/` / `scripts/` / `contrib/` / `third_party/` / `build/` / `down/` / `data/` 每个目录/文件的类型、是否进版本库、功能用途与命名建议。**Go 惯用目录（`cmd` / `internal` / `vendor`）不可改名**。
+
 ## 2. 改码必改档（零超前于代码）
 
 代码变更**必须**同步受影响文档，同次提交；映射见 `docs/AI协作规范.md §4`。提交前逐项过清单：
