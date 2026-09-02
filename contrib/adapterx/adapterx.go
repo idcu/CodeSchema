@@ -11,7 +11,7 @@
 //	adapterx.IRDocument        ↔  internal/parser.IRDocument（桥接见 internal/parser/adapterx.go）
 //	adapterx.BuiltinAdapters() ↔  internal/parser/adapter/{treesitter,scip,codegraph,lsp}
 //
-// 发布形态与路线图见 README.md 与 docs/4-决策层/生态资产发布说明.md。
+// 发布形态与路线图见 README.md 与 docs/archive/4-决策层/生态资产发布说明.md。
 package adapterx
 
 import "context"

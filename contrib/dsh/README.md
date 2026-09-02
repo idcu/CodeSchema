@@ -147,6 +147,6 @@ console.log(`token 估算: ${pkg.summary.totalTokens}`);
 ## 10. 参考链接
 
 - [CodeSchema README](../../README.md)
-- [CodeSchema MCP 接入指南](../../docs/3-使用层/客户端接入指南（MCP）.md)
+- [CodeSchema MCP 接入指南](../../docs/00-新人上手/README.md)
 - [DeepSeek Harness 官方](https://deepseek.com/harness)
 - [DSH 社区插件](https://github.com/topics/dsh-plugin)

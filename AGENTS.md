@@ -2,7 +2,7 @@
 
 > 本文件面向 AI 编程工具（Agent），告知其如何参与 CodeSchema 项目的开发协作。
 > 编写格式兼容 DeepSeek Harness AGENTS.md 约定。
-> 最后更新：2026-08-17
+> 最后更新：2026-09-02
 
 ## 1. 项目定位
 
@@ -16,11 +16,18 @@ Agent 在参与 CodeSchema 开发时必须遵循以下流程。完整规范见 [
 
 ### 2.1 读取阶段（读档顺序）
 
-1. `docs/README.md` — 系统定位、技术栈、目录导航
-2. `docs/1-生产层/技术设计文档.md` — 架构、模块划分、数据流
-3. `docs/1-生产层/代码规范与开发指南.md` — 目录、命名、commit 规范
-4. `DEV_PROGRESS.md` / `CHANGELOG.internal.md` — 近期改动、历史坑
-5. 当前任务卡 — 目标、验收标准
+1. `docs/README.md` — 文档地图（按人群导航，结论先行）
+2. `docs/00-新人上手/README.md` — 定位与 5 分钟快速开始
+3. `docs/01-开发者/README.md` — 构建前置/变体/红线；按需下钻：
+   - `docs/01-开发者/架构与模块.md`（架构/数据流）
+   - `docs/01-开发者/接口层.md`（CLI/HTTP/MCP）
+   - `docs/01-开发者/解析适配器.md`（CallerFQN 行为）
+   - `docs/01-开发者/存储后端.md`（4 种后端/性能）
+   - `docs/01-开发者/测试与CI.md`（CI 门禁/计数守护）
+4. `docs/02-架构师/README.md` — 设计决策与能力边界（必要时）
+5. `DEV_PROGRESS.md` / `CHANGELOG.internal.md` — 近期改动、历史坑
+6. `docs/04-贡献者/README.md` + `docs/AI协作规范.md` — 提交与同步规范
+7. 当前任务卡 — 目标、验收标准
 
 > 完成读取前禁止写代码。
 

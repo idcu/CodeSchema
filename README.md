@@ -54,7 +54,7 @@
 | `pg` / `postgres` | `storage.driver=pg` + `storage.dsn=postgres://...` | `-tags pg` | PostgreSQL，亿级横向扩展（需 `go get github.com/lib/pq`） |
 | Redis 缓存层 | `storage.kv=redis://host:6379/0` | `-tags redis` | 热点类/调用反查 L2 缓存，地址为空则不启用（需 `go get github.com/redis/go-redis/v9`） |
 
-> 默认 `go build ./...` 不含 pg/redis 代码；启用对应后端时加 `-tags pg` / `-tags redis` 并拉取驱动依赖即可，详见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md`。
+> 默认 `go build ./...` 不含 pg/redis 代码；启用对应后端时加 `-tags pg` / `-tags redis` 并拉取驱动依赖即可，详见 `docs/01-开发者/存储后端.md`。
 
 ## 多租户（单实例多仓库）
 
@@ -64,7 +64,7 @@
 - 接入方式统一：`serve` / `mcp` 共用同一份 `--config`（写 `tenants:` 列表）；HTTP 用 `X-Tenant` 头或 `?tenant=`，MCP 工具用 `project` 参数，`list_projects` / `GET /projects` 枚举全部租户；
 - 向后兼容：不写 `tenants` 即为单「default」租户，行为与此前完全一致。
 
-可运行示例见 `build/mt-demo.yaml`，设计细节见 [docs/1-生产层/开发文档/13-多租户设计文档.md](docs/1-生产层/开发文档/13-多租户设计文档.md)。
+可运行示例见 `build/mt-demo.yaml`，设计细节见 [docs/02-架构师/README.md](docs/02-架构师/README.md)。
 
 ## 快速开始
 
@@ -107,7 +107,7 @@ go build -o codeschema ./cmd/codeschema
 ### 5 分钟接入 AI 客户端（MCP）
 
 1. 启动 MCP Server：`./codeschema mcp --addr :8080`
-2. 查看当前端点的客户端配置：`./codeschema mcp --print-config`（或见 `docs/3-使用层/客户端接入指南（MCP）.md`）
+2. 查看当前端点的客户端配置：`./codeschema mcp --print-config`（或见 `docs/00-新人上手/README.md`）
 3. 在 VS Code / JetBrains / Claude Code / Cursor 中粘贴对应配置片段，即可调用
    `search_symbols` / `context` / `impact` 等 12 个 MCP 工具。
 
@@ -138,27 +138,16 @@ docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 
 ## 开发指南
 
-开发文档按阶段分割在 `docs/1-生产层/开发文档/` 目录下，请按编号顺序阅读：
+按人群分层的开发文档已重构，统一入口见 [docs/README.md](./docs/README.md)（文档地图）：
 
-```
-docs/1-生产层/开发文档/
-├── 00-项目概述与架构概览.md      ← 先看整体
-├── 01-数据模型与DDL.md            ← 定义数据模型
-├── 02-解析适配中间层.md           ← 核心接口定义
-├── 03-存储层实现.md               ← 存储层基础实现
-├── 04-增量更新与文件监听.md       ← 增量更新逻辑
-├── 05-接口层（CLI+HTTP+MCP）.md   ← 接口层实现
-├── 06-编排层与并发模型.md         ← 编排层实现
-├── 07-适配器实现指南.md           ← 适配器实现
-├── 08-测试关联与AI增强.md         ← 测试关联 + AI
-├── 09-语义检索与全文搜索.md       ← 语义检索
-├── 10-可观测性与安全设计.md       ← 可观测性 + 安全
-├── 11-配置部署与路线图.md         ← 配置、部署、路线图
-├── 12-存储扩展与大规模迁移路径.md ← PG/Redis 扩展、规模决策
-└── 13-多租户设计文档.md           ← 多租户设计
-```
+- 新人 / 快速开始 → [docs/00-新人上手/README.md](./docs/00-新人上手/README.md)
+- 开发者（构建 / 架构 / 接口 / 解析 / 存储 / 测试CI）→ [docs/01-开发者/README.md](./docs/01-开发者/README.md)
+- 架构师（设计决策 / 成熟度 / 边界）→ [docs/02-架构师/README.md](./docs/02-架构师/README.md)
+- 部署运维（Docker / 配置 / 安全 / 多租户 / 可观测）→ [docs/03-部署运维/README.md](./docs/03-部署运维/README.md)
+- 贡献者（提交 / 改码必改档 / CI）→ [docs/04-贡献者/README.md](./docs/04-贡献者/README.md)
 
-模块级文档（按 P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/1-生产层/modules/` 总览：[README.md](./docs/1-生产层/modules/README.md)。
+> 重构前的历史开发文档（原 `docs/archive/1-生产层/开发文档/` 00–13、modules P1–P9 等）已归档至 `docs/archive/`，仅供追溯，不再随主文档维护。
+
 
 ## 架构概览
 
@@ -239,7 +228,7 @@ make clean
 
 ### 最新进展（2026-08-14）
 
-- **多租户（单实例多仓库）已落地**：新增 `internal/tenant`（管理器 + 路由）与 `internal/runtime`（单租户运行期装配），`serve` / `mcp` 通过一份 `--config` 的 `tenants:` 列表同时服务多个隔离仓库；每租户独立 store + 独立 FTS/向量/IDF 索引（默认按各自 `storage.dsn` 目录派生隔离）。HTTP 用 `X-Tenant`/`?tenant=`，MCP 工具用 `project` 参数，`list_projects` / `GET /projects` 枚举租户；无 `tenants` 配置时退化为单「default」租户，完全向后兼容。设计见 [docs/1-生产层/开发文档/13-多租户设计文档.md](docs/1-生产层/开发文档/13-多租户设计文档.md)，可运行示例见 `build/mt-demo.yaml`。
+- **多租户（单实例多仓库）已落地**：新增 `internal/tenant`（管理器 + 路由）与 `internal/runtime`（单租户运行期装配），`serve` / `mcp` 通过一份 `--config` 的 `tenants:` 列表同时服务多个隔离仓库；每租户独立 store + 独立 FTS/向量/IDF 索引（默认按各自 `storage.dsn` 目录派生隔离）。HTTP 用 `X-Tenant`/`?tenant=`，MCP 工具用 `project` 参数，`list_projects` / `GET /projects` 枚举租户；无 `tenants` 配置时退化为单「default」租户，完全向后兼容。设计见 [docs/02-架构师/README.md](docs/02-架构师/README.md)，可运行示例见 `build/mt-demo.yaml`。
 - **SQLite 权威存储已接线**：新增 `internal/store/sqlite`（基于纯 Go 的 `modernc.org/sqlite`，免 CGO），完整实现 `store.Store` 接口（文件/类/方法/调用/标签 + 反向查询 + `UpsertIR` 增量入库），`storage.driver=sqlite` 即启用，默认仍 JSON 文件存储作 fallback。消除了「文档声称 SQLite、现实仅 JSON」的实现落差。
 - **SCIP / LSP 适配器生产验证**：
   - SCIP：新增真实 fixture 端到端测试，覆盖 class/method/**调用关系提取**逻辑，并修复 `ParseAll` 误用「文件存在」校验目录导致目录永远判为不存在的 Bug。
@@ -249,13 +238,13 @@ make clean
 
 ## 实际核查备注（2026-08-14）
 
-> 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md` 与 `DEV_PROGRESS.md`。
+> 以下为代码级核查结论，供接手/评审参考。详细论证见 `docs/01-开发者/存储后端.md` 与 `DEV_PROGRESS.md`。
 
 - **包数量**：实际 **36** 个 Go 包（`go list ./...`，2026-08-17 实测，含 `internal/tenant`、`internal/runtime`、`contrib/adapterx`、`contrib/contextsdk`、`internal/contextsdk`、`scripts/benchtrend`），本文及 `DEV_PROGRESS.md` 中「23/24/27/31/32/33 个包」等旧表述已过时。
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
-- **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
-- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md`。
-- **开发文档索引**：`docs/1-生产层/开发文档/` 实际含 `00`–`13` 共 14 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/1-生产层/modules/`。
+- **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/01-开发者/存储后端.md` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
+- **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/01-开发者/存储后端.md`。
+- **开发文档索引**：`docs/archive/1-生产层/开发文档/` 实际含 `00`–`13` 共 14 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/archive/1-生产层/modules/`。
 
 ### 构建变体与能力边界（默认 vs onnx vs 扩展存储）
 

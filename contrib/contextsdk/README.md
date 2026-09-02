@@ -58,4 +58,4 @@ func NewClient(resolve ResolveService) *Client // Client = contextsdk.Client（�
 
 - 发布前 `go test ./contrib/contextsdk/...` 全通
 - 发布前 benchmark 记录 token 估算与编排耗时（红线：没有数据就是没做）
-- 发布后同步更新 `docs/4-决策层/生态资产发布说明.md` 状态
+- 发布后同步更新 `docs/archive/4-决策层/生态资产发布说明.md` 状态
