@@ -64,7 +64,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 | 体系 | 含义 | 宣称完成度 | 来源 |
 |---|---|---|---|
 | **P0–P18（开发阶段）** | 时间线式交付里程碑（骨架/MVP/反向引用/多语言/可观测性/CI…） | 全部 **100%（生产级）** | README.md「当前状态」表、DEV_PROGRESS.md |
-| **P1–P9（架构模块层）** | 按架构职能切分的模块完成度 | **系统总 ≈95%**，其中 P3=96% P4=96% P6=97% P7=95% P9=96%，其余 100% | docs/archive/1-生产层/modules/README.md |
+| **P1–P9（架构模块层）** | 按架构职能切分的模块完成度 | **系统总 ≈95%**，其中 P3=96% P4=96% P6=97% P7=95% P9=96%，其余 100% | git 历史（2026-09-02 重构前文档） |
 
 **矛盾点**：同一仓库既宣称「P0–P18 全部生产级 100%」，又宣称「系统总完成度 ≈95% 且 P3/P4/P7/P9 <100%」。两套编号无映射表，新人极易误判。
 > 已于 2026-09-02 在 `DEV_PROGRESS.md` 加「进度体系说明」澄清：前者是开发里程碑轴（何时建成，全 100% 交付），后者是能力成熟度轴（当前多成熟，95–98% 打磨中），两轴正交非矛盾。
@@ -129,7 +129,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 5. **Dockerfile 口径统一**：✅ DEV_PROGRESS:235、11-配置部署:365 由 alpine 改为 `golang:1.25-bookworm → debian:bookworm-slim`（与 Dockerfile 实际一致）。
 
 ### P2（规划，消除进度认知混乱）
-6. **建立 P0–P18 ↔ P1–P9 进度体系澄清**——✅ **已应用（2026-09-02）**：经核查两体系为**正交双轴**——`DEV_PROGRESS.md` 的 `P0骨架/P0 MVP/P1–P18` 是「开发里程碑轴」（各能力首次落地顺序，现已全 100% 交付）；`docs/archive/1-生产层/modules/` 下 `P*.md` 的「完成度」是「能力模块当前成熟度轴」（95–98%，持续打磨非未交付）。已在 `DEV_PROGRESS.md` 当前状态块后新增「进度体系说明」消除歧义；未做硬性 1:1 映射表（两轴非同构，强行映射反致误导）。
+6. **建立 P0–P18 ↔ P1–P9 进度体系澄清**——✅ **已应用（2026-09-02）**：经核查两体系为**正交双轴**——`DEV_PROGRESS.md` 的 `P0骨架/P0 MVP/P1–P18` 是「开发里程碑轴」（各能力首次落地顺序，现已全 100% 交付）；git 历史（2026-09-02 重构前文档） 下 `P*.md` 的「完成度」是「能力模块当前成熟度轴」（95–98%，持续打磨非未交付）。已在 `DEV_PROGRESS.md` 当前状态块后新增「进度体系说明」消除歧义；未做硬性 1:1 映射表（两轴非同构，强行映射反致误导）。
 7. **校正子模块完成度**：P3_3/P3_4/P3_5 在树与正文取同一数字——✅ **已验证（2026-09-02）**：脚本扫描 `docs/**/P*.md` 共 42 份，41 份含完成度声明且**头部=正文 100% 一致、0 处不一致**（延续 `ee8c5dc` 三方对齐成果），无需改动。
 8. **CallerFQN 回填（代码侧根因修复）**——✅ **已应用（2026-09-02）**：
    - 默认路径 `adapter.go`（`//go:build !treesitter`）：新增 `currentMethod *parser.MethodIR` 跟踪当前方法，类定义处重置、方法定义处赋值、`detectCalls` 调用处（现 `adapter.go:846`）按 `ClassFQN+"."+Name`/`Name` 计算 caller 并回填。
@@ -146,9 +146,9 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 ## 7. 让人更快掌握本项目的路线（30 分钟上手）
 
 1. **先读 3 篇，建立心智模型**：
-   - `docs/archive/4-决策层/系统简介.md`（定位与目标）
-   - `docs/archive/1-生产层/开发文档/00-项目概述与架构概览.md`（五层架构）
-   - `docs/archive/1-生产层/modules/README.md`（模块树与完成度）
+   - git 历史（2026-09-02 重构前文档）（定位与目标）
+   - git 历史（2026-09-02 重构前文档）（五层架构）
+   - git 历史（2026-09-02 重构前文档）（模块树与完成度）
 2. **再跑一遍，建立手感**（需 `../idcu-go` 兄弟仓）：
    ```bash
    go build -o codeschema ./cmd/codeschema
@@ -185,11 +185,11 @@ grep -n 'CallerFQN' internal/parser/adapter/treesitter/adapter.go internal/parse
 |---|---|---|
 | 1 | `README.md:16` | 影响面分析加 caller 空值警示 + 生效条件 |
 | 2 | `README.md`（「构建变体与能力边界」） | 新增三档构建能力矩阵（默认 / `-tags onnx` / `-tags 'pg redis'`）+ idcu-go 兄弟仓构建前置声明 |
-| 3 | `docs/archive/1-生产层/modules/README.md:4` | 包数量 27 → 32（internal/）+ 全仓库 36 口径说明 |
-| 4 | `docs/archive/4-决策层/系统简介.md:30` | 32 包加 scope；ONNX 召回 1.00 加「默认=TF-IDF 降级」说明 |
-| 5 | `docs/archive/4-决策层/版本发布说明.md:28/29/32` | 语义检索/影响面分析加生效边界；包数加 scope |
+| 3 | git 历史（2026-09-02 重构前文档） | 包数量 27 → 32（internal/）+ 全仓库 36 口径说明 |
+| 4 | git 历史（2026-09-02 重构前文档） | 32 包加 scope；ONNX 召回 1.00 加「默认=TF-IDF 降级」说明 |
+| 5 | git 历史（2026-09-02 重构前文档） | 语义检索/影响面分析加生效边界；包数加 scope |
 | 6 | `DEV_PROGRESS.md:235` | Dockerfile 基础镜像 alpine → `golang:1.25-bookworm → debian:bookworm-slim` |
-| 7 | `docs/archive/1-生产层/开发文档/11-配置部署与路线图.md:365` | 同上，alpine → bookworm |
+| 7 | git 历史（2026-09-02 重构前文档） | 同上，alpine → bookworm |
 | 8 | `internal/parser/adapter/treesitter/adapter.go` | **代码修复**：默认路径新增 `currentMethod` 跟踪，`detectCalls` 调用处（`adapter.go:846`）回填 `CallerFQN` |
 | 9 | `internal/parser/adapter/treesitter/adapter_ast.go` | **代码修复**：AST 路径 `walk` 新增 `curMethod` 跟踪，Elixir 默认调用（`adapter_ast.go:342`）与 `callTypes`（`adapter_ast.go:402`）两处 `CallIR` 补 `CallerFQN` |
 

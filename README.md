@@ -146,7 +146,7 @@ docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 - 部署运维（Docker / 配置 / 安全 / 多租户 / 可观测）→ [docs/03-部署运维/README.md](./docs/03-部署运维/README.md)
 - 贡献者（提交 / 改码必改档 / CI）→ [docs/04-贡献者/README.md](./docs/04-贡献者/README.md)
 
-> 重构前的历史开发文档（原 `docs/archive/1-生产层/开发文档/` 00–13、modules P1–P9 等）已归档至 `docs/archive/`，仅供追溯，不再随主文档维护。
+> 重构前的历史开发文档（原 git 历史（2026-09-02 重构前文档） 00–13、modules P1–P9 等）已归档至 git 历史（2026-09-02 重构前文档），仅供追溯，不再随主文档维护。
 
 
 ## 架构概览
@@ -244,7 +244,7 @@ make clean
 - **默认构建已免 CGO（已修复）**：原 `embedder_onnx.go` 无条件 `import onnxruntime_go` 导致 `go build ./...` 强制需 gcc。现已将 ONNX 嵌入器用 `//go:build onnx` 隔离，默认构建免 CGO/gcc；仅 `go build -tags onnx` 才引入 ONNX 语义检索（仍需 gcc 与 onnxruntime 动态库）。
 - **SQLite 批量写入已优化**：`BulkUpsert`（`internal/store`）修复单条 upsert 慢 500 倍的瓶颈，N=10万 级批量写入降至 5~14s（见 `docs/01-开发者/存储后端.md` 与 `analysis/2026-08-14-scale-bench.md`）；超大仓写入走 `BulkUpsert`/PG/chromem。
 - **存在但未在本文登记的代码**：`internal/store/pg`（PG 完整实现，564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层，117 行，`//go:build redis`）、`internal/scalebench`（超大仓基准）此前均未接主路。现 PG/Redis 已通过 `cmd/codeschema` 层 build-tagged 统一分发接入主路，`internal/scalebench` 新增 `BenchmarkScaleBulk`（N=1万）与 `BenchmarkSQLiteWALConfigs`（WAL 同步参数定案）固化进 CI（`.github/workflows/ci.yml` 新增 bench job）看护 `BulkUpsert` 回归，详见 `docs/01-开发者/存储后端.md`。
-- **开发文档索引**：`docs/archive/1-生产层/开发文档/` 实际含 `00`–`13` 共 14 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 `docs/archive/1-生产层/modules/`。
+- **开发文档索引**：git 历史（2026-09-02 重构前文档） 实际含 `00`–`13` 共 14 篇，本文「开发指南」已全部列出；模块级文档（P1~P9 分层拆解，含完成度/阻塞项/模块关系）见 git 历史（2026-09-02 重构前文档）。
 
 ### 构建变体与能力边界（默认 vs onnx vs 扩展存储）
 

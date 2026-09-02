@@ -35,19 +35,19 @@ P18      [████████████████████] 100%
 
 ---
 
-> **进度体系说明（消除口径歧义）**：本文件 `当前状态` 的 `P0骨架 / P0 MVP / P1–P18` 是**开发里程碑轴**——记录各能力「首次落地」的先后顺序，现已全部 100%（即均已交付）。而 `docs/archive/1-生产层/modules/` 下各 `P*.md` 的「完成度」字段是**能力模块当前成熟度轴**（如 `P3_3` SCIP=97%、`P3_4` LSP=97%），多数为 95–98%，表示持续打磨中，**并非未交付**。
+> **进度体系说明（消除口径歧义）**：本文件 `当前状态` 的 `P0骨架 / P0 MVP / P1–P18` 是**开发里程碑轴**——记录各能力「首次落地」的先后顺序，现已全部 100%（即均已交付）。而 git 历史（2026-09-02 重构前文档） 下各 `P*.md` 的「完成度」字段是**能力模块当前成熟度轴**（如 `P3_3` SCIP=97%、`P3_4` LSP=97%），多数为 95–98%，表示持续打磨中，**并非未交付**。
 > 两轴度量维度不同（「何时建成」vs「当前多成熟」），共用 P 前缀易误读为「100% 与 95% 自相矛盾」。P10–P18 为 P1–P9 之后的延展能力（多租户、agent-bench、生态资产发布等），本文件不含 P19+ 后续里程碑。
 
 ## 实际核查结论（2026-08-14 · 代码级）
 
-> 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 `docs/archive/1-生产层/开发文档/12` scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
+> 接手/评审前必读：下面是基于 `go build ./...`、包枚举与 git 历史（2026-09-02 重构前文档） scalebench 实测的核查，旨在纠正历史文档中的虚高/过时表述。
 
 1. **包数量实为 36 个**（`go list ./...`，含 2026-08-16 新增的 `internal/tenant`、`internal/runtime`、`scripts/benchtrend` 与 2026-08-17 新增的 `contrib/adapterx`、`contrib/contextsdk`、`internal/contextsdk`），全文历史「23/24/27/31/32/33 个包」表述已过时；`go build ./...` 通过（exit 0）。
 2. **默认构建强制 CGO（已修复）**：原 `internal/vector/embedder_onnx.go` 无条件 `import onnxruntime_go`，即使不用 ONNX 也需 gcc。现已以 `//go:build onnx` 隔离 ONNX 实现，新增 `embedder_onnx_stub.go`（`!onnx`）提供同名 API 桩，默认 `go build ./...`（CGO 关）免 gcc；ONNX 语义检索需 `go build -tags onnx`（仍依赖 gcc + onnxruntime 动态库）。「GCC 可选」的旧表述已校正为「仅 ONNX 需要」。
-3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：`docs/archive/1-生产层/开发文档/12` scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
-4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 117 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）；`rebuild-kv` 命令在 `-tags redis` 下从基础存储全量重建缓存。详见 `docs/archive/1-生产层/开发文档/12` §12.5 与 README「存储后端」小节。
+3. **SQLite 写入非生产级（已通过 BulkUpsert 修复）**：git 历史（2026-09-02 重构前文档） scalebench 实测 N=10万 单批 `UpsertIR`，SQLite ≈ **77~237s**（本机波动，受 WAL 检查点 fsync 抖动），JSON FileStore ≈ **0.4s**（慢约 500 倍）。根因是 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；**已实现 `BulkUpsert`（单事务 + 预编译语句），100k 落库降至约 5~14s（约一个数量级 / 5~14× 提速），生产化应使用它**。切 PG 仍适用于亿级。因此「SQLite 为权威存储、JSON 仅 fallback」的 headline 与实测方向相反（SQLite 写入确慢于 JSON，但关系查询/跨会话一致性是 JSON 不具备的）。
+4. **pg/redis 后端已接入统一分发（2026-08-14）**：`internal/store/pg`（PG 完整实现 564 行，`//go:build pg`）、`internal/store/redis`（热点缓存层 117 行，`//go:build redis`）现经 `cmd/codeschema` 的 build-tagged 分发接线——`storage.driver=pg|postgres`（需 `-tags pg`）+ `storage.kv=redis://...`（需 `-tags redis`）；`rebuild-kv` 命令在 `-tags redis` 下从基础存储全量重建缓存。详见 git 历史（2026-09-02 重构前文档） §12.5 与 README「存储后端」小节。
 5. **tree-sitter 双路径**：默认构建为纯 Go 正则轻量解析（30 语言，无 CGO）；`-tags treesitter` 启用真语法树（go.mod 含 `smacker/go-tree-sitter` 各语言包，但默认 tag 隔离不编译）。依赖为 `modernc.org/sqlite` + `chromem-go` + `fsnotify` + `onnxruntime_go`（可选）。
-6. **开发文档索引**：`docs/archive/1-生产层/开发文档/` 实际含 `00`–`13` 共 14 篇；README「开发指南」与本文均已全部列出（`12` 于 2026-08-15 补入、`13` 于 2026-08-16 补入）。
+6. **开发文档索引**：git 历史（2026-09-02 重构前文档） 实际含 `00`–`13` 共 14 篇；README「开发指南」与本文均已全部列出（`12` 于 2026-08-15 补入、`13` 于 2026-08-16 补入）。
 7. **阶段完成度口径**：P0–P18 的「功能实现」确已完成并通过测试；但「生产级」「权威存储」等运行期/性能声明需以上述实测为准，不能仅凭 phase 100% 推定。
 
 ## 已完成工作
@@ -237,7 +237,7 @@ P18      [████████████████████] 100%
 - [x] **`Makefile`** — 构建自动化脚本，支持 build/test/clean/cross/lint/bench/run 等 10 个目标，跨平台交叉编译（linux/darwin/windows × amd64/arm64）
 - [x] **`Dockerfile`** — 多阶段构建，golang:1.25-bookworm → debian:bookworm-slim（glibc，CGO 链接 onnxruntime `.so` 必需；alpine/musl 会导致 ONNX 静默降级 LocalEmbedder），CGO 构建含 SQLite/tree-sitter，支持 VERSION 构建参数
 - [x] **`.github/workflows/ci.yml`** — GitHub Actions CI 流水线，8 个 Job（test 跨 ubuntu/macos/windows + bench + nightly-scale + race 竞态检测 + treesitter + cross 交叉编译 + docker 镜像）；actions 已升级为 Node 24 兼容版本（`actions/checkout@v7`、`actions/setup-go@v7`、`actions/upload-artifact@v6`、`docker/setup-qemu-action@v4`、`docker/setup-buildx-action@v4`、`docker/metadata-action@v6`、`docker/build-push-action@v7`、`softprops/action-gh-release@v3`），此前 Node 20 actions 缓存 tar 恢复失败与 Windows 偶发失败均已在 `427fe7b`/`b90271a`/`0c4a1a1` 修复
-- [x] **`docs/archive/1-生产层/开发文档/11-配置部署与路线图.md`** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
+- [x] **git 历史（2026-09-02 重构前文档）** — 新增 §9 P13 构建与部署指南（Makefile/Docker/CI/部署形态/环境要求/检查清单）
 - [x] 验证数据：go build 通过 | go test 18 包 0 失败 | 新增 3 个文件（Makefile/Dockerfile/CI）+ 1 个文档更新
 
 ### P14 — 多语言适配器扩展（SCIP/LSP）+ 语义检索精度提升（chromem-go）
@@ -275,9 +275,9 @@ P18      [████████████████████] 100%
 - [x] 验证数据：`go build` 通过 | `go test` 23 包 0 失败 | 新增 3 个文件，修改 1 个文件
 
 ### 文档
-- [x] `docs/archive/1-生产层/开发文档/` — 14 个开发文档按开发顺序分割（`00`–`13`）
+- [x] git 历史（2026-09-02 重构前文档） — 14 个开发文档按开发顺序分割（`00`–`13`）
 - [x] `DEV_PROGRESS.md` — 本文件，开发进度跟踪
-- [x] `docs/archive/1-生产层/modules/` — 模块级文档（P1~P9 分层拆解，43 份）
+- [x] git 历史（2026-09-02 重构前文档） — 模块级文档（P1~P9 分层拆解，43 份）
 
 ## 后续优化完成项
 
@@ -298,7 +298,7 @@ P18      [████████████████████] 100%
 - [x] **优先级② SCIP / LSP 适配器生产验证** —
   - **SCIP**：新增真实 fixture 端到端测试（`fixture_test.go`），覆盖 class/method/**调用关系（Calls）提取**逻辑（此前 0 覆盖）；并修复 `ParseAll` 误用 `adapter.FileExists`（仅对文件返回 true）校验 `indexDir` 目录，导致目录永远被判为「不存在」的 Bug（改为 `scipDirExists` 目录存在性判断）。
   - **LSP**：`gopls` 真实语言服务器端到端验证（Go 为主语言，真实返回 `Calculator` 类与 `Add`/`Sub` 方法，`TestLSPAdapter_RealGopls` 已 PASS；`clangd` 真实服务器传输层验证（JSON-RPC 实际连通，clangd 因缺少 compile-commands/project 上下文拒绝登记独立文件，已改为优雅跳过并记录缺口）。三处**生产修复**：①`Parse` 的 `didOpen` 改为携带真实文件内容（clangd 等要求，gopls/mock 不受影响）；②新增 `lspPathToOSPath` / `readLSPFileContent` 辅助；③**关键修复**——`addSymbolInfo` / `addDocumentSymbol` 的 `SymbolKind` 映射原仅覆盖 5(Class)/6(Method)/9(Constructor)，漏掉 Go 的 Struct(23)/Interface(24)/Function(12)，导致 gopls 对 Go 源码解析出 0 类 0 方法；补齐 `case 23→STRUCT / 24→INTERFACE / 6,12→方法` 后，gopls 真实返回类与方法（验证由 `TestLSPAdapter_RealGopls` 从 FAIL 转为 PASS）。
-  > **2026-08-15 更新**：clangd 场景已补齐工程上下文真实验证（`TestLSPAdapter_RealClangd` 构造 compile_commands.json 最小工程，clangd 22 真实提取类/方法 PASS），并修复其根因——`jsonRPCRequest.ID` 缺 `omitempty` 使 notification 携带 `"id":0` 违反 JSON-RPC 2.0，clangd 严格拒绝（gopls 宽容未暴露）。详见 `docs/archive/1-生产层/modules/P3_4.md`。
+  > **2026-08-15 更新**：clangd 场景已补齐工程上下文真实验证（`TestLSPAdapter_RealClangd` 构造 compile_commands.json 最小工程，clangd 22 真实提取类/方法 PASS），并修复其根因——`jsonRPCRequest.ID` 缺 `omitempty` 使 notification 携带 `"id":0` 违反 JSON-RPC 2.0，clangd 严格拒绝（gopls 宽容未暴露）。详见 git 历史（2026-09-02 重构前文档）。
   - **多语言验证/基准框架**：`internal/adapterbench/adapter_validation_test.go`（独立轻量包，仅依赖 lsp/scip 适配器、刻意不引入 onnxruntime 等 cgo 重型依赖，秒级编译运行），对 SCIP（fixture，始终可用）+ LSP（gopls/clangd/jdtls，按工具可用性）逐语言真实解析并记录符号数与延迟，输出 `build/adapter-bench.json` 与 `analysis/2026-08-14-adapter-validation.md`；工具缺失则优雅跳过。
   - **架构调整（绕开 cgo 慢编译）**：原 `internal/integration/adapter_validation_test.go` 因 `package integration` 传递引入完整 scan/index/vector 流水线的 `onnxruntime_go` cgo 依赖，在本机 MinGW 下编译极慢（>50min）。将适配器验证测试迁移到独立包 `internal/adapterbench`（只 import lsp+scip），编译+运行降至 ~1min 且真实验证 gopls（classes=1/methods=2）。旧文件已从索引移除（磁盘锁定副本待杀软释放后清理）。
 - [x] **依赖修正说明**：`go.mod` 实际依赖为 `modernc.org/sqlite`（纯 Go）+ `chromem-go` + `fsnotify` + `yaml.v3` + `onnxruntime_go`；tree-sitter 为 30 语言正则解析实现（非 CGO 版 go-tree-sitter，`-tags treesitter` 切真语法树）。此前「已知问题」中「go-sqlite3 / go-tree-sitter 已安装」属历史表述，当前默认构建已无需 CGO。
@@ -306,7 +306,7 @@ P18      [████████████████████] 100%
   - **超大仓基准框架** `internal/scalebench/scale_bench_test.go`：纯 Go 无 cgo，合成每文件 1 类/3 方法/2 调用 IR，压测 N=1k/5k/10k/50k/100k 的插入/落盘/内存；SQLite 每 N 独立 dsn 隔离累积干扰；产物 `build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md`。
   - **实测结论（推翻原假设）**：SQLite(UpsertIR) 是主导瓶颈——100k 文件（≈700k 行）单批插入 **77~237s**（本机波动，≈560× chromem），根因为 `UpsertIR` 逐文件多语句独立事务（100k 文件≈70万次事务提交放大）；FileStore 为内存 O(n)（100k≈1.08GB）、chromem 线性（100k≈169MB）均远快于 SQLite。**已实现 `BulkUpsert`（单事务 + 预编译语句）消除提交放大**：100k 落库降至 **约 5~14s（约一个数量级 / 跨 N 点位稳定 5~14× 提速）**，生产化应使用它（analyzer 整仓重索引时批量灌入）。
   - **PG 适配器骨架** `internal/store/pg/pg.go`（`//go:build pg`）：完整 `store.Store` 接口 + PG DDL；**Redis 缓存骨架** `internal/store/redis/redis.go`（`//go:build redis`）：热点类 HASH + 调用反查 SET + 文件→类索引。均 `go get` 即启用。
-  - **文档** `docs/archive/1-生产层/开发文档/12-存储扩展与大规模迁移路径.md`：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
+  - **文档** git 历史（2026-09-02 重构前文档）：回填实测表格 + 修正结论（SQLite 实为超线性主导瓶颈）+ 迁移路径（SQLite+BulkUpsert / chromem 持久化 / PG 横向 / Redis 缓存）。
   - **环境状态（已解决）**：本机已将仓库加入杀软信任目录——`go.mod` 恢复可写、`go build ./...` 由 50min+ 降至 ~4s、生成目录可写。已 `go get` 拉入 `lib/pq` + `go-redis/v9`，PG/Redis 骨架（`go build -tags pg/redis`）均编译通过；`build/scale-bench.json` + `analysis/2026-08-14-scale-bench.md` 已落盘。
   - **优先级 T2-4 CodeGraph 适配器去骨架（不静默空 IR）** `internal/parser/adapter/codegraph/adapter.go`：原 `ParseAll` 在 DB 存在时**静默吐空 IR 文档**（与「不静默返回空结果」目标相悖，原测试甚至断言「吐了 3 个空文档」）；改为用纯 Go `modernc.org/sqlite` 打开并校验 `symbols`/`edges` 契约表，缺表或非 SQLite 显式返 `ErrSourceUnavailable` 降级，表存在时按文档化契约（symbols: name/qualified_name/kind/file_path/language；edges: caller/callee/type）尽力读取真实类/调用 IR（调用边按 caller 前缀归属文件），列漂移则显式报错——**绝不静默空 IR**。`go test ./internal/parser/adapter/codegraph/...` 全绿（含真实读取 + 显式降级用例）。注：CodeGraph 真实列名未在本仓确认，当前契约为假设列名；若真实列名不同，读取会显式报错并降级到 tree-sitter，需后续按真实 schema 校准列名。
   - **优先级 T2-3 LSP 适配器健壮性（可观测降级 + 失败重试）** `internal/parser/adapter/lsp/adapter.go`：消除"静默丢信息"——① clangd 在 `Init` 显式探测 `compile_commands.json`（缺失则 WARN + `lsp_missing_compile_commands_total`）；② `documentSymbol` 请求经 `requestWithRetry` 包裹（`robust.Retry` 指数退避 + `robust.RetryableError`），瞬时失败自动重试；③ 解析非空 C/C++ 文件却 0 符号时显式 WARN + `lsp_parse_empty_symbols_total{lang="cpp"}`；④ `readResponses` 中原静默丢弃的异常帧（Content-Length 解析失败 / JSON 体失败 / 孤儿响应）改为 WARN + `lsp_malformed_frames_total{kind=...}`；⑤ 子进程 stderr 由 `io.Discard` 改为按行日志（关键字 WARN，其余 DEBUG），暴露 clangd 自身降级原因。`init()` 注册 5 个 LSP 指标；`adapter_test.go` 新增 8 项测试（探测命中/缺失、空符号告警、重试失败/取消、孤儿/畸形 Content-Length/畸形 JSON 帧），`go test -race ./internal/parser/adapter/lsp/...` 全绿。**已接入 Registry 编排主路（PHASE_09/T1-3）**：LSP 适配器经 `cmd/codeschema/parser_registry.go` 的 `newParserRegistry` 统一工厂注册（`parser.lsp.enabled=true` 且工具存在时启用 gopls/jdtls/clangd），以 `parser.FallbackParser` 包装——LSP 解析失败自动回退 tree-sitter，全链路可观测，不再阻塞扫描主路。
@@ -324,7 +324,7 @@ P18      [████████████████████] 100%
 - [x] **T2-2 向量索引原文持久化**（`2fcf551`）— `DocContentStore` 可选接口（Persistent/Memory 实现，旧文件向后兼容），IndexBuilder 写入原文，/viz 展示类/方法原文
 - [x] **T2-3 语义检索质量定案**（`72bdc93`）— 真实 ONNX 复测：**R@1/@3/@5 = 1.00/1.00/1.00 vs Local(TF-IDF) 0.42/0.58/0.83**；默认策略定案（Local 兜底 / 语义敏感场景 -tags onnx）
 - [x] **T2-4 FileStore 权威化与一致性**（`9594342`）— flock 进程锁（Unix）/独占创建（Windows），同目录二次 Open 显式失败；scanner 忽略 store 数据文件
-- [x] **T2-5 配置模板与一键体验**（`6ebb93a`）— `codeschema mcp --print-config` 输出 5 类客户端配置 + `docs/archive/3-使用层/客户端接入指南（MCP）.md` + README 快速开始
+- [x] **T2-5 配置模板与一键体验**（`6ebb93a`）— `codeschema mcp --print-config` 输出 5 类客户端配置 + git 历史（2026-09-02 重构前文档） + README 快速开始
 - [x] **T3-1 10万+ 文件真实规模压测**（`efb548e`）— `TestScaleEndToEnd` 真实全链路（真实 .go 文件→Scanner→UpsertIR→BuildFromStore→Searcher）：**N=10万 扫描 8.18s / 索引 9.55s / P95 搜索 1.97s / 内存 1079MB** → 规模决策表（<1万 默认栈 / 1万~10万 SQLite+chromem / >10万 PG+Redis）
 - [x] **T3-2 PG/Redis 真实实例集成**（`fa6dec0`）— PG 骨架修 2 个历史 bug（file.imports 列缺失、UpsertIR 从未写 method）；集成测试三档降级（外部实例→localhost→嵌入式 fergusstrange/embedded-postgres 真实内核）；`TestPGStore_EndToEnd` + `TestRedisCache_RealInstance`（docker redis）PASS
 - [x] **T3-3 Docker 实构建 + 多平台**（`fa6dec0`）— Dockerfile 三处修复（GOPROXY 固化 goproxy.cn、提前 COPY third_party/、移除非法 shell COPY）；`codeschema:test` 构建成功，容器内 version/scan/serve+viz/mcp stdio 冒烟全 PASS
@@ -336,7 +336,7 @@ P18      [████████████████████] 100%
 
 ### 维护优化（2026-08-16）：单实例多租户（多项目共享一个 CodeSchema 进程）
 
-多项目都需要 CodeSchema 时，落地「单实例多租户」方案（设计见 `docs/archive/1-生产层/开发文档/13-多租户设计文档.md`，可运行示例 `build/mt-demo.yaml`）：
+多项目都需要 CodeSchema 时，落地「单实例多租户」方案（设计见 git 历史（2026-09-02 重构前文档），可运行示例 `build/mt-demo.yaml`）：
 
 - [x] **`internal/tenant`（新包）** — 多租户管理器 `Manager`：持有 N 个隔离的单租户运行实例（每租户独立 `store.Store` + 独立 `runtime.Runtime`），按 `project` 路由请求；`OpenStoreFunc` 由 cmd 层注入以维持 `internal/store` 的循环依赖隔离；`deriveIndexDirs` 为显式 `tenants` 按各自 `storage.dsn` 派生隔离的 FTS/向量/IDF 索引目录。
 - [x] **`internal/runtime`（新包）** — 抽取单租户运行期装配（`NewParserRegistry`/`WithImpactAnalyzer`/`NewAIEnhancer`/``RunTagAll`/`NewSearcher`/`BuildRuntime`/`ScanRepository`/`StartWatchBackground`），供单项目（`scan`/`watch`）与多租户（`serve`/`mcp`）共用，消除重复装配。
@@ -346,7 +346,7 @@ P18      [████████████████████] 100%
 - [x] **关键修复：索引隔离** — 早期仅隔离主 `store` 的 DSN，FTS/向量/IDF 仍沿用 `DefaultConfig` 共享的 `./data/fts|vector|idf`，多租户按序 `auto_scan` 时后者覆盖前者索引 → 所有租户返回最后扫描者数据。修复：显式 `tenants` 在其**未显式配置**检索/向量目录时自动按各自 `storage.dsn` 派生 `<dsn>/fts|vector|idf`（仅目录型 `file/sqlite`）。判断「是否显式配置」用租户原始配置 `tc.Storage.Search.*`（merged 永远非空）。
 - [x] **向后兼容** — 无 `tenants` 配置时退化为单 `default` 租户，所有接口行为与单项目模式完全一致。
 - [x] **测试** — `internal/tenant/tenant_test.go`（6 项：deriveIndexDirs 派生/显式覆盖/非目录后端不派生 + Manager 单租户回退/多租户路由/索引目录派生隔离回归）；`internal/runtime/runtime_test.go`（3 项：NewParserRegistry/NewSearcherWithStore 非空 + BuildRuntime 全链路 scan→装配→首轮索引→检索）。
-- [x] **文档** — 新增 `docs/archive/1-生产层/开发文档/13-多租户设计文档.md`；更新 `README.md`/`docs/archive/1-生产层/开发文档/11`/`docs/archive/3-使用层/客户端接入指南（MCP）.md`/`docker-compose.yml`（新增 `codeschema-mt` 服务，`--profile mt`）。
+- [x] **文档** — 新增 git 历史（2026-09-02 重构前文档）；更新 `README.md`/git 历史（2026-09-02 重构前文档）/git 历史（2026-09-02 重构前文档）/`docker-compose.yml`（新增 `codeschema-mt` 服务，`--profile mt`）。
 - [x] **验证** — `build/mt-demo.yaml`（demo-a→`./cmd`、demo-b→`./internal/config`）端到端：HTTP 与 MCP 两路均正确隔离；`go build ./...`、`go build -tags pg,redis ./...`、`go vet ./...`、`go test ./...`（31 包全绿）通过。
 - commit `693bdc4`（14 files, +1253/−257）。
 
@@ -442,8 +442,8 @@ P18      [████████████████████] 100%
 
 ## 接手说明
 
-1. 阅读 `docs/archive/1-生产层/开发文档/00-项目概述与架构概览.md` 了解整体架构
-2. 按 `docs/archive/1-生产层/开发文档/` 编号顺序阅读对应开发文档
+1. 阅读 git 历史（2026-09-02 重构前文档） 了解整体架构
+2. 按 git 历史（2026-09-02 重构前文档） 编号顺序阅读对应开发文档
 3. 当前所有模块可编译运行：`go build ./cmd/codeschema`
 4. 运行测试：`go test ./...`（全部包，0 失败；`-race` 竞态检测通过）
 5. 启动 HTTP API：`codeschema serve --http :8081`（或 `codeschema --config config.yaml serve`）

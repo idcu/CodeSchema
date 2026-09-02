@@ -43,4 +43,4 @@ codeschema-adapterx
 ## 5. 验证纪律
 
 - 发布前 `bash scripts/check-adapterx-publish.sh` 全通（红线：没有验证就是没做）
-- 发布后同步更新 `docs/archive/4-决策层/生态资产发布说明.md` 状态
+- 发布后同步更新 git 历史（2026-09-02 重构前文档） 状态
