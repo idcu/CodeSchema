@@ -622,6 +622,174 @@ CREATE INDEX IF NOT EXISTS idx_const_class ON constant(class_id);
 }
 
 var _ store.Store = (*PGStore)(nil)
+var _ store.FieldConstantStore = (*PGStore)(nil)
+
+// —— field（变量表）/ constant（常量表）读写（FieldConstantStore 可选接口） ——
+
+// nilIfZero 将 0 转为 NULL（归属二选一：0 表示无归属，落库为 NULL 以满足 CHECK 约束）。
+func nilIfZero(v int64) interface{} {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+const qFieldInsert = `INSERT INTO field (class_id, method_id, name, type, is_static, is_const, modifier, start_line, start_col, end_line, end_col, source, extra)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+
+func (s *PGStore) UpsertClassFields(ctx context.Context, classID int64, fields []store.FieldRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM field WHERE class_id=$1`, classID); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if _, err := tx.ExecContext(ctx, qFieldInsert, classID, nilIfZero(f.MethodID), f.Name, f.Type,
+			boolToInt(f.IsStatic), boolToInt(f.IsConst), f.Modifier,
+			f.StartLine, f.StartCol, f.EndLine, f.EndCol, f.Source, f.Extra); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *PGStore) UpsertMethodFields(ctx context.Context, methodID int64, fields []store.FieldRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM field WHERE method_id=$1`, methodID); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if _, err := tx.ExecContext(ctx, qFieldInsert, nilIfZero(f.ClassID), methodID, f.Name, f.Type,
+			boolToInt(f.IsStatic), boolToInt(f.IsConst), f.Modifier,
+			f.StartLine, f.StartCol, f.EndLine, f.EndCol, f.Source, f.Extra); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *PGStore) GetClassFields(ctx context.Context, classID int64) ([]store.FieldRecord, error) {
+	const q = `SELECT id, class_id, method_id, name, type, is_static, is_const, modifier, start_line, start_col, end_line, end_col, source, extra
+		FROM field WHERE class_id=$1 ORDER BY id`
+	return scanFields(ctx, s.db, q, classID)
+}
+
+func (s *PGStore) GetMethodFields(ctx context.Context, methodID int64) ([]store.FieldRecord, error) {
+	const q = `SELECT id, class_id, method_id, name, type, is_static, is_const, modifier, start_line, start_col, end_line, end_col, source, extra
+		FROM field WHERE method_id=$1 ORDER BY id`
+	return scanFields(ctx, s.db, q, methodID)
+}
+
+func scanFields(ctx context.Context, db *sql.DB, q string, arg int64) ([]store.FieldRecord, error) {
+	rows, err := db.QueryContext(ctx, q, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.FieldRecord
+	for rows.Next() {
+		var r store.FieldRecord
+		var cid, mid sql.NullInt64
+		var typ, mod, src, extra sql.NullString
+		var isStatic, isConst int
+		if err := rows.Scan(&r.ID, &cid, &mid, &r.Name, &typ, &isStatic, &isConst, &mod,
+			&r.StartLine, &r.StartCol, &r.EndLine, &r.EndCol, &src, &extra); err != nil {
+			return nil, err
+		}
+		r.ClassID = cid.Int64
+		r.MethodID = mid.Int64
+		r.Type = typ.String
+		r.Modifier = mod.String
+		r.Source = src.String
+		r.Extra = extra.String
+		r.IsStatic = isStatic != 0
+		r.IsConst = isConst != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+const qConstantInsert = `INSERT INTO constant (file_id, class_id, name, type, value, modifier, source, extra)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+
+func (s *PGStore) UpsertFileConstants(ctx context.Context, fileID int64, constants []store.ConstantRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM constant WHERE file_id=$1`, fileID); err != nil {
+		return err
+	}
+	for _, c := range constants {
+		if _, err := tx.ExecContext(ctx, qConstantInsert, fileID, nilIfZero(c.ClassID), c.Name, c.Type, c.Value, c.Modifier, c.Source, c.Extra); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *PGStore) UpsertClassConstants(ctx context.Context, classID int64, constants []store.ConstantRecord) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM constant WHERE class_id=$1`, classID); err != nil {
+		return err
+	}
+	for _, c := range constants {
+		if _, err := tx.ExecContext(ctx, qConstantInsert, nilIfZero(c.FileID), classID, c.Name, c.Type, c.Value, c.Modifier, c.Source, c.Extra); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *PGStore) GetFileConstants(ctx context.Context, fileID int64) ([]store.ConstantRecord, error) {
+	const q = `SELECT id, file_id, class_id, name, type, value, modifier, source, extra
+		FROM constant WHERE file_id=$1 ORDER BY id`
+	return scanConstants(ctx, s.db, q, fileID)
+}
+
+func (s *PGStore) GetClassConstants(ctx context.Context, classID int64) ([]store.ConstantRecord, error) {
+	const q = `SELECT id, file_id, class_id, name, type, value, modifier, source, extra
+		FROM constant WHERE class_id=$1 ORDER BY id`
+	return scanConstants(ctx, s.db, q, classID)
+}
+
+func scanConstants(ctx context.Context, db *sql.DB, q string, arg int64) ([]store.ConstantRecord, error) {
+	rows, err := db.QueryContext(ctx, q, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.ConstantRecord
+	for rows.Next() {
+		var r store.ConstantRecord
+		var fid, cid sql.NullInt64
+		var typ, val, mod, src, extra sql.NullString
+		if err := rows.Scan(&r.ID, &fid, &cid, &r.Name, &typ, &val, &mod, &src, &extra); err != nil {
+			return nil, err
+		}
+		r.FileID = fid.Int64
+		r.ClassID = cid.Int64
+		r.Type = typ.String
+		r.Value = val.String
+		r.Modifier = mod.String
+		r.Source = src.String
+		r.Extra = extra.String
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
 
 // BulkUpsert 批量入库多个文件的 IR（语义同逐文件 UpsertIR，但置于单事务 +
 // prepared statement + RETURNING id 维护 classID 映射，消除逐文件事务提交放大）。

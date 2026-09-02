@@ -97,6 +97,39 @@ type FileRecord struct {
 	ParseStatus       string   `json:"parse_status"`
 }
 
+// FieldRecord 对应 field 表（变量表）的一行记录。
+// 归属二选一：ClassID 非 0 为成员变量，MethodID 非 0 为局部变量（CHECK 约束保证）。
+type FieldRecord struct {
+	ID        int64  `json:"id"`
+	ClassID   int64  `json:"class_id,omitempty"`  // 成员变量归属类；0 表示非成员变量
+	MethodID  int64  `json:"method_id,omitempty"` // 局部变量归属方法；0 表示非局部变量
+	Name      string `json:"name"`
+	Type      string `json:"type,omitempty"`
+	IsStatic  bool   `json:"is_static,omitempty"`
+	IsConst   bool   `json:"is_const,omitempty"` // 类级常量可复用本表（is_const=true）
+	Modifier  string `json:"modifier,omitempty"`
+	StartLine int    `json:"start_line,omitempty"`
+	StartCol  int    `json:"start_col,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
+	EndCol    int    `json:"end_col,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Extra     string `json:"extra,omitempty"`
+}
+
+// ConstantRecord 对应 constant 表（常量表）的一行记录。
+// 归属二选一：FileID 非 0 为包/文件级常量，ClassID 非 0 为类级常量（CHECK 约束保证）。
+type ConstantRecord struct {
+	ID       int64  `json:"id"`
+	FileID   int64  `json:"file_id,omitempty"`  // 包/文件级常量归属文件；0 表示非文件级
+	ClassID  int64  `json:"class_id,omitempty"` // 类级常量归属类；0 表示非类级
+	Name     string `json:"name"`
+	Type     string `json:"type,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Modifier string `json:"modifier,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Extra    string `json:"extra,omitempty"`
+}
+
 // DriverNamer 可选接口：返回存储驱动名（file/sqlite/pg/...）。
 // 供健康检查等按实例精确报告驱动类型；未实现时由调用方按默认推断。
 type DriverNamer interface {
@@ -130,6 +163,30 @@ type CacheReader interface {
 	CalleesOf(ctx context.Context, fqn string) ([]string, error)
 	// ClassesOfFile 返回文件包含的类 FQN 集合。
 	ClassesOfFile(ctx context.Context, path string) ([]string, error)
+}
+
+// FieldConstantStore 可选接口：变量(field)/常量(constant) 表读写。
+// 仅 PG 后端实现（14 表 ID 型模型，含 field/constant 表）；FileStore/SQLiteStore
+// 未实现。调用方经类型断言探测（同 CacheReader/SkippedWriter 范式），未命中则回退。
+// 注意：cmd 层 redisCacheStore 包装后不透传本接口，启用 Redis 缓存层时需在包装层转发。
+type FieldConstantStore interface {
+	// UpsertClassFields 全量替换类的成员变量（按 class_id 删除后插入）。
+	UpsertClassFields(ctx context.Context, classID int64, fields []FieldRecord) error
+	// UpsertMethodFields 全量替换方法的局部变量（按 method_id 删除后插入）。
+	UpsertMethodFields(ctx context.Context, methodID int64, fields []FieldRecord) error
+	// GetClassFields 查询类的成员变量。
+	GetClassFields(ctx context.Context, classID int64) ([]FieldRecord, error)
+	// GetMethodFields 查询方法的局部变量。
+	GetMethodFields(ctx context.Context, methodID int64) ([]FieldRecord, error)
+
+	// UpsertFileConstants 全量替换文件/包级常量（按 file_id 删除后插入）。
+	UpsertFileConstants(ctx context.Context, fileID int64, constants []ConstantRecord) error
+	// UpsertClassConstants 全量替换类级常量（按 class_id 删除后插入）。
+	UpsertClassConstants(ctx context.Context, classID int64, constants []ConstantRecord) error
+	// GetFileConstants 查询文件/包级常量。
+	GetFileConstants(ctx context.Context, fileID int64) ([]ConstantRecord, error)
+	// GetClassConstants 查询类级常量。
+	GetClassConstants(ctx context.Context, classID int64) ([]ConstantRecord, error)
 }
 
 // NewStore 根据驱动类型创建对应的存储实现。

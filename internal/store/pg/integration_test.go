@@ -22,6 +22,7 @@ import (
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // pgDSN 从环境变量读取 PG 连接串（默认本地 compose 实例）。
@@ -308,4 +309,108 @@ func TestPGStore_FieldConstantTables(t *testing.T) {
 		t.Fatalf("expected cascade cleanup, got fields=%d consts=%d", fields, consts)
 	}
 	t.Logf("field/constant tables OK: file=%d class=%d method=%d", fileID, classID, methodID)
+}
+
+// TestPGStore_FieldConstantIO 验证 field/constant 读写接口（FieldConstantStore，2026-09-03 新增）：
+//  1. PGStore 实现 store.FieldConstantStore 接口断言；
+//  2. UpsertClassFields/GetClassFields、UpsertMethodFields/GetMethodFields 读写一致
+//     （含 is_static/is_const/行列号），且再次 Upsert 全量替换清掉旧行；
+//  3. UpsertFileConstants/GetFileConstants、UpsertClassConstants/GetClassConstants 读写一致，
+//     且全量替换生效。
+func TestPGStore_FieldConstantIO(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// 1) 接口断言（编译期：PGStore 必须实现 store.FieldConstantStore）
+	var _ store.FieldConstantStore = s
+
+	// 准备父数据
+	uniquePath := fmt.Sprintf("/tmp/pg-io/file-%d.go", time.Now().UnixNano())
+	var fileID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO file (absolute_path) VALUES ($1) RETURNING id`, uniquePath).Scan(&fileID); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+	var classID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO class (file_id, name, full_name) VALUES ($1,'Svc','pkg.Svc') RETURNING id`, fileID).Scan(&classID); err != nil {
+		t.Fatalf("insert class: %v", err)
+	}
+	var methodID int64
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO method (class_id, name) VALUES ($1,'Run') RETURNING id`, classID).Scan(&methodID); err != nil {
+		t.Fatalf("insert method: %v", err)
+	}
+
+	// 2) field 读写
+	memberFields := []store.FieldRecord{
+		{Name: "count", Type: "int", IsStatic: true, StartLine: 3, EndLine: 3},
+		{Name: "max", Type: "int", IsConst: true, Modifier: "const", StartLine: 4, EndLine: 4},
+	}
+	if err := s.UpsertClassFields(ctx, classID, memberFields); err != nil {
+		t.Fatalf("UpsertClassFields: %v", err)
+	}
+	got, err := s.GetClassFields(ctx, classID)
+	if err != nil {
+		t.Fatalf("GetClassFields: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "count" || !got[0].IsStatic || got[0].Type != "int" ||
+		got[1].Name != "max" || !got[1].IsConst {
+		t.Fatalf("member fields mismatch: %+v", got)
+	}
+	// 全量替换：重写为单条，旧行应清空
+	if err := s.UpsertClassFields(ctx, classID, []store.FieldRecord{{Name: "only", Type: "string"}}); err != nil {
+		t.Fatalf("re-UpsertClassFields: %v", err)
+	}
+	got, err = s.GetClassFields(ctx, classID)
+	if err != nil || len(got) != 1 || got[0].Name != "only" {
+		t.Fatalf("member fields replace failed: %+v err=%v", got, err)
+	}
+
+	localFields := []store.FieldRecord{{Name: "tmp", Type: "string", StartLine: 10, EndLine: 12}}
+	if err := s.UpsertMethodFields(ctx, methodID, localFields); err != nil {
+		t.Fatalf("UpsertMethodFields: %v", err)
+	}
+	got, err = s.GetMethodFields(ctx, methodID)
+	if err != nil || len(got) != 1 || got[0].Name != "tmp" || got[0].StartLine != 10 || got[0].EndLine != 12 {
+		t.Fatalf("local fields mismatch: %+v err=%v", got, err)
+	}
+
+	// 3) constant 读写
+	pkgConsts := []store.ConstantRecord{{Name: "Pi", Type: "float64", Value: "3.14"}}
+	if err := s.UpsertFileConstants(ctx, fileID, pkgConsts); err != nil {
+		t.Fatalf("UpsertFileConstants: %v", err)
+	}
+	gotc, err := s.GetFileConstants(ctx, fileID)
+	if err != nil || len(gotc) != 1 || gotc[0].Name != "Pi" || gotc[0].Value != "3.14" {
+		t.Fatalf("package constants mismatch: %+v err=%v", gotc, err)
+	}
+	clsConsts := []store.ConstantRecord{
+		{Name: "Max", Type: "int", Value: "100"},
+		{Name: "Min", Type: "int", Value: "0"},
+	}
+	if err := s.UpsertClassConstants(ctx, classID, clsConsts); err != nil {
+		t.Fatalf("UpsertClassConstants: %v", err)
+	}
+	gotc, err = s.GetClassConstants(ctx, classID)
+	if err != nil || len(gotc) != 2 {
+		t.Fatalf("class constants count mismatch: %+v err=%v", gotc, err)
+	}
+	if err := s.UpsertClassConstants(ctx, classID, []store.ConstantRecord{{Name: "Only", Type: "int", Value: "1"}}); err != nil {
+		t.Fatalf("re-UpsertClassConstants: %v", err)
+	}
+	gotc, err = s.GetClassConstants(ctx, classID)
+	if err != nil || len(gotc) != 1 || gotc[0].Name != "Only" {
+		t.Fatalf("class constants replace failed: %+v err=%v", gotc, err)
+	}
+	t.Log("field/constant read-write interfaces OK")
 }
