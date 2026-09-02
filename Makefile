@@ -49,6 +49,30 @@ build-cgo:
 		echo "  -> skipped (not found: down/onnxruntime/$$lib)"; \
 	fi
 	@echo "==> Binary: $(OUTPUT)/$(BINARY)$(if $(filter windows,$(GOOS)),.exe,)"
+# ONNX 变体构建（含语义嵌入，-tags onnx）：输出到 build/codeschema-onnx
+.PHONY: build-onnx
+build-onnx:
+	@echo "==> Building $(BINARY)-onnx $(VERSION) (CGO_ENABLED=1, -tags onnx) ..."
+	@mkdir -p $(OUTPUT)
+	CGO_ENABLED=1 $(GO) build -tags onnx \
+		-ldflags "$(LDFLAGS) -X main.version=$(VERSION)" \
+		-o $(OUTPUT)/$(BINARY)-onnx$(if $(filter windows,$(GOOS)),.exe,) \
+		./cmd/codeschema
+	@echo "==> Copying onnxruntime library for $(GOOS) ..."
+	@case "$(GOOS)" in \
+		windows) lib="onnxruntime.dll";; \
+		linux)   lib="libonnxruntime.so";; \
+		darwin)  lib="libonnxruntime.dylib";; \
+		*) lib="";; \
+	esac; \
+	if [ -n "$$lib" ] && [ -f "down/onnxruntime/$$lib" ]; then \
+		cp "down/onnxruntime/$$lib" $(OUTPUT)/; \
+		echo "  -> copied $$lib"; \
+	else \
+		echo "  -> skipped (not found: down/onnxruntime/$$lib)"; \
+	fi
+	@echo "==> Binary: $(OUTPUT)/$(BINARY)-onnx$(if $(filter windows,$(GOOS)),.exe,)"
+
 
 # 测试
 .PHONY: test
