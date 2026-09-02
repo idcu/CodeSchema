@@ -10,17 +10,26 @@ import (
 // 本环境不通；且 scip-typescript 默认产出 protobuf 而非 JSON），
 // 这里用极简的 protobuf wire 解码器解析 Index。
 //
-// 实测 schema（scip-typescript 0.4.0）：
+// 实测 schema（scip-typescript 0.4.0，2026-09-02 真实产物 wire 校验）：
 //   Index      { Metadata metadata=1; repeated Document documents=2; }
-//   Document   { string relative_path=1; Language language=2; repeated SymbolInformation symbols=3; repeated Occurrence occurrences=4; }
-//   SymbolInfo { string symbol=1; int32 kind=2; string enclosing_symbol=3; }
-//   Occurrence { string symbol=1; int32 symbol_roles=2; repeated int32 range=3; }
-// Document.language 在较新 SCIP 为嵌套 Language message（非字符串），
-// 本解码器对其做 best-effort 提取，缺失时由 convertDocument 按文件扩展名兜底。
+//   Document   { string relative_path=1; repeated Occurrence occurrences=2;
+//                repeated SymbolInformation symbols=3; Language language=4?(嵌套，可缺省) }
+//   SymbolInfo { string symbol=1; ... }
+//     —— 0.4.0 产物仅填 symbol（field 1）；kind/enclosing_symbol 不填；
+//        documentation 文本（markdown）实测在 field 3，本解码器忽略。
+//   Occurrence { repeated int32 range=1 [packed, 实测 3 元素 [line,startChar,endChar]];
+//                string symbol=2; SymbolRole symbol_roles=3;
+//                repeated int32 enclosing_range=7 [packed, [sLine,sCol,eLine,eCol]] }
+// SymbolRole 位掩码（SCIP 协议）：Definition=1、Import=2、WriteAccess=4、
+// ReadAccess=8、Generated=16、ForwardDefinition=64；普通标识符引用 = 0。
+// Document.language 较新 SCIP 为嵌套 Language message（非字符串），
+// 本解码器对其做 best-effort 提取，缺失时由 docLang 按文件扩展名兜底。
 
 const (
+	// scipRoleDefinition 为 SCIP SymbolRole.Definition 位（1）。
+	// 注意：普通「引用」occurrence 的 symbol_roles 为 0（而非 1<<1）；
+	// 1<<1 是 Import 角色，不代表引用。判定「定义以外皆引用」即可。
 	scipRoleDefinition = 1
-	scipRoleReference  = 2
 )
 
 // readVarint 读取 protobuf varint；遇残缺（缓冲区提前结束）前进 1 字节避免越界 panic。
@@ -38,24 +47,39 @@ func readVarint(b []byte, pos int) (uint64, int) {
 	return x, pos + 1
 }
 
-// skipField 跳过指定 wire 类型的字段值。
+// skipField 跳过指定 wire 类型的字段值；对无效/越界输入保证前进，
+// 避免损坏输入导致死循环。
 func skipField(b []byte, pos, wt int) int {
 	switch wt {
 	case 0:
 		_, n := readVarint(b, pos)
 		return n
 	case 1:
+		if pos+8 > len(b) {
+			return len(b)
+		}
 		return pos + 8
 	case 5:
+		if pos+4 > len(b) {
+			return len(b)
+		}
 		return pos + 4
 	case 2:
 		l, n := readVarint(b, pos)
+		if n+int(l) > len(b) {
+			return len(b)
+		}
 		return n + int(l)
 	}
-	return pos
+	// 未知 wire type（损坏输入）：保守前进，避免死循环。
+	if pos+1 < len(b) {
+		return pos + 1
+	}
+	return len(b)
 }
 
 // decodeIndex 解析顶层 Index，返回所有 Document。
+// 顶层仅按 field 2（documents）切分；其余字段（metadata 等）跳过。
 func decodeIndex(data []byte) []*SCIPDocument {
 	var docs []*SCIPDocument
 	pos := 0
@@ -81,6 +105,10 @@ func decodeIndex(data []byte) []*SCIPDocument {
 }
 
 // decodeDocument 解析单个 Document 消息。
+// 实测字段序：relative_path=1、occurrences=2、symbols=3（language 缺省）。
+// 兼容早期产物（language=2 字符串、symbols=3、occurrences=4）时，
+// field 2 内容为可打印语言名（如 "TypeScript"）→ 按 language 处理；
+// 否则按新版 occurrences 处理（occurrence 消息含控制字节，必非可打印文本）。
 func decodeDocument(b []byte) *SCIPDocument {
 	d := &SCIPDocument{}
 	pos := 0
@@ -100,8 +128,14 @@ func decodeDocument(b []byte) *SCIPDocument {
 			l, n2 := readVarint(b, pos)
 			pos = n2
 			end := pos + int(l)
-			d.Language = extractLanguage(b[pos:end])
+			seg := b[pos:end]
 			pos = end
+			// 新版：occurrences（二进制）；旧版：language 字符串（可打印短文本）
+			if isLanguageText(seg) {
+				d.Language = string(seg)
+			} else {
+				d.Occurrences = append(d.Occurrences, decodeOccurrence(seg))
+			}
 		case field == 3 && wt == 2:
 			l, n2 := readVarint(b, pos)
 			pos = n2
@@ -109,11 +143,17 @@ func decodeDocument(b []byte) *SCIPDocument {
 			d.Symbols = append(d.Symbols, decodeSymbol(b[pos:end]))
 			pos = end
 		case field == 4 && wt == 2:
+			// 新版：language（嵌套 Language message 或字符串）；旧版：occurrences
 			l, n2 := readVarint(b, pos)
 			pos = n2
 			end := pos + int(l)
-			d.Occurrences = append(d.Occurrences, decodeOccurrence(b[pos:end]))
+			seg := b[pos:end]
 			pos = end
+			if lang := extractLanguage(seg); lang != "" {
+				d.Language = lang
+			} else {
+				d.Occurrences = append(d.Occurrences, decodeOccurrence(seg))
+			}
 		default:
 			pos = skipField(b, pos, wt)
 		}
@@ -121,7 +161,19 @@ func decodeDocument(b []byte) *SCIPDocument {
 	return d
 }
 
+// isLanguageText 判断字段值是否为语言名字符串（可打印短文本）。
+// occurrence 消息（field 2 新版）含控制字节（tag/len/packed），必非可打印文本。
+func isLanguageText(b []byte) bool {
+	if len(b) == 0 || len(b) > 64 {
+		return false
+	}
+	return isPrintable(b)
+}
+
 // decodeSymbol 解析 SymbolInformation 消息。
+// 实测（0.4.0）：仅 symbol（field 1）有值；kind/enclosing_symbol 不填；
+// field 3 为 documentation 文本（markdown），本解码器忽略。
+// 兼容早期产物的 kind（enum varint，field 2）。
 func decodeSymbol(b []byte) *SCIPSymbol {
 	s := &SCIPSymbol{}
 	pos := 0
@@ -137,13 +189,8 @@ func decodeSymbol(b []byte) *SCIPSymbol {
 			end := pos + int(l)
 			s.ID = string(b[pos:end])
 			pos = end
-		case field == 3 && wt == 2:
-			l, n2 := readVarint(b, pos)
-			pos = n2
-			end := pos + int(l)
-			s.EnclosingSymbol = string(b[pos:end])
-			pos = end
 		case field == 2 && wt == 0:
+			// 兼容早期 enum kind（0.4.0 不填）
 			v, nn := readVarint(b, pos)
 			pos = nn
 			s.Kind = int(v)
@@ -154,7 +201,9 @@ func decodeSymbol(b []byte) *SCIPSymbol {
 	return s
 }
 
-// decodeOccurrence 解析 Occurrence 消息；range 为 packed repeated int32。
+// decodeOccurrence 解析 Occurrence 消息。
+// 实测字段序：range=1（packed int32，[line,startChar,endChar]）、
+// symbol=2、symbol_roles=3（varint）、enclosing_range=7（packed，方法体区间）。
 func decodeOccurrence(b []byte) *SCIPOccurrence {
 	o := &SCIPOccurrence{}
 	pos := 0
@@ -165,32 +214,48 @@ func decodeOccurrence(b []byte) *SCIPOccurrence {
 		wt := int(tag & 7)
 		switch {
 		case field == 1 && wt == 2:
-			l, n2 := readVarint(b, pos)
-			pos = n2
-			end := pos + int(l)
-			o.Symbol = string(b[pos:end])
-			pos = end
-		case field == 2 && wt == 0:
-			v, nn := readVarint(b, pos)
-			pos = nn
-			o.SymbolRole = int(v)
-		case field == 3 && wt == 2:
+			// range：packed repeated int32（实测 3 元素 [line,startChar,endChar]）
 			l, n2 := readVarint(b, pos)
 			pos = n2
 			end := pos + int(l)
 			packed := b[pos:end]
 			pos = end
-			pp := 0
-			for pp < len(packed) {
-				v, nn2 := readVarint(packed, pp)
-				pp = nn2
-				o.Range = append(o.Range, int(v))
-			}
+			o.Range = append(o.Range, unpackInt32(packed)...)
+		case field == 2 && wt == 2:
+			l, n2 := readVarint(b, pos)
+			pos = n2
+			end := pos + int(l)
+			o.Symbol = string(b[pos:end])
+			pos = end
+		case field == 3 && wt == 0:
+			v, nn := readVarint(b, pos)
+			pos = nn
+			o.SymbolRole = int(v)
+		case field == 7 && wt == 2:
+			// enclosing_range：packed repeated int32（方法体 [sLine,sCol,eLine,eCol]）
+			l, n2 := readVarint(b, pos)
+			pos = n2
+			end := pos + int(l)
+			packed := b[pos:end]
+			pos = end
+			o.EnclosingRange = append(o.EnclosingRange, unpackInt32(packed)...)
 		default:
 			pos = skipField(b, pos, wt)
 		}
 	}
 	return o
+}
+
+// unpackInt32 解包 packed repeated int32（varint 序列）。
+func unpackInt32(packed []byte) []int {
+	var out []int
+	pp := 0
+	for pp < len(packed) {
+		v, nn2 := readVarint(packed, pp)
+		pp = nn2
+		out = append(out, int(v))
+	}
+	return out
 }
 
 // isPrintable 判断字节切片是否为可打印 ASCII（允许常见空白）。

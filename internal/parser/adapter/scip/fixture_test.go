@@ -6,26 +6,35 @@ import (
 	"testing"
 )
 
-// TestSCIPAdapter_ConvertDocument_Calls 验证 SCIP 适配器的「引用→调用关系」提取逻辑。
+// fixture 语义与真实 scip-typescript 0.4.0 产物一致（见 scipwire.go 头注释）：
+//   - SymbolRole 位掩码 Definition=1；普通引用 occurrence 的 SymbolRole=0；
+//   - Range 为 [line, startChar, endChar]（3 元素）；
+//   - 方法定义 occurrence 的 EnclosingRange（field 7）覆盖整个方法体；
+//   - 符号为完整 SCIP symbol（descriptor 语法：`Foo#` 类、`Foo#bar().` 方法）。
+
+// TestSCIPAdapter_ConvertDocument_Calls 验证「方法体引用 → 方法级调用」提取。
 //
-// 这是生产路径中的关键能力：当同一个符号同时存在定义 occurrence（SymbolRole=0）
-// 与引用 occurrence（SymbolRole=1）时，convertDocument 应生成一条 CallIR。
-// 该路径在此前的单测中未被覆盖。
+// 历史缺陷回归锚点：旧实现把 SymbolRole=2 当「引用」（实为 Import），
+// 且 caller 直接记文件路径、引用需命中同文件定义——真实产物下
+// （引用 roles=0）调用关系完全丢失。新语义：Definition 之外的引用 +
+// 方法级 callee + 引用行落在方法 enclosing_range 内 → 生成 CallIR。
 func TestSCIPAdapter_ConvertDocument_Calls(t *testing.T) {
 	doc := &SCIPDocument{
-		RelativePath: "src/main/Foo.java",
-		Language:     "Java",
+		RelativePath: "src/calc.ts",
 		Symbols: []*SCIPSymbol{
-			{ID: "com.example.Foo", Name: "Foo", Kind: 0, EnclosingSymbol: ""},
-			{ID: "com.example.Foo.bar", Name: "bar", Kind: 1, EnclosingSymbol: "com.example.Foo"},
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#"},
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#add()."},
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#double()."},
 		},
 		Occurrences: []*SCIPOccurrence{
+			// add 方法定义（enclosing_range 覆盖方法体 行1-3）
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#add().", SymbolRole: 1, Range: []int{1, 2, 5}, EnclosingRange: []int{1, 0, 3, 1}},
+			// double 方法定义（方法体 行5-7）
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#double().", SymbolRole: 1, Range: []int{5, 2, 8}, EnclosingRange: []int{5, 0, 7, 1}},
 			// 类定义
-			{Symbol: "com.example.Foo", SymbolRole: 0, Range: []int{1, 0, 50, 0}},
-			// 方法定义
-			{Symbol: "com.example.Foo.bar", SymbolRole: 0, Range: []int{10, 0, 20, 0}},
-			// 对方法的引用（应生成一条调用）
-			{Symbol: "com.example.Foo.bar", SymbolRole: 1, Range: []int{3, 4, 3, 7}},
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#", SymbolRole: 1, Range: []int{0, 13, 23}, EnclosingRange: []int{0, 0, 8, 1}},
+			// double 方法体内 this.add(...) 引用（roles=0，行6）→ 调用 double→add
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#add().", SymbolRole: 0, Range: []int{6, 11, 14}},
 		},
 	}
 	a := NewSCIPAdapter("")
@@ -34,76 +43,78 @@ func TestSCIPAdapter_ConvertDocument_Calls(t *testing.T) {
 	if len(ir.Classes) != 1 {
 		t.Fatalf("expected 1 class, got %d", len(ir.Classes))
 	}
-	if ir.Classes[0].FullName != "com.example.Foo" {
-		t.Errorf("class fullName = %q", ir.Classes[0].FullName)
+	if ir.Classes[0].FullName != "scip-typescript npm . . src/calc.ts/Calculator#" {
+		t.Errorf("class FullName = %q", ir.Classes[0].FullName)
 	}
-	if len(ir.Methods) != 1 {
-		t.Fatalf("expected 1 method, got %d", len(ir.Methods))
-	}
-	if ir.Methods[0].Name != "bar" || ir.Methods[0].ClassFQN != "com.example.Foo" {
-		t.Errorf("method = name=%q classFQN=%q, want bar/com.example.Foo", ir.Methods[0].Name, ir.Methods[0].ClassFQN)
+	if len(ir.Methods) != 2 {
+		t.Fatalf("expected 2 methods (add/double), got %d", len(ir.Methods))
 	}
 	if len(ir.Calls) != 1 {
-		t.Fatalf("expected 1 call (reference→call), got %d", len(ir.Calls))
+		t.Fatalf("expected 1 call (double→add), got %d: %v", len(ir.Calls), ir.Calls)
 	}
 	c := ir.Calls[0]
-	if c.CallerFQN != "src/main/Foo.java" {
-		t.Errorf("callerFQN = %q, want file relative_path", c.CallerFQN)
+	wantCaller := "scip-typescript npm . . src/calc.ts/Calculator#double()."
+	if c.CallerFQN != wantCaller {
+		t.Errorf("callerFQN = %q, want method FQN %q", c.CallerFQN, wantCaller)
 	}
-	if c.CalleeFQN != "com.example.Foo.bar" {
-		t.Errorf("calleeFQN = %q, want method symbol id", c.CalleeFQN)
+	if c.CalleeFQN != "scip-typescript npm . . src/calc.ts/Calculator#add()." {
+		t.Errorf("calleeFQN = %q, want add method symbol", c.CalleeFQN)
 	}
 	if c.CallType != "direct" {
 		t.Errorf("callType = %q, want direct", c.CallType)
 	}
-	if c.LineNumber != 3 {
-		t.Errorf("lineNumber = %d, want 3", c.LineNumber)
+	if c.LineNumber != 6 {
+		t.Errorf("lineNumber = %d, want 6", c.LineNumber)
 	}
 }
 
-// TestSCIPAdapter_ConvertDocument_NoCallWithoutDefinition 验证：
-// 仅存在引用、无对应定义时，不应生成调用（避免悬空调用边）。
-func TestSCIPAdapter_ConvertDocument_NoCallWithoutDefinition(t *testing.T) {
+// TestSCIPAdapter_ConvertDocument_NoCallOutsideMethod 验证：
+// 类级引用（如 new Calculator()、类型注解）与不在任何方法体内的引用
+// 不应生成调用（避免把「引用」误当「调用」）。
+func TestSCIPAdapter_ConvertDocument_NoCallOutsideMethod(t *testing.T) {
 	doc := &SCIPDocument{
-		RelativePath: "src/main/Foo.java",
-		Language:     "Java",
-		Symbols:      []*SCIPSymbol{},
+		RelativePath: "src/calc.ts",
+		Symbols: []*SCIPSymbol{
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#"},
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#add()."},
+			{ID: "scip-typescript npm . . src/calc.ts/Calculator#double()."},
+		},
 		Occurrences: []*SCIPOccurrence{
-			{Symbol: "com.example.Unknown.baz", SymbolRole: 1, Range: []int{3, 4, 3, 7}},
+			// double 方法定义（方法体 行5-7）
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#double().", SymbolRole: 1, Range: []int{5, 2, 8}, EnclosingRange: []int{5, 0, 7, 1}},
+			// 类引用（行0 export class 之外无方法包裹——如模块顶层类型注解）
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#", SymbolRole: 0, Range: []int{0, 20, 31}},
+			// 方法级引用但落在任何方法体之外（行9 顶层调用）
+			{Symbol: "scip-typescript npm . . src/calc.ts/Calculator#add().", SymbolRole: 0, Range: []int{9, 0, 3}},
 		},
 	}
 	a := NewSCIPAdapter("")
 	ir := a.convertDocument(doc)
 	if len(ir.Calls) != 0 {
-		t.Fatalf("expected 0 calls without definition, got %d", len(ir.Calls))
+		t.Fatalf("expected 0 calls (refs outside method bodies), got %d: %v", len(ir.Calls), ir.Calls)
 	}
 }
 
-// TestSCIPAdapter_ParseRealIndexFile 端到端：从磁盘加载真实感 .scip 文件并解析。
-//
-// 覆盖「loadIndex → 路径匹配 → convertDocument」完整链路，确保 ParseAll 在真实
-// 多文件 index 下能正确分发 IR。同时验证降级行为：不在 index 中的文件返回空 IR。
+// TestSCIPAdapter_ParseRealIndexFile 端到端：从磁盘加载真实形态二进制 .scip
+// 并解析，覆盖「loadIndex → 路径匹配 → convertDocument」完整链路；
+// 同时验证不在 index 中的文件返回空 IR（降级，非错误）。
 func TestSCIPAdapter_ParseRealIndexFile(t *testing.T) {
 	dir := t.TempDir()
-	indexJSON := `{
-		"metadata": {"tool_info": {"name": "scip-go", "version": "0.3.0"}},
-		"documents": [
-			{
-				"relative_path": "internal/service/svc.go",
-				"language": "Go",
-				"symbols": [
-					{"id": "codeschema/internal/service.Service", "name": "Service", "kind": 0, "enclosing_symbol": ""},
-					{"id": "codeschema/internal/service.Service.Run", "name": "Run", "kind": 1, "enclosing_symbol": "codeschema/internal/service.Service"}
-				],
-				"occurrences": [
-					{"symbol": "codeschema/internal/service.Service", "symbol_role": 0, "range": [5, 0, 30, 0]},
-					{"symbol": "codeschema/internal/service.Service.Run", "symbol_role": 0, "range": [12, 0, 22, 0]},
-					{"symbol": "codeschema/internal/service.Service.Run", "symbol_role": 1, "range": [45, 2, 45, 5]}
-				]
-			}
-		]
-	}`
-	if err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(indexJSON), 0644); err != nil {
+	idx := encIndex(encDocument("internal/service/svc.go", []string{
+		"scip-typescript npm . . internal/service/svc.go/Service#",
+		"scip-typescript npm . . internal/service/svc.go/Service#Run().",
+		"scip-typescript npm . . internal/service/svc.go/Service#helper().",
+	},
+		// Service 类定义
+		&SCIPOccurrence{Symbol: "scip-typescript npm . . internal/service/svc.go/Service#", SymbolRole: 1, Range: []int{5, 6, 14}, EnclosingRange: []int{5, 0, 30, 1}},
+		// helper 方法定义（方法体 行12-22）
+		&SCIPOccurrence{Symbol: "scip-typescript npm . . internal/service/svc.go/Service#helper().", SymbolRole: 1, Range: []int{12, 2, 8}, EnclosingRange: []int{12, 0, 22, 1}},
+		// Run 方法定义（方法体 行30-50）
+		&SCIPOccurrence{Symbol: "scip-typescript npm . . internal/service/svc.go/Service#Run().", SymbolRole: 1, Range: []int{30, 2, 5}, EnclosingRange: []int{30, 0, 50, 1}},
+		// Run 方法体内调用 helper（行45）→ Run→helper
+		&SCIPOccurrence{Symbol: "scip-typescript npm . . internal/service/svc.go/Service#helper().", SymbolRole: 0, Range: []int{45, 2, 8}},
+	))
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,8 +139,11 @@ func TestSCIPAdapter_ParseRealIndexFile(t *testing.T) {
 	if ir.Language != "go" {
 		t.Errorf("language = %q, want go", ir.Language)
 	}
-	if len(ir.Classes) != 1 || len(ir.Methods) != 1 || len(ir.Calls) != 1 {
-		t.Errorf("got classes=%d methods=%d calls=%d, want 1/1/1", len(ir.Classes), len(ir.Methods), len(ir.Calls))
+	if len(ir.Classes) != 1 || len(ir.Methods) != 2 || len(ir.Calls) != 1 {
+		t.Errorf("got classes=%d methods=%d calls=%d, want 1/2/1", len(ir.Classes), len(ir.Methods), len(ir.Calls))
+	}
+	if c := ir.Calls[0]; c.CalleeFQN != "scip-typescript npm . . internal/service/svc.go/Service#helper()." {
+		t.Errorf("call callee = %q, want helper method symbol", c.CalleeFQN)
 	}
 
 	// 未命中 index 的文件 → 返回空 IR（降级，非错误）

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,21 @@ func TestSCIPAdapter_RealScipTypeScript(t *testing.T) {
 	}
 	if !found["add"] || !found["double"] {
 		t.Errorf("methods missing: add=%v double=%v (got %v)", found["add"], found["double"], found)
+	}
+	// double() 内 this.add(...) 是真实调用。历史缺陷：occurrences 解码字段
+	// 错位 + 引用角色误判（2=Import 而非引用），导致真实产物 calls=0——
+	// 断言 calls>=1 且存在 callee 含 add 的调用边，杜绝缺陷回归。
+	if len(ir.Calls) < 1 {
+		t.Errorf("calls = %d, want >=1 (double() calls this.add())", len(ir.Calls))
+	}
+	calleeOK := false
+	for _, c := range ir.Calls {
+		if strings.Contains(c.CalleeFQN, "add") && c.CallerFQN != "" {
+			calleeOK = true
+		}
+	}
+	if !calleeOK {
+		t.Errorf("expected a call double→add (caller/callee FQN non-empty), got %v", ir.Calls)
 	}
 	t.Logf("real scip-typescript index: classes=%d methods=%d calls=%d", len(ir.Classes), len(ir.Methods), len(ir.Calls))
 }

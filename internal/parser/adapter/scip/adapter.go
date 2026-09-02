@@ -23,7 +23,7 @@ import (
 // SCIP 文档/符号/引用结构见下方 SCIPDocument / SCIPSymbol / SCIPOccurrence。
 // （.scip 为 protobuf 二进制，由 scipwire.go 内极简 wire 解码器解析。）
 
-// SCIPDocument 表示 SCIP index 中的一个文档。
+// SCIPDocument 表示 SCIP index 中的一个文档（由 scipwire.go wire 解码填充）。
 type SCIPDocument struct {
 	RelativePath string            `json:"relative_path"`
 	Language     string            `json:"language"`
@@ -31,21 +31,29 @@ type SCIPDocument struct {
 	Occurrences  []*SCIPOccurrence `json:"occurrences"`
 }
 
-// SCIPSymbol 表示 SCIP 中的符号定义。
+// SCIPSymbol 表示 SCIP 中的符号定义（SymbolInformation）。
+// 实测 scip-typescript 0.4.0 仅填 ID（完整 SCIP symbol 串）；
+// Kind/EnclosingSymbol 保留字段仅供早期产物兼容，真实产物为空。
 type SCIPSymbol struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
-	Kind            int    `json:"kind"` // 0=class, 1=method, 2=field, ...
+	Kind            int    `json:"kind"` // 早期 enum（0.4.0 不填）
 	PackageName     string `json:"package_name"`
 	PackageVersion  string `json:"package_version"`
 	EnclosingSymbol string `json:"enclosing_symbol"`
 }
 
-// SCIPOccurrence 表示 SCIP 中的符号引用（定义或引用位置）。
+// SCIPOccurrence 表示 SCIP 中的符号引用位置（定义或使用）。
+// SymbolRole 为位掩码（SCIP：Definition=1/Import=2/Write=4/Read=8/...）；
+// 普通标识符「引用」的 SymbolRole 为 0。
+// Range 实测 3 元素 [line, startChar, endChar]（同行的列区间）；
+// EnclosingRange（field 7）4 元素 [sLine, sCol, eLine, eCol]，
+// 仅定义 occurrence 携带，覆盖整个符号体（如方法体）——调用归属的关键。
 type SCIPOccurrence struct {
-	Symbol     string `json:"symbol"`
-	SymbolRole int    `json:"symbol_role"` // 0=definition, 1=reference, 2=forward_decl
-	Range      []int  `json:"range"`       // [startLine, startChar, endLine, endChar]
+	Symbol         string `json:"symbol"`
+	SymbolRole     int    `json:"symbol_role"`
+	Range          []int  `json:"range"`
+	EnclosingRange []int  `json:"enclosing_range"`
 }
 
 // SCIPAdapter 读取 SCIP index 文件的适配器。
@@ -257,20 +265,22 @@ done:
 
 // convertDocument 将 SCIP 文档转换为 IRDocument。
 //
-// 类/方法身份从 SymbolInformation 符号表的符号描述符解析
-// （scip-typescript 0.4.0 的 occurrences 常为空，定义信息落在符号里）。
-// 调用关系从 Occurrence 抽取（若存在）；SCIP symbol_roles 为位掩码：
-// DEFINITION=1、REFERENCE=2。
+// 类/方法身份从 SymbolInformation 符号表按 SCIP symbol descriptor 语法解析
+// （classifySymbol；真实产物 kind 字段为空，不能依赖）。
+// 调用关系从 Occurrence 按方法级语义抽取：
+//   - SymbolRole 位掩码 Definition=1；其余（0 普通引用/2 Import/4 Write/8 Read
+//     等）均为「使用」，Definition 之外的引用视为潜在调用点；
+//   - 方法定义 occurrence 的 EnclosingRange（方法体区间）承载 caller 归属：
+//     引用行落在哪个方法体内，caller 即该方法；
+//   - 仅方法级符号（descriptor 含方法签名）的引用计入调用，类/字段/参数
+//     引用、类型注解、import 不计（避免把引用误当调用）。
+// caller/callee 用完整 SCIP symbol（跨包唯一可溯源）；方法→类归属可由上层
+// 按 symbol 前缀与 ClassIR.FullName 关联（MethodIR.ClassFQN 不重复冗余存储）。
 func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
 	ir := &parser.IRDocument{
 		Source:   "scip",
 		Language: scipLangToCodeLang(docLang(doc)),
 		FilePath: doc.RelativePath,
-	}
-
-	symMap := make(map[string]*SCIPSymbol)
-	for _, sym := range doc.Symbols {
-		symMap[sym.ID] = sym
 	}
 
 	// 类/方法从符号表抽取
@@ -286,35 +296,55 @@ func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
 		case isMethod:
 			ir.Methods = append(ir.Methods, parser.MethodIR{
 				Name:     name,
-				ClassFQN: sym.EnclosingSymbol,
+				ClassFQN: sym.EnclosingSymbol, // 真实产物为空；类归属按 symbol 前缀关联
 			})
 		}
 	}
 
-	// 调用关系从 occurrences 抽取（若存在）
-	typeDefs := make(map[string]bool)
+	// 方法定义 occurrence（携带方法体 enclosing_range）→ caller 归属池
+	type methodDef struct {
+		symbol string
+		span   []int // EnclosingRange [sLine,sCol,eLine,eCol]
+	}
+	var defs []methodDef
 	for _, occ := range doc.Occurrences {
-		if occ.SymbolRole&scipRoleDefinition != 0 {
-			if _, ok := symMap[occ.Symbol]; ok {
-				typeDefs[occ.Symbol] = true
-			}
+		if occ.SymbolRole&scipRoleDefinition == 0 {
+			continue
+		}
+		if _, isM, _ := classifySymbol(occ.Symbol); isM && len(occ.EnclosingRange) >= 4 {
+			defs = append(defs, methodDef{symbol: occ.Symbol, span: occ.EnclosingRange})
 		}
 	}
+
+	// 引用 occurrence → 方法级调用
 	for _, occ := range doc.Occurrences {
-		if occ.SymbolRole&scipRoleReference != 0 {
-			if typeDefs[occ.Symbol] {
-				line := 0
-				if len(occ.Range) >= 4 {
-					line = occ.Range[0]
-				}
-				ir.Calls = append(ir.Calls, parser.CallIR{
-					CallerFQN:  doc.RelativePath,
-					CalleeFQN:  occ.Symbol,
-					CallType:   "direct",
-					LineNumber: line,
-				})
+		if occ.SymbolRole&scipRoleDefinition != 0 {
+			continue // 定义本身不是调用
+		}
+		_, calleeIsMethod, _ := classifySymbol(occ.Symbol)
+		if !calleeIsMethod {
+			continue // 类/模块/字段/参数引用、import、类型注解等不算调用
+		}
+		line := 0
+		if len(occ.Range) >= 1 {
+			line = occ.Range[0]
+		}
+		caller := ""
+		for _, d := range defs {
+			if len(d.span) >= 4 && line >= d.span[0] && line <= d.span[2] {
+				caller = d.symbol
+				break
 			}
 		}
+		if caller == "" {
+			continue // 引用不在任何方法体内（顶层/字段初始化等）——不伪造调用边
+		}
+		ir.Calls = append(ir.Calls, parser.CallIR{
+			CallerFQN:  caller,
+			CalleeFQN:  occ.Symbol,
+			CallType:   "direct",
+			LineNumber: line,
+		})
 	}
 
 	return ir

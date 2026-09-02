@@ -2,10 +2,8 @@ package scip
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -83,41 +81,37 @@ func TestSCIPAdapter_LoadIndex_NoFiles(t *testing.T) {
 }
 
 func TestSCIPAdapter_LoadIndex_InvalidFile(t *testing.T) {
+	// 损坏输入（非 protobuf）：宽容处理——不 panic、不 hang（skipField 防死循环
+	// 保护），解析出 0 文档后由编排层降级，而非报错中断。
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte("not json"), 0644)
+	err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte("not a scip index"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := NewSCIPAdapter(dir)
 	err = a.loadIndex()
-	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+	if err != nil {
+		t.Fatalf("garbage input should be tolerated (no error), got: %v", err)
+	}
+	if len(a.documents) != 0 {
+		t.Errorf("expected 0 documents for garbage input, got %d", len(a.documents))
 	}
 }
 
 func TestSCIPAdapter_LoadIndex_ValidFile(t *testing.T) {
 	dir := t.TempDir()
-	indexJSON := `{
-		"metadata": {"tool_info": {"name": "scip-java", "version": "1.0"}},
-		"documents": [
-			{
-				"relative_path": "src/main/Foo.java",
-				"language": "Java",
-				"symbols": [
-					{"id": "com.example.Foo", "name": "Foo", "kind": 0, "enclosing_symbol": ""}
-				],
-				"occurrences": [
-					{"symbol": "com.example.Foo", "symbol_role": 0, "range": [1, 0, 50, 0]}
-				]
-			}
-		]
-	}`
-	err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(indexJSON), 0644)
-	if err != nil {
+	// 真实 protobuf 二进制（与 scip-typescript 0.4.0 产物同构，见 scip_wireencode_test.go）
+	idx := encIndex(encDocument("src/main/Foo.java", []string{
+		"scip-typescript npm . . src/main/Foo.java/Foo#",
+	}, &SCIPOccurrence{
+		Symbol: "scip-typescript npm . . src/main/Foo.java/Foo#",
+		SymbolRole: 1, Range: []int{1, 0, 5},
+	}))
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
 		t.Fatal(err)
 	}
 	a := NewSCIPAdapter(dir)
-	err = a.loadIndex()
+	err := a.loadIndex()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -127,17 +121,17 @@ func TestSCIPAdapter_LoadIndex_ValidFile(t *testing.T) {
 	if a.documents[0].RelativePath != "src/main/Foo.java" {
 		t.Errorf("expected relative_path=src/main/Foo.java, got %s", a.documents[0].RelativePath)
 	}
+	if len(a.documents[0].Symbols) != 1 || len(a.documents[0].Occurrences) != 1 {
+		t.Errorf("expected 1 symbol + 1 occurrence, got %d/%d",
+			len(a.documents[0].Symbols), len(a.documents[0].Occurrences))
+	}
 }
 
 func TestSCIPAdapter_ConvertDocument_Class(t *testing.T) {
 	doc := &SCIPDocument{
 		RelativePath: "src/main/Foo.java",
-		Language:     "Java",
 		Symbols: []*SCIPSymbol{
-			{ID: "com.example.Foo", Name: "Foo", Kind: 0},
-		},
-		Occurrences: []*SCIPOccurrence{
-			{Symbol: "com.example.Foo", SymbolRole: 0, Range: []int{1, 0, 50, 0}},
+			{ID: "scip-typescript npm . . src/main/Foo.java/Foo#"},
 		},
 	}
 	a := NewSCIPAdapter("")
@@ -157,17 +151,16 @@ func TestSCIPAdapter_ConvertDocument_Class(t *testing.T) {
 	if ir.Classes[0].Name != "Foo" {
 		t.Errorf("expected class name=Foo, got %s", ir.Classes[0].Name)
 	}
+	if ir.Classes[0].FullName != "scip-typescript npm . . src/main/Foo.java/Foo#" {
+		t.Errorf("class FullName = %q, want full SCIP symbol", ir.Classes[0].FullName)
+	}
 }
 
 func TestSCIPAdapter_ConvertDocument_Method(t *testing.T) {
 	doc := &SCIPDocument{
 		RelativePath: "src/main/Foo.java",
-		Language:     "Java",
 		Symbols: []*SCIPSymbol{
-			{ID: "com.example.Foo.bar", Name: "bar", Kind: 1, EnclosingSymbol: "com.example.Foo"},
-		},
-		Occurrences: []*SCIPOccurrence{
-			{Symbol: "com.example.Foo.bar", SymbolRole: 0, Range: []int{10, 0, 20, 0}},
+			{ID: "scip-typescript npm . . src/main/Foo.java/Foo#bar()."},
 		},
 	}
 	a := NewSCIPAdapter("")
@@ -178,8 +171,10 @@ func TestSCIPAdapter_ConvertDocument_Method(t *testing.T) {
 	if ir.Methods[0].Name != "bar" {
 		t.Errorf("expected method name=bar, got %s", ir.Methods[0].Name)
 	}
-	if ir.Methods[0].ClassFQN != "com.example.Foo" {
-		t.Errorf("expected classFQN=com.example.Foo, got %s", ir.Methods[0].ClassFQN)
+	// ClassFQN 真实产物（scip-typescript 0.4.0）无 enclosing_symbol 字段：
+	// 方法→类归属由上层按 method symbol 前缀与 ClassIR.FullName 关联。
+	if ir.Methods[0].ClassFQN != "" {
+		t.Errorf("expected empty ClassFQN (0.4.0 no enclosing field), got %q", ir.Methods[0].ClassFQN)
 	}
 }
 
@@ -241,11 +236,11 @@ func TestSCIPLangToCodeLang(t *testing.T) {
 func TestSCIPAdapter_LoadIndex_MultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	index1 := `{"documents": [{"relative_path": "a.java", "language": "Java", "symbols": [], "occurrences": []}]}`
-	index2 := `{"documents": [{"relative_path": "b.go", "language": "Go", "symbols": [], "occurrences": []}]}`
+	idx1 := encIndex(encDocument("a.java", nil))
+	idx2 := encIndex(encDocument("b.go", nil))
 
-	os.WriteFile(filepath.Join(dir, "index1.scip"), []byte(index1), 0644)
-	os.WriteFile(filepath.Join(dir, "index2.scip"), []byte(index2), 0644)
+	os.WriteFile(filepath.Join(dir, "index1.scip"), idx1, 0644)
+	os.WriteFile(filepath.Join(dir, "index2.scip"), idx2, 0644)
 
 	a := NewSCIPAdapter(dir)
 	err := a.loadIndex()
@@ -260,8 +255,8 @@ func TestSCIPAdapter_LoadIndex_MultipleFiles(t *testing.T) {
 func TestSCIPAdapter_LoadIndex_SkipNonScipFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	indexJSON := `{"documents": [{"relative_path": "a.java", "language": "Java", "symbols": [], "occurrences": []}]}`
-	os.WriteFile(filepath.Join(dir, "index.scip"), []byte(indexJSON), 0644)
+	idx := encIndex(encDocument("a.java", nil))
+	os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644)
 	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not an index"), 0644)
 
 	a := NewSCIPAdapter(dir)
@@ -276,16 +271,12 @@ func TestSCIPAdapter_LoadIndex_SkipNonScipFiles(t *testing.T) {
 func TestSCIPAdapter_LoadIndex_StreamingBackpressure(t *testing.T) {
 	dir := t.TempDir()
 	// 构造一个包含 5 个文档的 index，验证 maxDocs 背压截断（流式加载不整读内存）
-	var b strings.Builder
-	b.WriteString(`{"metadata": {"tool_info": {"name": "scip-java"}}, "documents": [`)
-	for i := 0; i < 5; i++ {
-		if i > 0 {
-			b.WriteString(",")
-		}
-		b.WriteString(fmt.Sprintf(`{"relative_path": "f%d.java", "language": "Java", "symbols": [], "occurrences": []}`, i))
-	}
-	b.WriteString(`]}`)
-	if err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(b.String()), 0644); err != nil {
+	idx := encIndex(
+		encDocument("f0.java", nil), encDocument("f1.java", nil),
+		encDocument("f2.java", nil), encDocument("f3.java", nil),
+		encDocument("f4.java", nil),
+	)
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -316,8 +307,8 @@ func TestSCIPAdapter_LoadIndex_StreamingBackpressure(t *testing.T) {
 
 func TestSCIPAdapter_LoadIndex_ReloadIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	indexJSON := `{"documents": [{"relative_path": "a.java", "language": "Java", "symbols": [], "occurrences": []}]}`
-	if err := os.WriteFile(filepath.Join(dir, "index.scip"), []byte(indexJSON), 0644); err != nil {
+	idx := encIndex(encDocument("a.java", nil))
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
 		t.Fatal(err)
 	}
 	a := NewSCIPAdapter(dir)
