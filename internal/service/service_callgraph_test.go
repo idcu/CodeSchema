@@ -126,3 +126,70 @@ func TestService_GetCallGraph_NoAnalyzer(t *testing.T) {
 		t.Errorf("expected empty nodes when analyzer nil, got %v", nodes)
 	}
 }
+
+// TestService_FindDependencies 验证 FindDependencies 返回真实下游依赖（callees），
+// 即给定符号直接调用/依赖的符号，而非调用者。
+func TestService_FindDependencies(t *testing.T) {
+	st := store.NewStore("file")
+	dir := t.TempDir()
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	fileID, err := st.UpsertFile(context.Background(), "/project/config/watcher.go", "h1", 100, 2048)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	calls := []parser.CallIR{
+		{CallerFQN: "config.NewWatcher", CalleeFQN: "config.Watcher.ReloadNow"},
+		{CallerFQN: "config.Watcher.ReloadNow", CalleeFQN: "config.loadConfig"},
+		{CallerFQN: "config.Watcher.ReloadNow", CalleeFQN: "config.flushCache"},
+	}
+	if err := st.UpsertCalls(context.Background(), fileID, calls); err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+
+	an := analyzer.NewAnalyzer(st)
+	svc := NewService(st).WithImpactAnalyzer(an)
+
+	deps, err := svc.FindDependencies(context.Background(), "config.Watcher.ReloadNow")
+	if err != nil {
+		t.Fatalf("FindDependencies: %v", err)
+	}
+	if len(deps) == 0 {
+		t.Fatal("expected non-empty dependencies")
+	}
+	depSet := make(map[string]bool, len(deps))
+	for _, d := range deps {
+		depSet[d] = true
+	}
+	// 下游依赖（callees）应包含，调用者（NewWatcher）不应混入。
+	if !depSet["config.loadConfig"] || !depSet["config.flushCache"] {
+		t.Errorf("expected callee dependencies present, got %v", deps)
+	}
+	if depSet["config.NewWatcher"] {
+		t.Errorf("caller should not be reported as dependency, got %v", deps)
+	}
+}
+
+// TestService_FindDependencies_NoAnalyzer 验证未注入 analyzer 时返回空（向后兼容）。
+func TestService_FindDependencies_NoAnalyzer(t *testing.T) {
+	svc := newTestService(t)
+	deps, err := svc.FindDependencies(context.Background(), "config.Watcher.ReloadNow")
+	if err != nil {
+		t.Fatalf("FindDependencies: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Errorf("expected empty dependencies when analyzer nil, got %v", deps)
+	}
+}
+
+// TestService_FindDependencies_InvalidSymbol 验证空 symbol 被拒绝。
+func TestService_FindDependencies_InvalidSymbol(t *testing.T) {
+	svc := newTestService(t)
+	_, err := svc.FindDependencies(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty symbol")
+	}
+}

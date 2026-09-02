@@ -1342,12 +1342,35 @@ func parseInt64(s string) int64 {
 	return n
 }
 
-// FindDependencies 查找依赖关系（P0 骨架）。
+// FindDependencies 查找指定符号的依赖关系列表。
+//
+// 语义：给定方法 FQN，返回它在调用图上直接依赖/调用的下游符号（callees）FQN 列表，
+// 供 Agent 快速判断修改该符号的连带影响。复用与 GetImpact / GetCallGraph 同一套
+// FQN 双向归一化，保证链路口径一致。
 func (s *Service) FindDependencies(ctx context.Context, symbol string) ([]string, error) {
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
-	return []string{}, nil
+	if s.analyzer == nil {
+		// 未注入 analyzer：无调用图可分析，返回空（与 GetImpact 一致的向后兼容）。
+		return []string{}, nil
+	}
+	// 双向归一化定位命中节点，避免查询符号与图节点命名空间不一致。
+	resolved := symbol
+	if r, ok := s.analyzer.ResolveImpactNode(ctx, symbol); ok {
+		resolved = r
+	}
+	_, callees, err := s.analyzer.FindImpactNodesWithDepth(ctx, resolved, 1)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find dependencies: %v", err)}
+	}
+	out := make([]string, 0, len(callees))
+	for _, c := range callees {
+		if c.Method != "" {
+			out = append(out, c.Method)
+		}
+	}
+	return out, nil
 }
 
 // GetCallGraph 获取指定符号的调用子图（基于真实调用图，T1 修复后可用）。
@@ -1609,12 +1632,55 @@ func (s *Service) GetAllTags(ctx context.Context) (*AllTagsResult, error) {
 	}, nil
 }
 
-// SearchConfig 搜索配置项（P0 骨架）。
+// SearchConfig 搜索配置项和注解。
+//
+// 语义：遍历库中全部类与方法，对符号名（FullName/Name）、文档注释（Doc）、
+// 签名（Signature）与返回类型（ReturnType）做大小写不敏感子串匹配，返回命中符号的 FQN 列表。
+// 受限于 store 持久化字段不设独立注解索引，注解文本经 Doc 覆盖（注解常附于文档注释）。
 func (s *Service) SearchConfig(ctx context.Context, pattern string) ([]string, error) {
 	if pattern == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "pattern is required"}
 	}
-	return []string{}, nil
+	needle := strings.ToLower(pattern)
+	hit := func(fields ...string) bool {
+		for _, f := range fields {
+			if f != "" && strings.Contains(strings.ToLower(f), needle) {
+				return true
+			}
+		}
+		return false
+	}
+
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("search config: %v", err)}
+	}
+	hits := make(map[string]bool)
+	for _, f := range files {
+		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
+		if err != nil {
+			continue
+		}
+		for _, c := range classes {
+			if hit(c.FullName, c.Name, c.Doc) {
+				hits[c.FullName] = true
+			}
+			methods, err := s.store.GetMethodsByClassID(ctx, c.ID)
+			if err != nil {
+				continue
+			}
+			for _, m := range methods {
+				if hit(m.FullName, m.Name, m.Doc, m.Signature, m.ReturnType) {
+					hits[m.FullName] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(hits))
+	for k := range hits {
+		out = append(out, k)
+	}
+	return out, nil
 }
 
 // GetAffected 获取受指定符号变更影响的单测列表。

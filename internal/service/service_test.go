@@ -253,6 +253,73 @@ func TestSearchConfig_EmptyPattern(t *testing.T) {
 	}
 }
 
+// TestSearchConfig_MatchSymbolDoc 验证 SearchConfig 能真实命中符号名与文档注释
+// （对类/方法记录的 FullName/Name/Doc/Signature 做大小写不敏感子串匹配）。
+func TestSearchConfig_MatchSymbolDoc(t *testing.T) {
+	st := store.NewStore("file")
+	dir := t.TempDir()
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	fileID, err := st.UpsertFile(context.Background(), "/project/config/config.go", "h1", 20, 1024)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	if err := st.UpsertClasses(context.Background(), fileID, []parser.ClassIR{
+		{Name: "ConfigManager", FullName: "cfg.ConfigManager", Doc: "@Configuration 配置管理"},
+	}); err != nil {
+		t.Fatalf("UpsertClasses: %v", err)
+	}
+	classes, err := st.GetClassesByFileID(context.Background(), fileID)
+	if err != nil || len(classes) == 0 {
+		t.Fatalf("GetClassesByFileID: classes=%v err=%v", classes, err)
+	}
+	if err := st.UpsertMethods(context.Background(), classes[0].ID, []parser.MethodIR{
+		{Name: "LoadConfig", Signature: "LoadConfig()", Doc: "加载配置"},
+	}); err != nil {
+		t.Fatalf("UpsertMethods: %v", err)
+	}
+
+	svc := NewService(st)
+	// 命中类名与文档注释（不同大小写也命中）。
+	hits, err := svc.SearchConfig(context.Background(), "config")
+	if err != nil {
+		t.Fatalf("SearchConfig: %v", err)
+	}
+	hitSet := make(map[string]bool, len(hits))
+	for _, h := range hits {
+		hitSet[h] = true
+	}
+	if !hitSet["cfg.ConfigManager"] {
+		t.Errorf("expected class ConfigManager hit, got %v", hits)
+	}
+	// 方法名 LoadConfig 含 config 子串，理应命中；其存储 FQN 由后端生成，做子串检查。
+	foundMethod := false
+	for h := range hitSet {
+		if strings.Contains(h, "LoadConfig") {
+			foundMethod = true
+			break
+		}
+	}
+	if !foundMethod {
+		t.Errorf("expected method LoadConfig hit, got %v", hits)
+	}
+}
+
+// TestSearchConfig_NoHit 验证无命中时返回空（非 nil 错误）。
+func TestSearchConfig_NoHit(t *testing.T) {
+	svc := newTestService(t)
+	hits, err := svc.SearchConfig(context.Background(), "__definitely_absent__")
+	if err != nil {
+		t.Fatalf("SearchConfig: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Errorf("expected no hits, got %v", hits)
+	}
+}
+
 func TestGetAffected_EmptySymbol(t *testing.T) {
 	svc := newTestService(t)
 	_, err := svc.GetAffected(context.Background(), "", false)
