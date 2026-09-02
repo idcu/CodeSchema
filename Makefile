@@ -136,6 +136,15 @@ lint:
 	@echo "==> Running go vet ..."
 	$(GO) vet ./...
 
+# 标签隔离代码看护：解析并类型检查 onnx/pg/redis 标签隔离包（不链接运行时，轻量）
+# 防止默认构建外的 ONNX 嵌入 / PG / Redis 存储代码长期无人编译而腐化。
+# 等价于「该变体至少能编译」；CI 见 .github/workflows/ci.yml 的 tag-guard job。
+.PHONY: verify-tags
+verify-tags:
+	@echo "==> Verifying tag-isolated packages (onnx/pg/redis) ..."
+	$(GO) list -tags 'onnx pg redis' ./...
+	@echo "==> Tag-isolated packages resolve OK."
+
 # 交叉编译（无 CGO，纯 Go 二进制）
 CROSS_TARGETS = \
 	linux/amd64 \
@@ -187,6 +196,7 @@ help:
 	@echo "  test-cover   Run tests with coverage report"
 	@echo "  bench        Run benchmarks"
 	@echo "  lint         Run go vet"
+	@echo "  verify-tags  Verify onnx/pg/redis tag-isolated packages compile"
 	@echo "  cross        Cross-compile for all platforms (CGO_ENABLED=0)"
 	@echo "  clean        Clean build artifacts"
 	@echo "  run          Build and run (pass ARGS=... for arguments)"

@@ -310,6 +310,39 @@ jobs:
             build/treesitter-bench-history.jsonl
           if-no-files-found: warn
 
+  # === 标签隔离代码看护（-tags onnx/pg/redis：默认二进制不含，需显式开启） ===
+  # 防止 ONNX 嵌入 / PG / Redis 存储在默认构建外长期无人编译而腐化。
+  # 用 go list（仅解析+类型检查，不链接 onnxruntime 运行时）做轻量看护，
+  # 避免 CI 拉取 onnxruntime 运行时库；等价于「该变体至少能编译」。
+  tag-guard:
+    name: Tag-Isolated Build Guard
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify tag-isolated packages resolve (onnx/pg/redis)
+        # go list -tags 'onnx pg redis' ./... ：解析并类型检查全部标签隔离包；
+        # 不链接 onnxruntime 运行时，轻量守护标签隔离代码不腐化。
+        run: go list -tags 'onnx pg redis' ./...
+
   # === 交叉编译（无 CGO） ===
   cross:
     name: Cross-Compile
