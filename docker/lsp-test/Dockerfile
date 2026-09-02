@@ -22,4 +22,11 @@ RUN wget -q https://download.eclipse.org/jdtls/snapshots/jdt-language-server-lat
 COPY docker/lsp-test/jdtls.sh /usr/local/bin/jdtls
 RUN chmod +x /usr/local/bin/jdtls
 
+# SCIP：scip CLI（本地 clone 构建——其 go.mod 自带 replace 指令，Go 1.21+ 拒绝 go install @latest）。
+# github 直连不稳定（曾超时 exit 128），失败不阻断：SCIPAdapter 直接读 .scip 文件，CLI 仅调试辅助。
+RUN (git clone --depth 1 https://github.com/sourcegraph/scip.git /tmp/scip-src && \
+    cd /tmp/scip-src && go build -o /root/go/bin/scip ./cmd/scip && rm -rf /tmp/scip-src) || echo "scip CLI build skipped"
+# scip-typescript（TS→SCIP index 生成器）+ @optave/codegraph（真实 CodeGraph 产物，tree-sitter→SQLite nodes/edges）
+RUN npm install -g @sourcegraph/scip-typescript@0.4.0 @optave/codegraph
+
 WORKDIR /src
