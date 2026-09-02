@@ -24,7 +24,7 @@ CodeSchema 代码元数据 KV/DB 系统（生产级，总完成度 ≈ 95%）
 │   ├── P3_2 Treesitter 适配器（30 语言） ........ 96%
 │   ├── P3_3 SCIP 适配器 ....................... 95%
 │   ├── P3_4 LSP 适配器 ........................ 97%
-│   └── P3_5 CodeGraph 适配器 .................. 92%
+│   └── P3_5 CodeGraph 适配器 .................. 93%
 │
 ├── P4 分析层 Analysis Layer ──────────── 96%
 │   ├── P4_1 代码图与影响面分析 ................. 100%
@@ -117,7 +117,7 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 | ├ P3_2 Treesitter | [P3_2.md](./P3_2.md) | 96% | ├ P8_2 日志 | [P8_2.md](./P8_2.md) | 100% |
 | ├ P3_3 SCIP | [P3_3.md](./P3_3.md) | 95% | ├ P8_3 指标 | [P8_3.md](./P8_3.md) | 100% |
 | ├ P3_4 LSP | [P3_4.md](./P3_4.md) | 97% | ├ P8_4 追踪 | [P8_4.md](./P8_4.md) | 100% |
-| └ P3_5 CodeGraph | [P3_5.md](./P3_5.md) | 92% | ├ P8_5 错误 | [P8_5.md](./P8_5.md) | 100% |
+| └ P3_5 CodeGraph | [P3_5.md](./P3_5.md) | 93% | ├ P8_5 错误 | [P8_5.md](./P8_5.md) | 100% |
 | **P4 分析层** | [P4.md](./P4.md) | 96% | └ P8_6 健壮性 | [P8_6.md](./P8_6.md) | 100% |
 | ├ P4_1 Analyzer | [P4_1.md](./P4_1.md) | 100% | **P9 测试基准** | [P9.md](./P9.md) | 96% |
 | └ P4_2 AI | [P4_2.md](./P4_2.md) | 87% | ├ P9_1 Benchmark | [P9_1.md](./P9_1.md) | 100% |
@@ -151,4 +151,5 @@ P3_1 解析核心(IR 契约) → 被依赖: scanner/analyzer/ai/search/service/
 - **Treesitter 标记语言精度定案（P3_2 → 96%）**：css/toml/yaml 无函数调用，调用图维度空集 precision/recall=1（语法树与正则无差异）。
 - **百万级 SQLite BulkUpsert 实测（P9_2 → 96%）**：N=100万 182.2s / 分配 6.2GB / db 660MB / 0.182ms 每文件——相对 100k ~0.05ms 呈超线性，亿级走 PG 边界更清晰。
 - **PG/Redis 真实实例集成（P7_3/P7_4 → 92%）**：PG 嵌入式真实内核端到端 PASS（修复 file.imports 列缺失 + method 未落库 2 个历史 bug）；Redis docker 实例缓存+反查 PASS（T3-2，见 dev12 §12.3）。
+- **真实工具链产物端到端验证（P3_3/P3_4/P3_5）**：「无工具链」阻塞解除——jdtls 容器内真实验证 PASS（8.2s，解除 JDK21 缺失）；scip-typescript 0.4.0 真实二进制 `.scip` 手写 wire 解码 PASS（classes=1/methods=2）；`@optave/codegraph` 3.7.0 主机真实 graph.db 解析 PASS（classes=1/methods=2/calls=5）。容器内 codegraph 3.17.0 段错误定案为上游 better-sqlite3 ABI 问题（测试保留 SKIP 守卫，工具可用即真实验证）。
 - **剩余阻塞项**：AI 真实 LLM 评估（需外部 API key）。
