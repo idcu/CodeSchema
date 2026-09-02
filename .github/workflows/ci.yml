@@ -343,6 +343,36 @@ jobs:
         # 不链接 onnxruntime 运行时，轻量守护标签隔离代码不腐化。
         run: go list -tags 'onnx pg redis' ./...
 
+  # === 计数漂移断言（P3#10 CI 闭环） ===
+  # 实时计数（包数 / MCP 工具数 / HTTP 路由数）与 scripts/counts_baseline.json 比对，
+  # 任一结构性计数变化且未同步更新基线即失败，拦截结构/口径漂移（如包数四处不一）。
+  counts-guard:
+    name: Counts Drift Guard
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Counts drift assertion
+        run: make counts-check
+
   # === 交叉编译（无 CGO） ===
   cross:
     name: Cross-Compile

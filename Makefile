@@ -152,6 +152,18 @@ verify-tags:
 counts:
 	@python3 ./scripts/project_counts.py $(if $(JSON),--json,)
 
+# 计数漂移断言（CI 闭环）：实时计数与 scripts/counts_baseline.json 比对，
+# 任一结构性计数不一致即失败（退出码 1）。make counts-update 可刷新基线。
+.PHONY: counts-check
+counts-check:
+	@python3 ./scripts/counts_check.py
+
+# 刷新计数基线（确认本次变更属预期后使用）
+.PHONY: counts-update
+counts-update:
+	@python3 ./scripts/project_counts.py --json > scripts/counts_baseline.json
+	@echo "==> baseline refreshed: scripts/counts_baseline.json"
+
 # 交叉编译（无 CGO，纯 Go 二进制）
 CROSS_TARGETS = \
 	linux/amd64 \
@@ -205,6 +217,8 @@ help:
 	@echo "  lint         Run go vet"
 	@echo "  verify-tags  Verify onnx/pg/redis tag-isolated packages compile"
 	@echo "  counts       Print project counts (packages/LoC/MCP tools/HTTP routes)"
+	@echo "  counts-check Compare live counts against scripts/counts_baseline.json (CI drift guard)"
+	@echo "  counts-update Refresh scripts/counts_baseline.json with current counts"
 	@echo "  cross        Cross-compile for all platforms (CGO_ENABLED=0)"
 	@echo "  clean        Clean build artifacts"
 	@echo "  run          Build and run (pass ARGS=... for arguments)"
