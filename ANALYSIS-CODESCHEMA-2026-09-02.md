@@ -67,6 +67,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 | **P1–P9（架构模块层）** | 按架构职能切分的模块完成度 | **系统总 ≈95%**，其中 P3=96% P4=96% P6=97% P7=95% P9=96%，其余 100% | docs/1-生产层/modules/README.md |
 
 **矛盾点**：同一仓库既宣称「P0–P18 全部生产级 100%」，又宣称「系统总完成度 ≈95% 且 P3/P4/P7/P9 <100%」。两套编号无映射表，新人极易误判。
+> 已于 2026-09-02 在 `DEV_PROGRESS.md` 加「进度体系说明」澄清：前者是开发里程碑轴（何时建成，全 100% 交付），后者是能力成熟度轴（当前多成熟，95–98% 打磨中），两轴正交非矛盾。
 
 **子模块完成度口径本身也不一致**（modules/README.md 树 vs P3.md 正文）：
 - P3_3 SCIP：树 97% / 正文 95%
@@ -109,7 +110,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 | 🔴 高 | 语义检索 Recall=1.00 | 默认即 bge-ONNX | 仅 `-tags onnx`+模型+glibc 成立；默认 TF-IDF 降级 | ✅ **已修正**：版本发布说明:28、系统简介:30 加默认=TF-IDF 降级说明；README 新增「构建变体与能力边界」矩阵 |
 | 🟠 中 | 多存储（PG/Redis） | 作为已落地能力描述 | 被 build tag 隔离，默认二进制不含 | 🟡 部分修正（README 矩阵已标注 `-tags pg,redis` 构建要求；待 P2 在正文显式说明） |
 | 🟠 中 | 包数量（口径） | 27 / 31 / 32 / 36 四处不一 | `internal/`=**32**、`全仓库 go list ./...`=**36**（两者均属实，仅口径不同）；唯 modules/README 旧写 27 为错误 | ✅ **已修正**：modules/README:4 27→32+scope；README/系统简介/版本发布说明 标注「32=internal/，36=全仓库」 |
-| 🟠 中 | 双 P 编号体系 | P0–P18 全 100% 与 P1–P9 ≈95% 并存 | 两套无映射、互悖 | 增加映射表或合并为单一进度体系（P2，未做） |
+| 🟠 中 | 双 P 编号体系 | P0–P18 全 100% 与 P1–P9 ≈95% 并存 | 两套无映射、互悖 | ✅ **已澄清（2026-09-02）**：DEV_PROGRESS.md 新增「进度体系说明」，明确两轴正交（里程碑轴 vs 成熟度轴）；未做硬性映射表 |
 | 🟡 低 | Docker 基础镜像 | 一处写 `alpine` 构建、另一处强调「必须用 glibc(Debian)，alpine 会 ONNX 降级」 | 后者为真（ONNX 需 glibc） | ✅ **已修正**：DEV_PROGRESS:235、11-配置部署:365 alpine→bookworm（与 Dockerfile 实际 `golang:1.25-bookworm→debian:bookworm-slim` 对齐） |
 | 🟡 低 | 「解析 100% 外包」 vs 「30 语言正则启发式」 | 设计文档称不自研 AST、100% 外包 | README 自承默认为正则启发式，仅 `-tags treesitter` 切真语法树 | 设计文档与 README 对齐口径 |
 | 🟡 低 | 模块文档计数 | DEV_PROGRESS 称「43 份」 | 目录实际 41 个模块文件 + README = 42 | 校数为 42 |
@@ -128,8 +129,8 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
 5. **Dockerfile 口径统一**：✅ DEV_PROGRESS:235、11-配置部署:365 由 alpine 改为 `golang:1.25-bookworm → debian:bookworm-slim`（与 Dockerfile 实际一致）。
 
 ### P2（规划，消除进度认知混乱）
-6. **建立 P0–P18 ↔ P1–P9 映射表**，或合并为单一进度体系，杜绝「全 100%」与「≈95%」并存。
-7. **校正子模块完成度**：P3_3/P3_4/P3_5 在树与正文取同一数字（建议以正文/实测 e2e 为准）。
+6. **建立 P0–P18 ↔ P1–P9 进度体系澄清**——✅ **已应用（2026-09-02）**：经核查两体系为**正交双轴**——`DEV_PROGRESS.md` 的 `P0骨架/P0 MVP/P1–P18` 是「开发里程碑轴」（各能力首次落地顺序，现已全 100% 交付）；`docs/1-生产层/modules/` 下 `P*.md` 的「完成度」是「能力模块当前成熟度轴」（95–98%，持续打磨非未交付）。已在 `DEV_PROGRESS.md` 当前状态块后新增「进度体系说明」消除歧义；未做硬性 1:1 映射表（两轴非同构，强行映射反致误导）。
+7. **校正子模块完成度**：P3_3/P3_4/P3_5 在树与正文取同一数字——✅ **已验证（2026-09-02）**：脚本扫描 `docs/**/P*.md` 共 42 份，41 份含完成度声明且**头部=正文 100% 一致、0 处不一致**（延续 `ee8c5dc` 三方对齐成果），无需改动。
 8. **CallerFQN 回填（代码侧根因修复）**——✅ **已应用（2026-09-02）**：
    - 默认路径 `adapter.go`（`//go:build !treesitter`）：新增 `currentMethod *parser.MethodIR` 跟踪当前方法，类定义处重置、方法定义处赋值、`detectCalls` 调用处（现 `adapter.go:846`）按 `ClassFQN+"."+Name`/`Name` 计算 caller 并回填。
    - AST 路径 `adapter_ast.go`（`//go:build treesitter`）：`walk` 函数新增 `curMethod` 跟踪，Elixir `defmodule`/`def*` 与方法分支设置 `curMethod`，Elixir 默认调用（`adapter_ast.go:342`）与 `callTypes` 分支（`adapter_ast.go:402`）两处 `CallIR` 均补 `CallerFQN`。
@@ -137,7 +138,7 @@ AI 增强层   Tagger(标签) · DocEnhancer(文档增强) · Embedder(向量) �
    - 头牌能力（impact/tests/get_call_graph）默认路径可用性的关键代码修复已完成，**待 commit/push 后随新构建生效**。
 
 ### P3（增强）
-9. 增加 `go list -tags 'onnx pg redis'` 的 CI 校验，防止标签隔离代码长期无人编译而腐化。
+9. 增加标签隔离代码 CI 校验——✅ **已应用（2026-09-02）**：`.github/workflows/ci.yml` 新增 `tag-guard` job（运行 `go list -tags 'onnx pg redis' ./...`，仅解析+类型检查、不链接 onnxruntime 运行时）；`Makefile` 新增 `verify-tags` target + `help` 说明。验证：`make verify-tags` exit 0。
 10. 模块文档计数、版本号等「计数类」字段改为脚本生成，避免人工漂移。
 
 ---
@@ -192,5 +193,10 @@ grep -n 'CallerFQN' internal/parser/adapter/treesitter/adapter.go internal/parse
 | 8 | `internal/parser/adapter/treesitter/adapter.go` | **代码修复**：默认路径新增 `currentMethod` 跟踪，`detectCalls` 调用处（`adapter.go:846`）回填 `CallerFQN` |
 | 9 | `internal/parser/adapter/treesitter/adapter_ast.go` | **代码修复**：AST 路径 `walk` 新增 `curMethod` 跟踪，Elixir 默认调用（`adapter_ast.go:342`）与 `callTypes`（`adapter_ast.go:402`）两处 `CallIR` 补 `CallerFQN` |
 
-**未做（P2/P3，需评审或代码改动）**：P0–P18 ↔ P1–P9 编号体系统一、子模块完成度树/正文对齐、CI 标签隔离校验（`-tags 'onnx pg redis'` 编译校验）。
+**P2/P3 收尾状态（2026-09-02）**：
+- ✅ P2#6 双 P 编号体系：已以「进度体系说明」澄清正交双轴（DEV_PROGRESS.md），未做硬性映射表。
+- ✅ P2#7 子模块完成度：扫描 42 份 P*.md，头部=正文 100% 一致、0 不一致，无需改动。
+- ✅ P2#8 CallerFQN 回填：代码侧根因修复已落地（adapter.go + adapter_ast.go），build+单测通过。
+- ✅ P3#9 CI 标签隔离校验：ci.yml 新增 tag-guard job + Makefile verify-tags，已验证。
+- ⬜ P3#10 计数类字段脚本生成：仍待做（低优先，属长期防漂移优化）。
 （注：上表 #8/#9 的 CallerFQN 代码侧根因修复已于 2026-09-02 落地并验证通过，原列于「未做」现已转入「已应用」。）
