@@ -61,6 +61,9 @@ down/models/
 # Temporary analysis docs (competitor analyses, reviews, drafts — not deliverables)
 /analysis/
 
+# Analysis documents under docs/ (not version-controlled)
+/docs/analysis/
+
 # Published articles / external drafts (not version-controlled)
 /articles/
 
