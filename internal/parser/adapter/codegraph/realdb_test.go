@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,7 +83,12 @@ func (s *Service) helper() string {
 	}
 	found := map[string]bool{}
 	for _, m := range ir.Methods {
-		found[m.Name] = true
+		// codegraph 产物方法名为限定名（Service.Run），按后缀匹配
+		name := m.Name
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:]
+		}
+		found[name] = true
 	}
 	if !found["Run"] || !found["helper"] {
 		t.Errorf("methods missing: Run=%v helper=%v (got %v)", found["Run"], found["helper"], found)
