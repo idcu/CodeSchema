@@ -49,7 +49,8 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 func initPatterns() map[string]langPatterns {
 	return map[string]langPatterns{
 		"go": {
-			classPattern:   regexp.MustCompile(`^(type\s+(\w+)\s+(struct|interface))\s*\{`),
+			// 支持泛型类型参数：type Watcher[T any] struct { ... }（T1-2 真实缺陷：泛型类未识别）
+			classPattern:   regexp.MustCompile(`^(type\s+(\w+)(?:\[[^\]]*\])?\s+(struct|interface))\s*\{`),
 			classNameIndex: 2,
 			methodPattern:  regexp.MustCompile(`^func\s+(\([^)]*\)\s*)?(\w[\w.]*)\(`),
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\([^)]*\)`),
@@ -342,6 +343,13 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	var docComment strings.Builder
 	var sanitizer codeSanitizer // 跨行状态（块注释 / 三引号字符串）
 
+	// Go 专属结构跟踪：花括号净深度 + 当前方法作用域。
+	// 用途（T1-2 真实缺陷修复）：调用归属 CallerFQN、receiver 决定 ClassFQN、
+	// 顶层函数不再被误挂到最近 class。仅 Go 启用——其余语言走原启发式路径。
+	goDepth := 0         // 已见 `{`/`}` 净深度（字符串/注释已剔除）
+	curMethodIdx := -1   // doc.Methods 中当前所在方法索引（-1 = 不在任何方法内）
+	methodOpenDepth := 0 // 方法体起始深度（方法定义行之前的 goDepth）
+
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -363,6 +371,75 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		}
 		if trimmed == "" && docComment.Len() > 0 {
 			// 空行分隔，保留文档注释
+			continue
+		}
+
+		// Go 走精确路径（brace 作用域 + receiver 归属）；其余语言走启发式。
+		// Go 语法结构可靠（func/type 仅顶层、括号必然配平），可精确判定
+		// 方法体边界与调用归属；其余语言（无括号结构/缩进敏感）保持原启发式。
+		if lang == "go" {
+			code := sanitizer.clean(trimmed, lang) // 剔字符串/注释，供 brace 计数与调用检测
+
+			// 解析类定义（支持泛型 type X[T any] struct/interface）
+			if matches := patterns.classPattern.FindStringSubmatch(line); len(matches) > patterns.classNameIndex {
+				className := matches[patterns.classNameIndex]
+				classType := detectClassType(matches, lang)
+				class := parser.ClassIR{
+					Name:      className,
+					FullName:  className,
+					Type:      classType,
+					StartLine: lineNum,
+					EndLine:   lineNum,
+					Doc:       strings.TrimSpace(docComment.String()),
+				}
+				doc.Classes = append(doc.Classes, class)
+				goDepth += braceNet(code)
+				docComment.Reset()
+				continue
+			}
+
+			// 解析方法/函数定义
+			if matches := patterns.methodPattern.FindStringSubmatch(line); len(matches) >= 2 {
+				methodName := matches[len(matches)-1]
+				method := parser.MethodIR{
+					Name:      methodName,
+					Signature: strings.TrimSpace(trimmed),
+					StartLine: lineNum,
+					EndLine:   lineNum,
+					Doc:       strings.TrimSpace(docComment.String()),
+				}
+				// receiver 存在 → 方法归属 receiver 类型；否则为顶层函数，
+				// ClassFQN 留空（不再误挂到最近 class——旧 currentClass 永不闭合）。
+				if recvType := parseGoReceiver(matches[1]); recvType != "" {
+					method.ClassFQN = recvType
+				}
+				doc.Methods = append(doc.Methods, method)
+				curMethodIdx = len(doc.Methods) - 1
+				methodOpenDepth = goDepth // 定义行 `{` 尚未计入
+				goDepth += braceNet(code)
+				docComment.Reset()
+				continue
+			}
+
+			// 普通行：先判定是否仍在方法体内（基于进入本行前的深度），
+			// 再更新深度；深度回落至 methodOpenDepth 即方法体闭合。
+			caller := ""
+			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
+				m := &doc.Methods[curMethodIdx]
+				if m.ClassFQN != "" {
+					caller = m.ClassFQN + "." + m.Name
+				} else {
+					caller = m.Name
+				}
+			}
+			if strings.Contains(code, "(") {
+				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller)
+			}
+			goDepth += braceNet(code)
+			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
+				curMethodIdx = -1 // 方法体已闭合
+			}
+			docComment.Reset()
 			continue
 		}
 
@@ -409,7 +486,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		// bash/ocaml 调用可无括号（命令名 / 无括号应用），其余语言调用需含 "("
 		code := sanitizer.clean(trimmed, lang)
 		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern)
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, "")
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -744,7 +821,8 @@ func (c *codeSanitizer) clean(line, lang string) string {
 }
 
 // detectCalls 从行文本中提取函数调用。
-func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp) {
+// caller 为调用所在方法 FQN（Go 精确路径提供；其余语言传 ""，与旧行为一致）。
+func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller string) {
 	matches := pattern.FindAllStringSubmatch(line, -1)
 	for _, m := range matches {
 		if len(m) >= 2 {
@@ -754,12 +832,56 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 				continue
 			}
 			*calls = append(*calls, parser.CallIR{
+				CallerFQN:  caller,
 				CalleeFQN:  callee,
 				CallType:   "direct",
 				LineNumber: lineNum,
 			})
 		}
 	}
+}
+
+// parseGoReceiver 从方法定义的 receiver 段解析归属类型名。
+// 输入为 methodPattern 捕获组 1（如 "(w *Watcher[T]) "，顶层函数为空串）：
+//
+//	"(w *Watcher[T]) " → "Watcher"（剥括号/指针/泛型实参）
+//	"(u User) "        → "User"
+//	""                 → ""（顶层函数，无 receiver）
+//
+// 返回空串表示无 receiver。仅 Go 使用；错误/非常规形态保守返回空串。
+func parseGoReceiver(recv string) string {
+	r := strings.TrimSpace(recv)
+	if r == "" {
+		return ""
+	}
+	r = strings.TrimPrefix(r, "(")
+	r = strings.TrimSuffix(r, ")")
+	r = strings.TrimSpace(r)
+	fields := strings.Fields(r)
+	if len(fields) < 2 {
+		return "" // 无 receiver 名与类型之分，视为非常规形态
+	}
+	typ := fields[len(fields)-1]
+	typ = strings.TrimPrefix(typ, "*")
+	typ = strings.TrimPrefix(typ, "[]")
+	if i := strings.IndexByte(typ, '['); i >= 0 { // 剥泛型实参 [T] / [T any]
+		typ = typ[:i]
+	}
+	return typ
+}
+
+// braceNet 返回一行代码中 `{`/`}` 的净深度增量（调用方需传已剔除字符串/注释的行）。
+func braceNet(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			n++
+		case '}':
+			n--
+		}
+	}
+	return n
 }
 
 // isKeyword 判断是否为语言关键字，避免误匹配。
