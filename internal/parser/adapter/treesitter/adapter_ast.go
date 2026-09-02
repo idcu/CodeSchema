@@ -274,6 +274,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	callTypes := astCallNodeTypes[lang]
 
 	var curClass *parser.ClassIR
+	var curMethod *parser.MethodIR // 跟踪当前方法，用于回填调用关系的 CallerFQN
 	// skipChild：Elixir def 的 arguments（函数签名）子节点，避免签名中的
 	// `create(order)` 被误判为调用
 	var skipChild *ts.Node
@@ -302,6 +303,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 						}
 						doc.Classes = append(doc.Classes, cls)
 						curClass = &doc.Classes[len(doc.Classes)-1]
+						curMethod = nil // 进入新的模块作用域，方法跟踪重置
 					}
 				case head == "def" || head == "defp" || head == "defmacro" || head == "defguard":
 					name := elixirDefName(n, data)
@@ -315,6 +317,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 							m.ClassFQN = curClass.FullName
 						}
 						doc.Methods = append(doc.Methods, m)
+						curMethod = &doc.Methods[len(doc.Methods)-1]
 						// 跳过 arguments（函数签名 `create(order)`）子树
 						for i := 0; i < int(n.NamedChildCount()); i++ {
 							if c := n.NamedChild(i); c.Type() == "arguments" {
@@ -326,8 +329,17 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				default:
 					callee := astCalleeName(n, data)
 					if callee != "" && !isKeyword(callee) {
+						caller := ""
+						if curMethod != nil {
+							if curMethod.ClassFQN != "" {
+								caller = curMethod.ClassFQN + "." + curMethod.Name
+							} else {
+								caller = curMethod.Name
+							}
+						}
 						doc.Calls = append(doc.Calls, parser.CallIR{
 							CalleeFQN:  callee,
+							CallerFQN:  caller,
 							CallType:   "direct",
 							LineNumber: int(start.Row) + 1,
 						})
@@ -349,6 +361,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			}
 			doc.Classes = append(doc.Classes, cls)
 			curClass = &doc.Classes[len(doc.Classes)-1]
+			curMethod = nil // 进入新的类作用域，方法跟踪重置
 
 		case methodTypes[typ]:
 			// OCaml：value_definition 可能是纯值绑定（`let s = "..." in`），
@@ -369,14 +382,24 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				m.ClassFQN = curClass.FullName
 			}
 			doc.Methods = append(doc.Methods, m)
+			curMethod = &doc.Methods[len(doc.Methods)-1]
 
 		case callTypes[typ]:
 			callee := astCalleeName(n, data)
 			if callee == "" || isKeyword(callee) {
 				break
 			}
+			caller := ""
+			if curMethod != nil {
+				if curMethod.ClassFQN != "" {
+					caller = curMethod.ClassFQN + "." + curMethod.Name
+				} else {
+					caller = curMethod.Name
+				}
+			}
 			doc.Calls = append(doc.Calls, parser.CallIR{
 				CalleeFQN:  callee,
+				CallerFQN:  caller,
 				CallType:   "direct",
 				LineNumber: int(start.Row) + 1,
 			})

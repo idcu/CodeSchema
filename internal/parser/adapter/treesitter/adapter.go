@@ -340,6 +340,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
 	var currentClass *parser.ClassIR
+	var currentMethod *parser.MethodIR // 通用路径：当前方法作用域（用于回填 CallerFQN）
 	var docComment strings.Builder
 	var sanitizer codeSanitizer // 跨行状态（块注释 / 三引号字符串）
 
@@ -457,6 +458,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			}
 			doc.Classes = append(doc.Classes, class)
 			currentClass = &doc.Classes[len(doc.Classes)-1]
+			currentMethod = nil
 			docComment.Reset()
 			continue
 		}
@@ -476,6 +478,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				method.ClassFQN = currentClass.FullName
 			}
 			doc.Methods = append(doc.Methods, method)
+			currentMethod = &doc.Methods[len(doc.Methods)-1]
 			docComment.Reset()
 			continue
 		}
@@ -486,7 +489,15 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		// bash/ocaml 调用可无括号（命令名 / 无括号应用），其余语言调用需含 "("
 		code := sanitizer.clean(trimmed, lang)
 		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, "")
+			caller := ""
+			if currentMethod != nil {
+				if currentMethod.ClassFQN != "" {
+					caller = currentMethod.ClassFQN + "." + currentMethod.Name
+				} else {
+					caller = currentMethod.Name
+				}
+			}
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller)
 		}
 
 		// 非注释行清空文档注释缓冲区
