@@ -26,7 +26,7 @@
 - Go 1.25.2；internal 包 **32** / 全仓库 **36**
 - MCP 工具 **12** · HTTP 路由 **16** · 非 vendor LoC ≈ 51.3k
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
-- 解析适配器：treesitter（默认）/ codegraph / scip / lsp / jcodeindexer
+- 解析适配器：treesitter（默认）/ codegraph / scip / lsp（jcodeindexer 仅配置预留，未实现）
 
 ## 旧文档
 

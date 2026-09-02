@@ -18,10 +18,18 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 
 | job | 作用 |
 |---|---|
-| `test` | 单元测试 + 竞态 |
+| `test` | 单元测试（OS 矩阵 ubuntu / macos / windows），核心合并门禁 |
+| `race` | Race Detector 专项（`-race`） |
+| `treesitter` | TreeSitter AST 变体（`-tags treesitter` CGO 真语法树） |
 | `tag-guard` | `go list -tags 'onnx pg redis' ./...` 解析+类型检查（不链接运行时），防止 build-tag 变体编译断裂 |
 | `counts-guard` | `make counts-check`：实时计数 vs `scripts/counts_baseline.json`，任一漂移即失败（防「包数/工具数」文档漂移） |
 | `agent-bench` | Agent 任务端到端评测（快照归一化 repo_path） |
+| `bench` | Scale Benchmark 规模基准 |
+| `nightly-scale` | Nightly Scale E2E（100k）夜间规模端到端 |
+| `cross` | Cross-Compile 交叉编译 |
+| `docker` | Docker Image 镜像构建 |
+
+> 核心合并门禁：`test` / `tag-guard` / `counts-guard` / `agent-bench`；`race` / `treesitter` 为质量增强；`bench` / `nightly-scale` / `cross` / `docker` 为定期 / 辅助作业。
 
 ## 计数守护（防数字漂移）
 
