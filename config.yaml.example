@@ -84,7 +84,8 @@ storage:
 # 解析器配置
 # ---------------------------------------------------------------------------
 parser:
-  # 启用的解析适配器列表
+  # 声明性适配器清单（不作为运行时注册开关：tree-sitter 始终注册兜底，LSP 由
+  # lsp.enabled 启用、SCIP 由 scip.index_dir、CodeGraph 由 codegraph.db）
   adapters:
     - treesitter
   # SCIP index 适配器配置
@@ -99,7 +100,7 @@ parser:
     config_file: ".jindexer/config.yaml"
     env:
       INDEXER_EMBEDDING_ENABLED: "false"
-  # LSP 适配器配置（接入解析编排主路，按语言分发 gopls/jdtls/clangd）
+  # LSP 适配器配置（接入解析编排主路，按语言分发 gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server）
   # 启用后：工具存在则优先 LSP 解析（精度更高），缺失/失败自动回退 tree-sitter。
   lsp:
     enabled: false
