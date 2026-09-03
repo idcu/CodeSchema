@@ -15,42 +15,52 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 文档口径守护的声明目标：README 事实基线行的关键数字。
-DOC_README = "docs/README.md"
-
 
 def fmt_loc_k(n):
     return f"{n / 1000:.1f}k"
 
 
-def check_docs(cur):
-    """校验文档关键数字与实际计数一致（防止文档领先/落后于代码）。
-
-    README 事实基线行须包含当前 http 路由数、MCP 工具数、非 vendor LoC；
-    匹配对空格不敏感（兼容加粗/间距格式），任一缺失判定文档口径漂移。
-    """
-    tokens = [
-        f"HTTP 路由 **{cur['http_routes']}**",
+# 文档口径守护目标：每文档的关键数字声明，须与实际计数一致（防文档领先/落后于代码）。
+# key 里含换行与空格，匹配时对空格不敏感（兼容加粗/间距格式）。
+DOC_TARGETS = {
+    "docs/README.md": lambda cur: [
+        f"internal 包 **{cur['internal_packages']}**",
+        f"全仓库 **{cur['total_packages']}**",
         f"MCP 工具 **{cur['mcp_tools']}**",
+        f"HTTP 路由 **{cur['http_routes']}**",
         f"非 vendor LoC ≈ {fmt_loc_k(cur['non_vendor_loc'])}",
-    ]
-    path = os.path.join(ROOT, DOC_README)
-    try:
-        with open(path, encoding="utf-8") as f:
-            flat = f.read().replace(" ", "").replace("\n", "")
-    except OSError as e:
-        print(f"DOC-DRIFT  {DOC_README}: 无法读取 ({e})")
-        return False
+    ],
+    "docs/01-开发者/架构与模块.md": lambda cur: [
+        f"internal 包数：**{cur['internal_packages']}**",
+        f"全仓库包数：**{cur['total_packages']}**",
+        f"MCP 工具：**{cur['mcp_tools']}**",
+        f"HTTP 路由：**{cur['http_routes']}**",
+        f"http={cur['http_routes']}",
+        f"非 vendor LoC ≈ {fmt_loc_k(cur['non_vendor_loc'])}",
+    ],
+}
 
-    ok = True
-    for tok in tokens:
-        key = tok.replace(" ", "")
-        if key in flat:
-            print(f"DOC-OK     {DOC_README}: {tok}")
-        else:
-            print(f"DOC-DRIFT  {DOC_README}: 缺少声明「{tok}」（文档口径落后于代码）")
-            ok = False
-    return ok
+
+def check_docs(cur):
+    """校验文档关键数字与实际计数一致，任一缺失判定文档口径漂移。"""
+
+    all_ok = True
+    for rel, make_tokens in DOC_TARGETS.items():
+        path = os.path.join(ROOT, rel)
+        try:
+            with open(path, encoding="utf-8") as f:
+                flat = f.read().replace(" ", "").replace("\n", "")
+        except OSError as e:
+            print(f"DOC-DRIFT  {rel}: 无法读取 ({e})")
+            all_ok = False
+            continue
+        for tok in make_tokens(cur):
+            if tok.replace(" ", "") in flat:
+                print(f"DOC-OK     {rel}: {tok}")
+            else:
+                print(f"DOC-DRIFT  {rel}: 缺少声明「{tok}」（文档口径落后于代码）")
+                all_ok = False
+    return all_ok
 
 
 def main():
