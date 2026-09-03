@@ -25,7 +25,18 @@ import (
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
+
+	metrics "gitee.com/idcu-go/metrics"
 )
+
+// init 注册 service 层监控指标（P26 可观测性细化）：上下文查询规模、预算降级、
+// 查询级缓存命中，直接支撑「省 token / 省轮次 / 质量透明度」三类 KPI 的观测。
+func init() {
+	metrics.RegisterCounter("context_queries_total", "Total context queries served", "kind")
+	metrics.RegisterCounter("context_degraded_total", "Context queries that degraded due to budget", "reason")
+	metrics.RegisterCounter("querycache_hits_total", "Query cache hits", "kind")
+	metrics.RegisterCounter("querycache_misses_total", "Query cache misses", "kind")
+}
 
 // Service 是业务逻辑层，封装所有查询操作。
 type Service struct {
@@ -379,6 +390,7 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 	}
 	key := s.queryCacheKey(symbol, opts)
 	if hit, ok := s.queryCache.Get(key); ok && hit != nil {
+		metrics.IncCounter("querycache_hits_total", string(opts.Mode))
 		cached := *hit
 		if hit.Trace != nil {
 			traceCopy := *hit.Trace
@@ -387,6 +399,7 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 		}
 		return &cached, nil
 	}
+	metrics.IncCounter("querycache_misses_total", string(opts.Mode))
 	got, err := s.getContextModeUncached(ctx, symbol, opts)
 	if err != nil {
 		return nil, err
@@ -408,6 +421,7 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 	if !ok {
 		return nil, &ServiceError{Code: "ERR_SYMBOL_NOT_FOUND", Message: fmt.Sprintf("symbol not found: %s", symbol)}
 	}
+	metrics.IncCounter("context_queries_total", string(opts.Mode))
 
 	// minimal 模式：不读源码原文，只回元数据（快路径）。
 	if opts.Mode == ModeMinimal {
@@ -514,6 +528,7 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 	}
 	if fitted.Degraded {
 		trace.DegradeReason = string(fitted.Reason)
+		metrics.IncCounter("context_degraded_total", string(fitted.Reason))
 	}
 
 	ctx2 := &SymbolContext{

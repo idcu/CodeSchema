@@ -99,3 +99,6 @@ build/idcu-mt/
 
 # ONNX inference binary (large Mach-O executable, build artifact — must not be tracked)
 /codeschema-onnx
+
+# TRAE 内部工作目录（不入库）
+.trae/

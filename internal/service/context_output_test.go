@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	metrics "gitee.com/idcu-go/metrics"
 	"gitee.com/idcu-go/pathsafe"
 )
 
@@ -330,5 +331,40 @@ func TestPathVirtualWithoutRoot(t *testing.T) {
 	}
 	if got.FilePath != real {
 		t.Fatalf("未注入虚拟根时应退化输出真实路径 %q, 实际 %q", real, got.FilePath)
+	}
+}
+
+// TestServiceMetrics 验证 service 层可观测化指标（P26）：预算降级计数、
+// 查询级缓存命中计数、上下文查询计数均打到 metrics 输出。
+func TestServiceMetrics(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	opts := ContextOptions{Mode: ModeFull, IncludeTrace: true}
+
+	// 1. 预算触发降级 → context_queries_total + context_degraded_total
+	if _, err := svc.GetContextMode(context.Background(), "com.example.OrderService.GetUser", ContextOptions{
+		Mode: ModeFull, MaxBytes: 30, IncludeTrace: true,
+	}); err != nil {
+		t.Fatalf("GetContextMode(degrade): %v", err)
+	}
+	render := metrics.Render()
+	if !strings.Contains(render, "context_queries_total") {
+		t.Fatalf("缺少 context_queries_total 指标:\n%s", render)
+	}
+	if !strings.Contains(render, "context_degraded_total") {
+		t.Fatal("缺少 context_degraded_total 指标（预算降级应计数）")
+	}
+
+	// 2. 启用查询缓存：首查 miss、二查 hit → querycache_misses/hits_total
+	svc.EnableQueryCache(time.Minute, 16)
+	if _, err := svc.GetContextMode(context.Background(), "com.example.OrderService.GetUser", opts); err != nil {
+		t.Fatalf("first GetContextMode: %v", err)
+	}
+	if _, err := svc.GetContextMode(context.Background(), "com.example.OrderService.GetUser", opts); err != nil {
+		t.Fatalf("second GetContextMode: %v", err)
+	}
+	render = metrics.Render()
+	if !strings.Contains(render, `querycache_misses_total`) || !strings.Contains(render, `querycache_hits_total`) {
+		t.Fatalf("查询缓存指标缺失:\n%s", render)
 	}
 }
