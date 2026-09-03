@@ -101,7 +101,7 @@ func (s *Service) ParseGoCoverProfile(ctx context.Context, r io.Reader) error {
 	report := make(map[string][]string)
 	for _, classes := range classesByFile {
 		for _, cls := range classes {
-			if !isTestClass(cls) {
+			if !isTestClass(cls, "") {
 				continue
 			}
 			// 该测试类的源类 FQN（命名约定）

@@ -318,22 +318,51 @@ func TestIsTestClass(t *testing.T) {
 	tests := []struct {
 		name     string
 		cls      store.ClassRecord
+		path     string
 		expected bool
 	}{
-		{name: "Test suffix", cls: store.ClassRecord{Name: "OrderServiceTest"}, expected: true},
-		{name: "Test prefix", cls: store.ClassRecord{Name: "TestOrderService"}, expected: true},
-		{name: "Tests suffix", cls: store.ClassRecord{Name: "OrderServiceTests"}, expected: true},
-		{name: "Spec suffix", cls: store.ClassRecord{Name: "OrderServiceSpec"}, expected: true},
-		{name: "Not test", cls: store.ClassRecord{Name: "OrderService"}, expected: false},
-		{name: "Empty", cls: store.ClassRecord{Name: ""}, expected: false},
+		{name: "Test suffix", cls: store.ClassRecord{Name: "OrderServiceTest"}, path: "/x/service.go", expected: true},
+		{name: "Test prefix", cls: store.ClassRecord{Name: "TestOrderService"}, path: "/x/service.go", expected: true},
+		{name: "Tests suffix", cls: store.ClassRecord{Name: "OrderServiceTests"}, path: "/x/service.go", expected: true},
+		{name: "Spec suffix", cls: store.ClassRecord{Name: "OrderServiceSpec"}, path: "/x/service.go", expected: true},
+		{name: "Not test", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/service.go", expected: false},
+		{name: "Empty", cls: store.ClassRecord{Name: ""}, path: "/x/service.go", expected: false},
+		{name: "Go test file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/service_test.go", expected: true},
+		{name: "pytest module file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/test_order.py", expected: true},
+		{name: "pytest module file 2", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order_test.py", expected: true},
+		{name: "Jest test file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order.test.ts", expected: true},
+		{name: "Jest spec file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order.spec.js", expected: true},
+		{name: "plural test file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order.tests.py", expected: false},
+		{name: "contest false positive", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/latest_file.go", expected: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isTestClass(tt.cls)
+			got := isTestClass(tt.cls, tt.path)
 			if got != tt.expected {
-				t.Errorf("isTestClass(%q) = %v, want %v", tt.cls.Name, got, tt.expected)
+				t.Errorf("isTestClass(%q, %q) = %v, want %v", tt.cls.Name, tt.path, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestIsTestFileName(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/x/service_test.go", true},
+		{"/x/test_order.py", true},
+		{"/x/order_test.py", true},
+		{"/x/order.test.ts", true},
+		{"/x/order.spec.js", true},
+		{"/x/service.go", false},
+		{"/x/latest_file.go", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isTestFileName(tt.path); got != tt.want {
+			t.Errorf("isTestFileName(%q) = %v, want %v", tt.path, got, tt.want)
+		}
 	}
 }
 
@@ -349,6 +378,13 @@ func TestMatchesTestMethod(t *testing.T) {
 		{"ReturnOrder", "ShouldReturnOrder", true},
 		{"getOrder", "createOrder", false},
 		{"processPayment", "TestProcessPayment", true},
+		// pytest snake_case
+		{"get_order", "test_get_order", true},
+		{"get_order", "should_get_order", true},
+		{"get_order", "when_get_order_called", true},
+		// JUnit/BDD camelCase 兼容 snake 语义（包含兜底）
+		{"getOrder", "testGetOrderShouldReturn", true},
+		{"get_order", "create_order", false},
 	}
 	for _, tt := range tests {
 		got := matchesTestMethod(tt.target, tt.test)

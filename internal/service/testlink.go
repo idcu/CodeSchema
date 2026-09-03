@@ -237,25 +237,33 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 	}
 }
 
-// matchesTestMethod 判断测试方法名是否匹配目标方法名。
+// matchesTestMethod 判断测试方法名是否匹配目标方法名（跨框架：Go/JUnit/pytest/Jest）。
 func matchesTestMethod(targetName, testName string) bool {
 	// 精确匹配
 	if testName == targetName {
 		return true
 	}
-	// Test 前缀：TestGetOrder ↔ GetOrder
+	// Go: Test*/test* 前缀：TestGetOrder ↔ GetOrder
 	if strings.HasPrefix(testName, "Test") && strings.TrimPrefix(testName, "Test") == targetName {
 		return true
 	}
-	// test 前缀：testGetOrder ↔ GetOrder
 	if strings.HasPrefix(testName, "test") && strings.TrimPrefix(testName, "test") == targetName {
 		return true
 	}
-	// Should 前缀：ShouldReturnOrder ↔ ReturnOrder（不精确，检查包含）
+	// pytest: test_ 前缀（snake_case）：test_get_order ↔ get_order
+	if strings.HasPrefix(testName, "test_") && strings.TrimPrefix(testName, "test_") == targetName {
+		return true
+	}
+	// pytest/BDD snake_case：should_* / when_* 与目标包含关系
+	if (strings.HasPrefix(testName, "should_") || strings.HasPrefix(testName, "when_")) &&
+		strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
+		return true
+	}
+	// JUnit/BDD camelCase：Should 前缀（ShouldReturnOrder ↔ ReturnOrder）
 	if strings.HasPrefix(testName, "Should") && strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
 		return true
 	}
-	// 目标方法名包含在测试方法名中
+	// Jest test("..."), it("should ...") 等以描述串命名：目标方法名包含在测试名中
 	if strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
 		return true
 	}
@@ -300,8 +308,8 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 			if cls.ID == targetClassID {
 				continue
 			}
-			// 只考虑测试类
-			if !isTestClass(cls) {
+			// 只考虑测试类（含文件级识别）
+			if !isTestClass(cls, f.AbsolutePath) {
 				continue
 			}
 
@@ -316,11 +324,42 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 	}
 }
 
-// isTestClass 判断是否为测试类。
-func isTestClass(cls store.ClassRecord) bool {
+// isTestClass 判断是否为测试类（跨框架：Go/JUnit/pytest/Jest）。
+//
+// 识别两类信号：
+//   - 类名约定：*Test / Test* / *Tests / *Spec（Go/JUnit/Jest）
+//   - 文件路径约定：*_test.go / *_test.py / test_*.py / *.test.ts|js / *.spec.ts|js（pytest/Jest 以文件命名的测试）
+//     （文件级识别需由调用方传入 path；空 path 时仅按类名判断）
+func isTestClass(cls store.ClassRecord, path string) bool {
 	name := cls.Name
-	return strings.HasSuffix(name, "Test") || strings.HasPrefix(name, "Test") ||
-		strings.HasSuffix(name, "Tests") || strings.HasSuffix(name, "Spec")
+	if strings.HasSuffix(name, "Test") || strings.HasPrefix(name, "Test") ||
+		strings.HasSuffix(name, "Tests") || strings.HasSuffix(name, "Spec") {
+		return true
+	}
+	if path != "" && isTestFileName(path) {
+		return true
+	}
+	return false
+}
+
+// isTestFileName 判断是否为多框架测试文件（按文件命名约定识别）。
+func isTestFileName(path string) bool {
+	path = strings.ReplaceAll(path, "\\", "/")
+	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
+		path = path[idx+1:]
+	}
+	base := strings.ToLower(path)
+	// pytest: test_ 前缀文件（test_*.py / test_*.js）（仅前缀，避免 latest_file.go 误判）
+	if strings.HasPrefix(base, "test_") {
+		return true
+	}
+	// *_test.* / *.test.* / *.spec.*（Go/JUnit/Jest 文件级约定）
+	for _, marker := range []string{"_test.", ".test.", ".spec."} {
+		if strings.Contains(base, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasCommonTag 检查两个标签列表是否有共同标签。
@@ -400,7 +439,7 @@ func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord,
 	for _, f := range files {
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
 		for _, cls := range classes {
-			if !isTestClass(cls) {
+			if !isTestClass(cls, f.AbsolutePath) {
 				continue
 			}
 
@@ -502,7 +541,7 @@ func (s *Service) linkByDependency(ctx context.Context, files []*store.FileRecor
 		}
 		classes := fileToClasses[f.ID]
 		for _, cls := range classes {
-			if isTestClass(cls) {
+			if isTestClass(cls, f.AbsolutePath) {
 				methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
 				for _, m := range methods {
 					add(m.FullName, m.Name, "dependency", 80)
@@ -547,7 +586,7 @@ func (s *Service) linkByDependency(ctx context.Context, files []*store.FileRecor
 		if referencesTarget {
 			classes := fileToClasses[f.ID]
 			for _, cls := range classes {
-				if isTestClass(cls) {
+				if isTestClass(cls, f.AbsolutePath) {
 					methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
 					for _, m := range methods {
 						add(m.FullName, m.Name, "dependency", 80)
