@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 150: feat(parser): P20 — 真语法树路径非 Go caller FQN 包限定对齐
+
+- 背景：P19 已把默认正则路径（`adapter.go`）Java/Kotlin/C# 的 caller FQN 包限定为 `com.example.OrderService.createOrder`；但 `-tags treesitter` 的真语法树路径（`adapter_ast.go`）仅按类简单名回填 caller（`OrderService.createOrder`），两条解析路径命名空间差异会导致同一仓库 impact 结果随构建标签漂移。P20 要求对 AST 路径做同等的包限定对齐。
+- 动作：`adapter_ast.go` 新增 `astPackageDecl`（复用与正则路径 `pkgDeclPatterns` 一致的 Java `package`/Kotlin `package`/C# `namespace` 声明正则），在 `Parse` 构建文档时捕获包前缀，并在此前两处 caller 回填点（Elixir call 分支 + 通用 call 分支）应用 `astPkg + "." + caller`；类 FullName 保持简单名、callee 保持裸名（依赖类型消歧），与正则路径口径一致。
+- 测试：新增 `TestASTAdapter_Parse_NonGoCallerPkgQualified`（java/kotlin/csharp 三例，断言 caller 产出 `com.example.OrderService.createOrder` 等），镜像 P19 的正则路径用例。
+- 验证：`gofmt` 通过。**环境遗留**：本机 `-tags treesitter` 构建在第三方 grammar（`go-tree-sitter/sql`/`php`）的 C 头文件（`tree_sitter/parser.h`、`tree_sitter/array.h`）处失败，经 `git stash` 复核确认是 HEAD 即存在的预存环境问题（缺 grammar 的 vendored tree-sitter runtime 头文件），非本改动引入；故 AST 运行时路径本机无法实跑，改动经代码对称性与 gofmt 校验。
+
+### Commit 149: test(server): B5 批量入参补 MCP 层验证 + 文档同步接口裁剪参数
+
+- 背景：fastcontext B1/B5 已在 Commit 129 落地，但验证集中在 service/HTTP 层，MCP 层符号批量入参（`symbols[]`）路径未直接回归。
+- 动作：新增 `TestMCP_ToolCall_ContextBatch`（`tools/call` 的 context 传 `symbols` 数组 → 批量路径，单符号失败不中断整体、`errors[]` 带 code+hint）；`docs/01-开发者/接口层.md` 增补 context 工具裁剪参数表（`symbols`/`max_bytes`/`max_tokens`/`max_line_chars`/`path_style`/`mode`）与 HTTP 等价支持；修正新增测试导致的非 vendor LoC 53.6k→53.7k 两处文档口径。
+- 验证：`go test ./internal/server/ ./internal/service/` 全绿；`make counts-check` 通过。
+
 ### Commit 148: chore(eco): 生态资产 P2 正式发布收口（gitee 独立仓 v0.2.0，模块路径 go get 可用）
 
 - 背景：adapterx / contextsdk 已随上批推送 gitee 独立仓（v0.1.0），但 go.mod 模块路径沿用 `github.com/idcu/…` 与真实托管（gitee）不一致——标准 `go get github.com/idcu/codeschema-adapterx@v0.1.0` 会去 github.com 拉取而失败，对外不可消费。

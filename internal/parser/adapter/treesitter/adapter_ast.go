@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	ts "github.com/smacker/go-tree-sitter"
@@ -269,6 +270,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		FilePath: path,
 	}
 
+	// P20：Java/Kotlin/C# 单文件显式包/命名空间声明 → caller FQN 包限定，
+	// 与默认正则路径（adapter.go 的 nonGoPkg）对齐，使非 Go 调用图与 Go 同命名空间。
+	astPkg := astPackageDecl(lang, data)
+
 	classTypes := astClassNodeTypes[lang]
 	methodTypes := astMethodNodeTypes[lang]
 	callTypes := astCallNodeTypes[lang]
@@ -336,6 +341,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 							} else {
 								caller = curMethod.Name
 							}
+							// 包/命名空间限定（Java/Kotlin/C#）：pkg.Class.Method / pkg.func
+							if astPkg != "" {
+								caller = astPkg + "." + caller
+							}
 						}
 						doc.Calls = append(doc.Calls, parser.CallIR{
 							CalleeFQN:  callee,
@@ -395,6 +404,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 					caller = curMethod.ClassFQN + "." + curMethod.Name
 				} else {
 					caller = curMethod.Name
+				}
+				// 包/命名空间限定（Java/Kotlin/C#）：pkg.Class.Method / pkg.func
+				if astPkg != "" {
+					caller = astPkg + "." + caller
 				}
 			}
 			doc.Calls = append(doc.Calls, parser.CallIR{
@@ -525,6 +538,26 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 		}
 	}
 	return firstIdentifierText(n, src)
+}
+
+// astPackageDecl 提取 Java/Kotlin/C# 的单文件显式包/命名空间声明（P20）。
+// 与默认正则路径 adapter.go 的 pkgDeclPatterns 口径一致；其余语言无显式包声明 → 空串。
+func astPackageDecl(lang string, data []byte) string {
+	var re *regexp.Regexp
+	switch lang {
+	case "java":
+		re = regexp.MustCompile(`(?m)^\s*package\s+([\w.]+)\s*;?\s*$`)
+	case "kotlin":
+		re = regexp.MustCompile(`(?m)^\s*package\s+([\w.]+)\s*$`)
+	case "csharp":
+		re = regexp.MustCompile(`(?m)^\s*namespace\s+([\w.]+)\s*[{;]`)
+	default:
+		return ""
+	}
+	if m := re.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // astClassType 从 AST 节点类型映射 IR 类类型。

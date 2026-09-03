@@ -164,3 +164,80 @@ class UserService {
 		t.Errorf("expected repository.findById detected, got calls: %+v", doc.Calls)
 	}
 }
+
+// TestASTAdapter_Parse_NonGoCallerPkgQualified 验证 AST 路径下 Java/Kotlin/C# 的
+// caller FQN 包限定（P20），与默认正则路径（P19）产出一致，使非 Go 调用图命名空间对齐。
+func TestASTAdapter_Parse_NonGoCallerPkgQualified(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+
+	cases := []struct {
+		name, filename, content, wantCaller string
+	}{
+		{
+			name:     "java",
+			filename: "OrderService.java",
+			content: `package com.example;
+
+public class OrderService {
+    public void createOrder(Order order) {
+        paymentService.pay(order);
+    }
+}
+`,
+			wantCaller: "com.example.OrderService.createOrder",
+		},
+		{
+			name:     "kotlin",
+			filename: "UserService.kt",
+			content: `package com.example
+
+class UserService {
+    fun getUser(id: Long) {
+        val user = repository.findById(id)
+    }
+}
+`,
+			wantCaller: "com.example.UserService.getUser",
+		},
+		{
+			name:     "csharp",
+			filename: "OrderService.cs",
+			content: `namespace Acme.Orders;
+
+public class OrderService {
+    public void Create(Order order) {
+        repository.Save(order);
+    }
+}
+`,
+			wantCaller: "Acme.Orders.OrderService.Create",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.filename)
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := a.Parse(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(doc.Calls) == 0 {
+				t.Fatalf("no calls parsed for %s", tc.name)
+			}
+			found := false
+			for _, c := range doc.Calls {
+				if c.CallType == "direct" && c.CallerFQN == tc.wantCaller {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("callerFQN=%q not found; calls=%+v", tc.wantCaller, doc.Calls)
+			}
+		})
+	}
+}
