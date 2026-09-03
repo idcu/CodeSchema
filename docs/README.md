@@ -3,7 +3,7 @@
 > 一句话：先看自己属于哪类读者，再进对应目录。所有文档均以源码事实为基线，不超前于代码。
 > 核心原则：改码必改档；文档同步性核验见 `docs/AI协作规范.md`；计数类字段以 `make counts` 为准。
 
-> 最后更新：2026-09-02
+> 最后更新：2026-09-03
 
 ## 你是谁 → 读哪里
 
@@ -30,7 +30,7 @@
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 
-- 解析适配器：treesitter（默认）/ codegraph / scip / lsp（jcodeindexer 仅配置预留，未实现）
+- 解析适配器：treesitter（默认）/ codegraph / scip / lsp（gopls/jdtls/clangd/rust-analyzer）；jcodeindexer 仅配置预留、未实现
 
 ## 旧文档
 
