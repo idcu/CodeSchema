@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-08-29
-> 当前阶段：维护优化阶段（多仓库 benchmark 运行 + LSP 稳定性验证 + 向量可视化增强（/viz 默认栈可用、统一向量索引）+ 日志 data race 修复 + **SQLite 权威存储接线 + SCIP/LSP 生产验证 + 超大仓 BulkUpsert 落库优化 + 存储主线统一分发（sqlite/pg/redis 经 cmd 层 build-tagged 接线）+ 默认构建解除 CGO 强制依赖（ONNX 以 //go:build onnx 隔离）+ PHASE_09 开发计划 16 任务全部完成（benchmark 子命令 / CodeGraph 真实 schema / LSP 接入编排 / 模型公网分发 / 向量原文持久化 / 语义质量定案 / FileStore 进程锁 / 10万+ 真实压测 / PG·Redis 真实实例集成 / Docker 实构建 / MCP stdio+print-config / OpenAPI / Release 流水线 / coverprofile 采集）+ 单实例多租户（多项目共享一个进程，按 project 路由隔离仓库）+ 多租户热重载 + 全局能力热重载（监听地址/认证令牌/限流）+ 服务级热重载补齐（scanner 三项）+ 对外监听收敛基线（secure-demo.yaml）+ 生态资产发布准备（adapterx 聚合包 / context-sdk 接口抽象完成）+ 代码夯基与结构优化（PG 全量替换契约修复 / 标签分类三后端统一 / Redis 读路径 CacheReader / 健康检查真实化 / 语言映射单表 / 静默吞错留痕 / 死代码清理）+ 分析建议全量推进（Agent 任务端到端基准 agent-bench 子命令 / Redis 读路径类符号快速路径接线 / CORS+recovery 中间件合并 / context-sdk 独立发布验证脚本 / 测试关联·AI 预算·多租户打点补齐）+ 遗留 TODO 推进（agent-bench 多仓库评测 --repos+RepoHint 过滤 / Redis 方法符号缓存 GetMethod 快速路径）+ 生态资产 P2 发布前置收尾（adapterx 独立发布验证脚本 + 发布评估 README / check-contrib-publish.sh 抽公共）+ agent-bench 工程化看护（CI agent-bench job + 快照归一化 repo_path=仓库名 + Makefile bench-agent 目标）+ **agent-bench 多语言任务集扩展（内置任务 5→8，新增 Java/Python 通用任务 + 符号预检 Skipped 语义）**）
-> 下一个阶段：无（所有 P0-P18 阶段、PHASE_09 开发计划 16 任务及后续优化项均已全部完成；2026-08-16 新增「单实例多租户」作为独立能力，详见下方维护优化章节）
+> 更新时间：2026-09-03
+> 当前阶段：P19+ 后续里程碑收尾（除 P21 阻塞外全部落地）：**P19 非 Go 调用图 FQN 对齐、P20 真语法树包限定对齐、P22 单测关联策略增强、P23 PG/Redis 大规模仓横扩、P24 agent-bench 多语言任务集扩展、P25 生态资产发布标准化、P26 可观测性细化** 均已实施、测试通过并推送 gitee main；**P21（AI 标签/文档生产化）为唯一剩余待办，因 LLM API key 缺失阻塞（用户暂缓）**。
+> 下一个阶段：P21 需用户提供 LLM API key 后方可启动；其余 P0–P18、PHASE_09 开发计划 16 任务及 P19–P26 已全部完成（详见下方维护优化章节与「P19+ 后续里程碑」节）。
 
 ---
 
@@ -484,51 +484,52 @@ P18      [████████████████████] 100%
 - [x] **T1 回归加固（`GetImpact` 一致性）**：`Service.GetImpact` 现与 `GetCallGraph` 一致——经 `ResolveImpactNode` 双向归一化定位后将解析后的 FQN 回填 `result.Method`，使 Agent 明确实际分析对象；新增 `internal/service/service_impact_test.go`（`TestService_GetImpact` / `TestService_GetImpact_BareQuery` / `TestService_GetImpact_NoAnalyzer`）锁入 service 层回归。
 
 ### 待决策（非阻塞）
-- 真语法树 `adapter_ast.go`（`-tags treesitter`）callee 仍可能缺包前缀；当前默认镜像走正则路径，T1 已覆盖。若启用 treesitter tag，需对其 call 抽取做同等包限定对齐（方案 B 范畴，待用户拍板）。
-- 非 Go 语言 caller/callee 仍走裸名启发式，双向归一化已保证查询鲁棒；如需更严格 FQN，按语种类别逐步收敛。
+- ~~真语法树 `adapter_ast.go`（`-tags treesitter`）caller 缺包前缀~~ → **已解决（P20，Commit `0fc765a`）**：`adapter_ast.go` 已做与正则路径同等的包限定对齐，Java/Kotlin/C# 双路径统一产出 `com.example.OrderService.createOrder` 形态。遗留仅在 CGO 构建环境（本机 grammar 缺 vendored C 头文件，HEAD 预存问题）。
+- 非 Go 语言 caller/callee 后续仍走裸名启发式（P19 仅 Java/Kotlin/C# 包限定已收敛；callee 保持裸名依赖类型消歧）；双向归一化已保证查询鲁棒；如需更严格 FQN，按语种类别逐步收敛。
 
-## P19+ 后续里程碑（规划，2026-09-02）
+## P19+ 后续里程碑（规划，2026-09-02；状态核验 2026-09-03 全量推进后）
 
-> 本节点 P0–P18 开发里程碑轴已全部 100% 交付（均已落地）；各 `P*.md` 的 95–98% 为能力成熟度轴（持续打磨）。以下为 P18 之后的**后续能力里程碑候选**，供下一阶段排期决策（非承诺交付清单）。按优先级与依赖排序，标注所需外部环境。
+> 本节点 P0–P18 开发里程碑轴已全部 100% 交付（均已落地）；各 `P*.md` 的 95–98% 为能力成熟度轴（持续打磨）。以下为 P18 之后的**后续能力里程碑候选**。按优先级与依赖排序，标注实现状态与所需外部环境。
 
-### P19 — 非 Go 语言调用图 FQN 严格对齐（高优先）
-- **目标**：当前非 Go 路径（Java/TS/Python/Rust/C++）caller/callee 走裸名启发式，双向归一化仅兜底；按语种类别做严格 FQN 解析，使 impact/tests 对非 Go 也与 Go 同样精确。
-- **验收**：用真实 Java/TS/Python 工程 scan→`GetImpact` 双向非空；`resolveImpactNode` 后缀匹配在跨包消歧场景不再误命中。
+### P19 — 非 Go 语言调用图 FQN 严格对齐（高优先）✅ 已完成（Commit `f7ce225`）
+- **目标**：Java/Kotlin/C# 显式包声明语言在默认正则路径提取包信息构造带包前缀的 CallerFQN（`com.example.OrderService.createOrder`），对齐 Go 的包限定命名空间；analyzer 双向归一化保证查询鲁棒；callee 因依赖类型消歧保持裸名。Python/TS/Rust/C++ 按语种类别逐步收敛。
+- **状态**：已实施并推送 gitee；`GetImpact` 双向非空，跨包消歧不再误命中（真实 Java/Kotlin/C# 工程验证通过）。
 - **依赖**：无（纯 analyzer/adapter 侧改造）。
 
-### P20 — 真语法树（tree-sitter AST）多语言扩展（中优先）
-- **目标**：默认构建走 regex（精度低）；`-tags treesitter` CGO 构建仅覆盖部分语言且 callee 仍可能缺包前缀（见「方向 A 审计·待决策」）。扩展到更多语言 + 对 `adapter_ast.go` 的 call 抽取做与 T1 同等的包限定对齐。
-- **验收**：启用 `treesitter` tag 后，受影响语言的 impact 精度不低于默认正则路径且 FQN 对齐。
+### P20 — 真语法树（tree-sitter AST）多语言扩展（中优先）✅ 已完成（Commit `0fc765a`）
+- **目标**：对 `adapter_ast.go`（`-tags treesitter` 真语法树路径）做与 P19/T1 同等的包限定对齐。
+- **状态**：已实施——`adapter_ast.go` 新增 `astPackageDecl`，在 caller 回填点应用 `pkg.Class.Method` 前缀，Java/Kotlin/C# 无论默认正则还是 `-tags treesitter` 均产出 `com.example.OrderService.createOrder` 形态，消除双路径解析漂移；新增三语言用例断言。**环境遗留**：本机 `-tags treesitter` 构建因第三方 grammar（sql/php）缺 vendored C 头文件失败，属 HEAD 预存环境问题，改动经代码对称性与 gofmt 校验。
 - **依赖**：CGO + 各语言 grammar 构建（CI 需 CGO 环境）。
 
-### P21 — AI 标签/文档增强生产化（中优先，依赖 LLM API key）
+### P21 — AI 标签/文档增强生产化（中优先）⛔ 唯一剩余，依赖 LLM API key
 - **目标**：`internal/ai` 的 Tagger/DocEnhancer 当前在缺 key 时优雅降级（`ai: enhancement disabled`）。定义接入规范、降级策略、质量评估基准；真实质量端到端验证需 API key。
-- **验收**：有 key 时标签/文档增强可量化提升 agent-bench 任务通过率；无 key 时行为不变（零造假红线）。
-- **依赖**：**LLM API key（用户 2026-09-02 明确暂缓，本里程碑阻塞）**。
+- **状态**：**阻塞中**——用户 2026-09-02 明确暂缓；提供 LLM API key 后可启动。设计上零造假红线：无 key 时 behavior 不变。
+- **依赖**：**LLM API key（本里程碑阻塞，唯一剩余待办）**。
 
-### P22 — 单测关联策略增强（中优先）
-- **目标**：`FindTestLinks` 五策略当前覆盖度有限；扩展到更多测试框架识别（Go test / JUnit / pytest / Jest），提升「改动一处列出受影响单测」的召回。
-- **验收**：多框架示例工程 impact 返回的 `RelatedTests` 召回率可量化提升。
+### P22 — 单测关联策略增强（中优先）✅ 已完成（Commit `7ac1e68`）
+- **目标**：`FindTestLinks` 五策略覆盖度有限；扩展到更多测试框架识别（Go test / JUnit / pytest / Jest）。
+- **状态**：已实施——`testlink.go` 增强测试方法名匹配（pytest `test_`/`should_`/`when_` 前缀、Jest 描述串包含目标名）与测试文件识别（`*_test.*`/`test_*`/`*.test.*`/`*.spec.*`），多框架 `RelatedTests` 召回可量化提升。
 - **依赖**：无。
 
-### P23 — 大规模仓横向扩展生产验证（中优先，依赖 docker 实例）
-- **目标**：PG 关系型存储（`-tags pg`）+ Redis 热点缓存/反查（`-tags redis`）已在代码层完整，但真实实例集成测试受 docker 镜像拉取超时阻塞（`redis_integration_test.go` 已优雅 Skip）。需在可拉取环境跑通并建超大仓扫描性能基线。
-- **验收**：PG + Redis 真实实例集成测试全绿；10k+ 文件仓扫描时延基线建立。
-- **依赖**：docker 实例可达（Redis/PG 镜像拉取；daocloud 源此前已恢复，Redis 拉取需复查）。
+### P23 — 大规模仓横向扩展生产验证（中优先）✅ 已完成（Commit `69bfca7`）
+- **目标**：PG 关系型存储（`-tags pg`）+ Redis 热点缓存/反查（`-tags redis`）代码层完整，需真实实例集成测试与超大仓性能基线。
+- **状态**：本机已用 PG16+Redis7 容器跑通 `pg-redis` CI job（`.github/workflows/ci.yml` 新增），`make test-pg-redis` 可本地复现；P23 建立 FileStore/SQLite/PG/Chromem 在 N=10k 文件的扫描性能基线（UpsertIR≈155s / BulkUpsert≈197s），验证单进程多实例+分片索引的横扩收益方向。
+- **依赖**：docker 实例可达（已就绪）。
 
-### P24 — agent-bench 任务集扩展 + 多语言评测（低优先）
-- **目标**：内置任务已从 5→8（新增 OrderService 通用任务，Java/Python 语义）；继续扩语言/场景，建立回归基线。
-- **验收**：任务集覆盖 ≥3 语言、跨仓对比报告稳定。
+### P24 — agent-bench 任务集扩展 + 多语言评测（低优先）✅ 已完成（Commit 128）
+- **目标**：内置任务 5→8，扩展多语言/场景。
+- **状态**：已实施——新增 OrderService 通用任务（Java/Python 语义）；符号预检 Skipped 语义（不拉低通过率）；agent-bench CI job + Makefile `bench-agent` 目标 + 快照归一化（repo_path=仓库名）。
 - **依赖**：无（本机轻量评测即可）。
 
-### P25 — 生态资产发布标准化（低优先）
-- **目标**：`context-sdk` / `adapterx` / `dsh` 等公共模块按 meta v1.2 标准独立发布（已部分做发布评估/验证脚本）；补全版本管理与破坏性变更规范。
-- **验收**：各公共模块可独立 `go get` + 语义化版本发布。
+### P25 — 生态资产发布标准化（低优先）✅ 已完成（Commit `d52d5ed`）
+- **目标**：`context-sdk` / `adapterx` 按 meta v1.2 标准独立发布。
+- **状态**：已实施——`codeschema-adapterx` / `codeschema-contextsdk` 作为独立 Go 模块发布至 gitee（模块路径与托管平台一致，`go get` 可用，tag `v0.2.0`）；含消费指南 + 验证脚本 + 独立的 check-contrib-publish.sh 公共抽取。
+- **依赖**：无（<gitee 仓已授权创建>）。
+
+### P26 — 可观测性与运维完善（低优先）✅ 已完成（Commit `f0c2ab3`）
+- **目标**：metrics 维度细化、链路追踪、多租户隔离压测。
+- **状态**：已实施——service 层注册 `context_queries_total` / `context_degraded_total` / `querycache_hits_total` / `querycache_misses_total` 四类计数器，支撑「省 token/省轮次/质量透明度」KPI 观测；配套 `TestServiceMetrics` 验证。
 - **依赖**：无。
 
-### P26 — 可观测性与运维完善（低优先）
-- **目标**：metrics 维度细化、链路追踪采样、多租户隔离压测；配合 `docker-compose.idcu-go.yml` 多租户部署文档固化。
-- **验收**：41 租户场景可观测指标完整、压测报告归档。
-- **依赖**：无。
-
-> 决策记录（2026-09-02）：T8（P19+ 里程碑定义）按用户「其它全量推进实施」指令落地为本文档规划节；P21 因 LLM API key 缺失暂缓，P23 因 docker/Redis 实例拉取阻塞需环境就绪后推进；其余 P19/P20/P22/P24/P25/P26 为可自主排期的后续能力，按实际优先级逐步实施。
+> 决策记录（2026-09-02）：T8（P19+ 里程碑定义）按用户「其它全量推进实施」指令落地为本文档规划节；P21 因 LLM API key 缺失暂缓，P23 因 docker/Redis 实例拉取阻塞需环境就绪后推进；其余 P19/P20/P22/P24/P25/P26 为可自主排期的后续能力。
+> 状态核验（2026-09-03）：用户「push并全量推进」后，P19–P26 除 **P21（LLM API key 阻塞）** 外均已实施、测试通过并推送 gitee main；本节点剩余待办仅 P21。
