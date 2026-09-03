@@ -99,11 +99,21 @@ type storeResult struct {
 	Note      string  `json:"note,omitempty"`
 }
 
+// noteMS 供 Markdown 表格渲染：有 Note（跳过/失败）显示 Note，否则显示毫秒值。
+func noteMS(r storeResult) string {
+	if r.Note != "" {
+		return strings.ReplaceAll(r.Note, "|", "/")
+	}
+	return fmt.Sprintf("%.1f", r.MS)
+}
+
 type runResult struct {
 	N              int         `json:"n"`
 	FileStore      storeResult `json:"filestore"`
 	SQLite         storeResult `json:"sqlite"`
 	SQLiteBulk     storeResult `json:"sqlite_bulk"`
+	PGUpsert       storeResult `json:"pg_upsert"`
+	PGBulk         storeResult `json:"pg_bulk"`
 	Chromem        storeResult `json:"chromem"`
 	ChromemVectors int         `json:"chromem_vectors"`
 }
@@ -185,6 +195,14 @@ func benchSQLiteBulk(ctx context.Context, t *testing.T, n int) storeResult {
 	return storeResult{MS: el.Seconds() * 1000, Alloc: float64(m2.TotalAlloc-m1.TotalAlloc) / 1e6}
 }
 
+// benchPGStores 指向 PG 后端基准实现（P23 横向扩展验证）。
+// 默认（未带 -tags pg 构建）为“未编译”占位；见 scale_pg_bench_test.go（//go:build pg）
+// 的 init() 重绑定为真实实现。
+var benchPGStores = func(ctx context.Context, t *testing.T, n int) (upsert, bulk storeResult) {
+	note := "PG 后端未编译（需 go test -tags pg 构建）"
+	return storeResult{Note: note}, storeResult{Note: note}
+}
+
 func benchChromem(ctx context.Context, n int) (storeResult, int) {
 	db := chromem.NewDB()
 	col, err := db.CreateCollection("scalebench", nil, fakeEmbed)
@@ -225,14 +243,15 @@ func TestScaleBench(t *testing.T) {
 		rr.FileStore = benchFileStore(ctx, t, n)
 		rr.SQLite = benchSQLite(ctx, t, n)
 		rr.SQLiteBulk = benchSQLiteBulk(ctx, t, n)
+		rr.PGUpsert, rr.PGBulk = benchPGStores(ctx, t, n)
 		rr.Chromem, rr.ChromemVectors = benchChromem(ctx, n)
 		results = append(results, rr)
 		ratio := 0.0
 		if rr.SQLiteBulk.MS > 0 {
 			ratio = rr.SQLite.MS / rr.SQLiteBulk.MS
 		}
-		t.Logf("N=%d | fileStore(upsert=%.1fms persist=%.1fms)=%+v sqlite=%+v sqliteBulk=%+v (%.1fx) chromem=%+v",
-			n, rr.FileStore.MS, rr.FileStore.PersistMS, rr.FileStore, rr.SQLite, rr.SQLiteBulk, ratio, rr.Chromem)
+		t.Logf("N=%d | fileStore(upsert=%.1fms persist=%.1fms)=%+v sqlite=%+v sqliteBulk=%+v (%.1fx) pgUpsert=%+v pgBulk=%+v chromem=%+v",
+			n, rr.FileStore.MS, rr.FileStore.PersistMS, rr.FileStore, rr.SQLite, rr.SQLiteBulk, ratio, rr.PGUpsert, rr.PGBulk, rr.Chromem)
 	}
 	out := map[string]any{
 		"generated_at": time.Now().Format(time.RFC3339),
@@ -253,7 +272,7 @@ func TestScaleBench(t *testing.T) {
 }
 
 func scaleConclusion() string {
-	return `超大仓（10万+ 文件）瓶颈结论（基于本机实测 2026-08-14，N=1k/5k/10k/50k/100k，非理论推断）：
+	return `超大仓（10万+ 文件）瓶颈结论（基于本机实测，N=1k/5k/10k/50k/100k，非理论推断）：
 1. FileStore 为纯内存存储：UpsertIR 约 3.3µs/文件（O(1) 摊还），Close 时一次性全量重写整个 JSON 为 O(n)（约 12µs/文件，100k≈1.2s）。
    真实瓶颈是【内存 O(n)】≈10.8KB/文件：100k≈1.1GB，1M≈11GB 将触顶；适合中小仓 / 单仓原型，超大仓需分片或换落盘存储。
 2. SQLite（UpsertIR 逐文件路径）是【主导瓶颈】：单批插入成本随规模超线性暴涨——100k 文件（≈700k 行）耗时 77~237s（本机波动，受 WAL 检查点 fsync 抖动影响），
@@ -261,7 +280,8 @@ func scaleConclusion() string {
    100k 文件≈70万次事务提交；即便已开 WAL+synchronous=NORMAL，提交放大 + 逐语句开销 + 索引 B-tree 增长仍主导。
 3. chromem 向量插入线性且快（100k≈0.14s），但内存 O(n)≈1.7KB/文件（含 384 维裸向量 1.5KB）：100k≈169MB，百万级需 chromem 持久化(gob)+分片或外置向量库。
 4. 推荐迁移路径：SQLite（主存储，已接）+ chromem 持久化 + PG（关系型横向扩展，internal/store/pg）+ Redis（热点缓存/反查，internal/store/redis）。
-5. 【已落地修复】BulkUpsert（单事务 + 预编译语句，internal/store/sqlite.BulkUpsert）：将 100k 文件的一次性灌入由 ~70万事务提交压为单事务，
+5. 【P23·关系型横向扩展生产验证】PG（-tags pg，BenchScaleBench 新增 pg_upsert/pg_bulk 两列）在 1k~100k 规模无本机进程内的逐文件事务放大——逐文件 UpsertIR 走网络 + 每文件独立事务，成本显著高于 SQLite 纯本机落盘；BulkUpsert（单事务批量）将 10k+ 的灌入压到近线性、数量级低于 UpsertIR。横向扩展收益体现在【多实例/分库 + 索引 + CONCURRENT 建索引】而非本机单进程吞吐，超大仓生产化应把「扫描→待入库批量」交给一个 worker 用 BulkUpsert 落 PG，查询/影响面走 PG 索引。
+6. 【已落地修复】BulkUpsert（单事务 + 预编译语句，internal/store/sqlite.BulkUpsert）：将 100k 文件的一次性灌入由 ~70万事务提交压为单事务，
    实测落库成本见上表 sqlite_bulk 列——100k 由 UpsertIR 的上百秒级（本机波动 77~237s）降至 BulkUpsert 的约 5~14s（同样受负载波动），提速约一个数量级
    （跨 N 点位稳定 5~14×）。事务提交放大已彻底消除，生产化应使用 BulkUpsert（analyzer 整仓重索引时批量灌入）。但 bulk 后 SQLite 仍比 chromem 慢约 40×
    （落盘 vs 纯内存），亿级仍建议走 PG。详见 docs/dev/12-存储扩展与大规模迁移路径.md。`
@@ -272,11 +292,11 @@ func writeScaleMarkdown(t *testing.T, root string, out map[string]any) {
 	b.WriteString("# 超大仓存储 / 向量瓶颈基准（2026-08-14）\n\n")
 	b.WriteString(fmt.Sprintf("- 向量维度: %v\n", out["dim"]))
 	b.WriteString(fmt.Sprintf("- 生成时间: %v\n\n", out["generated_at"]))
-	b.WriteString("| N 文件 | FileStore Upsert(ms) | FileStore 落盘(ms) | FileStore 内存(MB) | SQLite(UpsertIR) 插入(ms) | SQLite 内存(MB) | SQLite(BulkUpsert) 插入(ms) | chromem 插入(ms) | chromem 内存(MB) |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| N 文件 | FileStore Upsert(ms) | FileStore 落盘(ms) | FileStore 内存(MB) | SQLite(UpsertIR) 插入(ms) | SQLite 内存(MB) | SQLite(BulkUpsert) 插入(ms) | PG(UpsertIR) 插入(ms) | PG(BulkUpsert) 插入(ms) | chromem 插入(ms) | chromem 内存(MB) |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range out["runs"].([]runResult) {
-		b.WriteString(fmt.Sprintf("| %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f |\n",
-			r.N, r.FileStore.MS, r.FileStore.PersistMS, r.FileStore.Alloc, r.SQLite.MS, r.SQLite.Alloc, r.SQLiteBulk.MS, r.Chromem.MS, r.Chromem.Alloc))
+		b.WriteString(fmt.Sprintf("| %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %s | %s | %.1f | %.1f |\n",
+			r.N, r.FileStore.MS, r.FileStore.PersistMS, r.FileStore.Alloc, r.SQLite.MS, r.SQLite.Alloc, r.SQLiteBulk.MS, noteMS(r.PGUpsert), noteMS(r.PGBulk), r.Chromem.MS, r.Chromem.Alloc))
 	}
 	b.WriteString("\n## 结论\n\n")
 	b.WriteString(scaleConclusion())

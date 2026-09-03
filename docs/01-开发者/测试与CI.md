@@ -16,6 +16,8 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 
 > PG/Redis 真实实例集成测试：`make test-pg-redis`（先 `docker compose --profile pg --profile redis up -d` 起真实服务）。
 
+> **agent-bench 在容器内运行注意（遗留① 已定论）**：`TestRunMulti_RepoHintFilter` 等按 `RepoHint` 过滤任务的多仓库评测，取 `filepath.Base(仓库路径)` 与任务 `RepoHint`（如 `code-schema`）对齐；在 `docker/lsp-test` 等镜像内跑 Go 测试时，**仓库必须挂载到目录名与 RepoHint 一致的位置**（本仓应挂到 `/code-schema`，而非 `/src`），否则 `filepath.Base` 得 `src` 导致全部 `RepoHint` 任务被 Skipped、活跃任务数不符而失败。
+
 ## CI 门禁（`.github/workflows/ci.yml`）
 
 | job | 作用 |
