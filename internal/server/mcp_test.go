@@ -161,6 +161,58 @@ func TestMCP_InvalidJSON(t *testing.T) {
 	}
 }
 
+// TestMCP_ToolCall_ContextBatch symbols 数组传多个时走批量路径（B5）。
+// 单符号失败不中断整体：results 只含存在的符号，errors 带 code + hint。
+func TestMCP_ToolCall_ContextBatch(t *testing.T) {
+	srv := newTestMCPServer(t)
+	body := `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"context","arguments":{"symbols":["com.example.MyClass","com.example.Missing"]}}}`
+	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+
+	var resp jsonRPCResponse
+	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %+v", resp.Error)
+	}
+
+	// mcpResult 把结果序列化进 content[0].text，batch 结构在其中。
+	content, ok := resp.Result.(map[string]any)["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatal("缺少 content")
+	}
+	text, ok := content[0].(map[string]any)["text"].(string)
+	if !ok {
+		t.Fatal("缺少 text")
+	}
+	var batch struct {
+		Results []map[string]any `json:"results"`
+		Errors  []struct {
+			Symbol string `json:"symbol"`
+			Code   string `json:"code"`
+			Hint   string `json:"hint"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(text), &batch); err != nil {
+		t.Fatalf("parse batch result: %v", err)
+	}
+	if len(batch.Results) != 1 {
+		t.Fatalf("results=%d, want 1（仅存在的符号）", len(batch.Results))
+	}
+	if batch.Results[0]["symbol"] != "com.example.MyClass" {
+		t.Fatalf("results[0].symbol=%v", batch.Results[0]["symbol"])
+	}
+	if len(batch.Errors) != 1 || batch.Errors[0].Code != "ERR_SYMBOL_NOT_FOUND" {
+		t.Fatalf("errors=%+v, want 1 条 ERR_SYMBOL_NOT_FOUND", batch.Errors)
+	}
+	if batch.Errors[0].Hint == "" {
+		t.Fatal("批量失败明细应带 hint")
+	}
+}
+
 func TestMCP_ToolCall_AllTools(t *testing.T) {
 	srv := newTestMCPServer(t)
 
