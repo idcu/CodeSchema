@@ -5,7 +5,7 @@
 # 用法：
 #   bash scripts/check-contrib-publish.sh <src_dir> <module_name>
 #     src_dir      contrib 下的子包目录名（如 contextsdk / adapterx）
-#     module_name  独立发布用的 module 路径（如 github.com/idcu/codeschema-contextsdk）
+#     module_name  独立发布用的 module 路径（如 gitee.com/idcu/codeschema-contextsdk）
 #
 # 原理：把 contrib/<src_dir> 复制到系统临时目录，go mod init 独立 module，
 # go build 全包编译。若仅依赖标准库，无需任何外部依赖即可通过。

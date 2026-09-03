@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 148: chore(eco): 生态资产 P2 正式发布收口（gitee 独立仓 v0.2.0，模块路径 go get 可用）
+
+- 背景：adapterx / contextsdk 已随上批推送 gitee 独立仓（v0.1.0），但 go.mod 模块路径沿用 `github.com/idcu/…` 与真实托管（gitee）不一致——标准 `go get github.com/idcu/codeschema-adapterx@v0.1.0` 会去 github.com 拉取而失败，对外不可消费。
+- 动作：两独立仓 go.mod 模块路径改为 `gitee.com/idcu/codeschema-adapterx` / `gitee.com/idcu/codeschema-contextsdk`（与 `gitee.com/idcu-go/*` 惯例一致），源注释/README 同步；re-tag `v0.2.0` 并 push（main + tag）。消费侧验证：临时 module `go get gitee.com/idcu/codeschema-adapterx@v0.2.0` / `contextsdk@v0.2.0` 成功，`go run` 打印 `builtin adapters: 4`。
+- 配套：`scripts/check-{adapterx,contextsdk}-publish.sh` 与 `check-contrib-publish.sh` 用法注释改 gitee 模块路径；`contrib/{adapterx,contextsdk,dsh}/README.md` 发布形态改 gitee 路径并标注 P2 已发布 v0.2.0。
+- 遗留：两个独立仓消费需 `go get` 侧 `GOPRIVATE/GONOSUMDB` 覆盖 `gitee.com/idcu`（gitee 非官方 module proxy/sumdb 覆盖范围），已在 03-部署运维 或 README 记录。本批 monorepo 改动未 push（待授权）。
+
 ### Commit 147: refactor(watcher,scheduler): 抽取通用文件监听 fswatch 与泛型防抖队列 scheduler（档二续）
 
 - 背景：档二封档时 fswatch 标 planned 但因 watcher 耦 scanner/Scheduler 未落实。本轮把文件监听与事件调度两个中性内核从领域管线解耦，真正落地为可复用原语。

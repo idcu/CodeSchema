@@ -8,7 +8,7 @@ context-sdk 是 CodeSchema 的**上下文编排程序化 API**（B 级生态资�
 
 ## 2. 发布形态
 
-建议以独立 Go 模块 `github.com/idcu/codeschema-contextsdk` 发布，依赖关系：
+建议以独立 Go 模块 `gitee.com/idcu/codeschema-contextsdk` 发布，依赖关系：
 
 ```
 codeschema-contextsdk
@@ -47,12 +47,21 @@ func NewClient(resolve ResolveService) *Client // Client = contextsdk.Client（�
 |---|---|---|
 | P0 | 完成接口抽象（SDKProvider + 公共类型），创建独立 module 占位 | 当前任务 |
 | P1 | 内部仓库内使用抽象接口编译通过，测试全部通过 | 当前 monorepo |
-| P2 | 独立 `go.mod` 发布至 `github.com/idcu/codeschema-contextsdk` | 首个 v* tag |
+| P2 | 独立 `go.mod` 发布至 `gitee.com/idcu/codeschema-contextsdk` | ✅ 已发布 v0.2.0 |
 | P3 | 发布示例与 dsh 集成指南 | 同 P2 |
 
 > 发布前置验证已就绪（2026-08-17）：`bash scripts/check-contextsdk-publish.sh`
 > 把本包复制到临时目录做独立 module 编译 + vet + test，仅标准库依赖即可通过；
 > dsh Code mode 集成示例见 `contrib/dsh/README.md` §8。
+
+## 4.1 对外消费
+
+独立仓已随 P2 发布至 `gitee.com/idcu/codeschema-contextsdk`（模块路径 `gitee.com/idcu/codeschema-contextsdk`，tag `v0.2.0`），`go get gitee.com/idcu/codeschema-contextsdk@v0.2.0` 即可引入。因 gitee 不在官方 module proxy / sum.golang.org 覆盖范围，消费方 go 环境需：
+
+```bash
+go env -w GOPRIVATE=gitee.com/idcu GONOSUMDB=gitee.com/idcu GOSUMDB=off GOPROXY=direct
+go get gitee.com/idcu/codeschema-contextsdk@v0.2.0
+```
 
 ## 5. 验证纪律
 

@@ -109,7 +109,7 @@ preset: minimal
 ## 8. 方式三：Code mode 程序化编排（context-sdk）
 
 dsh **Code mode** 让模型写 TypeScript 程序组合多轮工具调用。配合 CodeSchema 的
-**context-sdk**（`contrib/contextsdk`，独立发布 `github.com/idcu/codeschema-contextsdk`），
+**context-sdk**（`contrib/contextsdk`，独立发布 `gitee.com/idcu/codeschema-contextsdk`），
 可在单次程序化调用里组合「多租户 × 多符号 × 影响面 × 关联单测」的上下文包，
 避免多轮往返：
 
