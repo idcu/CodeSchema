@@ -33,7 +33,7 @@ func TestHandleOpenAPI(t *testing.T) {
 		t.Fatal("missing paths")
 	}
 	// 应覆盖全部核心端点
-	for _, p := range []string{"/health", "/context", "/impact", "/tests", "/search", "/tags", "/tags/search", "/tags/all", "/metrics"} {
+	for _, p := range []string{"/health", "/context", "/impact", "/tests", "/affected", "/search", "/tags", "/tags/search", "/tags/all", "/projects", "/metrics"} {
 		if _, ok := paths[p]; !ok {
 			t.Fatalf("missing path %s in openapi spec", p)
 		}

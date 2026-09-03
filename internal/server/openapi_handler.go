@@ -18,16 +18,19 @@ var openapiJSON = []byte(`{
     "/health/db": { "get": { "summary": "存储层健康检查", "responses": { "200": { "description": "OK" } } } },
     "/health/kv": { "get": { "summary": "KV 缓存健康检查", "responses": { "200": { "description": "OK" } } } },
     "/health/vector": { "get": { "summary": "向量库健康检查", "responses": { "200": { "description": "OK" } } } },
-    "/context": { "get": { "summary": "获取符号的精准裁剪上下文", "parameters": [ { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "context_lines", "in": "query", "schema": { "type": "integer", "default": 5 } } ], "responses": { "200": { "description": "上下文" }, "404": { "description": "符号未找到" } } } },
+    "/context": { "get": { "summary": "获取符号的精准裁剪上下文", "parameters": [ { "name": "symbol", "in": "query", "required": false, "schema": { "type": "string" }, "description": "单符号查询（与 symbols 二选一）" }, { "name": "symbols", "in": "query", "schema": { "type": "string" }, "description": "批量符号，逗号分隔（B5，与 symbol 二选一）" }, { "name": "context_lines", "in": "query", "schema": { "type": "integer", "default": 5 } }, { "name": "mode", "in": "query", "schema": { "type": "string", "enum": ["full", "minimal"], "default": "full" } }, { "name": "max_bytes", "in": "query", "schema": { "type": "integer", "default": 0 } }, { "name": "max_tokens", "in": "query", "schema": { "type": "integer", "default": 0 } }, { "name": "max_line_chars", "in": "query", "schema": { "type": "integer", "default": 0 } }, { "name": "path_style", "in": "query", "schema": { "type": "string", "enum": ["absolute", "virtual"], "default": "absolute" } } ], "responses": { "200": { "description": "上下文" }, "404": { "description": "符号未找到" } } } },
     "/impact": { "get": { "summary": "分析方法的调用影响面", "parameters": [ { "name": "method", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "depth", "in": "query", "schema": { "type": "integer", "default": 1 } } ], "responses": { "200": { "description": "影响面" } } } },
     "/tests": { "get": { "summary": "查询方法的关联单测", "parameters": [ { "name": "method", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "min_confidence", "in": "query", "schema": { "type": "number", "default": 60 } } ], "responses": { "200": { "description": "单测列表" } } } },
+    "/affected": { "get": { "summary": "受影响测试查询（递归追溯调用者并收集关联单测）", "parameters": [ { "name": "method", "in": "query", "required": true, "schema": { "type": "string" } } ], "responses": { "200": { "description": "受影响测试清单" } } } },
     "/search": { "get": { "summary": "双路检索（FTS + 向量语义）", "parameters": [ { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "mode", "in": "query", "schema": { "type": "string", "enum": ["exact", "semantic", "both"], "default": "both" } }, { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } } ], "responses": { "200": { "description": "搜索结果" } } } },
     "/tags": { "get": { "summary": "获取符号的标签", "parameters": [ { "name": "symbol", "in": "query", "required": true, "schema": { "type": "string" } } ], "responses": { "200": { "description": "标签" } } } },
     "/tags/search": { "get": { "summary": "按标签搜索符号（支持多标签 AND，逗号分隔）", "parameters": [ { "name": "tag", "in": "query", "required": true, "schema": { "type": "string" }, "description": "标签名，可逗号分隔多个（AND 交集），如 controller,service" } ], "responses": { "200": { "description": "符号列表" } } } },
     "/tags/all": { "get": { "summary": "所有标签及分类", "responses": { "200": { "description": "标签统计" } } } },
+    "/projects": { "get": { "summary": "枚举多租户仓库", "responses": { "200": { "description": "项目清单" } } } },
     "/metrics": { "get": { "summary": "Prometheus 指标", "responses": { "200": { "description": "指标" } } } },
     "/openapi.json": { "get": { "summary": "OpenAPI 3.0 规范", "responses": { "200": { "description": "规范 JSON" } } } },
-    "/docs": { "get": { "summary": "API 文档页（swagger-ui）", "responses": { "200": { "description": "HTML" } } } }
+    "/docs": { "get": { "summary": "API 文档页（swagger-ui）", "responses": { "200": { "description": "HTML" } } } },
+    "/docs/": { "get": { "summary": "API 文档页（末尾斜杠）", "responses": { "200": { "description": "HTML" } } } }
   }
 }`)
 

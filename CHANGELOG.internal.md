@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 152: fix(server): OpenAPI 规范补齐 /affected、/projects、/docs/，对齐 23 路由口径
+
+- 背景：`internal/server/openapi_handler.go` 静态 OpenAPI 规范仅声明 13 个路径，而 HTTP API 实际注册 23 个端点（http.go 17 + viz.go 6）；`/affected`、`/projects` 是 `docs/01-开发者/接口层.md` 与 AGENTS.md 明确列出的核心数据端点，却未纳入规范，与「完整契约以 GET /openapi.json 为准」的声明相矛盾。
+- 动作：规范 `paths` 补入 `/affected`、`/projects`、`/docs/`；`/context` 参数补齐 B5 批量 `symbols` 与 B1 预算/裁剪参数（`max_bytes`/`max_tokens`/`max_line_chars`/`path_style`/`mode`），并将 `symbol` 改为非必填（与 `symbols` 二选一）；测试 `TestHandleOpenAPI` 的必需路径清单增补 `/affected`、`/projects` 防回归。
+- 说明：`/viz` 及 `/viz/api/*`（6 路由）为可视化调试端点，属 UI 调试工具，不纳入 OpenAPI 数据规范（与接口层.md「http.go 17 + viz.go 6」口径一致）。
+- 验证：`go test ./internal/server/...` 通过；`go build ./...` 通过。
+
 ### Commit 151: feat(parser): jcodeindexer 适配器落地并接线（去「配置预留」）
 
 - 背景：`internal/config/parse.go` 早有 `parser.jcodeindexer` 配置字段（db/config_file/env），但 `internal/parser/adapter/` 下无对应包、解析注册中心未接线——文档长期标注「仅配置预留、未实现」。本轮「修复骨架」将其补齐为真实可用的批量直读适配器。
