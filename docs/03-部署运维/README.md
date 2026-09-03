@@ -10,6 +10,10 @@
 docker build -t codeschema:latest .
 docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 
+# 需要 ONNX 语义检索，构建专门变体镜像（独立 Dockerfile + 生成文档）：
+docker build -f docker/onnx/Dockerfile -t codeschema:onnx .
+# 详见 [codeschema-onnx镜像生成.md](./codeschema-onnx镜像生成.md)
+
 # 或裸二进制
 make build && ./codeschema serve --http :8081
 ```
