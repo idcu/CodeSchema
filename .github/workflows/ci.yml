@@ -310,6 +310,68 @@ jobs:
             build/treesitter-bench-history.jsonl
           if-no-files-found: warn
 
+  # === PG / Redis 真实实例集成验证（-tags 'pg redis'，Linux services 容器） ===
+  # tag-guard 只保证 onnx/pg/redis 变体「能编译」；此为运行时真实验证，需真实服务。
+  # 测试源：internal/store/pg/integration_test.go（优先 CODESCHEMA_PG_DSN，其次 localhost:5432，
+  # 再降级 embedded-postgres）；internal/store/pg/redis_integration_test.go（读 CODESCHEMA_REDIS_ADDR，
+  # 不可达时测试自 Skip 不失败）。
+  pg-redis:
+    name: PG/Redis Integration (real services)
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    env:
+      CODESCHEMA_PG_DSN: postgres://codeschema:codeschema@localhost:5432/codeschema?sslmode=disable
+      CODESCHEMA_REDIS_ADDR: redis://localhost:6379/0
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: codeschema
+          POSTGRES_PASSWORD: codeschema
+          POSTGRES_DB: codeschema
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codeschema"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Checkout idcu-go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../idcu-go
+          for m in trim ttlcache pathsafe; do
+            if [ ! -d "../idcu-go/${m}/.git" ]; then
+              git clone --depth 1 --branch v0.1.0 "https://gitee.com/idcu-go/${m}.git" "../idcu-go/${m}"
+            fi
+          done
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: PG/Redis integration tests (-tags 'pg redis')
+        # services 容器暴露到 localhost:5432/6379，job env 已指好 DSN/ADDR；
+        # Redis 不可达时测试自 Skip（不失败），故 healthcheck 已保证容器就绪前提下本 step 真实验证。
+        run: go test -tags 'pg redis' -count=1 -timeout 300s ./internal/store/pg/...
+
   # === 标签隔离代码看护（-tags onnx/pg/redis：默认二进制不含，需显式开启） ===
   # 防止 ONNX 嵌入 / PG / Redis 存储在默认构建外长期无人编译而腐化。
   # 用 go list（仅解析+类型检查，不链接 onnxruntime 运行时）做轻量看护，

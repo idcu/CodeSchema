@@ -94,6 +94,15 @@ test-cover:
 	$(GO) test -count=1 -timeout 120s -coverprofile=$(OUTPUT)/coverage.out ./...
 	$(GO) tool cover -func=$(OUTPUT)/coverage.out
 
+# PG/Redis 真实实例集成测试（-tags 'pg redis'，需真实服务）：
+# 本地先起服务：docker compose --profile pg --profile redis up -d
+# 对应 CI：.github/workflows/ci.yml 的 pg-redis job（services 容器真实实例）
+.PHONY: test-pg-redis
+test-pg-redis:
+	@echo "==> Running PG/Redis real-instance integration tests ..."
+	$(GO) test -tags 'pg redis' -count=1 -timeout 300s ./internal/store/pg/...
+	@echo "==> PG/Redis integration tests OK."
+
 # 性能基准测试
 .PHONY: bench
 bench:
@@ -237,6 +246,7 @@ help:
 	@echo "  test         Run all tests"
 	@echo "  test-race    Run tests with race detector"
 	@echo "  test-cover   Run tests with coverage report"
+	@echo "  test-pg-redis Run PG/Redis real-instance integration tests (-tags 'pg redis')"
 	@echo "  bench        Run benchmarks"
 	@echo "  lint         Run go vet"
 	@echo "  verify-tags  Verify onnx/pg/redis tag-isolated packages compile"

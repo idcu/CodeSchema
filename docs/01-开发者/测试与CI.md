@@ -2,7 +2,7 @@
 
 > 写给：要跑测试、加测试、理解 CI 门禁的开发者
 
-> 最后更新：2026-09-02
+> 最后更新：2026-09-03
 ## 本地测试
 
 ```bash
@@ -14,6 +14,8 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 
 > 慢测试用 `-short` 与 env gate 控制；CI bench / nightly 不受影响。
 
+> PG/Redis 真实实例集成测试：`make test-pg-redis`（先 `docker compose --profile pg --profile redis up -d` 起真实服务）。
+
 ## CI 门禁（`.github/workflows/ci.yml`）
 
 | job | 作用 |
@@ -22,6 +24,7 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 | `race` | Race Detector 专项（`-race`） |
 | `treesitter` | TreeSitter AST 变体（`-tags treesitter` CGO 真语法树） |
 | `tag-guard` | `go list -tags 'onnx pg redis' ./...` 解析+类型检查（不链接运行时），防止 build-tag 变体编译断裂 |
+| `pg-redis` | 真实 PG/Redis 实例集成（services 容器，`-tags 'pg redis'`），验证 PG 存储 + Redis 缓存真实验证 |
 | `counts-guard` | `make counts-check`：实时计数 vs `scripts/counts_baseline.json`，任一漂移即失败（防「包数/工具数」文档漂移） |
 | `agent-bench` | Agent 任务端到端评测（快照归一化 repo_path） |
 | `bench` | Scale Benchmark 规模基准 |
@@ -29,7 +32,7 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 | `cross` | Cross-Compile 交叉编译 |
 | `docker` | Docker Image 镜像构建 |
 
-> 核心合并门禁：`test` / `tag-guard` / `counts-guard` / `agent-bench`；`race` / `treesitter` 为质量增强；`bench` / `nightly-scale` / `cross` / `docker` 为定期 / 辅助作业。
+> 核心合并门禁：`test` / `tag-guard` / `counts-guard` / `agent-bench`；`race` / `treesitter` / `pg-redis`（需服务容器）为质量增强；`bench` / `nightly-scale` / `cross` / `docker` 为定期 / 辅助作业。
 
 ## 计数守护（防数字漂移）
 

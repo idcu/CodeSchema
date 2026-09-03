@@ -95,14 +95,14 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 			return err
 		}
 		// 方法随类写入（骨架历史缺陷：method 从未落库，GetMethodsByClassID 恒空）
-		if err := upsertMethodsTx(ctx, tx, ir.Classes, ir.Methods, ir.Source); err != nil {
+		if err := upsertMethodsTx(ctx, tx, fileID, ir.Classes, ir.Methods, ir.Source); err != nil {
 			return err
 		}
 	}
 	// 变量/常量随类与方法写入（2026-09-03 新增；须在 upsertClassesTx/upsertMethodsTx 之后，
 	// 因为 class 被全量重插、method 需按 class_id+name 回查 id）。
 	if len(ir.Fields) > 0 {
-		if err := upsertFieldsTx(ctx, tx, ir.Fields, ir.Source); err != nil {
+		if err := upsertFieldsTx(ctx, tx, fileID, ir.Fields, ir.Source); err != nil {
 			return err
 		}
 	}
@@ -119,14 +119,14 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 	return tx.Commit()
 }
 
-// upsertMethodsTx 写入类下的方法（按 ClassFQN 关联类 ID，ON CONFLICT 幂等）。
-func upsertMethodsTx(ctx context.Context, tx *sql.Tx, classes []parser.ClassIR, methods []parser.MethodIR, src string) error {
-	// 构建类 FQN → 类 ID 映射
+// upsertMethodsTx 写入类下的方法（按当前 file 的 ClassFQN 关联类 ID，ON CONFLICT 幂等）。
+func upsertMethodsTx(ctx context.Context, tx *sql.Tx, fileID int64, classes []parser.ClassIR, methods []parser.MethodIR, src string) error {
+	// 构建类 FQN → 类 ID 映射（限定当前 file，避免跨文件同名 FQN 误挂到旧 class）
 	classIDByFQN := make(map[string]int64)
 	for _, c := range classes {
-		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		const q = `SELECT id FROM class WHERE file_id=$1 AND full_name=$2 LIMIT 1`
 		var id int64
-		if err := tx.QueryRowContext(ctx, q, c.FullName).Scan(&id); err == nil {
+		if err := tx.QueryRowContext(ctx, q, fileID, c.FullName).Scan(&id); err == nil {
 			classIDByFQN[c.FullName] = id
 		}
 	}
@@ -201,7 +201,8 @@ func upsertCallsTx(ctx context.Context, tx *sql.Tx, fileID int64, calls []parser
 //   - FieldIR.MethodFQN 非空（ClassFQN.MethodName）→ 局部变量，按 method_id 删除后插入。
 //
 // 关联需 class 表 full_name 命中、method 存在；否则跳过（顶层函数局部变量 method 不落库）。
-func upsertFieldsTx(ctx context.Context, tx *sql.Tx, fields []parser.FieldIR, src string) error {
+// class 查询限定当前 file（file_id），避免跨文件同名 FQN 误挂到旧 class。
+func upsertFieldsTx(ctx context.Context, tx *sql.Tx, fileID int64, fields []parser.FieldIR, src string) error {
 	classIDByFQN := make(map[string]int64, len(fields))
 	for _, f := range fields {
 		fqn := f.ClassFQN
@@ -218,9 +219,9 @@ func upsertFieldsTx(ctx context.Context, tx *sql.Tx, fields []parser.FieldIR, sr
 		if _, ok := classIDByFQN[fqn]; ok {
 			continue
 		}
-		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		const q = `SELECT id FROM class WHERE file_id=$1 AND full_name=$2 LIMIT 1`
 		var id int64
-		if err := tx.QueryRowContext(ctx, q, fqn).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, q, fileID, fqn).Scan(&id); err != nil {
 			classIDByFQN[fqn] = -1
 			continue
 		}
@@ -298,9 +299,10 @@ func upsertConstantsTx(ctx context.Context, tx *sql.Tx, fileID int64, constants 
 		if _, ok := classIDByFQN[c.ClassFQN]; ok {
 			continue
 		}
-		const q = `SELECT id FROM class WHERE full_name=$1 LIMIT 1`
+		// 限定当前 file，避免跨文件同名 FQN 误挂到旧 class
+		const q = `SELECT id FROM class WHERE file_id=$1 AND full_name=$2 LIMIT 1`
 		var id int64
-		if err := tx.QueryRowContext(ctx, q, c.ClassFQN).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, q, fileID, c.ClassFQN).Scan(&id); err != nil {
 			classIDByFQN[c.ClassFQN] = -1
 			continue
 		}
@@ -1017,7 +1019,7 @@ func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) erro
 		}
 		// 变量/常量落库（2026-09-03 新增；须在 class/method 插入之后）
 		if len(ir.Fields) > 0 {
-			if err := upsertFieldsTx(ctx, tx, ir.Fields, ir.Source); err != nil {
+			if err := upsertFieldsTx(ctx, tx, fileID, ir.Fields, ir.Source); err != nil {
 				return err
 			}
 		}
