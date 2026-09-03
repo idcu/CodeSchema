@@ -1182,3 +1182,79 @@ server: {
 		t.Errorf("expected cue, got %s", doc.Language)
 	}
 }
+
+// TestTreeSitterAdapter_Parse_NonGoCallerPkgQualified 验证非 Go 语言调用图 caller FQN 包限定
+// （P19：Java/Kotlin/C# 等显式包声明语言，caller 产出 pkg.Class.Method，与 Go 精确路径命名空间对齐）。
+func TestTreeSitterAdapter_Parse_NonGoCallerPkgQualified(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+
+	cases := []struct {
+		name, filename, content, wantCaller string
+	}{
+		{
+			name:     "java",
+			filename: "OrderService.java",
+			content: `package com.example;
+
+public class OrderService {
+    public void createOrder(Order order) {
+        paymentService.pay(order);
+    }
+}
+`,
+			wantCaller: "com.example.OrderService.createOrder",
+		},
+		{
+			name:     "kotlin",
+			filename: "UserService.kt",
+			content: `package com.example
+
+class UserService {
+    fun getUser(id: Long) {
+        val user = repository.findById(id)
+    }
+}
+`,
+			wantCaller: "com.example.UserService.getUser",
+		},
+		{
+			name:     "csharp",
+			filename: "OrderService.cs",
+			content: `namespace Acme.Orders;
+
+public class OrderService {
+    public void Create(Order order) {
+        repository.Save(order);
+    }
+}
+`,
+			wantCaller: "Acme.Orders.OrderService.Create",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.filename)
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := a.Parse(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			found := false
+			for _, c := range doc.Calls {
+				if strings.Contains(c.CalleeFQN, "pay") || strings.Contains(c.CalleeFQN, "findById") || strings.Contains(c.CalleeFQN, "Save") {
+					if c.CallerFQN == tc.wantCaller {
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				t.Errorf("callerFQN=%q not found on callee call; calls=%+v", tc.wantCaller, doc.Calls)
+			}
+		})
+	}
+}

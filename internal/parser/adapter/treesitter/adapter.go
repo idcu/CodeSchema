@@ -353,6 +353,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	goPkg := ""          // 当前 Go 文件 package 声明（调用图 FQN 包限定用）
 	curRecvVar := ""     // 当前方法 receiver 变量名（自调用 callee 限定用）
 	curRecvType := ""    // 当前方法 receiver 类型名
+	nonGoPkg := ""       // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
 	curStructIdx := -1      // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
 	curStructOpenDepth := 0 // struct 体起始深度（type X struct { 的 `{` 计入前）
@@ -509,6 +510,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			continue
 		}
 
+		// 捕获包/命名空间声明（Java/Kotlin/C#），供 caller FQN 包限定
+		if p := parsePkgDecl(lang, trimmed); p != "" {
+			nonGoPkg = p
+		}
+
 		// 解析类定义
 		if matches := patterns.classPattern.FindStringSubmatch(line); len(matches) > patterns.classNameIndex {
 			className := matches[patterns.classNameIndex]
@@ -561,6 +567,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				} else {
 					caller = currentMethod.Name
 				}
+				// 包/命名空间限定（Java/Kotlin/C# 等显式包声明）：pkg.Class.Method / pkg.func
+				if nonGoPkg != "" {
+					caller = nonGoPkg + "." + caller
+				}
 			}
 			// 通用路径传空 pkg/recv（非 Go 不包限定，保持原启发式行为）
 			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "")
@@ -585,6 +595,27 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 }
 
 // —— Go 变量/常量提取辅助（2026-09-03 新增，仅 Go 精确路径） ——
+
+// pkgDeclPatterns 语言→包/命名空间声明正则（提取包前缀，用于调用图 caller FQN 包限定）。
+//
+// 仅收录「单文件内显式、可靠的包声明」语言（Java/Kotlin/C#）。其余语言的包/模块语义
+// 依赖文件路径或作用域嵌套（Python 模块以文件路径推导、TS 用 import/export 而非包声明、
+// Rust 用嵌套 mod 树、C++ 命名空间可多段嵌套），留待语种类别逐步收敛。
+var pkgDeclPatterns = map[string]*regexp.Regexp{
+	"java":   regexp.MustCompile(`^\s*package\s+([\w.]+)\s*;?\s*$`),
+	"kotlin": regexp.MustCompile(`^\s*package\s+([\w.]+)\s*$`),
+	"csharp": regexp.MustCompile(`^\s*namespace\s+([\w.]+)\s*[{;]`),
+}
+
+// parsePkgDecl 若该行属于语言的包/命名空间声明，返回包 FQN；否则空串。
+func parsePkgDecl(lang, line string) string {
+	if re, ok := pkgDeclPatterns[lang]; ok {
+		if m := re.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
 
 var (
 	// goConstPattern：const X [Type] = v；const ( ... ) 块内行 X [Type] = v
