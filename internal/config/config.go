@@ -28,6 +28,8 @@ const (
 	DefaultSCIPIndexDir = "./scipout"
 	// DefaultCodeGraphDB CodeGraph 适配器默认 db 路径。
 	DefaultCodeGraphDB = "./codegraph.db"
+	// DefaultJCodeIndexerDB JCodeIndexer 适配器默认 db 路径。
+	DefaultJCodeIndexerDB = "./jcodeindexer.db"
 )
 
 // Config 顶层配置结构。
@@ -362,7 +364,7 @@ func DefaultConfig() *Config {
 				DB: DefaultCodeGraphDB,
 			},
 			JCodeIndexer: JCodeIndexerConfig{
-				DB:         "./jcodeindexer.db",
+				DB:         DefaultJCodeIndexerDB,
 				ConfigFile: ".jindexer/config.yaml",
 				Env:        map[string]string{},
 			},

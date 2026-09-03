@@ -21,6 +21,7 @@ import (
 	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter/codegraph"
+	"github.com/idcu/codeschema/internal/parser/adapter/jcodeindexer"
 	lspadapter "github.com/idcu/codeschema/internal/parser/adapter/lsp"
 	"github.com/idcu/codeschema/internal/parser/adapter/scip"
 	treesitter "github.com/idcu/codeschema/internal/parser/adapter/treesitter"
@@ -40,9 +41,9 @@ import (
 //  2. 配置 parser.lsp.enabled=true 且系统存在对应语言服务器时，注册
 //     gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server 适配器
 //     （FallbackParser 包装：LSP 失败自动回退 tree-sitter）；
-//  3. SCIP / CodeGraph 适配器按配置注册（可选），同样是「高精度优先、失败回退」。
+//  3. SCIP / CodeGraph / JCodeIndexer 适配器按配置注册（可选），同样是「高精度优先、失败回退」。
 //
-// 语言优先级（高精度优先）：LSP(go/java/cpp/py/ts/rust) > SCIP > CodeGraph > tree-sitter。
+// 语言优先级（高精度优先）：LSP(go/java/cpp/py/ts/rust) > SCIP > CodeGraph > JCodeIndexer(JVM) > tree-sitter。
 func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) *parser.Registry {
 	reg := parser.NewRegistry()
 
@@ -98,8 +99,18 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 		}
 	}
 
+	// ⑤ JCodeIndexer 适配器（可选：JVM 专项索引直读，配置了 db 才注册）
+	if db := cfg.Parser.JCodeIndexer.DB; db != "" && db != config.DefaultJCodeIndexerDB {
+		ji := jcodeindexer.NewJCodeIndexerAdapter(db)
+		if err := ji.Init(ctx, map[string]any{"db_path": db}); err != nil {
+			log.Printf("parser.jcodeindexer: init failed (%v), skipping", err)
+		} else {
+			reg.Register(parser.NewFallbackParser(ji, ts))
+		}
+	}
+
 	reg.SetPriority("go", []string{"gopls", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("java", []string{"jdtls", "codegraph", "scip", "treesitter"})
+	reg.SetPriority("java", []string{"jdtls", "codegraph", "jcodeindexer", "scip", "treesitter"})
 	reg.SetPriority("cpp", []string{"clangd", "codegraph", "scip", "treesitter"})
 	reg.SetPriority("ts", []string{"typescript-language-server", "codegraph", "scip", "treesitter"})
 	reg.SetPriority("py", []string{"pyright-langserver", "codegraph", "scip", "treesitter"})

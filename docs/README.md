@@ -24,13 +24,13 @@
 
 ## 事实基线（以 `scripts/project_counts.py` 为准，禁止手填）
 
-- Go 1.25.2；internal 包 **32** / 全仓库 **36**
+- Go 1.25.2；internal 包 **33** / 全仓库 **37**
 
-- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 53.8k
+- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 54.3k
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 
-- 解析适配器：treesitter（默认，始终注册兜底）/ codegraph / scip / lsp（gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server，按 `parser.lsp.enabled` 启用）；jcodeindexer 仅配置预留、未实现
+- 解析适配器：treesitter（默认，始终注册兜底）/ codegraph / scip / jcodeindexer（JVM 专项索引直读，按 `parser.jcodeindexer.db` 启用）/ lsp（gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server，按 `parser.lsp.enabled` 启用）
 
 ## 旧文档
 

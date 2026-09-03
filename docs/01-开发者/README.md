@@ -45,7 +45,7 @@ make bench-agent    # agent-bench 端到端评测
 ```
 cmd/codeschema/       CLI 入口（scan/watch/serve/mcp/benchmark/agent-bench/version）
 internal/
-  parser/adapter/     treesitter | codegraph | scip | lsp  （+ jcodeindexer 配置）
+  parser/adapter/     treesitter | codegraph | scip | jcodeindexer | lsp  （高精度按配置启用）
   scanner/            仓库扫描编排
   store/              file | sqlite | pg(-tags pg) | redis(-tags redis) 统一接口
   service/            context / testlink / coverprofile

@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 151: feat(parser): jcodeindexer 适配器落地并接线（去「配置预留」）
+
+- 背景：`internal/config/parse.go` 早有 `parser.jcodeindexer` 配置字段（db/config_file/env），但 `internal/parser/adapter/` 下无对应包、解析注册中心未接线——文档长期标注「仅配置预留、未实现」。本轮「修复骨架」将其补齐为真实可用的批量直读适配器。
+- 动作：
+  - 新增 `internal/parser/adapter/jcodeindexer/`：BatchParser 直读 JCodeIndexer（第三方 JVM 专项索引器 Java/Kotlin/Scala）SQLite 库——`symbols`+`edges` 契约（符号 + 调用图），按文件分组产出 `IRDocument`（class/method/interface/enum 映射 ClassIR，method/constructor 映射 MethodIR，calls/implements/imports 映射 CallIR）；schema 检测 + 契约不符/库缺失/非 SQLite 显式降级 `ErrSourceUnavailable`，绝不静默返回空 IR（复用 codegraph 降级范式）。JVM kind→语言 best-effort 由文件扩展名推断。
+  - `internal/runtime/runtime.go` `NewParserRegistry` 新增 ⑤ `parser.jcodeindexer.db`（非默认值）时注册，包 `FallbackParser` 失败回退 tree-sitter；`java` 语言优先级插入 `jcodeindexer`。
+  - `internal/config/config.go` 新增常量 `DefaultJCodeIndexerDB = "./jcodeindexer.db"`，默认配置复用该常量。
+  - 文档同步：解析适配器.md 适配器总览表新增 jcodeindexer 行并更正「配置预留」表述；docs/README.md、架构与模块.md、01-开发者/README.md 适配器列表与计数基线更新。
+- 测试：`internal/parser/adapter/jcodeindexer/adapter_test.go` 四用例（Supports JVM 三语 + 非 Go 拒、ParseAll 读符号/调用并分组按扩展名判语言、库缺失降级、schema 不符降级）。
+- 验证：`gofmt` 通过；`go build ./...` 通过；`go test ./internal/...` 全绿；新增包使 internal 包 32→33、全仓库 36→37、非 vendor LoC ≈ 54.3k，`make counts-update` 刷新基线 + `make counts-check` 通过。
+
 ### Commit 150: feat(parser): P20 — 真语法树路径非 Go caller FQN 包限定对齐
 
 - 背景：P19 已把默认正则路径（`adapter.go`）Java/Kotlin/C# 的 caller FQN 包限定为 `com.example.OrderService.createOrder`；但 `-tags treesitter` 的真语法树路径（`adapter_ast.go`）仅按类简单名回填 caller（`OrderService.createOrder`），两条解析路径命名空间差异会导致同一仓库 impact 结果随构建标签漂移。P20 要求对 AST 路径做同等的包限定对齐。
