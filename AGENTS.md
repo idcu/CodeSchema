@@ -76,9 +76,11 @@ Agent 在参与 CodeSchema 开发时必须遵循以下流程。完整规范见 [
 | `get_tags` / `search_by_tag` / `get_all_tags` | 标签查询 |
 | `list_projects` | 枚举多租户仓库 |
 
-### HTTP 端点（14+）
+### HTTP 端点（23）
 
-`/health*` / `/context` / `/impact` / `/tests` / `/search` / `/tags*` / `/projects` / `/metrics` / `/openapi.json` / `/docs`
+核心数据端点：`/health*` / `/context` / `/impact` / `/tests` / `/affected` / `/search` / `/tags*` / `/projects` / `/metrics` / `/openapi.json` / `/docs`
+可视化调试端点（`internal/server/viz.go` 单独注册，不计入 OpenAPI 数据规范）：`/viz` / `/viz/api/document` / `/viz/api/documents` / `/viz/api/overview` / `/viz/api/search`
+（计数以 `make counts` 为准；`mcp.go` 的 `/sse` `/message` 属 MCP 传输端点，不计入 HTTP API 路由）
 
 ## 4. 约束与安全
 

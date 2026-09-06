@@ -38,7 +38,7 @@
 ## 技术栈
 
 - 语言：Go 1.25.2
-- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（**可选**：仅在 `go build -tags onnx` 时引入）/ idcu-go 公共模块 `{trim, ttlcache, pathsafe, retry, graceful, recovery, metrics, log, trace, config}` v0.1.0（其中 log 为草案 α：`WithModule` 形态，API 可破；trace 为轻量 API 形态对齐 OTel）（纯标准库零依赖，托管于 `gitee.com/idcu-go/*`；`go.mod` 以 `require v0.1.0` + `replace ../idcu-go/*` 双模式接线：本地改模块即时生效，CI/Release 按 tag 检出、Docker 按 tag 拉取，去掉 replace 后配 `GOPRIVATE=gitee.com/idcu-go/*` 即可直接构建）；解析适配器为 30 语言（go/java/ts/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html/hcl/svelte/markdown/dockerfile/elm/cue）正则启发式，无 CGO 依赖（`-tags treesitter` 可切换真语法树）；ONNX 语义模型支持远程分发（`storage.vector.model_download_url` 自动下载 + SHA-256 校验）
+- 依赖：modernc.org/sqlite（纯 Go 免 CGO）/ fsnotify / chromem-go / yaml.v3 / onnxruntime_go（**可选**：仅在 `go build -tags onnx` 时引入）/ idcu-go 公共模块 `{trim, ttlcache, pathsafe, retry, graceful, recovery, metrics, log, trace, config}` v0.1.0（其中 log 为草案 α：`WithModule` 形态，API 可破；trace 为轻量 API 形态对齐 OTel）（纯标准库零依赖，托管于 `gitee.com/idcu-go/*`；`go.mod` 以 `require v0.1.0` + `replace ../idcu-go/*` 双模式接线：本地改模块即时生效，CI/Release 按 tag 检出、Docker 按 tag 拉取，去掉 replace 后配 `GOPRIVATE=gitee.com/idcu-go/*` 即可直接构建）；解析适配器为 31 语言（go/java/ts/js/py/rust/cpp/c/kotlin/swift/php/csharp/ruby/bash/scala/sql/elixir/ocaml/lua/groovy/css/toml/yaml/protobuf/html/hcl/svelte/markdown/dockerfile/elm/cue）正则启发式，无 CGO 依赖（`-tags treesitter` 可切换真语法树）；ONNX 语义模型支持远程分发（`storage.vector.model_download_url` 自动下载 + SHA-256 校验）
 - 存储：JSON 文件（默认 fallback）+ SQLite（modernc.org/sqlite 纯 Go 免 CGO，已接线，`storage.driver=sqlite` 启用）；PostgreSQL（`storage.driver=pg|postgres`，需 `go build -tags pg`）+ Redis 热点缓存层（`storage.kv=redis://host:6379/0`，需 `go build -tags redis`）经 `cmd/codeschema` 统一分发接入
 - 协议：MCP Server（JSON-RPC 2.0 + SSE）+ HTTP API（RESTful）
 - 部署：单二进制 / Docker 容器 / 多平台交叉编译
@@ -114,7 +114,8 @@ go build -o codeschema ./cmd/codeschema
 ### Docker 部署
 
 ```bash
-# 构建镜像（默认免 CGO 纯 Go；模块代理默认 goproxy.cn，国内可复现构建）
+# 构建镜像（默认启用 ONNX 语义检索：CGO + onnxruntime 动态库，需 glibc 基础镜像；纯 Go 免 CGO 可传 --build-arg CGO_ENABLED=0，语义检索降级 LocalEmbedder）
+# 模块代理默认 goproxy.cn，国内可复现构建
 docker build -t codeschema:latest .
 
 # 运行

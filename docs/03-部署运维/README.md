@@ -6,7 +6,7 @@
 ## 快速部署
 
 ```bash
-# 构建镜像（默认免 CGO 纯 Go；国内走 goproxy.cn）
+# 构建镜像（默认启用 ONNX 语义检索：CGO + onnxruntime，glibc 基础镜像；纯 Go 免 CGO 传 --build-arg CGO_ENABLED=0；国内走 goproxy.cn）
 docker build -t codeschema:latest .
 docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 
@@ -72,12 +72,12 @@ watcher:
 
 | 变体 | 标签 | 说明 |
 |---|---|---|
-| 默认 | 无 | 免 CGO，正则 + SQLite + TF-IDF |
+| 默认 | 无 | ONNX 语义（CGO + onnxruntime，glibc）；`--build-arg CGO_ENABLED=0` 降级免 CGO，正则 + SQLite + TF-IDF |
 | ONNX 语义 | `-tags onnx` | 需 gcc + glibc |
 | PG/Redis | `-tags 'pg redis'` | 对应后端 |
 | tree-sitter | `-tags treesitter` | CGO 真语法树 |
 
-> Dockerfile 默认免 CGO 纯 Go 栈；启用 onnx 需 glibc 对齐的基础镜像。
+> Dockerfile 默认 ONNX 栈（CGO + onnxruntime，需 glibc 对齐的基础镜像）；纯 Go 免 CGO 传 `--build-arg CGO_ENABLED=0`（语义检索降级 LocalEmbedder）。
 
 ## 目录与产物（构建 / 数据 / 缓存）
 

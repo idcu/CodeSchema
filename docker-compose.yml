@@ -153,7 +153,7 @@ services:
   # 使用方式：docker compose --profile mt up -d
   # 说明：复用同一镜像，挂载一份带 tenants: 的配置文件；各租户仓库分别挂载为只读卷，
   #       各租户 storage.dsn 指向容器内独立目录（索引目录默认按 dsn 自动派生隔离）。
-  #       可运行的最小配置示例见仓库 build/mt-demo.yaml；设计见 docs/dev/13-多租户设计文档.md。
+  #       可运行的最小配置示例见仓库 build/mt-demo.yaml；设计见 docs/02-架构师/README.md。
   # =========================================================================
   codeschema-mt:
     profiles:

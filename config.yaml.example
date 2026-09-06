@@ -48,10 +48,11 @@ storage:
   kv: ""
 
   # 向量配置
-  # 注：向量后端当前由代码固定为 PersistentStore（JSON 落盘）+ MemoryStore 语义检索，
-  # driver 字段仅作配置占位（chromem 实现存在但未接线生产路径）。
+  # 注：`storage.vector.driver` 设 "chromem" 时启用持久化 ChromemStore（internal/runtime
+  # NewVectorStore 已接线生产分发）；默认/空则用文件 PersistentStore（JSON 落盘）+ MemoryStore
+  # 语义检索，保持既有行为。
   vector:
-    # 向量库驱动（占位：chromem 为可选实现，未接入生产分发）
+    # 向量库驱动："chromem" 启用持久化 chromem 后端；空/默认走文件 PersistentStore
     driver: "chromem"
     # 向量库路径
     dsn: "./vector.db"
