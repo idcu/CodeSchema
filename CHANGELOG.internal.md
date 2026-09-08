@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 153: feat(ai)+docs: 新增 tags-stats 离线标签覆盖率统计命令 + counts-guard 扩容至 AGENTS/仓库结构 + 死链校验
+
+- 背景：P21（AI 标签/文档生产化）因 LLM API key 缺失阻塞，真实标签质量端到端无法验证。本次提供**不依赖 key 的离线评估基线**；同时 counts-guard 此前只守 README/架构与模块 的计数，漏检 AGENTS.md、仓库结构.md 等含硬数字的必读档。
+- 动作：
+  - 新增 `internal/ai/tagstats.go`：`ComputeTagCoverage` 遍历库中全部类+方法，统计六类标签（layer/biz/tech/risk/test/lang）覆盖率、分类分布与 TopTags（复用 store 的 DeriveTagCategory 分类口径，单实体失败不中断）；`internal/ai/tagstats_test.go` 2 用例（实体统计/分类分布/TopTags/空库）全绿。
+  - 新增 `cmd/codeschema/tags_stats.go` 子命令 `tags-stats`（--store --top），main.go 接线并补 Usage 帮助。
+  - `scripts/counts_check.py` 扩容：DOC_TARGETS 加入 AGENTS.md（MCP/HTTP 计数）与 仓库结构.md（internal 包数/基线）；新增 dead-link 校验扫描 docs/ 与根 README/AGENTS 相对链接。
+  - 语言计数 30→31：`internal/runtime/runtime.go`、`internal/benchmark/benchmark.go`、`internal/integration/multilang_test.go` 注释及 README/解析适配器/DEV_PROGRESS 同步（ExtToLang 实际返回 31 语言，含 js）。
+  - 文档同步：命令数 8→9（架构与模块/仓库结构/02-架构师/00-新人上手/README CLI 框），LoC 54.3k→54.6k。
+  - **Docker 默认构建口径定案（2026-09-03，消除三份镜像职责重叠）**：root Dockerfile 收敛为**纯 Go 免 CGO 默认轻量镜像**（`CGO_ENABLED=0`、去 `-tags onnx`、去 onnxruntime 软链/CGO_LDFLAGS/down 运行时拷贝；语义检索降级 LocalEmbedder，与 `make build`/CI 同口径）；ONNX 语义检索统一由 `docker/onnx/Dockerfile` 为唯一入口；`Dockerfile.mirror` 为同口径的 daocloud 国内源构建。同步更新 README 与 03-部署运维/README 的构建变体对照与部署命令。
+- 验证：`go build ./...` OK；`go vet ./cmd/... ./internal/ai/...` OK；`go test ./internal/ai/...` 全绿；`make counts-update` 刷新基线至 54566；`make counts-check` 通过（含死链 LINK-OK）；e2e：`scan --store X repo && tags-stats --store X` 实测覆盖率 50%、分类分布与 TopTags 正确。
+- 遗留：P21 真实 LLM 标签质量验证仍待 API key；root Dockerfile 默认 ONNX 与 Dockerfile.mirror/onnx 镜像职责重叠待设计定案（见 2026-09-03 复评报告）。
+
 ### Commit 152: fix(server): OpenAPI 规范补齐 /affected、/projects、/docs/，对齐 23 路由口径
 
 - 背景：`internal/server/openapi_handler.go` 静态 OpenAPI 规范仅声明 13 个路径，而 HTTP API 实际注册 23 个端点（http.go 17 + viz.go 6）；`/affected`、`/projects` 是 `docs/01-开发者/接口层.md` 与 AGENTS.md 明确列出的核心数据端点，却未纳入规范，与「完整契约以 GET /openapi.json 为准」的声明相矛盾。

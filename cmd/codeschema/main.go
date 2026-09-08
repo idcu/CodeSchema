@@ -64,6 +64,7 @@ Commands:
   agent-bench        Agent 任务端到端评测（三档上下文 × 任务集；--repos 多仓对比）
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
+  tags-stats        离线标签覆盖率统计（P21 质量评估基线，无需 LLM key）
   version           显示版本信息
 
 Global Options:
@@ -163,6 +164,9 @@ Use "codeschema <command> -h" for more information about a command.
 
 	case "serve":
 		return serveCmd(ctx, cfg, cfgWatcher, args[1:])
+
+	case "tags-stats":
+		return tagsStatsCmd(ctx, cfg, args[1:])
 
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])

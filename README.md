@@ -114,9 +114,12 @@ go build -o codeschema ./cmd/codeschema
 ### Docker 部署
 
 ```bash
-# 构建镜像（默认启用 ONNX 语义检索：CGO + onnxruntime 动态库，需 glibc 基础镜像；纯 Go 免 CGO 可传 --build-arg CGO_ENABLED=0，语义检索降级 LocalEmbedder）
+# 默认镜像 = 纯 Go 免 CGO 轻量（语义检索降级 LocalEmbedder；零 CGO、镜像最小，与 `make build`/CI 同口径）
 # 模块代理默认 goproxy.cn，国内可复现构建
 docker build -t codeschema:latest .
+
+# 需要 ONNX 语义检索，构建专门变体镜像（独立 Dockerfile）：
+docker build -f docker/onnx/Dockerfile -t codeschema:onnx .
 
 # 运行
 docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
@@ -153,10 +156,11 @@ docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 ## 架构概览
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                      CLI (cmd/codeschema)            │
-│  scan  watch  rebuild-kv  mcp  serve  version       │
-└──────────┬────────────────────────────────┬──────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      CLI (cmd/codeschema)                 │
+│  scan  watch  rebuild-kv  benchmark  agent-bench         │
+│  mcp  serve  tags-stats  version                          │
+└──────────┬────────────────────────────────┬──────────────┘
            │                                │
      ┌─────▼──────┐                  ┌──────▼───────┐
      │   Scanner   │                  │   Server     │

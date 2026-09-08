@@ -1,13 +1,14 @@
 # CodeSchema —— codeschema:onnx 专用镜像
 #
 # 本 Dockerfile 是 ONNX 语义检索变体的独立构建入口，产物镜像 tag 为 codeschema:onnx。
-# 与根目录 Dockerfile 相同定位，但作为 onnx 变体的唯一入口（不含免 CGO 分支）。
+# 构建口径决策（2026-09-03）：root Dockerfile 已收敛为纯 Go 免 CGO 默认轻量镜像（语义检索降级
+# LocalEmbedder），ONNX 语义检索统一由此文件为唯一入口（需 CGO + onnxruntime，不含免 CGO 分支）。
 #
 # 构建（构建上下文必须是仓库根目录，因为需要 vendor/、cmd/、third_party/、down/）：
 #   docker build -f docker/onnx/Dockerfile -t codeschema:onnx .
 #
-# 构建链路与根目录 Dockerfile 完全同源（仅精简免 CGO 分支），已在 codeschema:onnx
-# 镜像上实测运行期日志 `semantic: ONNX embedder active (bge-small-zh-v1.5, dim=512)`。
+# 构建链路与根目录 Dockerfile 同源（根目录为纯 Go 免 CGO 默认镜像，本文件为其 ONNX 变体），
+# 已在 codeschema:onnx 镜像上实测运行期日志 `semantic: ONNX embedder active (bge-small-zh-v1.5, dim=512)`。
 #
 # ⚠️ 前置依赖（不在 git 内，构建前必须准备，详见 docs/03-部署运维/codeschema-onnx镜像生成.md）：
 #   - down/models/bge-small-zh-v1.5/     bge 嵌入模型（onnx/model_fp16.onnx + tokenizer.json）

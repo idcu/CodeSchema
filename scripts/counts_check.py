@@ -6,10 +6,16 @@
 # 设计意图：文档口径不再手填，凡包数、工具数、路由数变化必须同步更新基线，
 # 否则 CI 红灯——把「27/31/32/36 四处包数不一」这类漂移在提交时即拦截。
 #
+# 2026-09-03 扩容：① DOC_TARGETS 由 README + 架构与模块 扩至 AGENTS.md +
+# 仓库结构.md，覆盖更多含硬数字的必读档；② 新增 dead-link 校验，扫描 docs/ 与
+# 根 README/AGENTS 的相对 markdown 链接是否指向存在的文件，拦截死链（如曾出现
+# 的 docs/dev/13-多租户设计文档.md 死链）。
+#
 # 用法：python3 scripts/counts_check.py  （或 make counts-check）
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -38,7 +44,84 @@ DOC_TARGETS = {
         f"http={cur['http_routes']}",
         f"非 vendor LoC ≈ {fmt_loc_k(cur['non_vendor_loc'])}",
     ],
+    # AGENTS.md 是 AI 工具必读档，其 MCP/HTTP 计数错误影响最大；guard 此前漏检
+    # 「HTTP 端点（14+）」漂移（现 23）。
+    "AGENTS.md": lambda cur: [
+        f"MCP 工具（{cur['mcp_tools']} 个）",
+        f"HTTP 端点（{cur['http_routes']}）",
+    ],
+    # 仓库结构.md 的 internal 包数 / 计数基线同样易手写漂移（曾 32→应 33）。
+    "docs/仓库结构.md": lambda cur: [
+        f"共 {cur['internal_packages']} 个 internal Go 包",
+        f"计数基线（{cur['internal_packages']} / {cur['total_packages']} / {cur['mcp_tools']} / {cur['http_routes']}）",
+    ],
 }
+
+
+# 需排除的非相对链接目标前缀（http/https/mailto/锚点/绝对路径/自动生成）
+_LINK_EXCLUDE = (
+    "http://", "https://", "mailto:", "#", "/", "\\",
+    "file:", "tel:", "ftp://", "www.",
+)
+# 明确跳过死链校验的伪链接目标（用于不存在的路径示意、占位等）
+_LINK_IGNORE = {
+    "docs/dev/",  # 历史归档目录，保留占位说明
+    "docs/13-",   # 旧编号文档占位
+    "git history",  # 非文件链接的指代
+}
+
+
+def _resolve_md_links(root_dir, rel):
+    """扫描单个 .md 文件，返回其指向不存在的相对链接列表 [(target, resolved)]。"""
+    path = os.path.join(root_dir, rel)
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+    except OSError:
+        return []
+    base_dir = os.path.dirname(path)
+    broken = []
+    for m in re.finditer(r"\[[^\]]*\]\(([^)]+)\)", text):
+        target = m.group(1).strip()
+        if not target:
+            continue
+        # 去掉内联 title 语法 [x](url "title") / url <#anchor>
+        target = re.sub(r'\s+["\'].*$', "", target)
+        if any(target.startswith(p) for p in _LINK_EXCLUDE):
+            continue
+        if any(target.startswith(p) for p in _LINK_IGNORE):
+            continue
+        # 去掉 URL fragment（锚点）后再判文件存在性
+        no_anchor = target.split("#")[0]
+        if not no_anchor:
+            continue
+        resolved = os.path.normpath(os.path.join(base_dir, no_anchor))
+        if not os.path.exists(resolved):
+            broken.append((target, resolved))
+    return broken
+
+
+def check_dead_links(cur):
+    """校验 docs/ 及根 README/AGENTS 的相对 markdown 链接无死链。"""
+    ok = True
+    # 相对路径锚点：以 {ROOT} 为基准
+    rel_targets = ["docs/", "AGENTS.md", "README.md"]
+    for rel in rel_targets:
+        base = os.path.join(ROOT, rel)
+        if os.path.isdir(base):
+            files = [os.path.join(dp, fn) for dp, _, fns in os.walk(base) for fn in fns if fn.endswith(".md")]
+            for p in files:
+                r = os.path.relpath(p, ROOT)
+                for target, resolved in _resolve_md_links(ROOT, r):
+                    print(f"LINK-DRIFT  {r}: 死链 [{target}] -> {os.path.relpath(resolved, ROOT)}（文件不存在）")
+                    ok = False
+        else:
+            for target, resolved in _resolve_md_links(ROOT, rel):
+                print(f"LINK-DRIFT  {rel}: 死链 [{target}] -> {os.path.relpath(resolved, ROOT)}（文件不存在）")
+                ok = False
+    if ok:
+        print("LINK-OK   全部相对 markdown 链接可解析（无死链）")
+    return ok
 
 
 def check_docs(cur):
@@ -88,11 +171,13 @@ def main():
 
     # 文档口径守护：README 事实基线行关键数字与实际计数必须一致。
     ok = check_docs(cur) and ok
+    # 死链守护：docs/ 与根 README/AGENTS 的相对链接可解析。
+    ok = check_dead_links(cur) and ok
 
     if not ok:
-        print("\n计数漂移断言失败：请核对代码变更并更新 scripts/counts_baseline.json（或同步文档声明）")
+        print("\n计数漂移断言失败：请核对代码变更并更新 scripts/counts_baseline.json（或同步文档声明/修复死链）")
         sys.exit(1)
-    print("\n计数漂移断言通过：全部结构性计数与文档口径一致")
+    print("\n计数漂移断言通过：全部结构性计数、文档口径与链接均一致")
     sys.exit(0)
 
 

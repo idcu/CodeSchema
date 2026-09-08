@@ -2,11 +2,11 @@
 
 > 写给：要把 CodeSchema 跑上线、配置、监控的运维/SRE
 
-> 最后更新：2026-09-03
+> 最后更新：2026-09-08
 ## 快速部署
 
 ```bash
-# 构建镜像（默认启用 ONNX 语义检索：CGO + onnxruntime，glibc 基础镜像；纯 Go 免 CGO 传 --build-arg CGO_ENABLED=0；国内走 goproxy.cn）
+# 默认镜像 = 纯 Go 免 CGO 轻量（语义检索降级 LocalEmbedder；零 CGO、镜像最小，与 `make build`/CI 同口径）
 docker build -t codeschema:latest .
 docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
 
@@ -72,12 +72,12 @@ watcher:
 
 | 变体 | 标签 | 说明 |
 |---|---|---|
-| 默认 | 无 | ONNX 语义（CGO + onnxruntime，glibc）；`--build-arg CGO_ENABLED=0` 降级免 CGO，正则 + SQLite + TF-IDF |
-| ONNX 语义 | `-tags onnx` | 需 gcc + glibc |
+| 默认 | 无 | 纯 Go 免 CGO（正则 + SQLite + TF-IDF，语义检索降级 LocalEmbedder）；零 CGO、镜像最小 |
+| ONNX 语义 | `-tags onnx`（独立 Dockerfile） | 需 gcc + glibc，`docker/onnx/Dockerfile` 专用入口 |
 | PG/Redis | `-tags 'pg redis'` | 对应后端 |
 | tree-sitter | `-tags treesitter` | CGO 真语法树 |
 
-> Dockerfile 默认 ONNX 栈（CGO + onnxruntime，需 glibc 对齐的基础镜像）；纯 Go 免 CGO 传 `--build-arg CGO_ENABLED=0`（语义检索降级 LocalEmbedder）。
+> root Dockerfile 默认纯 Go 免 CGO（零 CGO、镜像最小，与 `make build`/CI 同口径）；ONNX 语义检索为显式变体，走 `docker/onnx/Dockerfile` 独立入口（需 glibc 对齐，见 [codeschema-onnx镜像生成.md](./codeschema-onnx镜像生成.md)）。
 
 ## 目录与产物（构建 / 数据 / 缓存）
 

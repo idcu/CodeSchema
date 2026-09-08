@@ -37,7 +37,7 @@ import (
 // NewParserRegistry 构建统一的解析适配器注册中心（编排主路入口）。
 //
 // 注册策略：
-//  1. tree-sitter 适配器始终注册（30 语言正则，零依赖兜底）；
+//  1. tree-sitter 适配器始终注册（31 语言正则，零依赖兜底）；
 //  2. 配置 parser.lsp.enabled=true 且系统存在对应语言服务器时，注册
 //     gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server 适配器
 //     （FallbackParser 包装：LSP 失败自动回退 tree-sitter）；
@@ -47,7 +47,7 @@ import (
 func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) *parser.Registry {
 	reg := parser.NewRegistry()
 
-	// ① 兜底：tree-sitter 始终注册（默认构建为 30 语言正则，零 CGO）
+	// ① 兜底：tree-sitter 始终注册（默认构建为 31 语言正则，零 CGO）
 	ts := treesitter.NewTreeSitterAdapter()
 	reg.Register(ts)
 

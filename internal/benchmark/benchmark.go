@@ -214,7 +214,7 @@ func countFiles(root string) int {
 	return count
 }
 
-// isSupportedSource 判断文件名是否属于 scanner 支持的 30 语言。
+// isSupportedSource 判断文件名是否属于 scanner 支持的 31 语言。
 func isSupportedSource(name string) bool {
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
