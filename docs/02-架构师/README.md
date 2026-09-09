@@ -2,7 +2,7 @@
 
 > 写给：要做技术决策、评估能力边界、设计扩展方案的架构师
 
-> 最后更新：2026-09-02
+> 最后更新：2026-09-08
 ## 系统定位
 
 代码上下文供给引擎：结构图 × 语义检索 × 标签体系 × 测试关联 × 多租户隔离，为 AI Agent 提供精准裁剪的上下文，减少工具调用轮次与 token 消耗。
@@ -12,7 +12,7 @@
 1. **三层存储**：文件（权威源）+ 内存索引（热读）+ 向量/全文（语义检索）。`Store` 接口统一抽象，后端可插拔（file/sqlite/pg/redis）。
 2. **检索融合与置信度过滤（B8）**：空结果优于误导结果。语义取向量余弦相似度 [0,1]；FTS 取归一化相对得分；`min_score` 阈值过滤弱匹配（`trim_reason="below_threshold"`）。建议语义/融合模式 `min_score=0.3~0.5`。
 3. **多租户（单实例多仓库）**：一个进程服务多个隔离仓库，各自独立 store + 索引目录（绝不共享），按 `project`/`X-Tenant`/`?tenant=` 路由；不配 `tenants` 退化为单 `default` 租户。
-4. **解析精度权衡**：默认 tree-sitter 正则零 CGO、覆盖 30 语言。`da20964` 起 Go 已在默认正则路径回填 `CallerFQN`；但影响面分析曾因 FQN **命名空间错位**（裸名 `Watcher.ReloadNow` vs 查询包限定 `config.Watcher.ReloadNow`）恒空，`T1`（2026-09-02）通过 adapter 包限定产出（`config.Watcher.ReloadNow`）+ analyzer 双向归一化修复，**`impact`/`tests`/`get_call_graph` 对 Go 默认真实可用**；非 Go 走裸名启发式，双向归一化保证查询鲁棒，严格 FQN 对齐按语种类别逐步收敛。Go 之外的高精度影响面依赖 LSP/SCIP/CodeGraph——零依赖与跨语言精度的取舍仍是核心设计决策。
+4. **解析精度权衡**：默认 tree-sitter 正则零 CGO、覆盖 31 语言。`da20964` 起 Go 已在默认正则路径回填 `CallerFQN`；但影响面分析曾因 FQN **命名空间错位**（裸名 `Watcher.ReloadNow` vs 查询包限定 `config.Watcher.ReloadNow`）恒空，`T1`（2026-09-02）通过 adapter 包限定产出（`config.Watcher.ReloadNow`）+ analyzer 双向归一化修复，**`impact`/`tests`/`get_call_graph` 对 Go 默认真实可用**；非 Go 走裸名启发式，双向归一化保证查询鲁棒，严格 FQN 对齐按语种类别逐步收敛。Go 之外的高精度影响面依赖 LSP/SCIP/CodeGraph——零依赖与跨语言精度的取舍仍是核心设计决策。
 5. **配置分层**：默认值 < 配置文件 < 环境变量(`CODESCHEMA_*`) < CLI；支持能力预设 `minimal`/`semantic`/`multitenant` 与运行时热重载（监听地址/认证/限流/扫描器）。
 6. **生产健壮性**：优雅关闭、重试、Panic 恢复、安全中间件（CORS/recovery/auth/rate-limit）、可观测性（结构化日志 + Prometheus + 链路追踪）。
 

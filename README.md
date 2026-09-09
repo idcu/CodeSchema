@@ -136,7 +136,7 @@ docker run -p 8081:8081 -v ./data:/app/data codeschema:latest
    - `-tags 'pg redis'`：PostgreSQL / Redis 存储后端
    - `-tags treesitter`：tree-sitter **真语法树**解析（CGO）
 3. **影响面分析可用**：`impact` / `tests` / `get_call_graph` / `affected` 依赖调用边的 `CallerFQN`。Go 路径下 tree-sitter `detectCalls` 已回填包限定 `CallerFQN`/`CalleeFQN`，analyzer 再做双向归一化，对真实方法（含 `search_symbols`/`context` 返回的裸名）可正常命中；非 Go 语言与 LSP/SCIP/CodeGraph 适配器提供更精确的调用边。
-4. **计数类字段禁止手填**：包数（internal=32 / 全仓库=36）、MCP 工具数（12）、HTTP 路由数（23）统一由 `make counts` 生成、`scripts/counts_baseline.json` 锁基线、CI `counts-guard` 漂移断言守护。**改动后 `make counts-check` 必须绿灯**；数字有意为之变时先 `make counts-update` 刷新基线。
+4. **计数类字段禁止手填**：包数（internal=33 / 全仓库=37）、MCP 工具数（12）、HTTP 路由数（23）统一由 `make counts` 生成、`scripts/counts_baseline.json` 锁基线、CI `counts-guard` 漂移断言守护。**改动后 `make counts-check` 必须绿灯**；数字有意为之变时先 `make counts-update` 刷新基线。
 5. **文档分层面向不同人群**（文档地图见 [`docs/README.md`](./docs/README.md)）：新人上手 / 开发者 / 架构师 / 运维部署 / 贡献者各有专属文档，勿把某人群内容塞进另一人群文档。
 6. **改码必改档，文档不得超前于代码**：任何接口/表/CLI/能力边界变更，先改代码再同步文档；提交前 grep 核查旧路径/旧数字残留。提交遵循 Conventional Commits；**仅 `git commit`，push 需显式授权**。
 

@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 154: docs: 逐行修正文档漂移（命令数 9 / 包数 33·37 / 语言 31 / 日期刷新）
+
+- 背景：Commit 153 落地 tags-stats 命令与 Docker 纯 Go 默认口径后，逐行复查发现数处文档-代码漂移（均未被 counts-guard 的内联格式覆盖）：入口层仍写 8 个子命令、两处包数仍是 internal=32/total=36、两处语言计数仍是 30、目录速览漏列命令。
+- 动作：
+  - `docs/01-开发者/架构与模块.md`：入口层命令 8→9 并补 `tags-stats`；「make counts 校验（internal=32/total=36）」→（internal=33/total=37）。
+  - `docs/01-开发者/README.md`：目录速览 CLI 命令补 `rebuild-kv` 与 `tags-stats`（scan/watch/rebuild-kv/benchmark/agent-bench/mcp/serve/tags-stats/version）。
+  - `README.md`：开发红线「包数（internal=32/全仓库=36）」→（internal=33/全仓库=37）。
+  - `docs/02-架构师/README.md`：解析精度权衡「覆盖 30 语言」→「31 语言」。
+  - `DEV_PROGRESS.md`：tree-sitter 适配器「30 种语言」→「31 种语言」。
+  - 上述文档「最后更新」日期刷新至 2026-09-08；CHANGELOG Commit 153 过时遗留（Docker 职责重叠待定案）清理。
+- 验证：`make counts-check` 通过（含 dead-link LINK-OK）；`go build ./...` OK；全 live 文档 grep 无 internal=32/30 语言/默认 ONNX 残留。
+
 ### Commit 153: feat(ai)+docs: 新增 tags-stats 离线标签覆盖率统计命令 + counts-guard 扩容至 AGENTS/仓库结构 + 死链校验
 
 - 背景：P21（AI 标签/文档生产化）因 LLM API key 缺失阻塞，真实标签质量端到端无法验证。本次提供**不依赖 key 的离线评估基线**；同时 counts-guard 此前只守 README/架构与模块 的计数，漏检 AGENTS.md、仓库结构.md 等含硬数字的必读档。
@@ -17,7 +29,7 @@
   - 文档同步：命令数 8→9（架构与模块/仓库结构/02-架构师/00-新人上手/README CLI 框），LoC 54.3k→54.6k。
   - **Docker 默认构建口径定案（2026-09-03，消除三份镜像职责重叠）**：root Dockerfile 收敛为**纯 Go 免 CGO 默认轻量镜像**（`CGO_ENABLED=0`、去 `-tags onnx`、去 onnxruntime 软链/CGO_LDFLAGS/down 运行时拷贝；语义检索降级 LocalEmbedder，与 `make build`/CI 同口径）；ONNX 语义检索统一由 `docker/onnx/Dockerfile` 为唯一入口；`Dockerfile.mirror` 为同口径的 daocloud 国内源构建。同步更新 README 与 03-部署运维/README 的构建变体对照与部署命令。
 - 验证：`go build ./...` OK；`go vet ./cmd/... ./internal/ai/...` OK；`go test ./internal/ai/...` 全绿；`make counts-update` 刷新基线至 54566；`make counts-check` 通过（含死链 LINK-OK）；e2e：`scan --store X repo && tags-stats --store X` 实测覆盖率 50%、分类分布与 TopTags 正确。
-- 遗留：P21 真实 LLM 标签质量验证仍待 API key；root Dockerfile 默认 ONNX 与 Dockerfile.mirror/onnx 镜像职责重叠待设计定案（见 2026-09-03 复评报告）。
+- 遗留：P21 真实 LLM 标签质量验证仍待 API key。（root Dockerfile 默认 ONNX 与 mirror/onnx 职责重叠项已于本记录同批定案——root 收敛为纯 Go 默认，onnx 由 docker/onnx/Dockerfile 唯一入口。）
 
 ### Commit 152: fix(server): OpenAPI 规范补齐 /affected、/projects、/docs/，对齐 23 路由口径
 

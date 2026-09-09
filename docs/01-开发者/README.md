@@ -2,7 +2,7 @@
 
 > 写给：要 clone、构建、调试、扩展 CodeSchema 的工程师
 
-> 最后更新：2026-09-03
+> 最后更新：2026-09-08
 ## 0. 构建前置（必读）
 
 - **Go 1.25+**
@@ -43,7 +43,7 @@ make bench-agent    # agent-bench 端到端评测
 ## 4. 目录速览
 
 ```
-cmd/codeschema/       CLI 入口（scan/watch/serve/mcp/benchmark/agent-bench/version）
+cmd/codeschema/       CLI 入口（scan/watch/rebuild-kv/benchmark/agent-bench/mcp/serve/tags-stats/version）
 internal/
   parser/adapter/     treesitter | codegraph | scip | jcodeindexer | lsp  （高精度按配置启用）
   scanner/            仓库扫描编排

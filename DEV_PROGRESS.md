@@ -1,6 +1,6 @@
 # CodeSchema 开发进度跟踪
 
-> 更新时间：2026-09-03
+> 更新时间：2026-09-08
 > 当前阶段：P19+ 后续里程碑收尾（除 P21 阻塞外全部落地）：**P19 非 Go 调用图 FQN 对齐、P20 真语法树包限定对齐、P22 单测关联策略增强、P23 PG/Redis 大规模仓横扩、P24 agent-bench 多语言任务集扩展、P25 生态资产发布标准化、P26 可观测性细化** 均已实施、测试通过并推送 gitee main；**P21（AI 标签/文档生产化）为唯一剩余待办，因 LLM API key 缺失阻塞（用户暂缓）**。
 > 下一个阶段：P21 需用户提供 LLM API key 后方可启动；其余 P0–P18、PHASE_09 开发计划 16 任务及 P19–P26 已全部完成（详见下方维护优化章节与「P19+ 后续里程碑」节）。
 
@@ -73,7 +73,7 @@ P18      [████████████████████] 100%
 
 ### P0 MVP — 适配器 + 增量更新 + 接口层
 - [x] `internal/parser/adapter/adapter.go` — 适配器模块公共工具（文件过滤/语言检测/IR 转换）
-- [x] `internal/parser/adapter/treesitter/adapter.go` — tree-sitter 适配器（30 种语言正则解析，`-tags treesitter` 可切换真语法树）
+- [x] `internal/parser/adapter/treesitter/adapter.go` — tree-sitter 适配器（31 种语言正则解析，`-tags treesitter` 可切换真语法树）
 - [x] `internal/parser/adapter/treesitter/adapter_test.go` — tree-sitter 单测（18 个测试）
 - [x] `internal/parser/adapter/codegraph/adapter.go` — CodeGraph 直读适配器骨架
 - [x] `internal/parser/adapter/codegraph/adapter_test.go` — CodeGraph 单测（4 个测试）
