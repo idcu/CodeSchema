@@ -20,7 +20,6 @@
             "service.TestFindTestLinks_NoTestFiles",
             "service.TestFindTestLinks_Explicit",
             "service.TestFindTestLinks_Explicit_MethodLevel",
-            "service.TestFindTestLinks_Coverage",
             "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
             "service.TestFindTestLinks_MultipleTestClassesPerSource",
             "service.TestFindTestLinks_NoSubstringNamingFalsePositive",

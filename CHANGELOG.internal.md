@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 222: fix(bench): 人工真值数据集移除失效引用（28→27）
+
+- `manual-truth.json` 删除 `service.TestFindTestLinks_Coverage`：对应测试已随 coverage
+  裁剪删除，数据集自检会因「真值测试不在标注文件内」直接失败。
+- 仅修数据有效性，判分口径未变：仍是闭合世界（范围外预测忽略）、微平均 P/R/F1。
+  规模 46 → 45 pair（Go 28 → 27 / Java 18）。
+- 实测（同命令 `release-bench --repo . --lang go --manual-truth ...`）：
+  真值 pair 27、范围内预测 27、TP 27 / FP 0 / FN 0、P/R/F1 均为 1.0000。
+- 文档：`docs/bench/2026-11-14/README.md`、`final-ledger-2026-11-14.md` 同步；
+  归档 JSON 标注为历史数据。`go test ./internal/releasebench/...` 通过。
+
 ### Commit 221: docs: R0-1 旧账无法对账结论 + 最终修复总账（R0-1）
 
 - R0-1 核查：`C-16` / `check-deps` 在全历史（`git log --all -S`）、已删文件、

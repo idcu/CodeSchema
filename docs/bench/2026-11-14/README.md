@@ -106,7 +106,9 @@ IR 只用于枚举「标注测试文件内的方法」，作为评估范围（�
 - 范围内漏掉的标注测试计 FN；
 - 评估前自检：生产方法必须存在于方法索引、真值测试必须位于标注文件内，防止标注漂移。
 
-规模：2 个仓库、14 个生产方法、46 条人工 pair（Go 28 / Java 18）。命令：
+规模：2 个仓库、14 个生产方法、45 条人工 pair（Go 27 / Java 18）。
+Go 由 28 降为 27：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步移除该失效引用，
+本次只修数据有效性，判分口径未变。命令：
 
 ```bash
 release-bench --repo <repo> --lang <lang> \
@@ -115,10 +117,13 @@ release-bench --repo <repo> --lang <lang> \
 
 | 仓库 | 变体 | 真值 pair | TP | FP | FN | Precision | Recall | F1 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 28 | 28 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
-| code-schema (go) | treesitter | 28 | 28 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | regex | 27 | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | treesitter | 27 | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
 | petclinic (java) | regex | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
 | petclinic (java) | treesitter | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+
+> 同目录 `final-*-go.json` / `manual-pre184-go.json` 为修复前的归档原始数据，
+> 其中的 28 条 pair 含已删除的 `TestFindTestLinks_Coverage`，仅作历史证据，不再作为当前基线。
 
 **这套真值确实能挡住回归**：在 R5-12 修复前（临时移除 `EnsureMethodOwners`）用同一数据集
 实测 Go regex 为 **TP 6 / FN 22 / Recall 0.2143 / F1 0.3530**，缺口精确落在
