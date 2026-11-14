@@ -428,6 +428,44 @@ public class PetControllerTests {
 	}
 }
 
+// TestASTAdapter_JavaChainedNewCall 负控：`new Calculator().add(1, 2)` 的被调方
+// 是构造表达式的链式方法调用。旧实现取 method_invocation 全文 `(` 前文本，得到
+// callee=`new Calculator`（非法 FQN），真值抽取与测试关联全部失配——
+// 这是 treesitter 下 releasebench Java 夹具真值 pair=0 的根因。
+// 现识别 object 为 object_creation_expression：callee 取 `类型.方法`（Calculator.add）。
+func TestASTAdapter_JavaChainedNewCall(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "CalculatorTest.java")
+	content := `package demo;
+
+public class CalculatorTest {
+    public void testAdd() {
+        new Calculator().add(1, 2);
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "Calculator.add" {
+			found = true
+		}
+		if strings.Contains(c.CalleeFQN, "new Calculator") {
+			t.Fatalf("构造表达式被当作 callee: %+v", c)
+		}
+	}
+	if !found {
+		t.Fatalf("expected Calculator.add, got calls: %+v", doc.Calls)
+	}
+}
+
 // TestASTAdapter_Parse_Kotlin 验证 Kotlin 语法级解析。
 func TestASTAdapter_Parse_Kotlin(t *testing.T) {
 	a := NewTreeSitterAdapter()

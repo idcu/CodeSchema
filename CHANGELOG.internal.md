@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 242: fix(parser): Java `new X().m()` 链式调用提取类型限定 callee（AST 路径）
+
+- Java 的 `method_invocation.object` 为 `object_creation_expression` 时
+  （`new Calculator().add(1, 2)`），AST 路径取调用全文 `(` 前文本，得到
+  callee=`new Calculator`（非法 FQN）：真值抽取与测试关联全部失配。
+- 这是 `-tags treesitter` 下 `TestRun_MultiLanguageFixtures/java` 真值 pair=0 的根因
+  （HEAD 即红，非本轮改动引入）；默认 regex 构建不受影响。
+- 现识别该形态，callee 取 `类型.方法`（`Calculator.add`）；普通 `obj.method`
+  与链式 `a().b()` 口径不变。
+- 负控：`TestASTAdapter_JavaChainedNewCall`（旧实现 callee=`…new Calculator`，红；新实现绿）。
+- 同语料（petclinic java treesitter）前→后：prod_methods 91、test_methods 104、calls 1609、
+  resolved 304/0.1889、仓内 307/304、人工真值 40/40 均不变——该仓库无此调用形态；
+  收益体现在夹具与后续含构造链式调用的 Java 仓库。
+
 ### Commit 241: fix(parser): Java 嵌套类方法统一归最外层类（跨变体 FQN 一致）
 
 - 正则路径 `classPattern` 带行首锚点且不含 `static`，缩进嵌套类不登记，方法归外层类；

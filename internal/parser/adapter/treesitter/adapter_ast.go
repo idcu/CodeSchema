@@ -884,11 +884,24 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		}
 	}
 	// Java method_invocation：object 是 method_invocation → 链式，取 name 字段（`invoke`）；
+	// Java method_invocation：object 是 method_invocation → 链式，取 name 字段（`invoke`）；
+	// object 是 object_creation_expression（`new Calculator().add(...)`）→ `类型.方法`；
 	// object 是 identifier → 普通 obj.method，取 `(` 前完整文本
 	if n.Type() == "method_invocation" {
-		if obj := n.ChildByFieldName("object"); obj != nil && !obj.IsNull() && obj.Type() == "method_invocation" {
-			if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
-				return string(name.Content(src))
+		if obj := n.ChildByFieldName("object"); obj != nil && !obj.IsNull() {
+			name := n.ChildByFieldName("name")
+			switch obj.Type() {
+			case "method_invocation":
+				if name != nil && !name.IsNull() {
+					return string(name.Content(src))
+				}
+			case "object_creation_expression":
+				if typ := obj.ChildByFieldName("type"); typ != nil && !typ.IsNull() && name != nil && !name.IsNull() {
+					tn := stripTypeArgs(strings.TrimSpace(string(typ.Content(src))))
+					if tn != "" {
+						return tn + "." + string(name.Content(src))
+					}
+				}
 			}
 		}
 		text := string(n.Content(src))
