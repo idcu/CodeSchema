@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 238: fix(parser): Java 行内注解方法进入索引
+
+- `public @ResponseBody Vets showResourcesVetList()` 的注解位于返回类型前，旧 Java
+  方法模式修饰符组不含 `@`，整行不被识别为方法：该方法不进索引、体内调用失去 caller，
+  声明行还被 `callPattern` 记成一条调用边。
+- 修饰符组加入 `@Name` / `@Name(...)`；独立成行的注解匹配不到后续类型，不会误判。
+- 负控：`TestTreeSitterAdapter_Parse_JavaInlineAnnotationMethod`（旧实现 methods=[]，红；
+  新实现绿）。
+- 同命令同语料（petclinic java regex）前→后：生产方法 90 → 91、calls 1184 → 1183、
+  unique callers 147 → 148、resolved 216 → 215（0.1824 → 0.1817）、仓内 219/216 →
+  218/215（0.9863 → 0.9862）、test_link 123/0/5 不变。
+  resolved 下降 1 是删除声明行伪调用：该边此前经短名回退命中同名测试方法
+  `VetControllerTests.showResourcesVetList`，属假解析的修正，不是召回退化。
+- 文档：`解析适配器.md` 同步。
+
 ### Commit 237: docs: 最终复测、caller 归属总账与 deferred 降 cut
 
 - 两变体 × 三仓全量复测，原始数据 `docs/bench/2026-11-14/post-*.json`。

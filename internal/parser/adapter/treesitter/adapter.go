@@ -99,7 +99,9 @@ func initPatterns() map[string]langPatterns {
 			// 行首锚定 + 修饰符可省略：JUnit 5 测试方法常为包级可见（`void foo()`），
 			// 且方法体常以单个 tab 缩进——旧模式要求「修饰符/≥2 个空白 + 空白 + 类型」，
 			// 单 tab 行会因修饰符组吃掉唯一空白而漏解析。类型组允许泛型中的空格。
-			methodPattern: regexp.MustCompile(`^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)*([\w<>\[\],.?][\w<>\[\],.?\s]*?)\s+(\w[\w$]*)\s*\(`),
+			// 修饰符组同时接受行内注解（`public @ResponseBody Vets foo()`）；独立成行的
+			// 注解因匹配不到后续类型而不会被误判为声明。
+			methodPattern: regexp.MustCompile(`^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp|@\w+(?:\([^)]*\))?)\s+)*([\w<>\[\],.?][\w<>\[\],.?\s]*?)\s+(\w[\w$]*)\s*\(`),
 			callPattern:   regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
 			commentTrim:   "//",
 		},

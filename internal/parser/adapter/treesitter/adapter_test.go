@@ -137,6 +137,41 @@ public interface OrderService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaInlineAnnotationMethod 负控：行内注解
+// （`public @ResponseBody Vets showResourcesVetList()`）中的方法曾被 methodPattern
+// 漏解析——修饰符组不含 `@`，注解被当作返回类型的一部分而无法匹配。
+// 后果：该方法不进索引，人工真值自检直接报「production not found」。
+func TestTreeSitterAdapter_Parse_JavaInlineAnnotationMethod(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "VetController.java")
+	content := `package demo;
+
+public class VetController {
+    @GetMapping("/vets")
+    public @ResponseBody Vets showResourcesVetList() {
+        return new Vets();
+    }
+}
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	found := false
+	for _, m := range doc.Methods {
+		if m.Name == "showResourcesVetList" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("inline annotation method not parsed: methods=%+v", doc.Methods)
+	}
+}
+
 // TestTreeSitterAdapter_Parse_JavaBodyStatementsAreNotMethods 负控：
 // Java 方法体内的 `return helper(a);` / `new Foo().bar();` 曾被正则方法模式
 // 误判为「返回类型 + 方法名」声明，导致方法数虚增且调用边被整行 continue 吞掉。
