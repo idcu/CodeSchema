@@ -211,6 +211,42 @@ func TestFindTestLinks_GoPackageLevelTests(t *testing.T) {
 	}
 }
 
+// TestFindTestLinks_JavaTestsSuffix 负控：JUnit/Spring 常见的 `*Tests` 后缀
+// （OwnerControllerTests）此前不被 matchTestClass 识别，而 isTestClass 已支持，
+// 两处口径不一致导致 Spring 仓测试关联零召回（公开基准 S-2 实测）。
+func TestFindTestLinks_JavaTestsSuffix(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/repo/src/main/java/org/demo/OwnerController.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/repo/src/test/java/org/demo/OwnerControllerTests.java", Language: "java"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "OwnerController", FullName: "OwnerController"}},
+			2: {{ID: 20, FileID: 2, Name: "OwnerControllerTests", FullName: "OwnerControllerTests"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "processCreationForm", FullName: "OwnerController.processCreationForm"}},
+			20: {{ID: 200, ClassID: 20, Name: "testProcessCreationForm", FullName: "OwnerControllerTests.testProcessCreationForm"}},
+		},
+	}
+
+	svc := NewService(st)
+	links, err := svc.FindTestLinks(ctx, "OwnerController.processCreationForm", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Strategy == "naming" && l.TestMethod == "OwnerControllerTests.testProcessCreationForm" {
+			if l.Confidence != 70 {
+				t.Errorf("confidence = %d, want 70", l.Confidence)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing naming link for *Tests class, got %+v", links)
+}
+
 func TestFindTestLinks_SameTag(t *testing.T) {
 	ctx := context.Background()
 	st := &mockStoreWithTestData{

@@ -198,6 +198,46 @@ public class Calculator {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaPackagePrivateMethods 负控：JUnit 5 允许
+// 包级可见性测试方法（`void initCreationForm() {`，无 public/private），
+// 旧 Java 方法模式强制要求修饰符，导致 Spring 仓测试方法大量漏解析。
+func TestTreeSitterAdapter_Parse_JavaPackagePrivateMethods(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OwnerControllerTests.java")
+	content := `package demo;
+
+class OwnerControllerTests {
+	void initCreationForm() throws Exception {
+		controller.initCreationForm();
+	}
+
+	private void helper() {}
+}
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	names := make([]string, 0, len(doc.Methods))
+	for _, m := range doc.Methods {
+		names = append(names, m.Name)
+	}
+	if len(doc.Methods) != 2 {
+		t.Fatalf("methods = %v, want [initCreationForm helper]", names)
+	}
+	for _, m := range doc.Methods {
+		if m.ClassFQN != "OwnerControllerTests" {
+			t.Errorf("method %s ClassFQN = %q", m.Name, m.ClassFQN)
+		}
+	}
+	if len(doc.Calls) == 0 {
+		t.Fatalf("expected call edge in package-private method body")
+	}
+}
+
 func TestTreeSitterAdapter_Parse_TypeScript(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()

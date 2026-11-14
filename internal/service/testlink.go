@@ -211,15 +211,18 @@ func isGoTestFile(path string) bool {
 
 // matchTestClass 判断是否为测试类，并返回对应的源类全限定名。
 //
-// 规则：
-//   - OrderServiceTest → OrderService（去掉 Test 后缀）
+// 规则（与 isTestClass 口径对齐）：
+//   - OrderServiceTest / OrderServiceTests / OrderServiceSpec → OrderService（去后缀）
 //   - TestOrderService → OrderService（去掉 Test 前缀）
 func (s *Service) matchTestClass(cls store.ClassRecord) string {
 	name := cls.Name
 
-	// 后缀匹配：OrderServiceTest
-	if strings.HasSuffix(name, "Test") && len(name) > 4 {
-		sourceName := strings.TrimSuffix(name, "Test")
+	// 后缀匹配：Test / Tests / Spec（Spring/JUnit 常用 *Tests，Jest 常用 *Spec）。
+	for _, suffix := range []string{"Tests", "Spec", "Test"} {
+		if !strings.HasSuffix(name, suffix) || len(name) <= len(suffix) {
+			continue
+		}
+		sourceName := strings.TrimSuffix(name, suffix)
 		return strings.Replace(cls.FullName, name, sourceName, 1)
 	}
 

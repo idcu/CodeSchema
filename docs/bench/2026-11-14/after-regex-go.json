@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-11-14T01:32:12Z",
+  "repo": "code-schema",
+  "commit": "b871ca106216734a485aaf48179d78f33abde987",
+  "language": "go",
+  "build_variant": "regex",
+  "files": 222,
+  "prod_files": 122,
+  "test_files": 100,
+  "prod_methods": 1332,
+  "test_methods": 1123,
+  "ground_truth_pairs": 1724,
+  "sampled_pairs": 192,
+  "sampled": true,
+  "prods_evaluated": 140,
+  "predicted_links": 175,
+  "test_link": {
+    "tp": 34,
+    "fp": 141,
+    "fn": 158,
+    "precision": 0.1943,
+    "recall": 0.1771,
+    "f1": 0.1853
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "regex",
+    "calls": 16415,
+    "unique_callers": 2053,
+    "unique_callees": 2756,
+    "resolved_calls": 3489,
+    "resolution_rate": 0.2125
+  }
+}

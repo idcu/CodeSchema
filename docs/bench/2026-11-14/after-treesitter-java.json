@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-11-14T01:32:16Z",
+  "repo": "s2-petclinic",
+  "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+  "language": "java",
+  "build_variant": "treesitter",
+  "files": 50,
+  "prod_files": 31,
+  "test_files": 19,
+  "prod_methods": 91,
+  "test_methods": 104,
+  "ground_truth_pairs": 160,
+  "sampled_pairs": 160,
+  "sampled": false,
+  "prods_evaluated": 37,
+  "predicted_links": 1,
+  "test_link": {
+    "tp": 1,
+    "fp": 0,
+    "fn": 159,
+    "precision": 1,
+    "recall": 0.0063,
+    "f1": 0.0125
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "treesitter",
+    "calls": 1609,
+    "unique_callers": 147,
+    "unique_callees": 525,
+    "resolved_calls": 288,
+    "resolution_rate": 0.179
+  }
+}

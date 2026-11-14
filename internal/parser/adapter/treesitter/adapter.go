@@ -67,9 +67,12 @@ func initPatterns() map[string]langPatterns {
 		"java": {
 			classPattern:   regexp.MustCompile(`^(public\s+|private\s+|protected\s+)?(abstract\s+|final\s+)?(class|interface|enum|@interface|record)\s+(\w+)`),
 			classNameIndex: 4,
-			methodPattern:  regexp.MustCompile(`(public|private|protected|static|final|abstract|synchronized|\s)+\s+(\w[\w<>[\],\s]*)\s+(\w[\w]*)\s*\(`),
-			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
-			commentTrim:    "//",
+			// 行首锚定 + 修饰符可省略：JUnit 5 测试方法常为包级可见（`void foo()`），
+			// 且方法体常以单个 tab 缩进——旧模式要求「修饰符/≥2 个空白 + 空白 + 类型」，
+			// 单 tab 行会因修饰符组吃掉唯一空白而漏解析。类型组允许泛型中的空格。
+			methodPattern: regexp.MustCompile(`^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)*([\w<>\[\],.?][\w<>\[\],.?\s]*?)\s+(\w[\w$]*)\s*\(`),
+			callPattern:   regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:   "//",
 		},
 		"ts": {
 			classPattern:   regexp.MustCompile(`^(export\s+)?(abstract\s+)?(class|interface|enum|type)\s+(\w+)`),

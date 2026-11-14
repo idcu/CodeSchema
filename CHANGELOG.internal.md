@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 180: fix(service/parser): Java `*Tests` 口径统一 + 包级可见性方法解析（R5-8 / S-2b）
+
+- 背景：公开基准 S-2 中 petclinic 的测试类统一命名 `OwnerControllerTests`，`matchTestClass` 只处理 `Test` 前后缀（`isTestClass` 已支持 `Tests`），两处口径不一致导致 naming 零召回。
+- 动作：
+  - `matchTestClass` 与 `isTestClass` 对齐：`Test` 前后缀 + `Tests`/`Spec` 后缀。
+  - 连带根因：Java 正则方法模式要求修饰符且未行首锚定，JUnit 5 包级可见性方法（`void initCreationForm()`）与单 tab 缩进行漏解析——不修则 `*Tests` 修正在默认变体不可观测。改为行首锚定 + 修饰符可省略 + 类型组至少一个非空白字符（仍由语句关键字抑制 `return/new/...`）。
+- 负控（先红后绿）：
+  - `TestFindTestLinks_JavaTestsSuffix`——修复前 naming 0 条，修复后 `OwnerControllerTests.testProcessCreationForm` naming(70) 命中。
+  - `TestTreeSitterAdapter_Parse_JavaPackagePrivateMethods`——修复前 `methods=[helper]`（tab 缩进 + 无修饰符漏解析），修复后 `[initCreationForm helper]` 且方法体调用边存在。
+- 实测（同一 `release-bench` 命令，3 仓库 × 2 变体，`docs/bench/2026-11-14/`）：
+  - Java regex `PredictedLinks 0 → 1`，TP 0 → 1，P 0 → 1.0000，R 0 → 0.0081，F1 0 → 0.0161；`TestMethods` 29 → 123。
+  - Java treesitter `PredictedLinks 0 → 1`，P 0 → 1.0000，R 0 → 0.0063。
+  - Go 两变体保持 R5-7 后的非零水平（regex P 0.1943 / R 0.1771 / F1 0.1853；AST P 0.2039 / R 0.1676 / F1 0.1840）。
+  - TS 仍为 0：Jest `it/test` 回调不是 IR 方法，**不在本轮范围**，已记录原因与后续路径，真值保留不删除。
+- 验证：`go build ./...` / `go vet ./...`（含 pg/redis/treesitter tags）/ `make test` 全绿；`make counts-check` 通过（LoC 59100 ≈ 59.1k）。
+
 ### Commit 179: fix(service): Go 包级测试函数进入关联候选（R5-7 / S-2a）
 
 - 背景：公开基准 S-2 实测 3 仓库 `PredictedLinks` 全为 0。Go 的测试函数（`TestXxx`/`BenchmarkXxx`/`ExampleXxx`）挂在合成 `PACKAGE` 容器下，容器名是包名，不满足 `discoverTestClasses` 的 `*Test`/`Test*` 类名约定，100 个 `_test.go` 无一进入候选；`GetAffected` 复用同一策略，同样盲区。
