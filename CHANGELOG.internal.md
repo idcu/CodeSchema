@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 189: fix(parser/scip): 懒加载并发首次 Parse 竞态（R5-6 / P3-6）
+
+- 问题：`Parse`/`ParseAll` 用裸 `if !a.loaded { a.loadIndex() }` 触发懒加载，
+  `documents`/`loaded`/`truncated` 无同步。并发首次解析（扫描器多 worker 共用适配器）时
+  多个 goroutine 同时 `loadIndex`，重复解析 index 并读写同一批文档对象。
+- 修复：`SCIPAdapter` 增加 `mu sync.RWMutex`；新增 `ensureLoaded()`（快路径 RLock 读标记，
+  慢路径 Lock 后双检再加载）、`snapshot()`（RLock 取文档切片快照）；`Parse`/`ParseAll`
+  改走 `ensureLoaded` 并在锁外遍历快照；`Close`/`SetMaxDocs`/`Truncated` 纳入锁保护。
+  已加载文档不可变（重载只在写锁内整体替换切片），因此快照在锁外使用安全。
+- 负控（先红后绿）：`TestSCIPAdapter_ConcurrentFirstParse`——16 goroutine 并发首次 `Parse`。
+  修复前 `go test -race` 报 `WARNING: DATA RACE`（`loadIndex` 写 `documents` vs
+  `convertDocument` 读）且 `documents loaded 2 times`；修复后无 race、恰好加载 1 次。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；`go test -race ./internal/parser/adapter/scip` 全绿；counts 60011（60.0k）。
+
 ### Commit 188: fix(mcp): search_config 描述与实现对齐（R4-3 / P2-5）
 
 - 问题：工具描述写「搜索配置项和注解」，实现是类/方法 `FullName/Name/Doc/Signature/ReturnType`

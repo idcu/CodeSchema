@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -95,6 +96,41 @@ func TestSCIPAdapter_LoadIndex_InvalidFile(t *testing.T) {
 	}
 	if len(a.documents) != 0 {
 		t.Errorf("expected 0 documents for garbage input, got %d", len(a.documents))
+	}
+}
+
+func TestSCIPAdapter_ConcurrentFirstParse(t *testing.T) {
+	dir := t.TempDir()
+	idx := encIndex(encDocument("src/main/Foo.java", []string{
+		"scip-typescript npm . . src/main/Foo.java/Foo#",
+	}, &SCIPOccurrence{
+		Symbol: "scip-typescript npm . . src/main/Foo.java/Foo#",
+		SymbolRole: 1, Range: []int{1, 0, 5},
+	}))
+	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := NewSCIPAdapter(dir)
+
+	// 并发首次 Parse 只能加载一次；P3-6 负控：旧实现无锁，loaded/documents 数据竞争。
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ir, err := a.Parse(context.Background(), filepath.Join(dir, "src/main/Foo.java"))
+			if err != nil || ir == nil {
+				t.Errorf("Parse: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if !a.loaded {
+		t.Fatal("expected loaded=true after concurrent Parse")
+	}
+	if len(a.documents) != 1 {
+		t.Fatalf("documents loaded %d times, want 1 (重复加载)", len(a.documents))
 	}
 }
 

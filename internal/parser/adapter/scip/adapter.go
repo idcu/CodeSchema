@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/parser"
@@ -57,7 +58,12 @@ type SCIPOccurrence struct {
 }
 
 // SCIPAdapter 读取 SCIP index 文件的适配器。
+//
+// 并发约束（P3-6）：懒加载状态 documents/loaded/truncated 由 mu 保护。
+// 首次 Parse 可能被多个 goroutine 同时触发，ensureLoaded 用双检锁保证
+// 只加载一次；已加载后文档内容不可变，读侧取快照后在锁外使用。
 type SCIPAdapter struct {
+	mu        sync.RWMutex
 	indexDir  string
 	documents []*SCIPDocument
 	loaded    bool
@@ -79,13 +85,20 @@ func NewSCIPAdapter(indexDir string) *SCIPAdapter {
 
 // SetMaxDocs 设置流式加载的文档背压上限（0 表示不限）。
 func (a *SCIPAdapter) SetMaxDocs(n int) {
-	if n > 0 {
-		a.maxDocs = n
+	if n <= 0 {
+		return
 	}
+	a.mu.Lock()
+	a.maxDocs = n
+	a.mu.Unlock()
 }
 
 // Truncated 返回上次加载是否因背压上限被截断。
-func (a *SCIPAdapter) Truncated() bool { return a.truncated }
+func (a *SCIPAdapter) Truncated() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.truncated
+}
 
 // Name 返回适配器唯一标识。
 func (a *SCIPAdapter) Name() string { return "scip" }
@@ -117,9 +130,36 @@ func (a *SCIPAdapter) Init(ctx context.Context, config map[string]any) error {
 
 // Close 清理适配器资源。
 func (a *SCIPAdapter) Close() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.documents = nil
 	a.loaded = false
 	return nil
+}
+
+// ensureLoaded 懒加载 index，双检锁保证并发首次调用只加载一次。
+func (a *SCIPAdapter) ensureLoaded() error {
+	a.mu.RLock()
+	loaded := a.loaded
+	a.mu.RUnlock()
+	if loaded {
+		return nil
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.loaded {
+		return nil
+	}
+	return a.loadIndex()
+}
+
+// snapshot 返回当前文档切片的快照。已加载的文档内容不可变
+// （重载只会在写锁内整体替换切片），因此可在锁外安全遍历。
+func (a *SCIPAdapter) snapshot() []*SCIPDocument {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.documents
 }
 
 // Parse 解析单个文件，从已加载的 SCIP index 中查找。
@@ -128,10 +168,8 @@ func (a *SCIPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocumen
 		return nil, fmt.Errorf("scip index directory not configured: %w", errors.ErrSourceUnavailable)
 	}
 
-	if !a.loaded {
-		if err := a.loadIndex(); err != nil {
-			return nil, err
-		}
+	if err := a.ensureLoaded(); err != nil {
+		return nil, err
 	}
 
 	relPath, err := filepath.Rel(a.indexDir, path)
@@ -142,7 +180,7 @@ func (a *SCIPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocumen
 	// 标准化路径分隔符
 	relPath = strings.ReplaceAll(relPath, "\\", "/")
 
-	for _, doc := range a.documents {
+	for _, doc := range a.snapshot() {
 		if doc.RelativePath == relPath || strings.HasSuffix(path, doc.RelativePath) {
 			return a.convertDocument(doc), nil
 		}
@@ -161,11 +199,12 @@ func (a *SCIPAdapter) ParseAll(ctx context.Context, paths []string) (<-chan *par
 		return nil, fmt.Errorf("SCIP index directory not found: %s: %w", a.indexDir, errors.ErrSourceUnavailable)
 	}
 
-	if !a.loaded {
-		if err := a.loadIndex(); err != nil {
-			return nil, err
-		}
+	if err := a.ensureLoaded(); err != nil {
+		return nil, err
 	}
+
+	// 先取快照，goroutine 内不再触碰适配器状态（Close 可安全并发）。
+	documents := a.snapshot()
 
 	ch := make(chan *parser.IRDocument)
 	go func() {
@@ -173,7 +212,7 @@ func (a *SCIPAdapter) ParseAll(ctx context.Context, paths []string) (<-chan *par
 
 		// 按路径建立查找映射
 		docMap := make(map[string]*SCIPDocument)
-		for _, doc := range a.documents {
+		for _, doc := range documents {
 			docMap[doc.RelativePath] = doc
 		}
 
