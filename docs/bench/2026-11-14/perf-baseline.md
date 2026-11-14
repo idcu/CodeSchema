@@ -12,7 +12,7 @@
 |---|---|
 | 最大语料 | Go 标准库 `src`：6,786 个 `.go` / 2,276,611 行 / 91,251 个符号 |
 | 索引吞吐（large） | scan 1,725.0 files/s、22,460.8 symbols/s；index 1,084.1 files/s、14,115.7 symbols/s |
-| 索引内存（large） | 隔离口径堆峰值 **623.6 MiB**（改前 1,382.2 MiB，见 §8.5）；GC 后 live 362.5 MiB；查询期常驻 421.5 MiB。perf 全流程口径改前 1,935.5 MiB，未同批复跑 |
+| 索引内存（large） | 隔离口径 **build_peak（scan+index 复合）623.6 MiB**（改前 1,382.2 MiB，见 §8.5）；GC 后 live 362.5 MiB；查询期常驻 421.5 MiB。perf 全流程口径改前 1,935.5 MiB，未同批复跑 |
 | `/context`（large） | P50 141.5 ms / P95 160.9 ms，0 错误 |
 | `/impact`（large） | P50 3.6 ms / P95 5.4 ms，0 错误（改造前 378.5 / 397.8 ms，见 §6.1） |
 | `/search`（large） | P50 244.9 ms / P95 256.8 ms，0 错误 |
@@ -24,8 +24,9 @@
 发现的明确结构性问题：持久化向量存储的 O(n²) 写放大（§8.1）、调用图逐请求全量重建
 （§6.1）、关键字判定每次调用重建 map 的分配放大（§8.4）、索引快照整块 `MarshalIndent`
 （§8.5），均已先红后绿修复。`file` 后端的堆峰值经归因为**索引构建期瞬态**（GC 余量 +
-快照序列化），常驻仅 362.5 MiB，未发现泄漏或非线性增长；改流式落盘后隔离口径峰值
-1,382.2 → 623.6 MiB。
+快照序列化），常驻仅 362.5 MiB，未发现泄漏或非线性增长；改流式落盘后构建复合峰值
+（build_peak）1,382.2 → 623.6 MiB。落盘改造的直接证据是 Save 期采样峰值与 TotalAlloc
+（§8.5），scan 阶段峰值未单独采样、不计入该归因。
 
 ## 2. 硬件与运行环境
 
@@ -315,12 +316,15 @@ scan 吞吐 1,262 → 1,725 files/s（+36.7%），隔离口径峰值 1,872.3 →
 `fsperm.WriteFile`（直写目标）」改为「按 ID 排序逐条序列化 → 写 `<file>.tmp` → `fsync` →
 原子 `rename` → `fsync` 目录」。负控：
 
-- `TestWriteFailureKeepsPreviousVersion`：回调写一半后报错，目标文件保持旧版本且无 `.tmp` 残留；
-- `TestPersistentStore_SaveFailureKeepsPreviousVersion`：NaN 触发序列化中途失败，旧索引仍可加载；
+- `TestWriteFailureKeepsPreviousVersion`：回调写一半后报错，目标文件仍是上一完整版本
+  （字节可完整解析），`.tmp` 不残留；
+- `TestPersistentStore_SaveFailureKeepsPreviousVersion`：NaN 触发序列化**中途**失败
+  （失败条目排在合法条目之后），重新 `Load` 成功且只含旧版本 1 条，失败条目未落盘，`.tmp` 不残留；
 - `TestPersistentFTS_StaleTempIgnoredOnLoad` / `TestPersistentFTS_OnlyTempNoMain`：
-  中断残留的半份 `.tmp` 不得被当作索引，只有 `.tmp` 时按空索引启动。
+  中断残留的半份 `.tmp` 不得被当作索引，重开只读主文件、可正常 `Search`，下次保存清理残留；
+  只有 `.tmp` 时按空索引启动。
 
-**GOROOT 构建期峰值（隔离口径，同机同语料，10,345 文件 / 2,276,611 LoC）**：
+**GOROOT 构建复合峰值（build_peak，端到端观测）**：
 
 | 指标 | 改前 | 改后 | 变化 |
 |---|---:|---:|---:|
@@ -330,18 +334,21 @@ scan 吞吐 1,262 → 1,725 files/s（+36.7%），隔离口径峰值 1,872.3 →
 | 调用图缓存后常驻 | 421.6 MiB | 421.5 MiB | 常驻不变 |
 
 原始数据：`mem-attribution-large-keyword-fix.json`（改前）、
-`mem-attribution-large-stream-atomic.json`（改后）。build_peak 是 scan+index 复合峰值；
-本轮只改落盘路径，峰值下降可直接归因于快照序列化缓冲的消失。
+`mem-attribution-large-stream-atomic.json`（改后）。**口径说明**：`build_peak` 是
+scan+index 复合峰值；本轮未单独采样 scan 阶段峰值，也未改 scan 代码（`after_scan`
+live heap 131.1 MiB 不变）。因此它只作端到端观测，**不把其中 scan 阶段的部分归因于
+落盘改造**；落盘改造的直接证据是下表的「Save 期采样峰值」与「Save 期 TotalAlloc」。
 
-**落盘耗时 A/B（真实语料文件、同一份内存数据、5 轮丢弃首轮取中位数）**：
+**落盘 A/B（真实语料文件、同一份内存数据、5 轮丢弃首轮取中位数）**：
 
-| 组件 | 文件大小 | 旧路径（整索引 MarshalIndent + 直写） | 新路径（流式 + 原子） | 序列化分配 旧 → 新 |
-|---|---:|---:|---:|---:|
-| 向量 `vector.json` | 86.5 MiB | 2,160 ms | 1,414 ms | 1,015.7 → 100.9 MiB |
-| FTS `fts.json` | 44.3 MiB | 695 ms | 518 ms | 307.3 → 55.4 MiB |
+| 组件 | 文件大小 | 旧路径耗时 | 新路径耗时 | Save 期采样峰值增量 旧 → 新 | Save 期 TotalAlloc 旧 → 新 |
+|---|---:|---:|---:|---:|---:|
+| 向量 `vector.json` | 86.5 MiB | 2,160 ms | 1,414 ms | 873.7 → 101.0 MiB（-88.4%） | 1,015.7 → 101.0 MiB（-90.1%） |
+| FTS `fts.json` | 44.3 MiB | 695 ms | 518 ms | 307.3 → 55.6 MiB（-81.9%） | 307.3 → 55.6 MiB（-81.9%） |
 
-采样峰值增量：向量 873.7 → 101.0 MiB（-88.4%）；FTS 307.3 → 55.6 MiB（-81.9%）。
-纯序列化（写 `io.Discard`）向量 2,031 → 1,044 ms、FTS 625 → 253 ms。
+旧路径为整索引 `MarshalIndent` + 直写，新路径为流式 + 原子替换；峰值由 2 ms 采样
+`HeapAlloc` 得到（GC 后取基线），TotalAlloc 取 `MemStats.TotalAlloc` 增量。
+纯序列化（写 `io.Discard`，不含 fsync/rename）向量 2,031 → 1,044 ms、FTS 625 → 253 ms。
 旧路径为测试内逐字复刻（非生产代码）；时长含 2 ms 堆采样开销，各变体同口径。
 原始数据：`save-ab-vector.json` / `save-ab-fts.json`；
 复跑：`CODESCHEMA_SNAPSHOT_DIR=<snapshot_dir>` + 对应 `TestPersistentStore_SaveAB` /
