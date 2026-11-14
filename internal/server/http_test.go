@@ -167,7 +167,8 @@ func TestSearchEndpoint_Success(t *testing.T) {
 }
 
 func TestCORSMiddleware(t *testing.T) {
-	handler := corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant",
+		func() bool { return false })(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -181,6 +182,33 @@ func TestCORSMiddleware(t *testing.T) {
 	}
 	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Error("expected CORS header")
+	}
+}
+
+// TestCORSMiddleware_AuthConverges P2-14 负控：启用 Bearer 认证时不回通配 CORS，
+// 未启用时保持 "*"（本地开发向后兼容）。
+func TestCORSMiddleware_AuthConverges(t *testing.T) {
+	cases := []struct {
+		name string
+		auth bool
+		want string
+	}{
+		{"no-auth", false, "*"},
+		{"auth", true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handler := corsMiddlewareFor("GET, OPTIONS", "Content-Type",
+				func() bool { return c.auth })(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/health", nil)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			if got := w.Header().Get("Access-Control-Allow-Origin"); got != c.want {
+				t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

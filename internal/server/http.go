@@ -328,7 +328,8 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 			h.authMiddleware(
 				h.pathTraversalMiddleware(
 					recoveryMiddlewareFor(true, h.logger)(
-						corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant")(mux),
+						corsMiddlewareFor("GET, OPTIONS", "Content-Type, X-Tenant",
+							func() bool { return h.currentAuthToken() != "" })(mux),
 					),
 				),
 			),

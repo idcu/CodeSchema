@@ -45,7 +45,8 @@ watcher:
 
 - **不要全接口绑定**：将 `mcp_addr`/`http_addr` 改为 `127.0.0.1:<port>`，或经 Nginx 内网反代（示例 `build/secure-demo.yaml`）。
   - 默认 `:8080`（MCP）/ `:8081`（HTTP）为全接口绑定，这是 [AGENTS.md](../../AGENTS.md) §4 明确要求部署收敛的约束——生产必须改为 `127.0.0.1` 或反代后仅暴露正向端口。
-- **必须设置 `server.auth_token`**（Bearer）。
+- **必须设置 `server.auth_token`**（Bearer）。启用认证后 CORS 不再返回通配
+  `Access-Control-Allow-Origin`；如浏览器侧确有跨域需求，请由反向代理显式配置可信来源。
 - 按需设 `server.rate_limit` 防滥用。
 - 多租户：各租户独立存储与索引目录，隔离彻底。
 

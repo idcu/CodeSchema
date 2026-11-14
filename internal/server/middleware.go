@@ -14,10 +14,15 @@ import (
 // corsMiddlewareFor 生成 CORS 中间件。
 // allowMethods 为该入口允许的 HTTP 方法（HTTP API 为 "GET, OPTIONS"；
 // MCP SSE 需要 POST，为 "GET, POST, OPTIONS"）；allowHeaders 为允许的请求头。
-func corsMiddlewareFor(allowMethods, allowHeaders string) func(http.Handler) http.Handler {
+// authEnabled 返回当前是否启用了 Bearer 认证：启用时不回通配
+// Access-Control-Allow-Origin（默认收敛，避免对浏览器暴露面过大）。
+func corsMiddlewareFor(allowMethods, allowHeaders string, authEnabled func() bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			// 启用认证时不回通配来源：避免任意站点在浏览器侧代持凭据调用。
+			if authEnabled == nil || !authEnabled() {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 			w.Header().Set("Access-Control-Allow-Methods", allowMethods)
 			w.Header().Set("Access-Control-Allow-Headers", allowHeaders)
 			if r.Method == http.MethodOptions {

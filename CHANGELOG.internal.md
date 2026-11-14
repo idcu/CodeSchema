@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 193: fix(server): 启用认证时 CORS 不再回通配来源（R3-8 / P2-14）
+
+- 问题：CORS 中间件无条件 `Access-Control-Allow-Origin: *`，启用 Bearer 认证后
+  仍对任意站点开放，与「默认收敛」不符。
+- 修复：`corsMiddlewareFor` 增加 `authEnabled` 判定；HTTP 与 MCP 两处按各自运行时
+  令牌快照传入（支持热更新）。未启用认证时保持 `*`（本地开发向后兼容）。
+- 负控（先红后绿）：`TestCORSMiddleware_AuthConverges` 两子用例——
+  `auth=true` 断言不回通配头（修复前实测 `*`，红）；`no-auth` 保持 `*`（绿）。
+- 文档：`docs/03-部署运维/README.md` 认证段说明 CORS 收敛与反代配置方式。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60.2k。
+
 ### Commit 192: fix(config): cloneConfig 保留 AI 凭据与向量模型字段（R3-5 / P1-17）
 
 - 问题：`cloneConfig` 漏拷 `AI.BaseURL`/`AI.APIKey` 与

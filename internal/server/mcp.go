@@ -376,7 +376,11 @@ func (m *MCPServer) Start(ctx context.Context) error {
 	// 中间件链：认证 → CORS → Panic 恢复
 	handler := m.authMiddleware(
 		recoveryMiddlewareFor(false, slog.WithModule("mcp"))(
-			corsMiddlewareFor("GET, POST, OPTIONS", "Content-Type, Authorization, X-Tenant")(mux),
+			corsMiddlewareFor("GET, POST, OPTIONS", "Content-Type, Authorization, X-Tenant",
+				func() bool {
+					token, _ := m.authToken.Load().(string)
+					return token != ""
+				})(mux),
 		),
 	)
 
