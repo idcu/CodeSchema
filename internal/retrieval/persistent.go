@@ -81,11 +81,14 @@ func (pf *PersistentFTS) BatchIndex(ctx context.Context, ids, contents []string)
 }
 
 // Search 执行全文搜索。
+//
+// 读锁必须覆盖整个搜索过程：MemoryFTS 持有的是自己的零值锁，无法保护共享的
+// pf.docs，提前释放 RLock 会让并发 Index/Remove 与 map 遍历冲突（fatal）。
 func (pf *PersistentFTS) Search(ctx context.Context, query string, mode FTSMode, limit int) ([]Result, error) {
 	pf.mu.RLock()
-	// 临时复制到 MemoryFTS 复用搜索逻辑
+	defer pf.mu.RUnlock()
+	// 临时包装为 MemoryFTS 复用搜索逻辑（共享 pf.docs，由外层读锁保护）。
 	mem := &MemoryFTS{docs: pf.docs}
-	pf.mu.RUnlock()
 	return mem.Search(ctx, query, mode, limit)
 }
 

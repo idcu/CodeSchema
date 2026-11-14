@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 165: fix(retrieval): PersistentFTS 搜索全程持读锁，消除并发 map fatal（P1-10）
+
+- 背景：`PersistentFTS.Search` 在 `RUnlock` 后才调用 `MemoryFTS.Search`，而临时 `MemoryFTS` 持有的是自己的零值锁，保护不到共享的 `pf.docs`。并发 `Index/BatchIndex/Remove` 与搜索遍历冲突，触发 Go fatal「concurrent map read and map write」（不可 recover，直接拖垮进程）。
+- 动作：读锁覆盖整个搜索过程（`defer RUnlock`）；包装体注释明确共享 map 由外层锁保护。
+- 负控（先红后绿）：新增 `internal/retrieval/persistent_test.go::TestPersistentFTS_ConcurrentIndexSearch`（500 文档 + 1 写 4 读并发 300ms）。修复前实测 `fatal error: concurrent map iteration and map write`，栈顶 `fts.go:119` 经 `persistent.go:89`；修复后常规与 `-race` 均通过。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 55751 ≈ 55.8k）。
+
 ### Commit 164: fix(service): 缓存残留但主存储无文件时不再 nil 解引用（P1-9）
 
 - 背景：`resolveSymbolLocation` 的 Redis 快路径只判断 `err == nil` 就访问 `f.LineCount`；`GetFileByPath` 契约允许未命中返回 `(nil, nil)`（FileStore/SQLite 均如此）。Redis 的 `methodpath/classpath` 键 TTL=0，文件删除/重建后残留键可稳定触发 panic。
