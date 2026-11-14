@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 192: fix(config): cloneConfig 保留 AI 凭据与向量模型字段（R3-5 / P1-17）
+
+- 问题：`cloneConfig` 漏拷 `AI.BaseURL`/`AI.APIKey` 与
+  `Storage.Vector.ModelDir`/`ModelDownloadURL`/`ModelSHA256`。`TenantConfig.ToConfig`
+  以 clone 结果为底再叠加租户覆盖项，基础层字段被清空后，未显式配置 AI 的租户
+  会静默失去全局凭据（AI 增强被禁用），模型自动下载与 SHA 校验同样失效。
+- 修复：深拷贝补齐上述 5 个字段。
+- 负控（先红后绿）：`TestCloneConfig_PreservesAIVectorFields`——通过
+  `TenantConfig.ToConfig` 继承全局配置，断言 AI 与向量模型字段一致；
+  修复前 `base_url="" api_key=""`（红），修复后绿。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60165（60.2k）。
+
 ### Commit 191: fix(server): 健康检查如实上报存储驱动与向量状态（R3-9 / P2-15）
 
 - 问题一：`/health/db` 恒返回 `"type":"file"`，与实际后端（sqlite/pg）无关。

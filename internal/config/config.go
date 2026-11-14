@@ -768,9 +768,12 @@ func cloneConfig(cfg *Config) *Config {
 			DSN:    cfg.Storage.DSN,
 			KV:     cfg.Storage.KV,
 			Vector: VectorConfig{
-				Driver:         cfg.Storage.Vector.Driver,
-				DSN:            cfg.Storage.Vector.DSN,
-				EmbeddingModel: cfg.Storage.Vector.EmbeddingModel,
+				Driver:           cfg.Storage.Vector.Driver,
+				DSN:              cfg.Storage.Vector.DSN,
+				EmbeddingModel:   cfg.Storage.Vector.EmbeddingModel,
+				ModelDir:         cfg.Storage.Vector.ModelDir,
+				ModelDownloadURL: cfg.Storage.Vector.ModelDownloadURL,
+				ModelSHA256:      cfg.Storage.Vector.ModelSHA256,
 			},
 			Search: SearchConfig{
 				FTS:       cfg.Storage.Search.FTS,
@@ -801,6 +804,8 @@ func cloneConfig(cfg *Config) *Config {
 		AI: AIConfig{
 			Provider:       cfg.AI.Provider,
 			Model:          cfg.AI.Model,
+			BaseURL:        cfg.AI.BaseURL,
+			APIKey:         cfg.AI.APIKey,
 			BudgetPerScan:  cfg.AI.BudgetPerScan,
 			BudgetPerQuery: cfg.AI.BudgetPerQuery,
 		},

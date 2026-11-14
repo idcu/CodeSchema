@@ -619,6 +619,29 @@ func TestCloneConfig_DeepCopy(t *testing.T) {
 	}
 }
 
+// TestCloneConfig_PreservesAIVectorFields P1-17 负控：深拷贝必须保留
+// AI.BaseURL/APIKey 与 vector 的 ModelDir/ModelDownloadURL/ModelSHA256，
+// 否则租户继承全局配置时 AI 被静默禁用、模型自动下载与校验失效。
+func TestCloneConfig_PreservesAIVectorFields(t *testing.T) {
+	base := DefaultConfig()
+	base.AI.BaseURL = "https://ai.example/v1"
+	base.AI.APIKey = "sk-test"
+	base.Storage.Vector.ModelDir = "/models/demo"
+	base.Storage.Vector.ModelDownloadURL = "https://dl.example/{model}.tar.gz"
+	base.Storage.Vector.ModelSHA256 = "abc123"
+
+	got := TenantConfig{ID: "t1"}.ToConfig(base)
+	if got.AI.BaseURL != base.AI.BaseURL || got.AI.APIKey != base.AI.APIKey {
+		t.Fatalf("租户继承丢失 AI 配置: base_url=%q api_key=%q",
+			got.AI.BaseURL, got.AI.APIKey)
+	}
+	if got.Storage.Vector.ModelDir != base.Storage.Vector.ModelDir ||
+		got.Storage.Vector.ModelDownloadURL != base.Storage.Vector.ModelDownloadURL ||
+		got.Storage.Vector.ModelSHA256 != base.Storage.Vector.ModelSHA256 {
+		t.Fatalf("租户继承丢失向量模型配置: %+v", got.Storage.Vector)
+	}
+}
+
 func TestConfigWatcher_New(t *testing.T) {
 	cfg := DefaultConfig()
 	cw := NewConfigWatcher("/tmp/nonexistent.yaml", cfg, nil)
