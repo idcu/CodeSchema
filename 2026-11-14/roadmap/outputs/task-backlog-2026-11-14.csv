@@ -72,3 +72,20 @@ R5-20,H,P0,Java重载与同名歧义消解,S-2i;R5-17,R5-17,2,`Owner.getPet`三�
 R5-21,H,P0,TS Jest回调建模与人工真值重建,S-2j,R5-18,3,回调建模vs文件级关联方案对比入文档；lytd 7个Jest测试文件人工真值33对；两变体测试方法与P/R/F1首次可度量；语料commit可复现,done,必做：选回调建模为IR方法；lytd f5e6604；33/33/0/0 F1 1.0；正则生产方法859过匹配已披露
 R5-22,K,P0,TS正则方法过匹配收敛（声明文件/接口成员）,S-2k;R5-21,R5-21,2,859→67（AST 75）；`.d.ts`/`.d.mts`/`.d.cts`不登记方法与调用边；interface/type成员不登记；逐类一提交先红后绿；复跑测试关联33/33不掉召回,done,必做：ce46f2b去789条声明方法与36条假边；b93e367去3条interface成员；TS calls 408→372、resolved 109→89（仓内89/89=1.0）；自动/人工33/0/0不变；正则仍少8条.jsx/tsx箭头，未强行对齐
 R5-23,K,P0,Go包级命名自动口径FP清零,S-2k;R5-20;R5-22,R5-22,1.5,自动口径15/16条FP归因并清零；同类命名歧义交call_graph；测试名类型锚定；先红后绿不删例；人工真值扩大不缩减,done,必做：fe4dd1d同目录同名多类型放弃命名；Test<Type>_<Method>/Example锚定；无锚定整词边界；regex 1834/1819/15→1838/1838/0；ts 1865/1849/16→1860/1860/0；人工169/2→173/0
+RA-1,L,P0,租户深拷贝保留连接池上限,复审P1-1,-,0.5,全局32/16与租户8/4覆盖均保留；负控先红后绿,done,必做：修复前实测maxOpen=0
+RA-2,L,P0,适配器Enabled随深拷贝保留且默认DB也生效,复审P1-2,RA-1,1,租户继承与cloneConfig均保留enabled；默认DB注册codegraph；负控先红后绿,done,必做：runtime只看enabled
+RA-3,L,P0,Jest声明仅测试文件且排除成员调用,复审P1-3,-,0.5,re.test('x')不产生幽灵方法；真实describe/it保留；负控先红后绿,done,必做：本轮回归项
+RA-4,L,P1,删除不可达DSN回退并改判校验契约,复审判据4.1,-,0.5,省略DSN不得臆造路径；Validate报requires storage.dsn,done,必做：改测试而非保留死代码
+RA-5,L,P1,人工真值与代码修复提交隔离,复审判据4.2,-,0.5,AI协作规范与bench标注规则固化独立提交要求,done,必做：文档同次提交
+RA-6,L,P0,OpenAPI声明与handler参数自动一致性判据,复审判据4.3,-,1.5,双向校验声明未读/读未声明/类型不一致；修复budget_tokens与min_confidence漂移,done,必做：含P2-4；先红后绿
+RA-7,L,P1,Redis包装器实现SkippedWriter并失效旁路文件缓存,复审P2-1,-,1,显式转发MarkParseSkipped；InvalidateFile精确失效类/方法键；负控先红后绿,done,必做：调用边TTL兜底
+RA-8,L,P1,跳过解析时清空上一轮IR,复审P2-2,-,1.5,FileStore/SQLite/PG三后端跳过即清类/方法/调用；负控先红后绿,done,必做：PG依赖FK级联
+RA-9,L,P1,批量接口增加256条目上限,复审P2-3,-,1,HTTP三端点超限400；MCP返回-32602；OpenAPI描述同步,done,必做：负控先红后绿
+RA-10,L,P2,热重载比较覆盖parser/storage子配置,复审P2-5,-,1,parser.codegraph与storage.max_open_conns变化触发重建；负控先红后绿,done,必做：按子结构整体比较
+RA-11,L,P2,查询缓存未命中返回值与缓存隔离,复审P2-6,-,0.5,调用方改写不污染缓存；命中仍深拷贝；负控先红后绿,done,必做：存疑项已确认
+RA-12,L,P2,MCP initialize只回显受支持协议版本,复审P2-7,-,0.5,仅2024-11-05；非法/新版本回退；负控先红后绿,done,必做：不伪装兼容
+RA-13,L,P3,IDF目录改用fsperm创建,复审P3-1,-,0.5,两处0755改0700；源码守卫防回归,done,必做：先红后绿
+RA-14,L,P3,复核pathsafe多级目录权限,复审P3-2,-,0.5,a/b/c逐级断言0700；判定伪问题,done,cut：既有祖先不在API收敛范围
+RA-15,L,P3,修正过时注释,复审P3-3,-,0.5,FieldConstantStore已转发；浅拷贝注释已改深拷贝,done,必做：纯文档
+RA-16,L,P3,MCP关闭先结束活跃SSE会话,复审P3-4,-,1,Stop耗时<2s；负控修复前阻塞5s,done,必做：先红后绿
+RA-17,L,P3,地址重绑失败不部分应用token限流,复审P3-5,-,0.5,失败保持旧快照；负控先红后绿,done,必做：整体生效

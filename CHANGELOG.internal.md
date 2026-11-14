@@ -6,6 +6,32 @@
 
 ## 提交记录
 
+### 独立复审批次（2026-11-14，P1=3 / P2=7 / P3=5 / 判据=3）
+
+复审报告：`2026-11-14/re-audit/outputs/audit-report-2026-11-14-reaudit.md`。逐条一笔提交、先红后绿。
+
+- `cb1fc8e` P1-3：Jest 声明只在测试文件且排除成员调用（`re.test('x')` 不再产生幽灵方法）。
+- `f0bfffd` P1-1：租户 `cloneConfig` 保留 `MaxOpenConns/MaxIdleConns`（修复前实测 0）。
+- `eab7977` P1-2：CodeGraph/JCodeIndexer 的 `Enabled` 随深拷贝保留；runtime 只看 enabled，默认 DB 也注册。
+- `2f77453` / `3d80247` P2-4 + 判据 4.3：OpenAPI/MCP 声明对齐 handler，新增自动一致性测试（双向校验）。
+- `430ee94` 判据 4.1：删除不可达 DSN 回退，测试改判 `config.Validate` 契约。
+- `7fe0ba7` 判据 4.2：人工真值/标注数据必须独立提交（规范 + bench 规则）。
+- `abf8021` P2-2：三后端 `MarkParseSkipped` 清空上一轮 IR（类/方法/调用/标签）。
+- `be26962` P2-1：Redis 包装器实现 `SkippedWriter`，新增 `InvalidateFile` 精确失效。
+- `0d9e526` P2-3：批量接口 256 条目上限（HTTP 400 / MCP -32602）。
+- `c484473` P2-5：热重载按 Project/Storage/Parser/Scanner 子结构整体比较。
+- `e982de1` P2-6：查询缓存未命中返回值与缓存对象隔离。
+- `a7be770` P2-7：`initialize` 只回显 2024-11-05，不再伪装新协议。
+- `b393884` P3-1：IDF 目录改经 `fsperm.MkdirAll`（0700）+ 源码守卫。
+- `ba15520` P3-2：复核多级目录权限，实测新建链路逐级 0700（伪问题）。
+- `4fba18a` P3-3：修正 FieldConstantStore 包装层过时注释。
+- `d03977e` P3-4：Stop 先关闭活跃 SSE 会话再 Shutdown（5s → <0.1s）。
+- `1c996f3` P3-5：地址重绑失败不再部分应用 token/限流。
+
+门禁：`go build` / `go vet` / `go vet -tags "pg redis treesitter"` / `make test`（40 包）/
+`make fmt-check` / `make counts-check` / `make verify-tags` 全绿。
+计数：internal 36 / 全仓 40 包；MCP 12；HTTP 23；非 vendor LoC 66464 → 67638（67.6k）。
+
 ### Commit 255: fix(testlink): Go 包级命名关联按类型锚定，清掉 15–16 条 FP（S-2k）
 
 - 根因两类：①Go 类 FQN 不含包前缀，`Resolve`/`Search`/`Dim`/`Embed`/`Close`/`AddEdge`

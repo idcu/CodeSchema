@@ -8,6 +8,7 @@
 1. **审计中可执行的正确性缺陷已全部落地**：62 条中 55 条 `done`、6 条 `cut`、1 条 `blocked`（R0-1 旧账无法对账，见 §4）；deferred 复盘后 5 条延后项均给出了降 cut 的实测理由。收尾阶段新增 R5-15（人工真值扩展）、R3-13（PG 验证边界）两条，均 `done`。
 2. **核心承诺已从「可用性」推进到「可度量」**：测试关联自动口径 F1 Go 1.0000 / Java 1.0000 / TS 1.0000，**人工独立真值扩至 358 对**（Go 173 / Java 152 / TS 33）：Go 两变体 TP 173 / FP 0 / FN 0；Java 两变体 TP 152 / FP 0 / FN 0（重载与同名歧义清零）；TS 两变体 TP 33 / FP 0 / FN 0（首次可度量）；agent-bench 5 个活跃任务 full/minimal 均 100%，token 节省 99.11%。
 3. **仍不能宣称的能力**：调用图全量分辨率（0.18–0.27）、仓内严格口径 0.83 的未解析（Go 侧全部是 FQN 前缀差异，生产可链接；不是解析缺口）、自动真值与 `call_graph` 同源、人工真值仅覆盖 code-schema + petclinic + lytd 三仓且 TS 仅 7 个 Jest 测试文件（Mocha/Vitest 扩展语法未建模）。TS 正则与 AST 仍差 8 条真实方法（`.jsx`/`.tsx` 箭头），未为对齐数字放宽正则。这些在 §4/§5 明列，不静默删除。
+4. **独立复审（P0=0 / P1=3 / P2=7 / P3=5）已按 P1→P2→P3 全部处理**：三条 P1（租户连接池上限、适配器 `Enabled`、Jest 幽灵方法）与七条 P2、五条 P3 逐条一笔提交、先红后绿；三条判据问题（不可达 DSN 测试、标注独立提交、OpenAPI↔handler 一致性）同步落地。复审明细见 §2.13。
 
 ## 1. 终态快照
 
@@ -15,10 +16,10 @@
 |---|---|
 | 基线 HEAD | `78f00ee3`（审计对象） |
 | 终态 HEAD | 本文件所在提交（`git log -1 --oneline`） |
-| 提交数（基线后） | 106 笔（含本笔总账） |
-| 计数 | internal 36 / 全仓 40 包；非 vendor LoC 66464（66.5k）；MCP 12；HTTP 23 |
-| 门禁 | `go build` / `go vet` / `go vet -tags "pg redis treesitter"` / `make test`（40 包）/ `make fmt-check` / `make counts-check` 全绿 |
-| 清单状态 | 55 done / 5 deferred / 1 cut / 1 blocked + 收尾 R5-15、R3-13、R5-16、R5-17、R3-14、R5-18、R5-19、R5-20、R5-21、R5-22、R5-23（done） |
+| 提交数（基线后） | 125 笔（含本笔总账） |
+| 计数 | internal 36 / 全仓 40 包；非 vendor LoC 67638（67.6k）；MCP 12；HTTP 23 |
+| 门禁 | `go build` / `go vet` / `go vet -tags "pg redis treesitter"` / `make test`（40 包）/ `make fmt-check` / `make counts-check` / `make verify-tags` 全绿 |
+| 清单状态 | 55 done / 5 deferred / 1 cut / 1 blocked + 收尾 R5-15、R3-13、R5-16、R5-17、R3-14、R5-18、R5-19、R5-20、R5-21、R5-22、R5-23（done）；独立复审 15 条 + 判据 3 条全部 done（§2.13） |
 
 ## 2. 缺陷修复总账（按主题，哈希可直接 `git show`）
 
@@ -207,6 +208,35 @@
 > 21062 → 21060（假边删除与新增负控所致），无召回损失。
 
 
+
+### 2.13 独立复审（P1=3 / P2=7 / P3=5 / 判据=3）
+
+复审报告：`2026-11-14/re-audit/outputs/audit-report-2026-11-14-reaudit.md`。每项一笔提交，先红后绿。
+
+| 复审项 | 问题 | 提交 | 红→绿证据 |
+|---|---|---|---|
+| P1-1 | 租户 `cloneConfig` 漏拷连接池上限（实测 maxOpen=0） | `f0bfffd` | 负控 `TestCloneConfig_PreservesPoolLimits` 修复前 32/16→0/0 |
+| P1-2 | 适配器 `Enabled` 未随深拷贝保留，默认 DB 下静默无效 | `eab7977` | 负控 `TestCloneConfig_PreservesAdapterEnabled` + `TestNewParserRegistry_CodeGraphEnabledDefaultDB` 修复前注册失败 |
+| P1-3 | Jest 正则未锚定，`re.test('x')` 产生幽灵方法（本轮引入） | `cb1fc8e` | 负控 `TestTreeSitterAdapter_Parse_TSRegExpTestIsNotJestMethod` 修复前出现 `abc`/`xyz` 方法 |
+| 判据-4.1 | `DerivesIsolatedDSNWhenOmitted` 覆盖不可达路径 | `430ee94` | 删除死回退，改为 `DoesNotInventDSNWhenOmitted` + `Validate` 契约断言 |
+| 判据-4.2 | 人工真值改动与代码修复混提 | `7fe0ba7` | `AI协作规范.md` §5 + bench 标注规则第 8 条固化提交隔离 |
+| 判据-4.3 | OpenAPI 声明与 handler 参数漂移（`min_score`/`budget_tokens`） | `3d80247`（修复 `2f77453`） | 一致性测试先红：报出 `budget_tokens` 未声明、`min_confidence` 类型不一致 |
+| P2-1 | Redis 包装器未实现 `SkippedWriter`，跳过留痕退化 | `be26962` | 负控三条修复前全部失败；新增 `InvalidateFile` 精确失效 |
+| P2-2 | 跳过解析时上一轮 IR 未清空 | `abf8021` | FileStore/SQLite 负控修复前仍可查到旧类与调用边 |
+| P2-3 | 批量接口无条目上限 | `0d9e526` | HTTP 三端点 257 项修复前返回 200，修复后 400；MCP -32602 |
+| P2-4 | OpenAPI/MCP 声明与 handler 参数不一致 | `2f77453` | 由判据-4.3 自动拦截 |
+| P2-5 | 热重载只比较 DSN/扫描参数，parser/storage 变化不重建 | `c484473` | 负控 parser.codegraph.enabled / storage.max_open_conns 修复前未重建 |
+| P2-6 | 缓存未命中返回对象与缓存共享引用 | `e982de1` | 负控改写首次返回值后第二次命中读到 POLLUTED |
+| P2-7 | MCP `initialize` 盲目回显客户端任意协议版本 | `a7be770` | 负控 2025-03-26/非法串修复前被原样回显 |
+| P3-1 | `main.go` 用 0755 创建 IDF 目录 | `b393884` | 源码守卫修复前报出两处，改经 `fsperm.MkdirAll`（0700） |
+| P3-2 | `pathsafe.MkdirAll` 多级目录权限存疑 | `ba15520` | 实测 a/b/c 全部新建后逐级 0700，判定为伪问题（仅既有祖先不在收敛范围） |
+| P3-3 | 注释过时（Redis 未转发、缓存“浅拷贝”） | `4fba18a` | `service.go` 注释已随 P2-6 修正 |
+| P3-4 | MCP 关闭固定等 5s（活跃 SSE 未关闭） | `d03977e` | 负控修复前 Stop 阻塞超 2s，修复后 <0.1s |
+| P3-5 | 地址重绑失败仍部分应用 token/限流 | `1c996f3` | 负控修复前 token 已变为 new-token |
+
+> 终态：`go build ./...`、`go vet ./...`、`go vet -tags "pg redis treesitter" ./...`、
+> `make test`（40 包）、`make fmt-check`、`make counts-check`、`make verify-tags` 全绿。
+> 非 vendor LoC 66464 → 67638（+1174），计数基线与文档口径同次更新。
 
 > 原始数据：`docs/bench/2026-11-14/README.md` 与同目录 `final-*.json`、`post-*.json`、`manual-pre184-go.json`。以下数字均可在该 README 复核。
 
