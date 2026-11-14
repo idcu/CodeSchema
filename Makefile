@@ -130,6 +130,15 @@ bench-agent:
 	$(OUTPUT)/codeschema agent-bench --repo $(if $(AGENT_BENCH_REPO),$(AGENT_BENCH_REPO),.) --out build/agent-task-bench
 	@echo "==> Agent bench outputs: build/agent-task-bench/agent-task-bench.md + .json"
 
+# 规范 MCP 客户端 e2e：用官方 Go SDK（github.com/modelcontextprotocol/go-sdk）
+# 以 stdio + SSE 两种传输完成 initialize / tools/list / tools/call，并落盘 transcript。
+# 证据输出：docs/bench/2026-11-14/mcp-transcript-{stdio,sse}.json
+.PHONY: mcp-e2e
+mcp-e2e:
+	@echo "==> Running official MCP client e2e (stdio + SSE) ..."
+	cd scripts/mcp-e2e && $(GO) run . -repo ../.. -out ../../docs/bench/2026-11-14
+	@echo "==> Transcripts: docs/bench/2026-11-14/mcp-transcript-{stdio,sse}.json"
+
 # 基准历史趋势可视化：读取 build/treesitter-bench-history.jsonl 生成 HTML 趋势图
 .PHONY: bench-trend
 bench-trend:

@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -102,7 +103,7 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 	for fi, f := range files {
 		// 进度：文件遍历阶段
 		if (fi+1)%50 == 0 || fi == totalFiles-1 {
-			fmt.Printf("\r  scanning files: %d/%d", fi+1, totalFiles)
+			fmt.Fprintf(os.Stderr, "\r  scanning files: %d/%d", fi+1, totalFiles)
 		}
 
 		classes, err := st.GetClassesByFileID(ctx, f.ID)
@@ -140,32 +141,32 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 			}
 		}
 	}
-	fmt.Println() // 换行结束文件扫描进度
+	fmt.Fprintln(os.Stderr) // 换行结束文件扫描进度
 
 	if len(docs) == 0 {
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
-	fmt.Printf("  collected %d docs for indexing\n", len(docs))
+	fmt.Fprintf(os.Stderr, "  collected %d docs for indexing\n", len(docs))
 
 	// 第二阶段：Observe 建立 IDF 词典（仅 LocalEmbedder 需要，ONNX 跳过）
 	if b.idf != nil {
 		if b.idf.HasIDF() {
-			fmt.Println("  skipping IDF build (loaded from persistence)")
+			fmt.Fprintln(os.Stderr, "  skipping IDF build (loaded from persistence)")
 		} else {
 			totalDocs := len(docs)
 			for i, d := range docs {
 				b.idf.Observe(d.text)
 				if (i+1)%100 == 0 || i == totalDocs-1 {
 					pct := float64(i+1) / float64(totalDocs) * 100
-					fmt.Printf("\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
+					fmt.Fprintf(os.Stderr, "\r  building IDF: %d/%d docs (%.0f%%)", i+1, totalDocs, pct)
 				}
 			}
-			fmt.Println() // 换行结束 IDF 进度
+			fmt.Fprintln(os.Stderr) // 换行结束 IDF 进度
 		}
 	} else {
-		fmt.Println("  skipping IDF build (ONNX embedder, no IDF needed)")
+		fmt.Fprintln(os.Stderr, "  skipping IDF build (ONNX embedder, no IDF needed)")
 	}
 
 	// 第三阶段：批量写入 FTS 和向量索引
@@ -177,24 +178,24 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 	}
 
 	// 批量写入 FTS
-	fmt.Print("  writing FTS index...")
+	fmt.Fprint(os.Stderr, "  writing FTS index...")
 	if err := b.fts.BatchIndex(ctx, ids, texts); err != nil {
-		fmt.Println(" FAIL")
+		fmt.Fprintln(os.Stderr, " FAIL")
 		return nil, fmt.Errorf("batch index fts: %w", err)
 	}
-	fmt.Println(" OK")
+	fmt.Fprintln(os.Stderr, " OK")
 
 	// 批量写入向量索引
-	fmt.Print("  writing vector index...")
+	fmt.Fprint(os.Stderr, "  writing vector index...")
 	embeddableDocs := make([]vector.TextEmbeddable, 0, len(docs))
 	for _, d := range docs {
 		embeddableDocs = append(embeddableDocs, &docEmbeddable{id: d.id, text: d.text})
 	}
 	if err := b.indexer.BatchBuild(ctx, embeddableDocs); err != nil {
-		fmt.Println(" FAIL")
+		fmt.Fprintln(os.Stderr, " FAIL")
 		return nil, fmt.Errorf("batch build vector: %w", err)
 	}
-	fmt.Println(" OK")
+	fmt.Fprintln(os.Stderr, " OK")
 
 	// 保存文档原文（/viz 可视化展示；底层不支持的后端静默跳过）
 	for _, d := range docs {
@@ -206,7 +207,7 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 	result.IndexedDocs = len(docs)
 	result.Duration = time.Since(start)
-	fmt.Printf("  index build complete: %d docs in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "  index build complete: %d docs in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
 	return result, nil
 }
 

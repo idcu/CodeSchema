@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 210: fix(server): stdio 的 stdout 仅承载 JSON-RPC，并用官方 MCP 客户端做双传输 e2e（R4-4 / S-1）
+
+- 根因：`search.IndexBuilder` 用 `fmt.Print*` 把索引进度（`scanning files` / `collected N docs`
+  / `writing FTS index` / `index build complete`）写到 stdout。SSE 模式无影响，但 stdio 的
+  MCP 客户端从子进程 stdout 逐行读 JSON-RPC，启动期自动索引的进度行直接破坏握手。
+- 修复：上述进度统一改写到 stderr；stdout 只保留 `writeStdioLine` 的 JSON-RPC 响应。
+- 验证工具：新增独立模块 `scripts/mcp-e2e`（官方 `github.com/modelcontextprotocol/go-sdk`
+  v1.8.0），以官方 `CommandTransport`（stdio）与 `SSEClientTransport`（SSE）完成
+  initialize / tools/list / tools/call（`search_config`、`context`、`get_call_graph`），
+  transcript 落盘 `docs/bench/2026-11-14/mcp-transcript-{stdio,sse}.json`；`make mcp-e2e` 可复跑。
+- 负控（先红后绿）：
+  修前官方客户端 stdio `connect` 失败：`calling "initialize": ... invalid character 's'
+  looking for beginning of value`（红）；SSE 同版本客户端已 `pass=true`（12 工具/3 调用）。
+  修后 stdio 与 SSE 均 `pass=true`，protocolVersion `2025-11-25`、12 个工具、3 次调用无
+  `is_error`（绿）。
+- 文档：`接口层.md` 补充 stdout 纯净契约与 `make mcp-e2e`；`测试与CI.md` 增加 e2e 入口；
+  counts 见本笔 `make counts`。
+
 ### Commit 209: fix(vector): ONNX Embedder 关闭后调用不再 panic（R6-3 / P2-16）
 
 - 根因：`ONNXEmbedder.Close` 把 `e.model` 置 nil，但 `Embed` 未判空，关闭后再次推理

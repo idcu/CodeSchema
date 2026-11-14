@@ -1,0 +1,52 @@
+{
+  "transport": "sse",
+  "generated_at": "2026-11-14T11:10:15+08:00",
+  "client": "codeschema-mcp-e2e",
+  "protocol_version": "2025-11-25",
+  "server_name": "codeschema",
+  "server_version": "dev",
+  "tools": [
+    "context",
+    "impact",
+    "tests",
+    "affected",
+    "get_call_graph",
+    "search_config",
+    "find_dependencies",
+    "search_symbols",
+    "get_tags",
+    "search_by_tag",
+    "get_all_tags",
+    "list_projects"
+  ],
+  "calls": [
+    {
+      "tool": "search_config",
+      "arguments": {
+        "pattern": "Hello"
+      },
+      "is_error": false,
+      "text": "[\n  \"Greeter.Hello\",\n  \"demo.CallHello\",\n  \"demo.TestGreeterHello\"\n]"
+    },
+    {
+      "tool": "context",
+      "arguments": {
+        "context_lines": 2,
+        "symbol": "Greeter.Hello"
+      },
+      "is_error": false,
+      "text": "{\n  \"symbol\": \"Greeter.Hello\",\n  \"source\": \"\\n// Hello 返回带前缀的问候语。\\nfunc (g *Greeter) Hello(name string) string {\\n\\treturn g.Prefix + \\\" \\\" + name\\n}\\n\\n// CallHello 调用 Greeter.Hello。\",\n  \"file_path\": \"/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mcp-e2e-2766709608/proj/greeter.go\",\n  \"start_line\": 9,\n  \"end_line\": 11,\n  \"doc\": \"Hello 返回带前缀的问候语。\",\n  \"related_tests\": [\n    \"demo.TestGreeterHello\",\n    \"demo.TestGreeterHello\",\n    \"demo.TestGreeterHello\"\n  ],\n  \"_trace\": {\n    \"source\": \"store.GetContext\",\n    \"hit_symbols\": 1,\n    \"hit_lines\": 7,\n    \"trim_reason\": \"context_lines\",\n    \"trimmed_lines\": 9,\n    \"token_estimate\": 28,\n    \"timestamp\": \"2026-11-14T03:10:15Z\",\n    \"config\": {\n      \"mode\": \"full\",\n      \"context_lines\": 2,\n      \"max_bytes\": 0,\n      \"max_tokens\": 0,\n      \"max_line_chars\": 0,\n      \"chars_per_token\": 4,\n      \"path_style\": \"absolute\"\n    },\n    \"actual_bytes\": 157,\n    \"actual_tokens\": 40,\n    \"actual_start\": 7,\n    \"actual_end\": 13,\n    \"degraded\": false,\n    \"line_truncated\": false,\n    \"omitted_lines\": 0,\n    \"cache_hit\": false\n  }\n}"
+    },
+    {
+      "tool": "get_call_graph",
+      "arguments": {
+        "depth": 1,
+        "symbol": "Greeter.Hello"
+      },
+      "is_error": false,
+      "text": "{\n  \"depth\": 1,\n  \"edges\": [],\n  \"nodes\": [\n    \"Greeter.Hello\"\n  ],\n  \"symbol\": \"Greeter.Hello\"\n}"
+    }
+  ],
+  "server_stderr": "{\"timestamp\":\"2026-11-14T11:10:15.546+08:00\",\"level\":\"INFO\",\"msg\":\"downloading ONNX model\",\"module\":\"vector.model\",\"model\":\"bge-small-zh-v1.5\",\"url\":\"file:///var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mcp-e2e-2766709608/missing-model.tar.gz\",\"caller\":\"model_download.go:138\"}\n2026/11/14 11:10:15 WARN: ONNX model remote fetch failed (download ONNX model bge-small-zh-v1.5: open local model archive /var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mcp-e2e-2766709608/missing-model.tar.gz: open /var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mcp-e2e-2766709608/missing-model.tar.gz: no such file or directory), will use LocalEmbedder\n2026/11/14 11:10:15 semantic: ONNX embedder not loaded (need `go build -tags onnx` + onnxruntime lib; model dir=down/models/bge-small-zh-v1.5) → using LocalEmbedder (dim=1024)\n2026/11/14 11:10:15 ai: enhancement disabled (set ai.base_url/api_key/model to enable)\n\r  scanning files: 3/3\n  collected 7 docs for indexing\n  skipping IDF build (loaded from persistence)\n  writing FTS index... OK\n  writing vector index... OK\n  index build complete: 7 docs in 1ms\n2026/11/14 11:10:15 ai: enhancement disabled (set ai.base_url/api_key/model to enable)\n2026/11/14 11:10:15 [tenant] manager ready: 1 tenant(s) (all auto-scanned)\n2026/11/14 11:10:15 MCP Server starting on 127.0.0.1:61527\n",
+  "pass": true
+}
