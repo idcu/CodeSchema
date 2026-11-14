@@ -348,13 +348,22 @@ func (s *Service) linkByCallGraph(ctx context.Context, files []*store.FileRecord
 		infos[f.ID] = info
 	}
 
-	// resolveCallee 与基准真值同口径：全名优先，短名唯一时接受变量形态。
+	// resolveCallee：全名优先；带包/模块前缀的 callee 逐级去掉前缀做后缀精确匹配
+	// （Go selector 产出 pkg.Type.Method，而生产方法索引键为 Type.Method）；最后接受
+	// 全局唯一短名。后缀匹配要求索引中存在完全相同的 Type.Method，不会放宽到模糊名。
 	resolveCallee := func(callee string) (string, bool) {
 		if callee == "" {
 			return "", false
 		}
 		if _, ok := exact[callee]; ok {
 			return callee, true
+		}
+		parts := strings.Split(callee, ".")
+		for i := 1; i < len(parts); i++ {
+			suffix := strings.Join(parts[i:], ".")
+			if _, ok := exact[suffix]; ok {
+				return suffix, true
+			}
 		}
 		if cands := shortIndex[shortMethodName(callee)]; len(cands) == 1 {
 			return cands[0], true

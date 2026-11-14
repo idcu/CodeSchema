@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 239: fix(service): 包限定 callee 按后缀解析到生产方法
+
+- Go selector 的 callee 为 `pkg.Type.Method`（`store.FileStore.GetFileByPath`），
+  而生产方法索引键为 `Type.Method`。`linkByCallGraph` 旧实现只做精确匹配与全局唯一
+  短名；`GetFileByPath` / `Open` / `Close` / `Upsert*` 在 FileStore、PGStore、SQLiteStore
+  间同名多义，整批调用边无法归到生产方法，测试关联漏召回。
+- `resolveCallee` 增加逐级去前缀的后缀精确匹配（要求索引中存在完全相同的
+  `Type.Method`），再回退唯一短名；不放宽到模糊名。
+- 基准真值抽取同步改用 `candidates`（同一「仓内确有定义」口径），
+  §3.3 严格分辨率口径与分母不变。
+- 负控：`TestFindTestLinks_CallGraphPackageQualifiedCallee`（旧实现无 call_graph 链接，红；
+  新实现绿）。
+- 扩展人工真值（Go 165 对）同命令前→后：TP 101 → 155、FN 63 → 10、
+  P 0.9099 → 0.9337、R 0.6159 → 0.9394、F1 0.7346 → 0.9365。
+  剩余 FN 为接收者变量类型推断（`svc`/`st`）与嵌套调用抽取，另项记录。
+
 ### Commit 238: fix(parser): Java 行内注解方法进入索引
 
 - `public @ResponseBody Vets showResourcesVetList()` 的注解位于返回类型前，旧 Java

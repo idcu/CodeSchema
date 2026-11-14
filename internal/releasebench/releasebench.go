@@ -320,7 +320,7 @@ func (idx *methodIndex) resolve(name string) (string, bool) {
 }
 
 // candidates 返回 callee 在索引中的定义候选（精确名或去掉包/模块前缀后的后缀）。
-// 只用于「仓内确有定义」判定，不改变 resolve 的严格口径。
+// 用于「仓内确有定义」判定与真值抽取，不改变 resolve 的严格分辨率口径。
 func (idx *methodIndex) candidates(callee string) []string {
 	if idx.count[callee] > 0 {
 		return []string{callee}
@@ -370,10 +370,14 @@ func collectTruth(ctx context.Context, ad parser.ParserPlugin, files []sourceFil
 				continue
 			}
 			caller := normalizeTestFQN(c.CallerFQN, testFQNs)
-			prod, ok := idx.resolve(c.CalleeFQN)
-			if !ok || prod == caller {
+			// 真值抽取按「仓内确有定义」消歧：callee 常带包/模块前缀
+			// （store.FileStore.GetFileByPath），严格 resolve 会因短名多义而漏掉真实边。
+			// 这里只影响真值集合，不改 §3.3 的严格分辨率口径。
+			cands := idx.candidates(c.CalleeFQN)
+			if len(cands) != 1 || cands[0] == caller {
 				continue
 			}
+			prod := cands[0]
 			key := prod + "\x00" + caller
 			if _, dup := seen[key]; dup {
 				continue

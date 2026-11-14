@@ -311,6 +311,43 @@ func TestFindTestLinks_CallGraphBehavioralName(t *testing.T) {
 	})
 }
 
+// TestFindTestLinks_CallGraphPackageQualifiedCallee 负控：Go selector 的 callee 带包前缀
+// （store.FileStore.GetFileByPath），而生产方法索引键为 FileStore.GetFileByPath。短名在
+// 多种存储实现间不唯一时，旧实现只做「精确 / 全局唯一短名」，链接整批丢失。
+func TestFindTestLinks_CallGraphPackageQualifiedCallee(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/internal/store/filestore.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/internal/store/pgstore.go", Language: "go"},
+			{ID: 3, AbsolutePath: "/proj/internal/store/filestore_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "FileStore", FullName: "FileStore"}},
+			2: {{ID: 20, FileID: 2, Name: "PGStore", FullName: "PGStore"}},
+			3: {{ID: 30, FileID: 3, Name: "store", FullName: "store", Type: "PACKAGE"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "GetFileByPath", FullName: "FileStore.GetFileByPath"}},
+			20: {{ID: 200, ClassID: 20, Name: "GetFileByPath", FullName: "PGStore.GetFileByPath"}},
+			30: {{ID: 300, ClassID: 30, Name: "TestFileStore_GetFileByPath", FullName: "store.TestFileStore_GetFileByPath"}},
+		},
+		calls: map[int64][]store.CallRecord{
+			3: {{
+				CallerFQN: "store.TestFileStore_GetFileByPath",
+				CalleeFQN: "store.FileStore.GetFileByPath",
+				CallType:  "direct",
+			}},
+		},
+	}
+
+	links, err := NewService(st).FindTestLinks(ctx, "FileStore.GetFileByPath", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	assertCallGraphLink(t, links, "store.TestFileStore_GetFileByPath")
+}
+
 func assertCallGraphLink(t *testing.T, links []TestLink, want string) {
 	t.Helper()
 	for _, l := range links {
