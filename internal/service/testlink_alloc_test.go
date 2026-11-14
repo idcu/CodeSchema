@@ -9,11 +9,12 @@ import (
 	"github.com/idcu/codeschema/internal/store"
 )
 
-// maxAllocsPerSameTagQuery 是单次 same_tag 关联允许的堆分配次数上限。
+// maxAllocsPerSameTagQuery 是单次关联查询允许的堆分配次数上限。
 //
-// 关联结果与分配次数无关，但每符号重新切词会让分配随测试类数量线性增长：
-// 修复前 360 个测试方法约 1,500 次分配/查询，预计算后应回落到常数级。
-const maxAllocsPerSameTagQuery = 12
+// 该值与结果条数同阶（360 个匹配测试），但不随测试类数量线性增长：
+// 修复前每个候选都重新切词/建 Builder，实测 8,317 次/查询；预计算后 38 次。
+// 若有人重新引入「逐测试类切词」，这里会立刻回到数千次。
+const maxAllocsPerSameTagQuery = 64
 
 // TestFindTestLinksSameTagAllocs 锁定 same_tag 热路径的分配量：
 // 测试名切词、词连接集合与标签集合必须在快照上预计算，符号循环只做查表。

@@ -33,6 +33,9 @@ type TestLink struct {
 	Confidence int    `json:"confidence"`
 }
 
+// strategyOrder 是五种关联策略的固定表，用于打点计数（避免每符号建 map）。
+var strategyOrder = [...]string{"explicit", "naming", "call_graph", "same_tag", "dependency"}
+
 // FindTestLinks 查找指定方法的所有关联单测（按置信度降序）。
 //
 // 实现三种策略：
@@ -127,20 +130,32 @@ func (s *Service) findTestLinksFromSnapshot(ctx context.Context, snap *testLinkS
 	sortByConfidenceDesc(results)
 
 	// 差异点打点：按策略统计查询与命中（可观测「测试关联」价值）。
+	// 固定数组替代每符号的 map 分配；最终计数与原逐策略递增一致。
 	metrics.IncCounter("testlink_lookups_total", "all")
-	strategyHits := map[string]int{}
+	var strategyCounts [len(strategyOrder)]int
 	for _, r := range results {
-		strategyHits[r.Strategy]++
+		for i, name := range strategyOrder {
+			if r.Strategy == name {
+				strategyCounts[i]++
+				break
+			}
+		}
 	}
-	for strat, n := range strategyHits {
-		metrics.IncCounter("testlink_lookups_total", strat)
+	for i, n := range strategyCounts {
+		if n == 0 {
+			continue
+		}
+		metrics.IncCounter("testlink_lookups_total", strategyOrder[i])
 		// 批量累加：/affected 会对上万个符号逐个查询，逐次 IncCounter 的全局锁
 		// 在命中较多时成为热点；最终计数与逐次递增一致。
-		metrics.AddCounter("testlink_hits_total", float64(n), strat)
+		metrics.AddCounter("testlink_hits_total", float64(n), strategyOrder[i])
 	}
 
-	// 过滤置信度
-	filtered := make([]TestLink, 0, len(results))
+	// 过滤置信度：复用 results 的底层数组，避免每个符号再分配一份切片。
+	filtered := results[:0]
+	if filtered == nil {
+		filtered = []TestLink{}
+	}
 	for _, r := range results {
 		if r.Confidence >= minConfidence {
 			filtered = append(filtered, r)
@@ -492,28 +507,22 @@ func (s *Service) linkBySameTag(ctx context.Context, snap *testLinkSnapshot, met
 	if len(targetTags) == 0 {
 		return
 	}
-	targetSet := make(map[string]bool, len(targetTags))
-	for _, t := range targetTags {
-		targetSet[t] = true
-	}
 
-	// 查找同标签的测试类（testOwners 是 owners 的保序子集，判定结果不变）
-	for _, o := range snap.testOwners {
-		cls := o.cls
+	// 预计算索引：测试名切词/词连接集/标签集合与当前符号无关，只建一次。
+	idx := snap.sameTagIndex(ctx)
+	if len(idx.methods) == 0 {
+		return
+	}
+	for _, pos := range idx.candidates(targetMethodName, nil) {
+		m := idx.methods[pos]
 		// 跳过自身
-		if cls.ID == targetClassID {
+		if m.classID == targetClassID {
 			continue
 		}
-
-		clsTags := snap.tagsOf(ctx, cls.ID)
-		if hasCommonTagSet(targetSet, clsTags) {
-			for _, m := range o.methods {
-				if !matchesTestMethod(targetMethodName, m.Name) {
-					continue
-				}
-				add(m.FullName, m.Name, "same_tag", 60)
-			}
+		if !hasCommonTagSet(idx.classTags[m.classID], targetTags) {
+			continue
 		}
+		add(m.fullName, m.name, "same_tag", 60)
 	}
 }
 

@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### 测试关联 same_tag 热路径（2026-11-15）：预计算切词/标签，GOROOT `/affected` 3.45 s → 85 ms
+
+- perf(testlink)：`linkBySameTag` 不再对每个候选重新切词。快照上一次性预计算
+  测试名词连接集、四类命名反向表（精确 / 去前缀 / 词连接 / 前缀边界）与测试类标签集合，
+  符号循环只做查表；打点 map 改为固定数组，置信度过滤原地复用 `results`。
+- 逐条一致：1,000 文件与 GOROOT 的 `links_sha256`、`affected_sha256` 前后相同
+  （GOROOT 受影响测试均为 10,927）；三语料人工真值 Go 179 / Java 152 / TS 33 全中、FP=0；
+  `TestSameTagIndexMatchesBruteForce` 对索引结果与 `matchesTestMethod` 做含顺序的全量比对。
+- GOROOT：`/affected` P50 3,453.7 → 85.5 ms、P95 3,509.4 → 85.9 ms、
+  冷启动 4,144.8 → 487.3 ms、`TotalAlloc`/op 803.3 MB → 6.67 MB；
+  `/tests` P50 4.75 → 1.56 ms；`/affected` 子树 `mallocgc` 样本占比 38.8% → 6.2%。
+- 1,000 文件：`/affected` P50 0.145 → 0.127 ms、P95 0.183 → 0.179 ms、
+  `TotalAlloc`/op 13,632 → 13,568 B。
+- 先红：`TestFindTestLinksSameTagAllocs` 8,317 次分配/查询 → 38 次（上限 64）。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.7；
+  数据 `testlink-scale-*-before-opt/after-opt.json`。
+- 计数：非 vendor LoC 72,102 → 72,421（72.4k），`make counts-update` 同步基线，
+  `docs/README.md` 与 `docs/01-开发者/架构与模块.md` 口径同次刷新。
+
 ### 人工真值闭合缺口（2026-11-15）：Go 173 → 179，6 条 FP 归因
 
 - fix(bench)：`abf8021`（2026-11-14 17:26）向标注文件 `internal/store/filestore_test.go`

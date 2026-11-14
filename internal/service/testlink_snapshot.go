@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 
@@ -68,6 +69,11 @@ type testLinkSnapshot struct {
 	depOnce               sync.Once
 	goTestOwnersByDir     map[string][]*testLinkClassOwner
 	testOwnersByImportSeg map[string][]*testLinkClassOwner
+
+	// same_tag 的匹配信号与「当前符号」无关：测试名切词、词连接集、
+	// 测试类标签集合都在首次使用时预计算，符号循环只做查表。
+	sameTagOnce sync.Once
+	sameTagIdx  *sameTagIndex
 }
 
 // buildTestLinkSnapshot 单次遍历「文件→类→方法」构建快照。
@@ -463,4 +469,144 @@ func fnvBytes(h uint64, s string) uint64 {
 		h = (h ^ uint64(s[i])) * fnvPrime64
 	}
 	return h
+}
+
+// sameTagMethod 是 same_tag 策略的测试方法条目，按快照原始遍历顺序编号。
+type sameTagMethod struct {
+	fullName string
+	name     string
+	classID  int64
+}
+
+// sameTagIndex 预计算 same_tag 的匹配信号：
+//   - 测试名一次切词，得到「词连接集」，查询时不再逐候选重建 Builder；
+//   - 测试类标签一次转成集合，查询只做成员判断；
+//   - 四类命名规则各建一张反向表（精确 / 去前缀 / 词连接 / 前缀边界）。
+//
+// 每张表的 value 都按快照遍历顺序追加，因此单独取出即有序；多表并集再排序
+// 去重，得到与「逐测试类、逐方法」遍历完全一致的输出顺序。
+type sameTagIndex struct {
+	methods   []sameTagMethod
+	classTags map[int64]map[string]bool
+
+	byExact    map[string][]int32
+	byStripped map[string][]int32
+	byWords    map[string][]int32
+	byPrefix   map[string][]int32
+}
+
+// sameTagStrippedPrefixes 对应 matchesTestMethod 的「前缀 + 精确余量」规则。
+var sameTagStrippedPrefixes = [...]string{"Test", "test", "test_"}
+
+// descriptiveTestPrefixes 对应 matchesTestMethod 的「描述型测试名」判定。
+var descriptiveTestPrefixes = [...]string{
+	"Test", "test", "test_", "Benchmark", "benchmark", "Example", "example",
+	"Should", "should_", "when_",
+}
+
+// sameTagIndex 惰性构建一次；与快照同代，失效时随快照一起丢弃。
+func (snap *testLinkSnapshot) sameTagIndex(ctx context.Context) *sameTagIndex {
+	snap.sameTagOnce.Do(func() {
+		idx := &sameTagIndex{
+			classTags:  make(map[int64]map[string]bool),
+			byExact:    make(map[string][]int32),
+			byStripped: make(map[string][]int32),
+			byWords:    make(map[string][]int32),
+			byPrefix:   make(map[string][]int32),
+		}
+		for _, o := range snap.testOwners {
+			if tags := snap.tagsOf(ctx, o.cls.ID); len(tags) > 0 {
+				set := make(map[string]bool, len(tags))
+				for _, t := range tags {
+					set[t] = true
+				}
+				idx.classTags[o.cls.ID] = set
+			}
+			for _, m := range o.methods {
+				pos := int32(len(idx.methods))
+				idx.methods = append(idx.methods, sameTagMethod{
+					fullName: m.FullName,
+					name:     m.Name,
+					classID:  o.cls.ID,
+				})
+				idx.add(m.Name, pos)
+			}
+		}
+		snap.sameTagIdx = idx
+	})
+	return snap.sameTagIdx
+}
+
+// add 把测试方法名登记进四类反向表。
+func (idx *sameTagIndex) add(name string, pos int32) {
+	idx.byExact[name] = append(idx.byExact[name], pos)
+	for _, prefix := range sameTagStrippedPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			rest := strings.TrimPrefix(name, prefix)
+			idx.byStripped[rest] = append(idx.byStripped[rest], pos)
+		}
+	}
+	if isDescriptiveTestName(name) {
+		for _, joined := range nameWordJoins(name) {
+			idx.byWords[joined] = append(idx.byWords[joined], pos)
+		}
+	}
+	if len(name) >= 4 {
+		idx.byPrefix[name] = append(idx.byPrefix[name], pos)
+		for i := 4; i < len(name); i++ {
+			if c := name[i]; c == '_' || (c >= 'A' && c <= 'Z') {
+				idx.byPrefix[name[:i]] = append(idx.byPrefix[name[:i]], pos)
+			}
+		}
+	}
+}
+
+// isDescriptiveTestName 与 matchesTestMethod 的前缀集合保持一致。
+func isDescriptiveTestName(name string) bool {
+	for _, prefix := range descriptiveTestPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// nameWordJoins 返回测试名切词后所有连续片段的小写拼接（即 containsNameWords
+// 可能命中的全部目标归一形式）。
+func nameWordJoins(name string) []string {
+	words := splitNameWords(name)
+	joins := make([]string, 0, len(words))
+	for i := range words {
+		var b strings.Builder
+		for j := i; j < len(words); j++ {
+			b.WriteString(strings.ToLower(words[j]))
+			joins = append(joins, b.String())
+		}
+	}
+	return joins
+}
+
+// candidates 取目标方法名在四张表里的位置并集，升序去重后复用调用方的缓冲区。
+//
+// 位置升序 = 快照里「测试类顺序 → 类内方法顺序」，与旧实现的 add 顺序一致。
+func (idx *sameTagIndex) candidates(target string, dst []int32) []int32 {
+	dst = append(dst, idx.byExact[target]...)
+	dst = append(dst, idx.byStripped[target]...)
+	if norm := strings.ToLower(strings.ReplaceAll(target, "_", "")); norm != "" {
+		dst = append(dst, idx.byWords[norm]...)
+	}
+	if len(target) >= 4 {
+		dst = append(dst, idx.byPrefix[target]...)
+	}
+	if len(dst) < 2 {
+		return dst
+	}
+	slices.Sort(dst)
+	out := dst[:1]
+	for _, pos := range dst[1:] {
+		if pos != out[len(out)-1] {
+			out = append(out, pos)
+		}
+	}
+	return out
 }
