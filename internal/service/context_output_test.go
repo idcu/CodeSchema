@@ -261,6 +261,36 @@ func TestQueryCache(t *testing.T) {
 	}
 }
 
+// TestQueryCache_MissResultIsolated 负控（P2-6）：
+// 未命中返回的对象不得与缓存共享底层引用，调用方修改不能污染后续命中。
+func TestQueryCache_MissResultIsolated(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	svc.EnableQueryCache(time.Minute, 16)
+	ctx := context.Background()
+	opts := ContextOptions{Mode: ModeFull, IncludeTrace: true}
+	symbol := "com.example.OrderService.GetUser"
+
+	first, err := svc.GetContextMode(ctx, symbol, opts)
+	if err != nil {
+		t.Fatalf("first GetContextMode: %v", err)
+	}
+	// 模拟调用方修改未命中返回值（SymbolContext 是导出类型，可能被就地改写）。
+	first.Symbol = "POLLUTED"
+	first.Source = "POLLUTED"
+
+	second, err := svc.GetContextMode(ctx, symbol, opts)
+	if err != nil {
+		t.Fatalf("second GetContextMode: %v", err)
+	}
+	if second.Symbol == "POLLUTED" || second.Source == "POLLUTED" {
+		t.Fatalf("未命中返回值与缓存共享引用：second=%+v", second)
+	}
+	if !second.Trace.CacheHit {
+		t.Fatal("第二次查询应命中缓存")
+	}
+}
+
 // TestQueryCacheKeyIncludesIncludeTrace P2-2 负控：include_trace 不同取值必须各自成 key。
 // 修复前 key 不含该参数，先 false 再 true 会命中无 _trace 的缓存条目。
 func TestQueryCacheKeyIncludesIncludeTrace(t *testing.T) {

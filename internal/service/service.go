@@ -400,8 +400,8 @@ func (s *Service) GetContext(ctx context.Context, symbol string, contextLines in
 // GetContextMode 按指定选项获取符号上下文（查询级缓存入口，B4）。
 //
 // 缓存未启用时直接落到 getContextModeUncached；启用后按「符号 + 裁剪参数」命中缓存，
-// 命中结果做浅拷贝返回（避免调用方改到缓存里的对象），并把 _trace.cache_hit 置为 true
-// 回传——命中与否对调用方可见，便于判断省下了多少工作。
+// 命中与未命中都返回缓存对象的深拷贝（避免调用方改到缓存里的对象），命中时把
+// _trace.cache_hit 置为 true 回传——命中与否对调用方可见，便于判断省下了多少工作。
 func (s *Service) GetContextMode(ctx context.Context, symbol string, opts ContextOptions) (*SymbolContext, error) {
 	opts = opts.normalize()
 	if s.queryCache == nil {
@@ -421,8 +421,9 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 	if err != nil {
 		return nil, err
 	}
+	// 缓存与返回值隔离：Set 存原对象，调用方拿到拷贝（P2-6）。
 	s.queryCache.Set(key, got)
-	return got, nil
+	return cloneSymbolContext(got), nil
 }
 
 // getContextModeUncached 是 GetContextMode 的无缓存实现（真正的裁剪逻辑）。
