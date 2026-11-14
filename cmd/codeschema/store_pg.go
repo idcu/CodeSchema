@@ -23,6 +23,10 @@ func init() {
 			if err := s.Open(ctx, openTarget); err != nil {
 				return nil, fmt.Errorf("open pg store: %w", err)
 			}
+			if err := store.ApplyPoolLimits(s, cfg.Storage.MaxOpenConns, cfg.Storage.MaxIdleConns); err != nil {
+				_ = s.Close()
+				return nil, fmt.Errorf("apply pg pool limits: %w", err)
+			}
 			return s, nil
 		},
 	})

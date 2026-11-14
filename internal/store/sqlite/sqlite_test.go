@@ -67,6 +67,35 @@ func TestSQLite_HotIndexes(t *testing.T) {
 	}
 }
 
+// TestSQLite_SetPoolLimits 校验连接池上限注入与非法值归一（R3-11）：
+// 负数按 0（不限制）处理，idle 不得超过 open。
+func TestSQLite_SetPoolLimits(t *testing.T) {
+	s := newTestStore(t)
+
+	if err := s.SetPoolLimits(4, 2); err != nil {
+		t.Fatalf("SetPoolLimits: %v", err)
+	}
+	if got := s.PoolStats().MaxOpenConnections; got != 4 {
+		t.Errorf("MaxOpenConnections = %d, want 4", got)
+	}
+
+	// idle > open 时收敛到 open
+	if err := s.SetPoolLimits(3, 100); err != nil {
+		t.Fatalf("SetPoolLimits clamp: %v", err)
+	}
+	if got := s.PoolStats().MaxOpenConnections; got != 3 {
+		t.Errorf("MaxOpenConnections = %d, want 3", got)
+	}
+
+	// 负数归一为 0（database/sql 默认）
+	if err := s.SetPoolLimits(-1, -1); err != nil {
+		t.Fatalf("SetPoolLimits negative: %v", err)
+	}
+	if got := s.PoolStats().MaxOpenConnections; got != 0 {
+		t.Errorf("MaxOpenConnections = %d, want 0", got)
+	}
+}
+
 func TestSQLite_DBFileAndDirPerm(t *testing.T) {
 	dir := t.TempDir()
 	s := NewSQLiteStore()

@@ -54,6 +54,10 @@ func newBaseStore(ctx context.Context, cfg *config.Config, openTarget string) (s
 		if err := s.Open(ctx, openTarget); err != nil {
 			return nil, fmt.Errorf("open sqlite store: %w", err)
 		}
+		if err := store.ApplyPoolLimits(s, cfg.Storage.MaxOpenConns, cfg.Storage.MaxIdleConns); err != nil {
+			_ = s.Close()
+			return nil, fmt.Errorf("apply sqlite pool limits: %w", err)
+		}
 		return s, nil
 	case "file", "":
 		fs := &store.FileStore{}

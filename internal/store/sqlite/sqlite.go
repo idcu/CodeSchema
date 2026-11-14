@@ -160,6 +160,37 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// SetPoolLimits 设置连接池上限（R3-11）。<=0 表示沿用 database/sql 默认（不限制）。
+func (s *SQLiteStore) SetPoolLimits(maxOpen, maxIdle int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return fmt.Errorf("sqlite not opened")
+	}
+	if maxOpen < 0 {
+		maxOpen = 0
+	}
+	if maxIdle < 0 {
+		maxIdle = 0
+	}
+	if maxOpen > 0 && maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	s.db.SetMaxOpenConns(maxOpen)
+	s.db.SetMaxIdleConns(maxIdle)
+	return nil
+}
+
+// PoolStats 返回连接池统计（观测/测试用）。
+func (s *SQLiteStore) PoolStats() sql.DBStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return sql.DBStats{}
+	}
+	return s.db.Stats()
+}
+
 // HealthCheck 返回存储层健康状态。
 func (s *SQLiteStore) HealthCheck(ctx context.Context) error {
 	s.mu.RLock()

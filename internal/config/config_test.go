@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -622,6 +623,29 @@ func TestCloneConfig_DeepCopy(t *testing.T) {
 // TestCloneConfig_PreservesAIVectorFields P1-17 负控：深拷贝必须保留
 // AI.BaseURL/APIKey 与 vector 的 ModelDir/ModelDownloadURL/ModelSHA256，
 // 否则租户继承全局配置时 AI 被静默禁用、模型自动下载与校验失效。
+// TestValidatePoolLimits 校验连接池配置的非法值（R3-11）。
+func TestValidatePoolLimits(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Storage.MaxOpenConns = 4
+	cfg.Storage.MaxIdleConns = 8
+	if errs := Validate(cfg); len(errs) == 0 {
+		t.Errorf("max_idle_conns > max_open_conns 应报错")
+	}
+
+	cfg.Storage.MaxOpenConns = -1
+	if errs := Validate(cfg); len(errs) == 0 {
+		t.Errorf("max_open_conns < 0 应报错")
+	}
+
+	cfg.Storage.MaxOpenConns = 4
+	cfg.Storage.MaxIdleConns = 2
+	for _, err := range Validate(cfg) {
+		if strings.Contains(err.Error(), "max_open_conns") || strings.Contains(err.Error(), "max_idle_conns") {
+			t.Errorf("合法连接池配置不应报错: %v", err)
+		}
+	}
+}
+
 func TestCloneConfig_PreservesAIVectorFields(t *testing.T) {
 	base := DefaultConfig()
 	base.AI.BaseURL = "https://ai.example/v1"

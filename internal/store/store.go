@@ -138,6 +138,28 @@ type DriverNamer interface {
 	DriverName() string
 }
 
+// PoolLimiter 可选接口：限定 database/sql 连接池上限（SQL 后端实现）。
+//
+// maxOpen/maxIdle <= 0 表示沿用 database/sql 默认（0 = 不限制）。
+// cmd 层在打开存储后统一经 ApplyPoolLimits 注入 storage.max_open_conns /
+// max_idle_conns，避免高并发下连接数无界（R3-11）。
+type PoolLimiter interface {
+	SetPoolLimits(maxOpen, maxIdle int) error
+}
+
+// ApplyPoolLimits 对实现了 PoolLimiter 的存储应用连接池上限；
+// 未实现的存储（如 FileStore）原样跳过，不算错误。
+func ApplyPoolLimits(st Store, maxOpen, maxIdle int) error {
+	if st == nil {
+		return nil
+	}
+	pl, ok := st.(PoolLimiter)
+	if !ok {
+		return nil
+	}
+	return pl.SetPoolLimits(maxOpen, maxIdle)
+}
+
 // SkippedWriter 可选接口：对因超限被旁路（大文件/超行数）的文件标记 parse_skipped 留痕。
 // FileStore/SQLiteStore/PGStore 均实现；未实现该接口的 Store 保留原行为（UpsertFile）。
 type SkippedWriter interface {

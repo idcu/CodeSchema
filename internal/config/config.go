@@ -198,6 +198,11 @@ type StorageConfig struct {
 	KV     string       `yaml:"kv" json:"kv"`
 	Vector VectorConfig `yaml:"vector" json:"vector"`
 	Search SearchConfig `yaml:"search" json:"search"`
+
+	// MaxOpenConns / MaxIdleConns SQL 后端（sqlite/pg）连接池上限（R3-11）。
+	// 0 表示沿用 database/sql 默认（不限制）；file 后端忽略该配置。
+	MaxOpenConns int `yaml:"max_open_conns" json:"max_open_conns"`
+	MaxIdleConns int `yaml:"max_idle_conns" json:"max_idle_conns"`
 }
 
 // VectorConfig 向量库配置。
@@ -350,10 +355,11 @@ func DefaultConfig() *Config {
 		},
 		Tenants: nil,
 		Storage: StorageConfig{
-			Driver: "file",
-			DSN:    "./data",
-			KV:     "",
-			Vector: VectorConfig{
+			Driver:       "file",
+			DSN:          "./data",
+			KV:           "",
+			MaxOpenConns: 16, // SQL 后端连接池上限（R3-11）；file 后端忽略
+			MaxIdleConns: 8,			Vector: VectorConfig{
 				// 默认文件持久化后端（PersistentStore）；仅显式配置 driver=chromem 时启用 chromem。
 				// （历史：曾默认 chromem，但 runtime 未接线；现改为显式启用以保持既有行为不变）
 				Driver:         "",
@@ -514,6 +520,16 @@ func Validate(cfg *Config) []error {
 
 	if cfg.Storage.DSN == "" {
 		errs = append(errs, fmt.Errorf("storage.dsn must not be empty"))
+	}
+
+	if cfg.Storage.MaxOpenConns < 0 {
+		errs = append(errs, fmt.Errorf("storage.max_open_conns must be >= 0 (0 = database/sql default)"))
+	}
+	if cfg.Storage.MaxIdleConns < 0 {
+		errs = append(errs, fmt.Errorf("storage.max_idle_conns must be >= 0 (0 = database/sql default)"))
+	}
+	if cfg.Storage.MaxOpenConns > 0 && cfg.Storage.MaxIdleConns > cfg.Storage.MaxOpenConns {
+		errs = append(errs, fmt.Errorf("storage.max_idle_conns (%d) must not exceed storage.max_open_conns (%d)", cfg.Storage.MaxIdleConns, cfg.Storage.MaxOpenConns))
 	}
 
 	if cfg.Server.MCPAddr == "" && cfg.Server.HTTPAddr == "" {

@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 202: feat(store): 连接池上限可配置并接入 sqlite/pg（R3-11 / P2-12）
+
+- 根因：sqlite/pg 均直接使用 `database/sql` 默认值——`MaxOpenConns=0`（无上限）。
+  PG 在高并发查询下连接数无界，易打满服务端 `max_connections`；
+  多租户（41 实例）时问题叠加。
+- 修复：`storage.max_open_conns` / `max_idle_conns`（默认 **16 / 8**，`0` 沿用
+  database/sql 默认，file 后端忽略）；启动校验拒绝负数与 `idle > open`。
+  `store.PoolLimiter` + `store.ApplyPoolLimits` 统一注入，cmd 的 sqlite 与 pg
+  两个打开路径（含租户经同一 `newStore`）均生效；两后端新增 `PoolStats()`
+  供观测/测试。非法值收敛：负数→0，idle>open→open。
+- 负控（先红后绿）：`TestNewBaseStoreAppliesPoolLimits`——修复前
+  `MaxOpenConnections = 0`（红），修复后 `= 4`（绿）。
+- 补充用例：`TestSQLite_SetPoolLimits`（含收敛路径）、`TestValidatePoolLimits`。
+- 文档：`存储后端.md` 新增「连接池上限」，含多租户连接数放大提示；counts 60339（60.3k）。
+
 ### Commit 200: perf(store): 补齐按文件清调用与标签反查索引（R3-10 / P2-11）
 
 - 根因：`class_tag` / `method_tag` 的 PK 前导列是 `*_id`，`tag_id` 无索引覆盖，
