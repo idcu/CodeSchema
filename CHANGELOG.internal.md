@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 174: fix(server): OpenAPI 声明与 handler 实际参数对齐，/affected 支持 method（P3-14）
+
+- 背景：`/openapi.json` 与实际实现漂移——`/context` 未声明 `chars_per_token`，`/impact`/`/tests` 未声明批量 `methods`，`/search` 未声明 `min_score`；`/affected` 规范声明 `method`，handler 只读 `symbol`，按规范调用直接 400。
+- 动作：
+  - `handleAffected` 主参数改为 `method`（保留 `symbol` 兼容别名），错误提示与响应字段同步；OpenAPI 增补 `symbol`/`recursive`。
+  - OpenAPI 补齐 `chars_per_token`、`methods`（impact/tests）、`min_score`，并把 `method` 的 `required` 改为 false +「与批量参数二选一」说明。
+  - 错误 hint 改为准确口径：context 用 `symbols[]`，impact/tests 用 `methods[]`，affected 用 `method`。
+- 负控（先红后绿）：
+  - `TestAffectedEndpointMethodParamIsQueryable`：修复前 `GET /affected?method=...` 返回 400 `symbol is required`。
+  - `TestOpenAPIDeclaresHandlerParameters`：修复前 6 处缺失（context/chars_per_token、impact/methods、tests/methods、affected/symbol、affected/recursive、search/min_score）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 57217 ≈ 57.2k）。
+
 ### Commit 173: fix(parser): AST 路径作用域跟踪与 Go 包级容器对齐（P0-1 遗留）
 
 - 背景：Commit 157 只修了默认正则路径，`-tags treesitter` 的 `adapter_ast.go` 仍用「进入声明即覆盖 `curClass/curMethod` 且永不恢复」的遍历方式：嵌套类/嵌套函数之后的兄弟声明被错挂到内层作用域；Go 顶层函数继承最近一次 `type` 声明作为 `ClassFQN`（或不归属任何类），无 PACKAGE 容器、caller/callee 无包限定；类/方法 `EndLine` 恒为 0，且 AST 路径不产出 Go 的 `Fields/Constants`。CI 的 treesitter job 因此红（6 个测试失败）。

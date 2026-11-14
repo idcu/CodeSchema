@@ -545,7 +545,7 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAffected 返回受指定符号变更影响的关联单测（递归时向上追溯传递调用者）。
-// GET /affected?symbol=<fqn>&recursive=<bool>
+// GET /affected?method=<fqn>&recursive=<bool>；symbol 为兼容别名。
 func (h *HTTPServer) handleAffected(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
@@ -559,20 +559,23 @@ func (h *HTTPServer) handleAffected(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	symbol := q.Get("symbol")
-	if symbol == "" {
-		writeError(w, "ERR_INVALID_PARAMETER", "symbol is required", 400)
+	method := q.Get("method")
+	if method == "" {
+		method = q.Get("symbol") // 兼容旧调用方
+	}
+	if method == "" {
+		writeError(w, "ERR_INVALID_PARAMETER", "method is required (symbol is accepted as alias)", 400)
 		return
 	}
 	recursive := q.Get("recursive") == "true" || q.Get("recursive") == "1"
 
-	affectedTests, err := svc.GetAffected(r.Context(), symbol, recursive)
+	affectedTests, err := svc.GetAffected(r.Context(), method, recursive)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"symbol":         symbol,
+		"symbol":         method,
 		"recursive":      recursive,
 		"affected_tests": affectedTests,
 	})

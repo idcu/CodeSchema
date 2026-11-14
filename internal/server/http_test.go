@@ -875,3 +875,71 @@ func TestRecoveryMiddlewareHidesPanicDetail(t *testing.T) {
 		t.Fatalf("panic detail leaked: %s", got)
 	}
 }
+
+// TestAffectedEndpointMethodParamIsQueryable 负控（P3-14）：OpenAPI 声明 /affected
+// 使用 method，handler 却只读 symbol → 按规范调用返回 400。method 应为主参数，
+// symbol 保留为兼容别名。
+func TestAffectedEndpointMethodParamIsQueryable(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/affected?method=com.example.MyClass", nil)
+	w := httptest.NewRecorder()
+	srv.handleAffected(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("affected?method= should be accepted, got %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["symbol"] != "com.example.MyClass" {
+		t.Fatalf("symbol = %v, want com.example.MyClass", body["symbol"])
+	}
+}
+
+// TestAffectedEndpointSymbolAliasStillWorks 保证兼容别名不回归。
+func TestAffectedEndpointSymbolAliasStillWorks(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/affected?symbol=com.example.MyClass&recursive=1", nil)
+	w := httptest.NewRecorder()
+	srv.handleAffected(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("affected?symbol= should still work, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestOpenAPIDeclaresHandlerParameters 负控（P3-14）：规范必须声明 handler 实际
+// 读取的全部查询参数，避免「按文档调用被 400」。
+func TestOpenAPIDeclaresHandlerParameters(t *testing.T) {
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name string `json:"name"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi json: %v", err)
+	}
+	want := map[string][]string{
+		"/context":  {"symbol", "symbols", "chars_per_token"},
+		"/impact":   {"method", "methods", "depth"},
+		"/tests":    {"method", "methods", "min_confidence"},
+		"/affected": {"method", "symbol", "recursive"},
+		"/search":   {"q", "mode", "limit", "min_score"},
+	}
+	for path, wantParams := range want {
+		op, ok := spec.Paths[path]["get"]
+		if !ok {
+			t.Fatalf("openapi missing path %s", path)
+		}
+		got := map[string]bool{}
+		for _, p := range op.Parameters {
+			got[p.Name] = true
+		}
+		for _, name := range wantParams {
+			if !got[name] {
+				t.Errorf("%s missing query parameter %q", path, name)
+			}
+		}
+	}
+}

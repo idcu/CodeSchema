@@ -14,9 +14,9 @@ func Hint(code string) string {
 	case "ERR_SYMBOL_NOT_FOUND":
 		return "符号未命中：确认用的是全限定名（类 FQN，或 类FQN.方法名）；可先调 search_symbols 检索确认写法，多租户场景确认 project 参数指向了正确的仓库，或该仓库的索引是否已重建。"
 	case "ERR_INVALID_PARAMETER":
-		return "参数非法：检查必填参数是否缺失、类型是否正确（数值型参数不要加引号）；context/impact/tests 支持 symbols[] 批量传参（数组），单符号仍用 symbol/method。"
+		return "参数非法：检查必填参数是否缺失、类型是否正确（数值型参数不要加引号）；context 支持 symbols[] 批量传参，impact/tests 支持 methods[]，affected 用 method（symbol 为兼容别名）。"
 	case "ERR_RATE_LIMITED":
-		return "已触发限流：降低请求频率，或调高 server.rate_limit 配置；批量查询请改用 symbols[] 一次传多个符号，把 N 次调用压成 1 次。"
+		return "已触发限流：降低请求频率，或调高 server.rate_limit 配置；批量查询请改用 symbols[]/methods[] 一次传多个符号，把 N 次调用压成 1 次。"
 	case "ERR_UNAUTHORIZED":
 		return "认证失败：请求头需携带 Authorization: Bearer <token>，且令牌与服务端 server.auth_token 一致；未启用认证时不要带该头。"
 	case "ERR_METHOD_NOT_ALLOWED":
