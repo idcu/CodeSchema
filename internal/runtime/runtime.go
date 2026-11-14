@@ -354,6 +354,7 @@ func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Run
 // 索引构建交由后续 BuildRuntime 统一完成，本函数只负责灌库与标签。
 func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, root string) error {
 	reg := NewParserRegistry(ctx, cfg, root)
+	defer reg.Close() // 释放 LSP 子进程等资源，避免扫描结束后留下孤儿进程
 	s := scanner.NewScanner(st, reg, cfg.Scanner.Workers)
 	s.SetLimits(int64(cfg.Scanner.FileSizeLimitMB)*1024*1024, cfg.Scanner.LineCountLimit)
 	if err := s.ScanAll(ctx, root); err != nil {
@@ -421,6 +422,7 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 	if err != nil {
 		wcancel()
 		stopAutoSave()
+		_ = reg.Close()
 		return nil, err
 	}
 	go sched.Start(wctx, func(ctx context.Context, path string) error {
@@ -432,5 +434,6 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 	return func() {
 		wcancel()
 		stopAutoSave()
+		_ = reg.Close() // 监听停止后释放 LSP 子进程
 	}, nil
 }

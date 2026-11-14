@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"gitee.com/idcu-go/metrics"
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -71,49 +73,42 @@ func runMockLSPServer() {
 			continue
 		}
 
+		// exit 是通知（无 id），需在通知过滤前处理，供 Close 优雅退出。
+		if req.Method == "exit" {
+			return
+		}
+
 		// 无 ID 的是通知，不需要响应
 		if req.ID == 0 {
 			continue
 		}
 
-		// 根据 method 生成响应
+		// 根据 method / MOCK_LSP_MODE 生成响应
 		var result any
 		switch req.Method {
 		case "initialize":
-			result = map[string]any{
-				"capabilities": map[string]any{},
+			caps := map[string]any{}
+			if os.Getenv("MOCK_LSP_MODE") == "calls" {
+				caps["callHierarchyProvider"] = true
 			}
+			result = map[string]any{"capabilities": caps}
 		case "textDocument/documentSymbol":
-			result = []map[string]any{
-				{
-					"name":          "MockClass",
-					"kind":          5,
-					"containerName": "pkg",
-					"location": map[string]any{
-						"uri": "file:///mock.go",
-						"range": map[string]any{
-							"start": map[string]int{"line": 0, "character": 0},
-							"end":   map[string]int{"line": 10, "character": 0},
-						},
-					},
-				},
-				{
-					"name":          "mockMethod",
-					"kind":          6,
-					"containerName": "pkg.MockClass",
-					"location": map[string]any{
-						"uri": "file:///mock.go",
-						"range": map[string]any{
-							"start": map[string]int{"line": 5, "character": 0},
-							"end":   map[string]int{"line": 8, "character": 0},
-						},
-					},
-				},
+			switch os.Getenv("MOCK_LSP_MODE") {
+			case "nested":
+				result = mockNestedSymbols()
+			case "calls":
+				result = mockCallSymbols()
+			case "empty":
+				result = []map[string]any{}
+			default:
+				result = mockFlatSymbols()
 			}
+		case "textDocument/prepareCallHierarchy":
+			result = mockPrepareCallHierarchy(req.Params)
+		case "callHierarchy/outgoingCalls":
+			result = mockOutgoingCalls(req.Params)
 		case "shutdown":
 			result = nil
-		case "exit":
-			os.Exit(0)
 		default:
 			result = nil
 		}
@@ -133,13 +128,117 @@ func runMockLSPServer() {
 // newMockLSPAdapter 创建使用测试二进制作为 mock LSP 服务器的适配器。
 func newMockLSPAdapter(t *testing.T, timeout time.Duration) *LSPAdapter {
 	t.Helper()
+	return newMockLSPAdapterMode(t, timeout, "")
+}
+
+// newMockLSPAdapterMode 按 MOCK_LSP_MODE 构造 mock 适配器，覆盖分层符号 / 调用边 /
+// 空符号等场景。
+func newMockLSPAdapterMode(t *testing.T, timeout time.Duration, mode string) *LSPAdapter {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("get executable: %v", err)
 	}
 	a := NewLSPAdapter("mock", exe, nil, "go", timeout)
 	a.env = []string{"MOCK_LSP_SERVER=1"}
+	if mode != "" {
+		a.env = append(a.env, "MOCK_LSP_MODE="+mode)
+	}
 	return a
+}
+
+func mockRange(sl, sc, el, ec int) map[string]any {
+	return map[string]any{
+		"start": map[string]int{"line": sl, "character": sc},
+		"end":   map[string]int{"line": el, "character": ec},
+	}
+}
+
+func mockSymbol(name string, kind, sl, sc, el, ec int, children ...map[string]any) map[string]any {
+	sym := map[string]any{
+		"name":           name,
+		"kind":           kind,
+		"range":          mockRange(sl, sc, el, ec),
+		"selectionRange": mockRange(sl, sc, sl, sc+len(name)),
+	}
+	if len(children) > 0 {
+		sym["children"] = children
+	}
+	return sym
+}
+
+// mockFlatSymbols 返回 DocumentSymbol[]（无嵌套），与旧测试的扁平结构等价。
+func mockFlatSymbols() []map[string]any {
+	return []map[string]any{
+		mockSymbol("MockClass", 5, 0, 0, 10, 0),
+		mockSymbol("mockMethod", 6, 5, 0, 8, 0),
+	}
+}
+
+// mockNestedSymbols 返回分层 DocumentSymbol[]：Outer > Inner > Run，另有 Outer.Own
+// 与顶层函数 topLevel；用于验证容器名逐层传递与 ClassFQN 归属。
+func mockNestedSymbols() []map[string]any {
+	inner := mockSymbol("Inner", 5, 1, 0, 8, 0,
+		mockSymbol("Run", 6, 2, 4, 5, 0))
+	outer := mockSymbol("Outer", 5, 0, 0, 9, 0,
+		inner,
+		mockSymbol("Own", 6, 6, 4, 7, 0))
+	top := mockSymbol("topLevel", 12, 11, 0, 13, 0)
+	return []map[string]any{outer, top}
+}
+
+// mockCallSymbols 返回一个类与两个方法，selectionRange 分别落在 line 1 / 4。
+func mockCallSymbols() []map[string]any {
+	return []map[string]any{
+		mockSymbol("MockClass", 5, 0, 0, 20, 0,
+			mockSymbol("mockMethod", 6, 1, 4, 3, 0),
+			mockSymbol("helper", 6, 4, 4, 6, 0)),
+	}
+}
+
+// mockPrepareCallHierarchy 按请求位置返回对应方法项（line>=4 视为 helper）。
+func mockPrepareCallHierarchy(params json.RawMessage) any {
+	var p struct {
+		TextDocument struct{ URI string } `json:"textDocument"`
+		Position     struct{ Line int }   `json:"position"`
+	}
+	_ = json.Unmarshal(params, &p)
+	name, line := "mockMethod", 1
+	if p.Position.Line >= 4 {
+		name, line = "helper", 4
+	}
+	return []map[string]any{{
+		"name":           name,
+		"kind":           6,
+		"uri":            p.TextDocument.URI,
+		"range":          mockRange(line, 4, line+2, 0),
+		"selectionRange": mockRange(line, 4, line, 4+len(name)),
+	}}
+}
+
+// mockOutgoingCalls 对 mockMethod 返回一条指向 helper 的调用边。
+func mockOutgoingCalls(params json.RawMessage) any {
+	var p struct {
+		Item struct {
+			Name string `json:"name"`
+			URI  string `json:"uri"`
+		} `json:"item"`
+	}
+	_ = json.Unmarshal(params, &p)
+	if p.Item.Name != "mockMethod" {
+		return []map[string]any{}
+	}
+	return []map[string]any{{
+		"to": map[string]any{
+			"name":           "helper",
+			"kind":           6,
+			"detail":         "func (m *MockClass) helper()",
+			"uri":            p.Item.URI,
+			"range":          mockRange(4, 4, 6, 0),
+			"selectionRange": mockRange(4, 4, 4, 10),
+		},
+		"fromRanges": []map[string]any{mockRange(2, 8, 2, 14)},
+	}}
 }
 
 func TestLSPAdapter_Name(t *testing.T) {
@@ -352,7 +451,7 @@ func TestAddDocumentSymbol_ClassWithChildren(t *testing.T) {
 			},
 		},
 	}
-	ir = a.addDocumentSymbol(ir, ds)
+	ir = a.addDocumentSymbol(ir, ds, "")
 	if len(ir.Classes) != 1 {
 		t.Fatalf("expected 1 class, got %d", len(ir.Classes))
 	}
@@ -361,6 +460,9 @@ func TestAddDocumentSymbol_ClassWithChildren(t *testing.T) {
 	}
 	if ir.Methods[0].Name != "bar" {
 		t.Errorf("expected method name=bar, got %s", ir.Methods[0].Name)
+	}
+	if ir.Methods[0].ClassFQN != "Foo" {
+		t.Errorf("expected ClassFQN=Foo, got %q", ir.Methods[0].ClassFQN)
 	}
 }
 
@@ -682,6 +784,116 @@ func TestLSPAdapter_ReadResponses_MalformedContentLength(t *testing.T) {
 
 	if !strings.Contains(metrics.Render(), `lsp_malformed_frames_total{kind="content_length"}`) {
 		t.Error("expected lsp_malformed_frames_total{kind=\"content_length\"} for malformed header")
+	}
+}
+
+// --- P0-2 LSP 精度负控 ---
+
+// TestLSPAdapter_Parse_NestedContainersSetClassFQN 验证分层 DocumentSymbol 的容器名逐层
+// 传递：嵌套类 FullName 为 Outer.Inner，其方法 ClassFQN 为 Outer.Inner；顶层函数
+// ClassFQN 留空（由 store 的合成包级容器承接）。
+func TestLSPAdapter_Parse_NestedContainersSetClassFQN(t *testing.T) {
+	a := newMockLSPAdapterMode(t, 3*time.Second, "nested")
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	defer a.Close()
+
+	path := writeTempSource(t, ".go", "package x\n\nfunc f() {}\n")
+	ir, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	classFull := make(map[string]string, len(ir.Classes))
+	for _, c := range ir.Classes {
+		classFull[c.Name] = c.FullName
+	}
+	if classFull["Outer"] != "Outer" {
+		t.Errorf("Outer.FullName = %q, want Outer", classFull["Outer"])
+	}
+	if classFull["Inner"] != "Outer.Inner" {
+		t.Errorf("Inner.FullName = %q, want Outer.Inner", classFull["Inner"])
+	}
+
+	methodClass := make(map[string]string, len(ir.Methods))
+	for _, m := range ir.Methods {
+		methodClass[m.Name] = m.ClassFQN
+	}
+	if methodClass["Run"] != "Outer.Inner" {
+		t.Errorf("Run.ClassFQN = %q, want Outer.Inner", methodClass["Run"])
+	}
+	if methodClass["Own"] != "Outer" {
+		t.Errorf("Own.ClassFQN = %q, want Outer", methodClass["Own"])
+	}
+	if got, ok := methodClass["topLevel"]; !ok || got != "" {
+		t.Errorf("topLevel.ClassFQN = %q (present=%v), want empty", got, ok)
+	}
+}
+
+// TestLSPAdapter_Parse_ExtractsCallEdges 验证 callHierarchy 抽取调用边：
+// mockMethod -> helper，CallerFQN/CalleeFQN 均为容器限定名。
+func TestLSPAdapter_Parse_ExtractsCallEdges(t *testing.T) {
+	a := newMockLSPAdapterMode(t, 3*time.Second, "calls")
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	defer a.Close()
+
+	path := writeTempSource(t, ".go", "package x\n\nfunc f() {}\n")
+	ir, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(ir.Calls) == 0 {
+		t.Fatal("expected call edges from callHierarchy, got 0")
+	}
+	found := false
+	for _, c := range ir.Calls {
+		if c.CallerFQN == "MockClass.mockMethod" && c.CalleeFQN == "MockClass.helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected MockClass.mockMethod -> MockClass.helper, got %+v", ir.Calls)
+	}
+}
+
+// TestLSPAdapter_Parse_EmptySymbolsReturnsSourceUnavailable 验证非空源文件却拿到空符号时
+// 返回 ErrSourceUnavailable，使 FallbackParser 能回退到 tree-sitter（而非静默固化空 IR）。
+func TestLSPAdapter_Parse_EmptySymbolsReturnsSourceUnavailable(t *testing.T) {
+	a := newMockLSPAdapterMode(t, 3*time.Second, "empty")
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	defer a.Close()
+
+	path := writeTempSource(t, ".go", "package x\n\nfunc f() {}\n")
+	ir, err := a.Parse(context.Background(), path)
+	if err == nil {
+		t.Fatalf("expected error for empty symbols on non-empty file, got ir=%+v", ir)
+	}
+	if !errors.Is(err, cerrors.ErrSourceUnavailable) {
+		t.Fatalf("error = %v, want ErrSourceUnavailable", err)
+	}
+}
+
+// TestLSPAdapter_Close_ReapsChildProcess 验证 Close 调用 cmd.Wait 回收子进程
+// （ProcessState 非空），不再留下僵尸进程。
+func TestLSPAdapter_Close_ReapsChildProcess(t *testing.T) {
+	a := newMockLSPAdapter(t, 3*time.Second)
+	if err := a.Init(context.Background(), nil); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	cmd := a.cmdObj
+	if cmd == nil {
+		t.Fatal("expected child process after Init")
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if cmd.ProcessState == nil {
+		t.Fatal("child process not reaped: cmd.Wait was not called")
 	}
 }
 

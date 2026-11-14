@@ -1,6 +1,9 @@
 package parser
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Registry 是适配器注册中心，管理所有 ParserPlugin 的注册与选择。
 type Registry struct {
@@ -48,4 +51,20 @@ func (r *Registry) Select(lang string) (ParserPlugin, error) {
 		}
 	}
 	return nil, fmt.Errorf("no adapter found for language: %s", lang)
+}
+
+// Close 释放所有已注册适配器持有的资源（LSP 子进程等），可重复调用。
+// 单个适配器关闭失败不阻断其余适配器，错误汇总返回。
+func (r *Registry) Close() error {
+	var errs []string
+	for _, p := range r.plugins {
+		if err := p.Close(); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", p.Name(), err))
+		}
+	}
+	r.plugins = nil
+	if len(errs) > 0 {
+		return fmt.Errorf("close adapters: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }

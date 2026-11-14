@@ -172,7 +172,7 @@ type Calculator struct {
 }
 
 func (c *Calculator) Add(a, b int) int {
-	return a + b
+	return a + c.Sub(b, 0)
 }
 
 func (c *Calculator) Sub(a, b int) int {
@@ -219,6 +219,18 @@ func (c *Calculator) Sub(a, b int) int {
 	if !containsName(names, "Add") {
 		t.Errorf("expected method 'Add' in %v", names)
 	}
+
+	// P0-2 验收：分层 documentSymbol 下方法必须带容器 FQN（否则入库时被丢弃），
+	// 且 callHierarchy 能抽出真实调用边。
+	for _, m := range ir.Methods {
+		if m.ClassFQN != "Calculator" {
+			t.Errorf("method %q ClassFQN = %q, want Calculator", m.Name, m.ClassFQN)
+		}
+	}
+	if len(ir.Calls) == 0 {
+		t.Fatalf("expected call edges from gopls callHierarchy, got 0")
+	}
+	t.Logf("gopls: classes=%d methods=%d calls=%d", len(ir.Classes), len(ir.Methods), len(ir.Calls))
 }
 
 // containsName 方法名匹配：真实 LSP 的 documentSymbol 名称可能带接收者前缀，

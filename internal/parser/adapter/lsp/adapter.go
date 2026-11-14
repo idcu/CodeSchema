@@ -28,11 +28,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/idcu/codeschema/internal/errors"
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
-	"github.com/idcu/codeschema/internal/parser"
 	"gitee.com/idcu-go/retry"
+	"github.com/idcu/codeschema/internal/errors"
+	"github.com/idcu/codeschema/internal/parser"
 )
 
 // LSPAdapter 通用 LSP 适配器，通过 JSON-RPC 2.0 与 LSP 服务器通信。
@@ -56,11 +56,19 @@ type LSPAdapter struct {
 	alive      bool          // 连接是否存活，readResponses 退出时自动置 false
 	aliveCheck chan struct{} // readResponses 退出时关闭，用于等待优雅退出
 
-	logger         *log.Logger      // 结构化日志，暴露降级原因，避免"静默丢信息"
-	retryAttempts  int             // documentSymbol 等高频请求的可重试次数（含首次）
-	retryBaseDelay time.Duration   // 重试退避基础延迟
-	retryMaxDelay  time.Duration   // 重试退避最大延迟
+	// callsSupported 由 initialize 响应的 callHierarchyProvider 能力决定；
+	// 不支持时只产出符号，不发起 callHierarchy 请求（避免无效往返）。
+	callsSupported bool
+
+	logger         *log.Logger   // 结构化日志，暴露降级原因，避免"静默丢信息"
+	retryAttempts  int           // documentSymbol 等高频请求的可重试次数（含首次）
+	retryBaseDelay time.Duration // 重试退避基础延迟
+	retryMaxDelay  time.Duration // 重试退避最大延迟
 }
+
+// maxCallHierarchyMethods 单文件最多为多少个方法抽取调用边。
+// callHierarchy 是「每方法 2 次请求」的协议，必须设上限，避免大文件放大解析延迟。
+const maxCallHierarchyMethods = 64
 
 // jsonRPCRequest JSON-RPC 2.0 请求结构。
 // 注意：ID 必须 omitempty——notification（didOpen/didClose/initialized）不允许携带 id，
@@ -109,9 +117,9 @@ func NewLSPAdapter(name, cmd string, args []string, lang string, timeout time.Du
 		timeout:    timeout,
 		pending:    make(map[int]chan<- *jsonRPCResponse),
 		aliveCheck: make(chan struct{}),
-		logger:      log.WithModule("lsp:" + name),
+		logger:     log.WithModule("lsp:" + name),
 		// 重试以覆盖 LSP 子进程的瞬时抖动（超时、连接重置），不放大单文件解析延迟。
-		retryAttempts: 2,
+		retryAttempts:  2,
 		retryBaseDelay: 150 * time.Millisecond,
 		retryMaxDelay:  time.Second,
 	}
@@ -296,22 +304,45 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 
 	// 发送 initialize 请求（此时已释放锁，不会与 sendRequest 内部锁冲突）
 	initParams := map[string]any{
-		"processId":             nil,
-		"clientInfo":            map[string]string{"name": "codeschema"},
-		"capabilities":          map[string]any{},
-		"workspaceFolders":      nil,
-		"rootUri":               rootURI,
+		"processId":  nil,
+		"clientInfo": map[string]string{"name": "codeschema"},
+		// 声明支持分层 DocumentSymbol：否则服务器按规范返回扁平 SymbolInformation[]，
+		// 容器信息只能来自 containerName，嵌套类/方法的层级会丢失。
+		"capabilities": map[string]any{
+			"textDocument": map[string]any{
+				"documentSymbol": map[string]any{
+					"hierarchicalDocumentSymbolSupport": true,
+				},
+			},
+		},
+		"workspaceFolders": nil,
+		"rootUri":          rootURI,
 	}
-	_, err = a.sendRequest(ctx, "initialize", initParams)
+	initResult, err := a.sendRequest(ctx, "initialize", initParams)
 	if err != nil {
 		a.logger.Warn("LSP initialize failed, degrading to fallback parser",
 			"server", a.name, "error", err.Error())
-		cmd.Process.Kill()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		// 回收子进程并清理 pending：否则初始化失败的短暂进程会变僵尸，
+		// 且挂起的请求永远等不到响应。
+		_ = cmd.Wait()
 		a.mu.Lock()
 		a.alive = false
+		a.cmdObj = nil
+		a.stdin = nil
+		a.pending = make(map[int]chan<- *jsonRPCResponse)
 		a.mu.Unlock()
+		if a.cancel != nil {
+			a.cancel()
+		}
 		return fmt.Errorf("%s initialize failed: %w: %w", a.name, err, errors.ErrSourceUnavailable)
 	}
+
+	a.mu.Lock()
+	a.callsSupported = supportsCallHierarchy(initResult)
+	a.mu.Unlock()
 
 	// 发送 initialized 通知（已释放锁，不会与 sendNotification 内部锁冲突）
 	a.sendNotification("initialized", map[string]any{})
@@ -319,28 +350,52 @@ func (a *LSPAdapter) Init(ctx context.Context, config map[string]any) error {
 	return nil
 }
 
-// Close 清理适配器资源，终止 LSP 子进程。
+// Close 清理适配器资源，优雅终止 LSP 子进程。
+//
+// 顺序很重要：先发 shutdown/exit 再关 stdin（旧实现先关 stdin，通知必然写失败），
+// 然后 cmd.Wait() 回收进程（避免僵尸）；进程不配合时 2s 后强杀。
+// 可重复调用。
 func (a *LSPAdapter) Close() error {
 	a.mu.Lock()
 	a.alive = false
-	if a.cancel != nil {
-		a.cancel()
-	}
 	stdin := a.stdin
 	cmdObj := a.cmdObj
+	cancel := a.cancel
 	a.mu.Unlock()
 
+	if cmdObj != nil && cmdObj.Process != nil && stdin != nil {
+		// shutdown 是请求（有 id），exit 是通知；顺序符合 LSP 生命周期约定。
+		sctx, scancel := context.WithTimeout(context.Background(), time.Second)
+		_, _ = a.sendRequest(sctx, "shutdown", nil)
+		scancel()
+		writeNotification(stdin, "exit", nil)
+	}
 	if stdin != nil {
-		stdin.Close()
+		_ = stdin.Close()
 	}
 
 	if cmdObj != nil && cmdObj.Process != nil {
-		// 发送 shutdown/exit 通知（已释放锁，不会与 sendNotification 内部锁冲突）
-		a.sendNotification("shutdown", nil)
-		a.sendNotification("exit", nil)
-		_ = cmdObj.Process.Kill()
+		done := make(chan struct{})
+		go func() {
+			_ = cmdObj.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = cmdObj.Process.Kill()
+			<-done
+		}
+	}
+	if cancel != nil {
+		cancel()
 	}
 
+	a.mu.Lock()
+	a.stdin = nil
+	a.cmdObj = nil
+	a.pending = make(map[int]chan<- *jsonRPCResponse)
+	a.mu.Unlock()
 	return nil
 }
 
@@ -398,50 +453,136 @@ func (a *LSPAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument
 		return nil, fmt.Errorf("%s documentSymbol failed: %w", a.name, err)
 	}
 
-	// 3. 解析符号结果
+	// 3. 解析符号结果：按负载形状区分 DocumentSymbol[]（分层）与
+	// SymbolInformation[]（扁平）。注意不能先试 SymbolInformation——两者字段不重叠，
+	// 前者反序列化到后者会"成功但字段全空"，导致容器/层级静默丢失（P0-2）。
 	ir := &parser.IRDocument{
 		Source:   a.name,
 		Language: a.lang,
 		FilePath: path,
 	}
+	sites := a.applySymbols(ir, uri, symbolResult)
 
-	// 尝试解析为 SymbolInformation[] 或 DocumentSymbol[]
-	var symbols []symbolInfo
-	if err := json.Unmarshal(symbolResult, &symbols); err == nil {
-		for _, sym := range symbols {
-			ir = a.addSymbolInfo(ir, sym)
-		}
-	} else {
-		var docSymbols []documentSymbol
-		if err := json.Unmarshal(symbolResult, &docSymbols); err == nil {
-			for _, ds := range docSymbols {
-				ir = a.addDocumentSymbol(ir, ds)
-			}
-		}
-	}
+	// 3.1 调用边：仅当服务器声明 callHierarchyProvider 时按方法逐个抽取（尽力而为，
+	// 失败只记指标，不影响符号结果）。
+	a.collectCalls(ctx, uri, sites, ir)
 
 	// 4. 发送 didClose 通知
 	a.sendNotification("textDocument/didClose", map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 	})
 
-	// 5. 可观测性：clangd 缺项目上下文（如 compile_commands.json）时会静默返回空符号，
-	// 这里对非空 C/C++ 文件显式暴露该降级，避免"静默丢信息"。
-	a.maybeReportEmptySymbols(path, text, ir)
+	// 5. 可观测性 + 空结果回退：clangd 缺项目上下文 / 结构无法识别时会返回空符号，
+	// 原实现静默返回空 IR 并写 hash，后续扫描永久跳过（P2-11）。这里显式返回
+	// ErrSourceUnavailable，交由 FallbackParser 回退 tree-sitter。
+	if a.maybeReportEmptySymbols(path, text, ir) {
+		return nil, fmt.Errorf("%s returned no symbols for non-empty %s source: %w",
+			a.name, a.lang, errors.ErrSourceUnavailable)
+	}
 
 	return ir, nil
 }
 
-// maybeReportEmptySymbols 在 C/C++ 非空文件却解析出 0 个符号时显式告警，
-// 通常意味着 clangd 缺少项目上下文（compile_commands.json），原实现会静默返回空 IR。
-func (a *LSPAdapter) maybeReportEmptySymbols(path, text string, ir *parser.IRDocument) {
-	if a.lang != "cpp" || len(text) == 0 || len(ir.Classes) != 0 || len(ir.Methods) != 0 {
-		return
+// applySymbols 解析 documentSymbol 响应并写入 IR，返回方法位置（供调用边抽取）。
+//
+// 负载形状判定：任一条目含 range 且不含 location → DocumentSymbol[]；
+// 否则按 SymbolInformation[] 处理。
+func (a *LSPAdapter) applySymbols(ir *parser.IRDocument, uri string, symbolResult json.RawMessage) []methodSite {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(symbolResult, &raw); err != nil || len(raw) == 0 {
+		return nil
 	}
-	a.logger.Warn("LSP returned zero symbols for non-empty C/C++ file; likely missing project context",
-		"server", a.name, "path", path,
-		"hint", "ensure compile_commands.json exists (cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON or bear -- make)")
-	metrics.IncCounter("lsp_parse_empty_symbols_total", "cpp")
+
+	var sites []methodSite
+	if isDocumentSymbolPayload(raw) {
+		var docs []documentSymbol
+		if err := json.Unmarshal(symbolResult, &docs); err != nil {
+			return nil
+		}
+		for _, ds := range docs {
+			a.addDocumentSymbol(ir, ds, "")
+			collectDocumentSites(ds, "", &sites)
+		}
+		return sites
+	}
+
+	var syms []symbolInfo
+	if err := json.Unmarshal(symbolResult, &syms); err != nil {
+		return nil
+	}
+	for _, sym := range syms {
+		a.addSymbolInfo(ir, sym)
+		if sym.Location.URI == uri && isMethodKind(sym.Kind) {
+			container, name := memberIdentity(sym.ContainerName, sym.Name)
+			sites = append(sites, methodSite{
+				fqn:  joinFQN(container, name),
+				line: sym.Location.Range.Start.Line,
+				char: sym.Location.Range.Start.Character,
+			})
+		}
+	}
+	return sites
+}
+
+// isDocumentSymbolPayload 判断响应是否为分层 DocumentSymbol[]。
+func isDocumentSymbolPayload(raw []json.RawMessage) bool {
+	for _, item := range raw {
+		var probe struct {
+			Range    json.RawMessage `json:"range"`
+			Location json.RawMessage `json:"location"`
+		}
+		if json.Unmarshal(item, &probe) != nil {
+			continue
+		}
+		if len(probe.Range) > 0 && len(probe.Location) == 0 {
+			return true
+		}
+		if len(probe.Location) > 0 {
+			return false
+		}
+	}
+	return false
+}
+
+// methodSite 是一次调用边抽取的起点（方法 FQN + 0-based selectionRange 起点）。
+type methodSite struct {
+	fqn        string
+	line, char int
+}
+
+// collectDocumentSites 递归收集方法位置；容器名同样逐层传递。
+func collectDocumentSites(ds documentSymbol, container string, out *[]methodSite) {
+	switch ds.Kind {
+	case 5, 10, 11, 23: // Class / Enum / Interface / Struct
+		for _, child := range ds.Children {
+			collectDocumentSites(child, joinFQN(container, ds.Name), out)
+		}
+	case 6, 9, 12: // Method / Constructor / Function
+		*out = append(*out, methodSite{
+			fqn:  joinFQN(memberIdentity(container, ds.Name)),
+			line: ds.SelectionRange.Start.Line,
+			char: ds.SelectionRange.Start.Character,
+		})
+		for _, child := range ds.Children {
+			collectDocumentSites(child, container, out)
+		}
+	}
+}
+
+// maybeReportEmptySymbols 在非空源文件却解析出 0 个符号时显式告警并记录指标。
+// 返回 true 表示应回退到兜底解析器（空文件不算异常，返回 false）。
+func (a *LSPAdapter) maybeReportEmptySymbols(path, text string, ir *parser.IRDocument) bool {
+	if strings.TrimSpace(text) == "" || len(ir.Classes) != 0 || len(ir.Methods) != 0 {
+		return false
+	}
+	hint := "LSP returned zero symbols; server may be missing project context"
+	if a.lang == "cpp" {
+		hint = "ensure compile_commands.json exists (cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON or bear -- make)"
+	}
+	a.logger.Warn("LSP returned zero symbols for non-empty file; falling back to tree-sitter",
+		"server", a.name, "lang", a.lang, "path", path, "hint", hint)
+	metrics.IncCounter("lsp_parse_empty_symbols_total", a.lang)
+	return true
 }
 
 // requestWithRetry 发送 JSON-RPC 请求，并在瞬时失败时按指数退避重试（复用 robust）。
@@ -527,8 +668,8 @@ func readLSPFileContent(p string) string {
 
 // symbolInfo 对应 LSP SymbolInformation 结构。
 type symbolInfo struct {
-	Name     string     `json:"name"`
-	Kind     int        `json:"kind"`
+	Name     string `json:"name"`
+	Kind     int    `json:"kind"`
 	Location struct {
 		URI   string `json:"uri"`
 		Range struct {
@@ -565,123 +706,353 @@ type documentRange struct {
 	} `json:"end"`
 }
 
+// joinFQN 拼接容器限定名；容器为空时返回裸名（避免产生 ".Foo" 这样的前导点）。
+func joinFQN(container, name string) string {
+	if container == "" {
+		return name
+	}
+	return container + "." + name
+}
+
+// splitMemberName 拆分 LSP 常见的成员名形态：
+//   - Go/gopls: "(*Calculator).Add"
+//   - Java/C++: "(Calculator).Add"
+//
+// 无接收者前缀时返回 ("", name)。
+func splitMemberName(name string) (container, member string) {
+	if !strings.HasPrefix(name, "(") {
+		return "", name
+	}
+	i := strings.Index(name, ")")
+	if i <= 0 {
+		return "", name
+	}
+	inner := strings.TrimSpace(name[1:i])
+	member = strings.TrimPrefix(strings.TrimSpace(name[i+1:]), ".")
+	// 兼容 "c *Calculator" 这种带变量名的接收者。
+	if k := strings.LastIndex(inner, " "); k >= 0 {
+		inner = inner[k+1:]
+	}
+	inner = strings.TrimPrefix(inner, "*")
+	return inner, member
+}
+
+// memberIdentity 归一化容器与方法名：优先使用服务器给出的 containerName，
+// 否则从 "(*Type).Method" 形态的名称中还原容器（gopls 常只给后者）。
+func memberIdentity(containerName, name string) (string, string) {
+	if c, m := splitMemberName(name); c != "" {
+		return c, m
+	}
+	return containerName, name
+}
+
+// isMethodKind 判断 LSP SymbolKind 是否方法/函数/构造函数。
+func isMethodKind(kind int) bool {
+	switch kind {
+	case 6, 9, 12:
+		return true
+	}
+	return false
+}
+
 // addSymbolInfo 将 SymbolInformation 添加到 IRDocument。
 func (a *LSPAdapter) addSymbolInfo(ir *parser.IRDocument, sym symbolInfo) *parser.IRDocument {
-	// LSP SymbolKind（部分）：5=Class, 6=Method, 9=Constructor, 11=Field,
-	// 12=Function, 23=Struct, 24=Interface。
-	// 注意：Go 的 struct/interface/func 分别为 23/24/12，原实现仅映射 5/6 会漏掉 Go 符号。
+	// LSP SymbolKind（规范）：5=Class, 6=Method, 9=Constructor, 10=Enum,
+	// 11=Interface, 12=Function, 23=Struct。
+	// 旧实现把 Constructor(9) 当类、把 Interface(11) 漏掉、把 Event(24) 误当接口。
+	container, name := memberIdentity(sym.ContainerName, sym.Name)
+	fullName := joinFQN(container, name)
 	switch sym.Kind {
-	case 5, 9: // Class, Constructor
+	case 5:
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      sym.Name,
-			FullName:  sym.ContainerName + "." + sym.Name,
-			Type:      "CLASS",
+			Name: name, FullName: fullName, Type: "CLASS",
 			StartLine: sym.Location.Range.Start.Line + 1,
 			StartCol:  sym.Location.Range.Start.Character + 1,
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
-	case 10: // Enum
+	case 10:
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      sym.Name,
-			FullName:  sym.ContainerName + "." + sym.Name,
-			Type:      "ENUM",
+			Name: name, FullName: fullName, Type: "ENUM",
 			StartLine: sym.Location.Range.Start.Line + 1,
 			StartCol:  sym.Location.Range.Start.Character + 1,
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
-	case 23: // Struct
+	case 11:
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      sym.Name,
-			FullName:  sym.ContainerName + "." + sym.Name,
-			Type:      "STRUCT",
+			Name: name, FullName: fullName, Type: "INTERFACE",
 			StartLine: sym.Location.Range.Start.Line + 1,
 			StartCol:  sym.Location.Range.Start.Character + 1,
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
-	case 24: // Interface
+	case 23:
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      sym.Name,
-			FullName:  sym.ContainerName + "." + sym.Name,
-			Type:      "INTERFACE",
+			Name: name, FullName: fullName, Type: "STRUCT",
 			StartLine: sym.Location.Range.Start.Line + 1,
 			StartCol:  sym.Location.Range.Start.Character + 1,
 			EndLine:   sym.Location.Range.End.Line + 1,
 			EndCol:    sym.Location.Range.End.Character + 1,
 		})
-	case 6, 12: // Method, Function
+	case 6, 9, 12:
 		ir.Methods = append(ir.Methods, parser.MethodIR{
-			Name:      sym.Name,
-			ClassFQN:  sym.ContainerName,
-			StartLine: sym.Location.Range.Start.Line + 1,
-			StartCol:  sym.Location.Range.Start.Character + 1,
-			EndLine:   sym.Location.Range.End.Line + 1,
-			EndCol:    sym.Location.Range.End.Character + 1,
+			Name:          name,
+			ClassFQN:      container,
+			IsConstructor: sym.Kind == 9,
+			StartLine:     sym.Location.Range.Start.Line + 1,
+			StartCol:      sym.Location.Range.Start.Character + 1,
+			EndLine:       sym.Location.Range.End.Line + 1,
+			EndCol:        sym.Location.Range.End.Character + 1,
 		})
 	}
 	return ir
 }
 
 // addDocumentSymbol 将 DocumentSymbol 递归添加到 IRDocument。
-func (a *LSPAdapter) addDocumentSymbol(ir *parser.IRDocument, ds documentSymbol) *parser.IRDocument {
+// container 为父容器限定名（顶层为空），逐层拼接后分别写入
+// ClassIR.FullName 与 MethodIR.ClassFQN——这是方法能入库、调用边能对齐的前提。
+func (a *LSPAdapter) addDocumentSymbol(ir *parser.IRDocument, ds documentSymbol, container string) *parser.IRDocument {
+	// gopls 的分层 documentSymbol 方法名仍带接收者前缀（如 "(*Calculator).Add"），
+	// 统一还原为容器 + 裸方法名，保证入库 FQN 与调用边对齐。
+	container, name := memberIdentity(container, ds.Name)
+	fullName := joinFQN(container, name)
 	switch ds.Kind {
-	case 5, 9: // Class, Constructor
+	case 5: // Class
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      ds.Name,
-			FullName:  ds.Name,
-			Type:      "CLASS",
+			Name: name, FullName: fullName, Type: "CLASS",
 			StartLine: ds.Range.Start.Line + 1,
 			StartCol:  ds.Range.Start.Character + 1,
 			EndLine:   ds.Range.End.Line + 1,
 			EndCol:    ds.Range.End.Character + 1,
 		})
+		container = fullName
 	case 10: // Enum
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      ds.Name,
-			FullName:  ds.Name,
-			Type:      "ENUM",
+			Name: name, FullName: fullName, Type: "ENUM",
 			StartLine: ds.Range.Start.Line + 1,
 			StartCol:  ds.Range.Start.Character + 1,
 			EndLine:   ds.Range.End.Line + 1,
 			EndCol:    ds.Range.End.Character + 1,
 		})
+		container = fullName
+	case 11: // Interface
+		ir.Classes = append(ir.Classes, parser.ClassIR{
+			Name: name, FullName: fullName, Type: "INTERFACE",
+			StartLine: ds.Range.Start.Line + 1,
+			StartCol:  ds.Range.Start.Character + 1,
+			EndLine:   ds.Range.End.Line + 1,
+			EndCol:    ds.Range.End.Character + 1,
+		})
+		container = fullName
 	case 23: // Struct
 		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      ds.Name,
-			FullName:  ds.Name,
-			Type:      "STRUCT",
+			Name: name, FullName: fullName, Type: "STRUCT",
 			StartLine: ds.Range.Start.Line + 1,
 			StartCol:  ds.Range.Start.Character + 1,
 			EndLine:   ds.Range.End.Line + 1,
 			EndCol:    ds.Range.End.Character + 1,
 		})
-	case 24: // Interface
-		ir.Classes = append(ir.Classes, parser.ClassIR{
-			Name:      ds.Name,
-			FullName:  ds.Name,
-			Type:      "INTERFACE",
-			StartLine: ds.Range.Start.Line + 1,
-			StartCol:  ds.Range.Start.Character + 1,
-			EndLine:   ds.Range.End.Line + 1,
-			EndCol:    ds.Range.End.Character + 1,
-		})
-	case 6, 12: // Method, Function
+		container = fullName
+	case 6, 9, 12: // Method / Constructor / Function
 		ir.Methods = append(ir.Methods, parser.MethodIR{
-			Name:      ds.Name,
-			StartLine: ds.Range.Start.Line + 1,
-			StartCol:  ds.Range.Start.Character + 1,
-			EndLine:   ds.Range.End.Line + 1,
-			EndCol:    ds.Range.End.Character + 1,
+			Name:          name,
+			ClassFQN:      container,
+			IsConstructor: ds.Kind == 9,
+			StartLine:     ds.Range.Start.Line + 1,
+			StartCol:      ds.Range.Start.Character + 1,
+			EndLine:       ds.Range.End.Line + 1,
+			EndCol:        ds.Range.End.Character + 1,
 		})
 	}
 
-	// 递归处理子符号
+	// 递归处理子符号：类用新容器，方法沿用当前容器（嵌套函数仍归属同一类）。
 	for _, child := range ds.Children {
-		ir = a.addDocumentSymbol(ir, child)
+		ir = a.addDocumentSymbol(ir, child, container)
 	}
 	return ir
+}
+
+// callHierarchyItem 对应 LSP CallHierarchyItem。
+type callHierarchyItem struct {
+	Name           string        `json:"name"`
+	Kind           int           `json:"kind"`
+	Detail         string        `json:"detail,omitempty"`
+	URI            string        `json:"uri"`
+	Range          documentRange `json:"range"`
+	SelectionRange documentRange `json:"selectionRange"`
+}
+
+// callHierarchyOutgoingCall 对应 LSP CallHierarchyOutgoingCall。
+type callHierarchyOutgoingCall struct {
+	To         callHierarchyItem `json:"to"`
+	FromRanges []documentRange   `json:"fromRanges"`
+}
+
+// supportsCallHierarchy 判断 initialize 响应是否声明 callHierarchyProvider。
+func supportsCallHierarchy(initResult json.RawMessage) bool {
+	var res struct {
+		Capabilities struct {
+			CallHierarchyProvider json.RawMessage `json:"callHierarchyProvider"`
+		} `json:"capabilities"`
+	}
+	if len(initResult) == 0 || json.Unmarshal(initResult, &res) != nil {
+		return false
+	}
+	v := strings.TrimSpace(string(res.Capabilities.CallHierarchyProvider))
+	return v != "" && v != "null" && v != "false"
+}
+
+// collectCalls 通过 callHierarchy 抽取方法调用边（尽力而为）。
+func (a *LSPAdapter) collectCalls(ctx context.Context, uri string, sites []methodSite, ir *parser.IRDocument) {
+	if len(sites) == 0 {
+		return
+	}
+	a.mu.Lock()
+	supported := a.callsSupported
+	a.mu.Unlock()
+	if !supported {
+		return
+	}
+	if len(sites) > maxCallHierarchyMethods {
+		a.logger.Debug("call hierarchy method cap reached; remaining methods skipped",
+			"server", a.name, "total", len(sites), "cap", maxCallHierarchyMethods)
+		sites = sites[:maxCallHierarchyMethods]
+	}
+
+	// 同文件方法名 → FQN：调用边优先落到本文件的容器限定名。
+	local := make(map[string]string, len(ir.Methods))
+	for _, m := range ir.Methods {
+		if _, ok := local[m.Name]; !ok {
+			local[m.Name] = joinFQN(m.ClassFQN, m.Name)
+		}
+	}
+
+	seen := make(map[string]struct{})
+	for _, site := range sites {
+		items, err := a.prepareCallHierarchy(ctx, uri, site)
+		if err != nil {
+			metrics.IncCounter("lsp_parse_errors_total", "call_hierarchy")
+			continue
+		}
+		for _, item := range items {
+			calls, err := a.outgoingCalls(ctx, item)
+			if err != nil {
+				metrics.IncCounter("lsp_parse_errors_total", "call_hierarchy")
+				continue
+			}
+			for _, c := range calls {
+				cContainer, cName := memberIdentity("", c.To.Name)
+				callee := local[cName]
+				if callee == "" {
+					if cContainer != "" {
+						callee = joinFQN(cContainer, cName)
+					} else {
+						callee = qualifiedCallName(cName, c.To.Detail)
+					}
+				}
+				if callee == "" {
+					continue
+				}
+				key := site.fqn + "->" + callee
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				line := 0
+				if len(c.FromRanges) > 0 {
+					line = c.FromRanges[0].Start.Line + 1
+				}
+				ir.Calls = append(ir.Calls, parser.CallIR{
+					CallerFQN:  site.fqn,
+					CalleeFQN:  callee,
+					CallType:   "direct",
+					LineNumber: line,
+				})
+			}
+		}
+	}
+	if len(ir.Calls) > 0 {
+		metrics.IncCounter("lsp_calls_total", a.name)
+	}
+}
+
+func (a *LSPAdapter) prepareCallHierarchy(ctx context.Context, uri string, site methodSite) ([]callHierarchyItem, error) {
+	raw, err := a.sendRequest(ctx, "textDocument/prepareCallHierarchy", map[string]any{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": site.line, "character": site.char},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var items []callHierarchyItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (a *LSPAdapter) outgoingCalls(ctx context.Context, item callHierarchyItem) ([]callHierarchyOutgoingCall, error) {
+	raw, err := a.sendRequest(ctx, "callHierarchy/outgoingCalls", map[string]any{"item": item})
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var calls []callHierarchyOutgoingCall
+	if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, err
+	}
+	return calls, nil
+}
+
+// qualifiedCallName 在无法从本文件方法表解析 callee 时，尝试从 detail 推导容器限定名。
+// 支持 Go `func (r *Type) Name(...)` 与 C++ `Type::Name` 两种常见形态。
+func qualifiedCallName(name, detail string) string {
+	if name == "" {
+		return ""
+	}
+	if i := strings.Index(detail, "func ("); i >= 0 {
+		rest := detail[i+len("func ("):]
+		if j := strings.Index(rest, ")"); j > 0 {
+			fields := strings.Fields(strings.TrimSpace(rest[:j]))
+			if len(fields) > 0 {
+				typ := strings.TrimPrefix(fields[len(fields)-1], "*")
+				if k := strings.LastIndex(typ, "."); k >= 0 {
+					typ = typ[k+1:]
+				}
+				if typ != "" {
+					return typ + "." + name
+				}
+			}
+		}
+	}
+	if i := strings.LastIndex(detail, "::"); i > 0 {
+		prefix := detail[:i]
+		if k := strings.LastIndexAny(prefix, " \t("); k >= 0 {
+			prefix = prefix[k+1:]
+		}
+		if prefix != "" {
+			return prefix + "." + name
+		}
+	}
+	return name
+}
+
+// writeNotification 向指定 writer 写一条 JSON-RPC 通知（无 id）。
+// 与 sendNotification 的区别：不依赖适配器当前状态，供 Close 在清空字段后使用。
+func writeNotification(w io.Writer, method string, params any) {
+	req := jsonRPCRequest{JSONRPC: "2.0", Method: method, Params: params}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
+	_, _ = w.Write([]byte(header + string(data)))
 }
 
 // sendRequest 发送 JSON-RPC 请求并等待响应。
@@ -758,7 +1129,8 @@ func (a *LSPAdapter) sendNotification(method string, params any) {
 // readResponses 异步读取 LSP 标准输出并分发响应。
 //
 // LSP 协议使用 HTTP 风格的头格式：
-//   Content-Length: <N>\r\n\r\n<JSON BODY (N bytes)>
+//
+//	Content-Length: <N>\r\n\r\n<JSON BODY (N bytes)>
 //
 // JSON 体可能包含换行符（如 pretty-printed JSON），
 // 因此必须按字节读取 Content-Length 指定的长度，而非逐行读取。
@@ -768,14 +1140,16 @@ func (a *LSPAdapter) sendNotification(method string, params any) {
 //   - 支持多行头（Content-Type 等额外头被忽略但不破坏协议解析）
 //   - 退出时自动关闭 aliveCheck 通道并置 alive=false
 func (a *LSPAdapter) readResponses() {
+	// 捕获本次运行的 aliveCheck：Init 重试会替换该字段，若退出时读字段可能误关新通道。
+	a.mu.Lock()
+	aliveCh := a.aliveCheck
+	a.mu.Unlock()
 	defer func() {
-		if r := recover(); r != nil {
-			// 记录 panic 但不崩溃，让编排层通过 IsAlive() 检测到异常
-		}
+		_ = recover() // 记录 panic 但不崩溃，让编排层通过 IsAlive() 检测到异常
 		a.mu.Lock()
 		a.alive = false
 		a.mu.Unlock()
-		close(a.aliveCheck)
+		close(aliveCh)
 	}()
 
 	reader := bufio.NewReader(a.stdout)

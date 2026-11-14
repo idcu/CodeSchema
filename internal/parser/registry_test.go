@@ -11,10 +11,10 @@ type mockAdapter struct {
 	supports map[string]bool
 }
 
-func (m *mockAdapter) Name() string                               { return m.name }
-func (m *mockAdapter) Supports(lang string) bool                   { return m.supports[lang] }
+func (m *mockAdapter) Name() string                                          { return m.name }
+func (m *mockAdapter) Supports(lang string) bool                             { return m.supports[lang] }
 func (m *mockAdapter) Init(ctx context.Context, config map[string]any) error { return nil }
-func (m *mockAdapter) Close() error                               { return nil }
+func (m *mockAdapter) Close() error                                          { return nil }
 func (m *mockAdapter) Parse(ctx context.Context, path string) (*IRDocument, error) {
 	return &IRDocument{Source: m.name}, nil
 }
@@ -23,15 +23,15 @@ func TestRegistry_RegisterAndSelect(t *testing.T) {
 	r := NewRegistry()
 
 	adapterGo := &mockAdapter{
-		name: "gopls",
+		name:     "gopls",
 		supports: map[string]bool{"go": true},
 	}
 	adapterJava := &mockAdapter{
-		name: "jdtls",
+		name:     "jdtls",
 		supports: map[string]bool{"java": true},
 	}
 	adapterGeneric := &mockAdapter{
-		name: "treesitter",
+		name:     "treesitter",
 		supports: map[string]bool{"go": true, "java": true, "py": true},
 	}
 
@@ -122,7 +122,7 @@ func TestBatchParser(t *testing.T) {
 	r := NewRegistry()
 
 	batch := &mockBatchParser{
-		name: "scip",
+		name:     "scip",
 		supports: map[string]bool{"go": true},
 	}
 	r.Register(batch)
@@ -153,16 +153,49 @@ func TestBatchParser(t *testing.T) {
 	}
 }
 
+// closableAdapter 记录 Close 调用次数，验证 Registry.Close 会释放已注册适配器。
+type closableAdapter struct {
+	mockAdapter
+	closed int
+}
+
+func (c *closableAdapter) Close() error {
+	c.closed++
+	return nil
+}
+
+// TestRegistry_Close_ClosesRegisteredAdapters 验证 Registry.Close 逐个关闭适配器
+// （LSP 子进程 / SCIP 索引句柄等），避免长驻进程产生孤儿。
+func TestRegistry_Close_ClosesRegisteredAdapters(t *testing.T) {
+	r := NewRegistry()
+	a := &closableAdapter{mockAdapter: mockAdapter{name: "gopls", supports: map[string]bool{"go": true}}}
+	b := &closableAdapter{mockAdapter: mockAdapter{name: "tree-sitter", supports: map[string]bool{"go": true}}}
+	r.Register(a)
+	r.Register(b)
+
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if a.closed != 1 || b.closed != 1 {
+		t.Fatalf("expected each adapter closed once, got a=%d b=%d", a.closed, b.closed)
+	}
+	// 幂等：再次 Close 不重复释放。
+	_ = r.Close()
+	if a.closed != 1 || b.closed != 1 {
+		t.Fatalf("expected idempotent Close, got a=%d b=%d", a.closed, b.closed)
+	}
+}
+
 // mockBatchParser 实现 BatchParser 接口的测试适配器。
 type mockBatchParser struct {
 	name     string
 	supports map[string]bool
 }
 
-func (m *mockBatchParser) Name() string                               { return m.name }
-func (m *mockBatchParser) Supports(lang string) bool                   { return m.supports[lang] }
+func (m *mockBatchParser) Name() string                                          { return m.name }
+func (m *mockBatchParser) Supports(lang string) bool                             { return m.supports[lang] }
 func (m *mockBatchParser) Init(ctx context.Context, config map[string]any) error { return nil }
-func (m *mockBatchParser) Close() error                               { return nil }
+func (m *mockBatchParser) Close() error                                          { return nil }
 func (m *mockBatchParser) Parse(ctx context.Context, path string) (*IRDocument, error) {
 	return &IRDocument{Source: m.name, FilePath: path}, nil
 }

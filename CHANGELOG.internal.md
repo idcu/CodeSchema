@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 176: fix(parser): LSP 符号层级/调用边/空结果回退/进程回收（P0-2）
+
+- 背景：LSP 路径「高精度」名不副实——`documentSymbol` 被按 `SymbolInformation` 反序列化（空字段也算成功），容器名丢失导致 `MethodIR.ClassFQN` 为空、方法入库被丢弃；从不抽取调用边；非空文件拿到 0 符号时静默返回空 IR 并写 hash（后续扫描永久跳过）；`Close` 只 `Kill` 不 `Wait`，遗留僵尸；`Registry` 无 `Close`，长驻 LSP 子进程无人释放。
+- 动作：
+  - initialize 声明 `hierarchicalDocumentSymbolSupport`；按负载形状（`range` vs `location`）选择 `DocumentSymbol[]` / `SymbolInformation[]` 解析，容器名逐层传递为 `ClassIR.FullName` / `MethodIR.ClassFQN`；`(*Type).Method` 与 `containerName` 两种形态统一归一化。
+  - 服务器声明 `callHierarchyProvider` 时，按方法 `selectionRange` 执行 `prepareCallHierarchy` + `outgoingCalls` 产出 `CallIR`；同文件 callee 优先映射本地 FQN，跨文件回退 detail 接收者解析；单文件上限 64 个方法。
+  - 非空源文件 0 符号 → `ErrSourceUnavailable`，触发 tree-sitter 回退；空文件不告警。
+  - `Close` 改为 shutdown（请求）→ exit（通知）→ 关 stdin → `cmd.Wait()`（2s 超时强杀），可重复调用；初始化失败路径 Kill+Wait+清 pending。
+  - `parser.Registry.Close()` 统一关闭适配器；`ScanRepository` defer、watch 停止回调与启动失败路径调用。
+- 负控（先红后绿）：
+  - `TestLSPAdapter_Parse_NestedContainersSetClassFQN`：修复前 `Outer.FullName=".Outer"`、`Inner.FullName=""`、所有 `ClassFQN=""`。
+  - `TestLSPAdapter_Parse_ExtractsCallEdges`：修复前 `Calls=0`。
+  - `TestLSPAdapter_Parse_EmptySymbolsReturnsSourceUnavailable`：修复前返回 `nil` error + 空 IR。
+  - `TestLSPAdapter_Close_ReapsChildProcess`：修复前 `cmd.ProcessState == nil`（未 Wait）。
+  - `TestRegistry_Close_ClosesRegisteredAdapters`：修复前无 `Registry.Close`（编译失败）。
+- 验证：`go build ./...` / `go vet ./...`（含 pg/redis/treesitter tags）/ `make test` 全绿；`go test -race` 两包通过。
+  - 真实 gopls（`TestLSPAdapter_RealGopls`，声明 `Add` 调用 `Sub`）：`classes=1 methods=2 calls=1`，两条方法 `ClassFQN=Calculator`；修复前方法名 `(*Calculator).Add` 且 `ClassFQN` 空。
+  - `make counts-check` 通过（LoC 58017 ≈ 58.0k）。
+
 ### Commit 175: fix(mcp): 传输层符合 MCP 2024-11-05（stdio 逐行 JSON / SSE sessionId / 通知不回包）（P2-20）
 
 - 背景：三处不合规——stdio 用 LSP 式 `Content-Length` 帧，标准 MCP 客户端读不到响应；SSE 的 `endpoint` 事件不带 `sessionId`，`POST /message` 直接 200 内联回包，响应无法路由到流；通知也被回包（JSON-RPC 禁止），解析失败的 `id` 被伪造成 `0`；`tools/call` 使用 `context.Background()`，客户端断开后无法取消。
