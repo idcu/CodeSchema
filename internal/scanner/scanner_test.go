@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/idcu/codeschema/internal/parser"
+	adapter "github.com/idcu/codeschema/internal/parser/adapter/treesitter"
 	"github.com/idcu/codeschema/internal/store"
 )
 
@@ -156,6 +157,44 @@ func TestScanAll(t *testing.T) {
 				t.Errorf("%s should be indexed", name)
 			}
 		}
+	}
+}
+
+func TestScanAll_GoCrossFileReceiverMethodIndexed(t *testing.T) {
+	dir := t.TempDir()
+	// Go 允许在同一包的不同文件中为同一类型定义方法：类型声明在 service.go，
+	// receiver 方法在 service_link.go。方法必须进入索引（不能因类不在本文件而丢弃）。
+	os.WriteFile(filepath.Join(dir, "service.go"), []byte("package svc\n\ntype Service struct{}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "service_link.go"), []byte("package svc\n\nfunc (s *Service) FindLinks() {}\n"), 0644)
+
+	reg := parser.NewRegistry()
+	reg.Register(adapter.NewTreeSitterAdapter())
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if err := NewScanner(st, reg, 2).ScanAll(context.Background(), dir); err != nil {
+		t.Fatalf("ScanAll: %v", err)
+	}
+
+	ctx := context.Background()
+	var found []string
+	files, _ := st.GetAllFiles(ctx)
+	for _, f := range files {
+		classes, _ := st.GetClassesByFileID(ctx, f.ID)
+		for _, cls := range classes {
+			methods, _ := st.GetMethodsByClassID(ctx, cls.ID)
+			for _, m := range methods {
+				if m.FullName == "Service.FindLinks" {
+					found = append(found, f.AbsolutePath)
+				}
+			}
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("Service.FindLinks indexed %d times, want 1 (files=%v)", len(found), found)
 	}
 }
 

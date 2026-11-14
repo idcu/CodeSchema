@@ -6,6 +6,30 @@
 
 ## 提交记录
 
+### Commit 184: fix(parser/scanner): 跨文件接收者方法入库（残余 FN 根因）
+
+- **根因更正**：Commit 183 把残余 FN 归为「调用解析 + FQN 归一」。实测推翻该结论——
+  IR 里调用边确实存在（`service.TestFindTestLinks_Naming -> svc.FindTestLinks`、
+  `server.TestMCPServer_Stdio_ToolsList -> srv.serveStdio`），但 store 中**没有任何短名为
+  `FindTestLinks` / `serveStdio` 的方法**。
+- 真根因（单点，两个症状同源）：Go 允许类型与方法分属同包不同文件。解析器把
+  `MethodIR.ClassFQN` 置为接收者类型（`Service`/`MCPServer`），但该类不在方法所在文件的
+  `Classes` 中；三后端按「本文件 ClassFQN → classID」映射入库，未命中即 `continue` 丢弃。
+  于是 `Service.FindTestLinks`、`MCPServer.serveStdio` 从未进入索引，任何策略都查不到。
+- 动作：新增 `parser.EnsureMethodOwners`，scanner 在 `UpsertIR` 前为未命中的 `ClassFQN`
+  补最小类记录（`FullName=ClassFQN`，`Type=CLASS`），方法 FQN 不变。两条解析路径
+  （默认正则 / `-tags treesitter`）共用，三后端无需改动。
+- 负控（先红后绿）：`TestScanAll_GoCrossFileReceiverMethodIndexed`——`service.go` 声明
+  `type Service struct{}`、`service_link.go` 定义 `func (s *Service) FindLinks`。
+  修复前 `Service.FindLinks indexed 0 times`（红）；修复后 1 次（绿）。
+- 实测（本仓 FileStore 全量扫描，`FindTestLinks` 目标）：
+  - `Service.FindTestLinks`：0 → 40 条（修复前 0 条；调用边一直在）；
+  - `MCPServer.serveStdio`：0 → 5 条；
+  - 短名索引确认唯一：`FindTestLinks -> [Service.FindTestLinks]`、`serveStdio -> [MCPServer.serveStdio]`。
+- 文档：`docs/01-开发者/解析适配器.md` 新增「跨文件接收者方法入库」；`docs/README.md`、
+  `docs/01-开发者/架构与模块.md` 同步 `非 vendor LoC ≈ 59.5k`；`make counts-update` 刷新基线。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test` 全绿。
+
 ### Commit 183: feat(service): call_graph 策略补齐行为型/跨类测试召回（R5-11 / S-2e）
 
 - 根因归属（四个环节逐一核对）：

@@ -160,6 +160,9 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	if ir.ByteSize == 0 {
 		ir.ByteSize = statSize(path)
 	}
+	// 补齐跨文件接收者方法的归属类（Go 允许类型与方法分属同包不同文件；
+	// 缺失归属类会被三后端静默丢弃，方法对所有查询不可见）。
+	parser.EnsureMethodOwners(ir)
 
 	// 6. 入库
 	if err := s.store.UpsertIR(ctx, ir); err != nil {

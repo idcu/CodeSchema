@@ -44,6 +44,7 @@ R5-8,E,P1,Java *Tests后缀口径统一,S-2b,R5-4,1,OwnerControllerTests映射�
 R5-9,E,P1,基准采样口径（真值不裁剪）,S-2c,R5-4,1,采样只收缩评估生产集合；真值取全量pair；同一输入P/R/F1可复现；不放宽min-confidence,done,必做
 R5-10,E,P1,命名匹配词边界+JUnit描述型前缀,S-2d,R5-4,1.5,Analyze不命中Analyzer；processCreationFormSuccess命中processCreationForm；Go包级helper不参与；既有TestFoo/test_foo匹配不变,done,必做
 R5-11,E,P0,候选集剪枝：call_graph策略,S-2e,R5-4,2,行为型测试名与跨类测试可命中；callee变量形态/带包名caller归一；Go R≥0.95、Java R≥0.95且P不降,done,必做
+R5-12,E,P0,跨文件接收者方法入库,S-2f,R5-11,1.5,类型与方法分局同包不同文件时方法仍入库且FQN不变；Service.FindTestLinks/serveStdio可查；三后端与两解析变体一致,done,必做
 R6-1,F,P1,预算化上下文接口,S-3,R1-3;R2-4;R5-4,5,budget_tokens生效；trim_reason/filtered/included_symbols存在；同输入同输出；预算过小显式truncated,todo,按需
 R6-2,F,P2,AI预算按请求重置+phase竞态,P2-19,R0-1,1.5,长驻服务按请求重置；race通过；预算不跨请求泄漏,todo,按需
 R6-3,F,P2,向量模型校验/删除隔离/ONNX生命周期,P2-16;P2-17,R0-1,2,维度或标识不匹配拒绝加载；删除后不可检索；Close后安全,todo,按需

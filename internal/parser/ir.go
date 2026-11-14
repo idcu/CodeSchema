@@ -58,6 +58,51 @@ type ParamIR struct {
 	Annotation string
 }
 
+// EnsureMethodOwners 为「归属类不在本文件声明中」的方法补齐最小类记录。
+//
+// Go 允许在同一包的不同文件中为同一类型定义方法：类型声明在 a.go，
+// receiver 方法写在 b.go。IR 的 MethodIR.ClassFQN 指向接收者类型，
+// 但该类不在 b.go 的 Classes 里；三个存储后端都按「本文件 ClassFQN → classID」
+// 映射入库，未命中即静默丢弃（跨文件接收者方法对所有查询不可见）。
+//
+// 补一条最小类记录（FullName = ClassFQN，不改方法自身 FQN），入库后方法可被
+// 索引/调用图/测试关联检索。非跨文件场景（类与方法同文件）不受影响。
+func EnsureMethodOwners(doc *IRDocument) {
+	if doc == nil || len(doc.Methods) == 0 {
+		return
+	}
+	known := make(map[string]struct{}, len(doc.Classes))
+	for _, c := range doc.Classes {
+		known[c.FullName] = struct{}{}
+	}
+	for _, m := range doc.Methods {
+		if m.ClassFQN == "" {
+			continue
+		}
+		if _, ok := known[m.ClassFQN]; ok {
+			continue
+		}
+		known[m.ClassFQN] = struct{}{}
+		doc.Classes = append(doc.Classes, ClassIR{
+			Name:      lastFQNSegment(m.ClassFQN),
+			FullName:  m.ClassFQN,
+			Type:      "CLASS",
+			StartLine: m.StartLine,
+			EndLine:   m.EndLine,
+		})
+	}
+}
+
+// lastFQNSegment 返回 FQN 的最后一段（Service / org.foo.Bar → Service / Bar）。
+func lastFQNSegment(fqn string) string {
+	for i := len(fqn) - 1; i >= 0; i-- {
+		if fqn[i] == '.' || fqn[i] == '/' {
+			return fqn[i+1:]
+		}
+	}
+	return fqn
+}
+
 // FieldIR 表示变量解析结果（成员变量/局部变量）。
 // 归属二选一：ClassFQN 非空为成员变量，MethodFQN 非空为局部变量（MethodFQN 形如 ClassFQN.MethodName）。
 type FieldIR struct {
