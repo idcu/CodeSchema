@@ -2,7 +2,8 @@
 
 > 最后更新：2026-11-15（2026-11-14：追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5；
 > `/tests` `/affected` 规模修复前后对比见 §8.7；2026-11-15 补记人工真值闭合缺口，
-> 并完成 GOROOT `/affected` 的 same_tag 预计算修复，见 §8.7 末）
+> 并完成 GOROOT `/affected` 的 same_tag 预计算修复，见 §8.7 末；
+> 三处缓存的对抗性验证与 watcher 失效接线修复见 §8.8）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -151,8 +152,8 @@ P99 / max：
   `FindTestLinks` 的 `call_graph` 策略共享同一张图。
 - **失效钩子**：`InvalidateCallGraph()` 先递增代次再清空快照。接线点：
   `Service.BuildIndex`（全量重索引成功后）、`Service.InvalidateDerivedCaches`
-  （watcher 的 `OnIndex`/`OnDelete` 增量更新后，`runtime.StartWatchBackground` 与
-  `cmd/codeschema watch` 两条路径）。
+  （watcher 的 `OnIndex`/`OnDelete` 增量更新后，`(*Runtime).StartWatchBackground` 与
+  `cmd/codeschema watch` 两条路径；多租户接线见 §8.8）。
 - **并发正确性**：建图由 `callGraphBuildMu` 串行化并双检，8 个并发请求只做一次全量读盘；
   图只在完整构建后原子发布，读者拿不到半成品。建图期间若代次变化（索引正在更新），
   重试一次，仍不稳定则返回本次结果且**不写缓存**——宁可不缓存，不发布跨代脏图。
@@ -506,6 +507,46 @@ CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after-opt \
   CODESCHEMA_TESTLINK_SAMPLES=5 CODESCHEMA_TESTLINK_WARMUP=1 \
   go test -count=1 -run '^TestTestLinkScale$/goroot' -v -timeout 1800s ./internal/scalebench
 ```
+
+### 8.8 三处缓存的对抗性验证（2026-11-15）
+
+验证对象：调用图缓存（按索引代次）、测试关联快照（代次 + 文件指纹）、Redis 按文件失效。
+
+| 场景 | 用例 | 结果 |
+|---|---|---|
+| 1 重索引/失效风暴中连续查询 | `TestBuildCallGraph_InvalidationStormNeverReturnsPartial`（analyzer） | 通过，未发现缺陷 |
+| 1 同上（测试关联快照） | `TestFindTestLinks_SnapshotRebuildUnderInvalidationStorm`（service） | 通过，未发现缺陷 |
+| 2 watcher 增量 ↔ 手动全量交替 | `TestWatchIncrementalUpdateInvalidatesRuntimeCaches`（runtime） | **先红后绿，修复 1 处缺陷** |
+| 3 多租户同时重索引 | `TestRuntimeCachesIsolatedAcrossTenants`（runtime） | 通过，未发现缺陷 |
+| 4 Redis 不可用 / 写失败 | `TestGetContext_CacheReadErrorFallsBackToStore`（service）、`TestReadFailureSurfacesError` / `TestFailedInvalidationKeepsStaleKeyUntilTTL`（redis）、`TestApplyRedisCache_UnreachableFallsBackToBaseStore`（cmd） | 通过；陈旧窗口为既有取舍（TTL 兜底），未改 |
+
+**缺陷（场景 2）：多租户 watcher 的失效打到了另一个 Service 实例。**
+`tenant.buildTenant` 把 `run.Svc` 交给 HTTP 查询，但 `runtime.StartWatchBackground` 自建
+`service.Service`，`OnIndex`/`OnDelete` 调的是这个临时实例的 `InvalidateDerivedCaches`。
+调用图缓存没有指纹自愈，watcher 增量更新后 `/impact`、`/call-graph` 会一直返回上一代图，
+直到下一次全量重建；启用查询缓存时同样不会失效。测试关联快照有文件指纹自愈，故不受影响。
+
+- 先红 `c259633`：预热 `run.Analyzer` 调用图缓存 → 改写文件 → 主存储已出现新边，
+  查询侧 3 s 内仍是旧图。
+- 修复：`StartWatchBackground` 改为 `(*Runtime)` 方法，回调失效 `r.Svc`；
+  `tenant.buildTenant` 改调 `run.StartWatchBackground`。
+- 修复后同一用例绿：watcher 更新与手动 `BuildIndex` 交替两轮，查询侧均立即看到新边、旧边消失。
+
+**场景 4 的明确结论**：
+
+- Redis 读失败 → 缓存层返回错误（`GetClass`/`GetMethod`）或未命中（`ClassPath`），
+  `resolveSymbolLocation` 回退主存储全表扫描，`/context` 结果与缓存健康时逐条一致；
+- Redis 装配期不可达 → `applyRedisCache` 回退基础存储，不把持续报错的包装层交给上层；
+- 写失败 → `SyncIR` 返回聚合错误（不静默），但**旧键会保留到 TTL 过期**；
+  这是包注释已声明的陈旧窗口，未做版本化改造。
+
+**相邻缺口（不在三处缓存范围，本轮未改）**：默认 poll watcher 不检测文件删除
+（`internal/fswatch/watcher.go` 只在 fsnotify 分支移除监听），且
+`IndexBuilder.BuildAndRemove` 只删检索文档、不删 Store 行，`scanner` 的 `onDelete`
+在 poll 模式下不可达；删除文件后 IR 与调用边仍留在索引里。
+
+门禁（串行）：`go build ./...`、`go vet ./...`、`go vet -tags 'pg redis' ./...`、
+`make fmt-check`、`make verify-tags`、`make counts-check`、`make test`、`make test-pg-redis` 全绿。
 
 ## 9. 复现
 

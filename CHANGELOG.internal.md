@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### 三处缓存对抗性验证（2026-11-15）：多租户 watcher 失效打错实例已修复
+
+- fix(runtime)：`StartWatchBackground` 由包级函数改为 `(*Runtime)` 方法。原实现自建
+  `service.Service`，多租户下 `tenant.buildTenant` 服务查询的是 `run.Svc`，watcher 的
+  `InvalidateDerivedCaches` 落在另一个实例上；调用图缓存无指纹自愈，增量更新后
+  `/impact`、`/call-graph` 会一直返回上一代图（查询缓存同理）。
+- 先红 `c259633`：`TestWatchIncrementalUpdateInvalidatesRuntimeCaches` 在主存储已出现
+  新调用边后，查询侧 3 s 内仍返回旧图。修复后 watcher 更新与手动 `BuildIndex` 交替两轮均绿。
+- 场景 1/3 守护用例（失效风暴下调用图完整、测试关联逐条不变、双租户并发重索引互不失效）
+  全部通过，未发现缺陷。
+- 场景 4：Redis 读失败时 `/context` 回退主存储且结果逐条一致；装配期不可达回退基础存储；
+  写失败时 `SyncIR` 返回聚合错误，但旧键保留到 TTL 过期（既有设计取舍，未改）。
+- 相邻缺口（未改，非缓存范围）：poll watcher 不检测删除，`BuildAndRemove` 只删检索文档
+  不删 Store 行，`onDelete` 在 poll 模式不可达。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.8。
+- 计数：非 vendor LoC 72,421 → 73,188（73.2k），`make counts-update` 同步基线。
+
 ### 测试关联 same_tag 热路径（2026-11-15）：预计算切词/标签，GOROOT `/affected` 3.45 s → 85 ms
 
 - perf(testlink)：`linkBySameTag` 不再对每个候选重新切词。快照上一次性预计算

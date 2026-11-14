@@ -106,7 +106,7 @@ func TestWatchIncrementalUpdateInvalidatesRuntimeCaches(t *testing.T) {
 		t.Fatalf("初始调用图缺少 helperA，用例前提不成立")
 	}
 
-	stop, err := StartWatchBackground(ctx, st, cfg, repoDir)
+	stop, err := run.StartWatchBackground(ctx, st, cfg, repoDir)
 	if err != nil {
 		t.Fatalf("StartWatchBackground: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestWatchIncrementalUpdateInvalidatesRuntimeCaches(t *testing.T) {
 	})
 	waitUntil(t, 3*time.Second, func() bool {
 		cg, err := run.Analyzer.BuildCallGraph(ctx)
-		return err == nil && callGraphHasSuffix(cg, "helperA")
+		return err == nil && callGraphHasSuffix(cg, "helperA") && !callGraphHasSuffix(cg, "helperB")
 	})
 }
 

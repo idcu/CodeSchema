@@ -389,7 +389,12 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 }
 
 // StartWatchBackground 后台启动该仓库的增量监听；返回的 stop 函数用于优雅停止。
-func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Config, root string) (func(), error) {
+//
+// 必须是 Runtime 的方法：增量更新后要失效的是**查询侧** Runtime.Svc 的派生缓存
+// （调用图 / 测试关联快照 / 查询缓存）。早期实现自建 service.Service 并在其上
+// 调用 InvalidateDerivedCaches，多租户下失效落在另一个实例上，run.Svc 会一直
+// 返回上一代调用图（见 runtime_watch_cache_test.go）。
+func (r *Runtime) StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Config, root string) (func(), error) {
 	reg := NewParserRegistry(ctx, cfg, root)
 	s := scanner.NewScanner(st, reg, cfg.Scanner.Workers)
 	s.SetLimits(int64(cfg.Scanner.FileSizeLimitMB)*1024*1024, cfg.Scanner.LineCountLimit)
@@ -411,16 +416,16 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
 			return err
 		}
-		// 索引变了，查询缓存与调用图缓存必须立即失效（B4 / 结构性问题 1）：
-		// 否则会短暂返回裁剪过的旧内容或上一代调用图。
-		svc.InvalidateDerivedCaches()
+		// 索引变了，查询侧的查询缓存、调用图缓存与测试关联快照必须立即失效
+		// （B4 / 结构性问题 1）：否则会短暂返回裁剪过的旧内容或上一代调用图。
+		r.Svc.InvalidateDerivedCaches()
 		return nil
 	})
 	s.SetOnDelete(func(ctx context.Context, filePath string) error {
 		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
 			return err
 		}
-		svc.InvalidateDerivedCaches()
+		r.Svc.InvalidateDerivedCaches()
 		return nil
 	})
 

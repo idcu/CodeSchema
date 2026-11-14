@@ -10,10 +10,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/store/redis"
 )
+
+// TestApplyRedisCache_UnreachableFallsBackToBaseStore 对抗性用例（场景 4）：
+// Redis 不可用时装配层必须回退基础存储，而不是把缓存包装层交给上层（后者会让
+// 所有读路径持续报错）。连接被拒绝是即时失败，不引入长超时。
+func TestApplyRedisCache_UnreachableFallsBackToBaseStore(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultConfig()
+	cfg.Storage.KV = "redis://127.0.0.1:1/0"
+
+	base := store.NewStore("file")
+	if err := base.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("open file store: %v", err)
+	}
+	defer base.Close()
+
+	got, err := applyRedisCache(ctx, cfg, base)
+	if err != nil {
+		t.Fatalf("缓存不可用时 applyRedisCache 不应返回错误: %v", err)
+	}
+	if got != base {
+		t.Fatalf("Redis 不可用时应回退基础存储，实际得到 %T", got)
+	}
+}
 
 // TestRedisCacheStore_ReindexInvalidatesRemovedEntities 活实例负控：
 // 生产包装层 redisCacheStore 在同一文件重索引后，必须让旧版本的类/方法键失效，

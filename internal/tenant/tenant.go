@@ -171,7 +171,7 @@ func (m *Manager) buildTenant(ctx context.Context, tgt tenantTarget) (*Tenant, e
 		ScanErr: scanErr,
 	}
 	if tgt.watch && tgt.cfg.Project.Root != "" {
-		stop, err := rt.StartWatchBackground(ctx, st, tgt.cfg, tgt.cfg.Project.Root)
+		stop, err := run.StartWatchBackground(ctx, st, tgt.cfg, tgt.cfg.Project.Root)
 		if err != nil {
 			log.Printf("tenant %q: watch failed (ignored): %v", tgt.id, err)
 		} else {
