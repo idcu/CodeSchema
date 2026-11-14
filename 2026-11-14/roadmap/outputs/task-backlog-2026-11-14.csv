@@ -41,6 +41,7 @@ R5-5,E,P3,非Go作用域/Elixir方法名,P3-8,R5-2,1.5,嵌套类与顶层函数�
 R5-6,E,P3,SCIP懒加载竞态,P3-6,R5-1,0.5,并发首次Parse无race；重复加载返回同一实例,todo,必做
 R5-7,E,P0,Go包级测试发现（Test/Benchmark/Example）,S-2a,R5-4,3,同目录*_test.go的PACKAGE容器进入naming候选并产生链接；GetAffected同源；类形态测试结果不变,done,必做
 R5-8,E,P1,Java *Tests后缀口径统一,S-2b,R5-4,1,OwnerControllerTests映射到OwnerController并产生naming链接；与isTestClass口径一致；包级可见性方法可解析；*Test/Test*不变,done,必做
+R5-9,E,P1,基准采样口径（真值不裁剪）,S-2c,R5-4,1,采样只收缩评估生产集合；真值取全量pair；同一输入P/R/F1可复现；不放宽min-confidence,done,必做
 R6-1,F,P1,预算化上下文接口,S-3,R1-3;R2-4;R5-4,5,budget_tokens生效；trim_reason/filtered/included_symbols存在；同输入同输出；预算过小显式truncated,todo,按需
 R6-2,F,P2,AI预算按请求重置+phase竞态,P2-19,R0-1,1.5,长驻服务按请求重置；race通过；预算不跨请求泄漏,todo,按需
 R6-3,F,P2,向量模型校验/删除隔离/ONNX生命周期,P2-16;P2-17,R0-1,2,维度或标识不匹配拒绝加载；删除后不可检索；Close后安全,todo,按需

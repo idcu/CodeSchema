@@ -159,7 +159,8 @@ func Run(ctx context.Context, repoPath string, opts Options) (*Report, error) {
 	}
 	defer cleanup()
 
-	report.TestLink, report.ProdsEvaluated, report.PredictedLinks = evaluate(ctx, svc, sampled, opts.MinConfidence)
+	truth, prods := prepareEvaluation(pairs, sampled)
+	report.TestLink, report.ProdsEvaluated, report.PredictedLinks = evaluate(ctx, svc, truth, prods, opts.MinConfidence)
 
 	// 调用图结构指标：解析率 = callee 能落到索引方法的边占比。
 	allCalls := append(append([]parser.CallIR{}, prodCalls...), testCalls...)
@@ -368,22 +369,35 @@ func samplePairs(pairs []Pair, max int) ([]Pair, bool) {
 	return out, true
 }
 
-// evaluate 对真值中的每个生产方法查询 FindTestLinks，计算微平均 P/R/F1。
-// 返回 PRF、评估的生产方法数、预测链接总数（用于区分「策略无输出」与「FQN 口径不一致」）。
-func evaluate(ctx context.Context, svc *service.Service, pairs []Pair, minConf int) (PRF, int, int) {
+// prepareEvaluation 返回「评估用真值」与「待评估生产方法」。
+//
+// 采样只用于缩小评估的生产方法集合，真值必须来自全部 pair：
+// 否则同一生产方法未被采样到的真实测试会被计成 FP，同时拉低 P 与 R
+// （基准口径缺陷，不是策略变差）。
+func prepareEvaluation(all, sampled []Pair) (map[string]map[string]struct{}, []string) {
 	truth := make(map[string]map[string]struct{})
-	for _, p := range pairs {
+	for _, p := range all {
 		if truth[p.Production] == nil {
 			truth[p.Production] = make(map[string]struct{})
 		}
 		truth[p.Production][p.Test] = struct{}{}
 	}
-	prods := make([]string, 0, len(truth))
-	for p := range truth {
-		prods = append(prods, p)
+	seen := make(map[string]struct{})
+	prods := make([]string, 0, len(sampled))
+	for _, p := range sampled {
+		if _, ok := seen[p.Production]; ok {
+			continue
+		}
+		seen[p.Production] = struct{}{}
+		prods = append(prods, p.Production)
 	}
 	sort.Strings(prods)
+	return truth, prods
+}
 
+// evaluate 对真值中的每个生产方法查询 FindTestLinks，计算微平均 P/R/F1。
+// 返回 PRF、评估的生产方法数、预测链接总数（用于区分「策略无输出」与「FQN 口径不一致」）。
+func evaluate(ctx context.Context, svc *service.Service, truth map[string]map[string]struct{}, prods []string, minConf int) (PRF, int, int) {
 	var out PRF
 	predicted := 0
 	for _, prod := range prods {

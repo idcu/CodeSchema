@@ -85,6 +85,28 @@ export class CalculatorTest {
 	return dir
 }
 
+// TestPrepareEvaluation_UsesAllPairsForSampledProds 负控：采样只收缩评估的
+// 生产方法集合，真值必须保留全部 pair；否则未被采样到的真实测试会被计为 FP。
+func TestPrepareEvaluation_UsesAllPairsForSampledProds(t *testing.T) {
+	all := []Pair{
+		{Production: "A.m", Test: "pkg.TestX"},
+		{Production: "A.m", Test: "pkg.TestY"},
+		{Production: "B.n", Test: "pkg.TestZ"},
+	}
+	sampled := []Pair{{Production: "A.m", Test: "pkg.TestX"}}
+
+	truth, prods := prepareEvaluation(all, sampled)
+	if len(prods) != 1 || prods[0] != "A.m" {
+		t.Fatalf("prods = %v, want [A.m]", prods)
+	}
+	if _, ok := truth["A.m"]["pkg.TestY"]; !ok {
+		t.Fatalf("truth[A.m] = %v, missing unsampled pair pkg.TestY", truth["A.m"])
+	}
+	if _, ok := truth["A.m"]["pkg.TestX"]; !ok {
+		t.Fatalf("truth[A.m] = %v, missing sampled pair pkg.TestX", truth["A.m"])
+	}
+}
+
 // TestRun_MultiLanguageFixtures 验证三种语言夹具都能产出真值 pair、非零 TP 与调用图指标。
 func TestRun_MultiLanguageFixtures(t *testing.T) {
 	ctx := context.Background()

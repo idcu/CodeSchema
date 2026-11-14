@@ -14,6 +14,8 @@
 - **指标**：对真值中的每个生产方法调用 `FindTestLinks`，把返回的 `TestMethod` 与真值集合比对，
   微平均 TP/FP/FN 与 Precision/Recall/F1；`PredictedLinks=0` 表示策略链**完全无输出**
   （区别于「有输出但 FQN 口径不一致」）。
+- **采样口径（R5-9 / S-2c）**：`--max-pairs` 只收缩「待评估生产方法集合」，真值始终取全量 pair。
+  否则同一生产方法未进入采样的真实测试会被计为 FP、其余真值被截断为 FN，P/R 同时失真。
 - **调用图**：`ResolutionRate = 能落到方法索引的 callee 边 / 全部调用边`。
 - **负控**：`TestAffectedNegativeControl_DeleteTest`——删除测试文件前后 `GetAffected` 必须
   从「含该测试」变为「不含」（通过）。

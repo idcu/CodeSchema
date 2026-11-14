@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 181: fix(bench): 采样只收缩评估生产集合，真值保留全量（R5-9 / S-2c）
+
+- 背景：`release-bench` 先 `samplePairs` 再构造真值，同一生产方法未进入采样的真实测试不在真值集合里 → 策略正确预测却被计为 FP；被采样生产方法的其余真值也一并缺失，FN 被低估。这是**测量口径缺陷**，不是策略变差，会让 P/R 同时失真。
+- 动作：新增 `prepareEvaluation(all, sampled)`，真值取全部 pair，采样只用于去重后的「待评估生产方法集合」；`evaluate` 改为接收 `truth map[string]map[string]struct{}` + `prods []string`。
+- 负控（先红后绿）：`TestPrepareEvaluation_UsesAllPairsForSampledProds`——临时把 `range all` 改为 `range sampled` 时 `truth[A.m]` 缺 `pkg.TestY`（红）；恢复后绿。
+- 实测（同一 `release-bench --repo code-schema --lang go`，min-confidence=60，策略代码零改动）：
+  - TP 34 → 130，FP 141 → 46，FN 158 → 1030。
+  - P 0.1943 → 0.7386，R 0.1771 → 0.1121，F1 0.1853 → 0.1947。
+  - R 下降是分母修正的结果（FN 不再被采样截断），旧数字与新数字**不可直接比较**；本笔不放宽任何阈值。
+- 验证：`go test ./internal/releasebench/ -run 'TestPrepareEvaluation|TestRun_MultiLanguage'` 通过；`make counts-check` 通过。
+
 ### Commit 180: fix(service/parser): Java `*Tests` 口径统一 + 包级可见性方法解析（R5-8 / S-2b）
 
 - 背景：公开基准 S-2 中 petclinic 的测试类统一命名 `OwnerControllerTests`，`matchTestClass` 只处理 `Test` 前后缀（`isTestClass` 已支持 `Tests`），两处口径不一致导致 naming 零召回。
