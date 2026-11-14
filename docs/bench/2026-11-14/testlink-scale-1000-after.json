@@ -1,0 +1,29 @@
+{
+  "corpus": "1000",
+  "store": "file",
+  "tag": "after",
+  "go_version": "go1.26.5",
+  "target": "benchpkg0.Svc0.handle",
+  "files": 1000,
+  "links": 1,
+  "links_sha256": "e32326b41c0aedaff9268059ea1d2234cdd5e741405304c6763f84b0ca97f183",
+  "affected": 1,
+  "affected_sha256": "d65b5bd4ebcb0cecbe7335a1919582482f1ce289c8c3866585372606deb3efd5",
+  "tests": {
+    "cold_ms": 4.259913,
+    "n": 200,
+    "p50_ms": 0.127649,
+    "p95_ms": 0.134863,
+    "p99_ms": 0.220461,
+    "max_ms": 0.284084
+  },
+  "affected_latency": {
+    "cold_ms": 1.980713,
+    "n": 200,
+    "p50_ms": 0.133323,
+    "p95_ms": 0.18197,
+    "p99_ms": 0.231984,
+    "max_ms": 0.273876
+  },
+  "generated_at": "2026-11-14T19:05:40Z"
+}

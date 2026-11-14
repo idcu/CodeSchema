@@ -1,0 +1,29 @@
+{
+  "corpus": "pg1000",
+  "store": "postgres",
+  "tag": "after",
+  "go_version": "go1.26.5",
+  "target": "benchpkg0.Svc0.handle",
+  "files": 1000,
+  "links": 6,
+  "links_sha256": "e513e92d743d40386265458a8bbcaa0ce79b67c61a2354196613efee8462192a",
+  "affected": 5,
+  "affected_sha256": "c3fc60286929f25f1a0640ced57178af252b873b5c91fb399b9d081ec32653d4",
+  "tests": {
+    "cold_ms": 9411.926933,
+    "n": 5,
+    "p50_ms": 6.625388,
+    "p95_ms": 7.464112,
+    "p99_ms": 7.464112,
+    "max_ms": 7.780246
+  },
+  "affected_latency": {
+    "cold_ms": 3857.591143,
+    "n": 5,
+    "p50_ms": 6.688194,
+    "p95_ms": 6.784363,
+    "p99_ms": 6.784363,
+    "max_ms": 7.68383
+  },
+  "generated_at": "2026-11-14T18:55:07Z"
+}

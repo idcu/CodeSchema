@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### 测试关联规模（2026-11-14 晚）：单次快照 + 代次/指纹缓存 + 反向索引
+
+- perf(testlink)：`FindTestLinksWithStats` 由每次调用 6~8 轮「文件 → 类 → 方法」全量扫描
+  改为单次存储快照；新增 `testLinkSnapshot`（`owners`/`ownersByFQN`/`ownersByFile`/
+  `classesByDir`/`testClasses`/`testOwners` 等有序视图）与三类反向索引
+  （`@TestFor` → 目标类、生产方法 ← 测试调用方、目录/import 末段 → 测试类），
+  全部按原遍历顺序构建，关联结果逐条不变。
+- 缓存：`Service.testLinkGen` 代次 + 顺序无关文件指纹（ID/路径/语言/ContentHash/Imports XOR）；
+  `InvalidateDerivedCaches` 递增代次。`/affected` 复用同一份文件列表与快照。
+- 实测（`go1.26.5`，P50/P95）：1,000 文件 file 后端 `/tests` 3.11/4.11 → 0.13/0.13 ms，
+  `/affected` 6.91/10.30 → 0.13/0.18 ms；1,000 文件 PG `/tests` 16,754/17,190 → 6.6/7.5 ms，
+  `/affected` 29,846/30,256 → 6.7/6.8 ms（PG 冷启动快照构建 19,627 → 9,412 ms，一次性）；
+  GOROOT 10,345 文件 `/tests` 382.2/400.9 → 6.2/6.3 ms，`/affected` 62,100/80,870 → 3,322/3,378 ms。
+- 一致性：1,000 文件 file/PG 的 links/affected 哈希前后完全相同；GOROOT 规范化后哈希相同
+  （`82302955…` / `43d656b4…`）。真值回归 Go 173/6/0、Java 152/0/0、TS 33/0/0，
+  `manual_truth` 块含逐条 predicted 列表字节一致。
+- 负控：`TestFindTestLinksNegativeControl` 覆盖删/增测试 × 显式失效/仅指纹四种组合。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.7；原始数据 `testlink-scale-*.json`（6 份）。
+
 ### 后端实测补齐（2026-11-14）：Redis 重索引失效 + PG/Redis 活实例三项
 
 - fix(redis)：新增 `RedisCache.SyncIR`，重索引时先 `InvalidateFile`（清本文件类/方法/路径

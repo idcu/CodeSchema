@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +60,13 @@ type Service struct {
 	queryCache *ttlcache.Cache[string, *SymbolContext]
 	// cacheEpoch 缓存世代号：失效时递增，旧 key 再也无法拼出，等价于 O(1) 全量失效。
 	cacheEpoch atomic.Uint64
+
+	// testLinkGen/testLinkCache 测试关联快照：把每次 FindTestLinks 的 6~8 轮
+	// 「文件→类→方法」全量扫描合并为一次构建，并按代次 + 文件指纹跨调用复用。
+	// 失效契约与调用图缓存一致：重索引/增量更新后由 InvalidateDerivedCaches 递增代次。
+	testLinkGen     atomic.Uint64
+	testLinkCache   atomic.Pointer[testLinkEntry]
+	testLinkBuildMu sync.Mutex
 }
 
 // NewService 创建 Service 实例。
@@ -151,6 +159,7 @@ func (s *Service) InvalidateDerivedCaches() {
 	if s.analyzer != nil {
 		s.analyzer.InvalidateCallGraph()
 	}
+	s.invalidateTestLinkSnapshot()
 	s.InvalidateQueryCache()
 }
 
@@ -1806,13 +1815,18 @@ func (s *Service) GetAffected(ctx context.Context, symbol string, recursive bool
 	}
 
 	// 2. 对每个受影响符号收集关联单测，去重。
+	//    受影响符号可能有上万个（如 GOROOT 语料），逐符号重新读文件会把
+	//    GetAllFiles 的 O(文件数) 成本乘以符号数；这里复用同一份文件列表与快照。
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("get all files: %v", err)}
+	}
+	snap := s.cachedTestLinkSnapshot(ctx, files)
+
 	seen := make(map[string]bool)
 	result := make([]string, 0)
 	for sym := range affected {
-		links, err := s.FindTestLinks(ctx, sym, 60)
-		if err != nil {
-			continue
-		}
+		links, _ := s.findTestLinksFromSnapshot(ctx, snap, sym, 60)
 		for _, l := range links {
 			if l.TestMethod == "" || seen[l.TestMethod] {
 				continue

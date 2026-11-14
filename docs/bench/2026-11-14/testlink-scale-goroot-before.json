@@ -1,0 +1,29 @@
+{
+  "corpus": "goroot",
+  "store": "file",
+  "tag": "before",
+  "go_version": "go1.26.5",
+  "target": "strings.TrimSpace",
+  "files": 10345,
+  "links": 148,
+  "links_sha256": "8230295545b085321442410bc896158a7ce4aa3eea22677c673398fe96a08e56",
+  "affected": 10928,
+  "affected_sha256": "43d656b4507c92b7c1edb2abfb13ed222b87dd8517dad0b10b5c69c6f4e02cb7",
+  "tests": {
+    "cold_ms": 156.080722,
+    "n": 5,
+    "p50_ms": 382.237311,
+    "p95_ms": 400.865361,
+    "p99_ms": 400.865361,
+    "max_ms": 422.042489
+  },
+  "affected_latency": {
+    "cold_ms": 65702.502648,
+    "n": 5,
+    "p50_ms": 62100.417756,
+    "p95_ms": 80870.20764,
+    "p99_ms": 80870.20764,
+    "max_ms": 82274.287521
+  },
+  "generated_at": "2026-11-14T18:56:35Z"
+}

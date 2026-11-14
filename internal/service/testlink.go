@@ -54,6 +54,20 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 		minConfidence = 60
 	}
 
+	// 获取所有文件数据（一次），随后从同一份快照读取类/方法/调用/标签，
+	// 避免五种策略各自做全量「文件→类→方法」扫描（PG 后端上是独立 SQL）。
+	files, err := s.store.GetAllFiles(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get all files: %w", err)
+	}
+	snap := s.cachedTestLinkSnapshot(ctx, files)
+	links, filtered := s.findTestLinksFromSnapshot(ctx, snap, methodFQN, minConfidence)
+	return links, filtered, nil
+}
+
+// findTestLinksFromSnapshot 在已构建的快照上执行五种策略、排序与置信度过滤。
+// 返回 (过滤后的关联, 被过滤条数)。
+func (s *Service) findTestLinksFromSnapshot(ctx context.Context, snap *testLinkSnapshot, methodFQN string, minConfidence int) ([]TestLink, int) {
 	// 收集所有结果，去重
 	type linkKey struct {
 		testMethod string
@@ -80,58 +94,34 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 		})
 	}
 
-	// 获取所有文件数据
-	files, err := s.store.GetAllFiles(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("get all files: %w", err)
-	}
-
 	// 查找目标方法所在的类
 	targetClass := extractClassFQN(methodFQN)
-	allTestClasses := s.discoverTestClasses(ctx, files)
-
-	// 预构建全量类映射（classFQN -> ClassRecord），供 explicit 策略解析目标类
-	allClasses := make(map[string]store.ClassRecord)
-	fileDir := make(map[int64]string, len(files))
-	// 同目录（Go 包）的类集合：Go 包级测试的命名关联需要判断方法名是否跨类型歧义。
-	classesByDir := make(map[string][]store.ClassRecord)
-	for _, f := range files {
-		dir := dirFromPath(f.AbsolutePath)
-		fileDir[f.ID] = dir
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			allClasses[cls.FullName] = cls
-			classesByDir[dir] = append(classesByDir[dir], cls)
-		}
-	}
-
-	// 已知类型名（含短名）：Go 包级测试名可能以 <Type>_ 前缀锚定接收者类型。
-	knownTypes := make(map[string]bool, len(allClasses)*2)
-	for fqn := range allClasses {
-		knownTypes[fqn] = true
-		knownTypes[shortMethodName(fqn)] = true
-	}
+	allTestClasses := snap.testClasses
+	allClasses := snap.allClasses
+	fileDir := snap.fileDir
+	classesByDir := snap.classesByDir
+	knownTypes := snap.knownTypes
 
 	// 0. explicit 策略：@TestFor(...) 显式注解（置信度 100）
-	s.linkByExplicit(ctx, files, allClasses, methodFQN, addResult)
+	s.linkByExplicit(ctx, snap, methodFQN, addResult)
 
 	// 1. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
 	//    同一源类可能有多个测试类（OrderServiceTest / TestOrderService），全部参与。
 	targetDir := fileDir[allClasses[targetClass].FileID]
 	for _, testClassFQN := range allTestClasses[targetClass] {
-		s.linkByNaming(ctx, files, classesByDir[targetDir], knownTypes, targetClass, testClassFQN, methodFQN, addResult)
+		s.linkByNaming(ctx, snap, classesByDir[targetDir], knownTypes, targetClass, testClassFQN, methodFQN, addResult)
 	}
 
 	// 2.5 call_graph 策略：测试方法直接调用目标方法。
 	//      行为型测试名（TestCollection_Delete 之于 CreateCollection）与跨类测试
 	//      都不在 naming 的候选集里，直接调用边与类名约定无关。
-	s.linkByCallGraph(ctx, files, methodFQN, addResult)
+	s.linkByCallGraph(ctx, snap, methodFQN, addResult)
 
 	// 3. same_tag 策略：同 Tag 聚类
-	s.linkBySameTag(ctx, files, methodFQN, addResult)
+	s.linkBySameTag(ctx, snap, methodFQN, addResult)
 
 	// 4. dependency 策略：依赖递归
-	s.linkByDependency(ctx, files, methodFQN, addResult)
+	s.linkByDependency(ctx, snap, methodFQN, addResult)
 
 	// 按置信度降序排序
 	sortByConfidenceDesc(results)
@@ -144,9 +134,9 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 	}
 	for strat, n := range strategyHits {
 		metrics.IncCounter("testlink_lookups_total", strat)
-		for i := 0; i < n; i++ {
-			metrics.IncCounter("testlink_hits_total", strat)
-		}
+		// 批量累加：/affected 会对上万个符号逐个查询，逐次 IncCounter 的全局锁
+		// 在命中较多时成为热点；最终计数与逐次递增一致。
+		metrics.AddCounter("testlink_hits_total", float64(n), strat)
 	}
 
 	// 过滤置信度
@@ -157,74 +147,7 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 		}
 	}
 
-	return filtered, len(results) - len(filtered), nil
-}
-
-// discoverTestClasses 发现所有测试类及其对应的源类映射。
-//
-// 命名约定：OrderServiceTest ↔ OrderService（去掉 Test 后缀/前缀）
-//
-// 额外覆盖 Go 包级测试：Go 测试函数（TestXxx/BenchmarkXxx/ExampleXxx）
-// 挂在合成 PACKAGE 容器下，容器名是包名而非「*Test/Test*」类名形态，
-// 因此按「同目录同包」把测试容器归属到该目录的全部生产类。
-func (s *Service) discoverTestClasses(ctx context.Context, files []*store.FileRecord) map[string][]string {
-	result := make(map[string][]string) // classFQN -> []testClassFQN
-	seen := make(map[string]map[string]bool)
-	add := func(source, test string) {
-		if source == "" || test == "" {
-			return
-		}
-		if seen[source] == nil {
-			seen[source] = make(map[string]bool)
-		}
-		if seen[source][test] {
-			return
-		}
-		seen[source][test] = true
-		result[source] = append(result[source], test)
-	}
-
-	type classEntry struct {
-		file *store.FileRecord
-		cls  store.ClassRecord
-	}
-	var entries []classEntry
-	for _, f := range files {
-		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
-		if err != nil {
-			continue
-		}
-		for _, cls := range classes {
-			entries = append(entries, classEntry{file: f, cls: cls})
-		}
-	}
-
-	// 类名约定。
-	for _, e := range entries {
-		if testClass := s.matchTestClass(e.cls); testClass != "" {
-			add(testClass, e.cls.FullName)
-		}
-	}
-
-	// Go 包级测试：*_test.go 的 PACKAGE 容器 → 同目录全部生产类。
-	prodByDir := make(map[string][]string)
-	for _, e := range entries {
-		if isTestFileName(e.file.AbsolutePath) {
-			continue
-		}
-		dir := dirFromPath(e.file.AbsolutePath)
-		prodByDir[dir] = append(prodByDir[dir], e.cls.FullName)
-	}
-	for _, e := range entries {
-		if e.cls.Type != "PACKAGE" || !isGoTestFile(e.file.AbsolutePath) {
-			continue
-		}
-		for _, prodClass := range prodByDir[dirFromPath(e.file.AbsolutePath)] {
-			add(prodClass, e.cls.FullName)
-		}
-	}
-
-	return result
+	return filtered, len(results) - len(filtered)
 }
 
 // isGoTestFile 判断是否为 Go 测试文件（*_test.go）。
@@ -270,28 +193,20 @@ func (s *Service) matchTestClass(cls store.ClassRecord) string {
 
 // linkByNaming 通过命名约定建立方法级关联。
 // dirClasses 是目标类同目录（Go 包）的类集合，用于判断包级同名方法歧义。
-func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, dirClasses []store.ClassRecord, knownTypes map[string]bool, classFQN, testClassFQN string, methodFQN string, add func(string, string, string, int)) {
+func (s *Service) linkByNaming(ctx context.Context, snap *testLinkSnapshot, dirClasses []store.ClassRecord, knownTypes map[string]bool, classFQN, testClassFQN string, methodFQN string, add func(string, string, string, int)) {
 	// 找到目标类及其全部方法
 	var targetMethod store.MethodRecord
 	found := false
 	// 目标类全部方法名：用于判断测试方法是否已显式调用「同类另一个方法」，
 	// 从而让命名关联让位给调用证据（见 hasCompetingCall）。
 	classMethodNames := make(map[string]bool)
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			if cls.FullName != classFQN {
-				continue
+	for _, o := range snap.ownersByFQN[classFQN] {
+		for _, m := range o.methods {
+			classMethodNames[m.Name] = true
+			if m.FullName == methodFQN {
+				targetMethod = m
+				found = true
 			}
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			for _, m := range methods {
-				classMethodNames[m.Name] = true
-				if m.FullName == methodFQN {
-					targetMethod = m
-					found = true
-				}
-			}
-			break
 		}
 		if len(classMethodNames) > 0 {
 			break
@@ -304,66 +219,58 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, d
 
 	// 在测试类中查找同名方法（或带 Test 前缀/后缀的方法）
 	methodName := targetMethod.Name
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		calls, _ := s.store.GetCallsByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			if cls.FullName != testClassFQN {
+	for _, o := range snap.ownersByFQN[testClassFQN] {
+		f := o.file
+		cls := o.cls
+		// 生产文件的 PACKAGE 容器与测试容器同名（Go 包名），不能当测试类扫描。
+		if cls.Type == "PACKAGE" && !isGoTestFile(f.AbsolutePath) {
+			continue
+		}
+		calls := snap.callsOf(ctx, f.ID)
+		methods := o.methods
+		// Go 包级容器的同包 helper（keysOfSets/newMockLSPAdapterMode）不是测试，
+		// 只让 Test/Benchmark/Example 前缀的函数参与命名匹配。
+		goPkg := cls.Type == "PACKAGE" && isGoTestFile(f.AbsolutePath)
+		// Go 包级测试：同名方法分布在多个类型时，测试名里的公共词无法确定目标类型
+		// （Resolve 之于 JavaResolver/GradleResolver/heuristicResolver），
+		// 命名关联属于过匹配；真实调用边由 call_graph 策略保留。
+		if goPkg && s.methodNameAmbiguousInDir(snap, dirClasses, methodName) {
+			continue
+		}
+		for _, m := range methods {
+			if goPkg && !isGoTestFuncName(m.Name) {
 				continue
 			}
-			// 生产文件的 PACKAGE 容器与测试容器同名（Go 包名），不能当测试类扫描。
-			if cls.Type == "PACKAGE" && !isGoTestFile(f.AbsolutePath) {
+			if goPkg {
+				ok, typeToken := goTestMethodMatches(m.Name, methodName, knownTypes)
+				if !ok {
+					continue
+				}
+				// 测试名锚定了接收者类型时，只允许该类型的方法。
+				if typeToken != "" && typeToken != classFQN && typeToken != shortMethodName(classFQN) {
+					continue
+				}
+			} else if !matchesTestMethod(methodName, m.Name) {
 				continue
 			}
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			// Go 包级容器的同包 helper（keysOfSets/newMockLSPAdapterMode）不是测试，
-			// 只让 Test/Benchmark/Example 前缀的函数参与命名匹配。
-			goPkg := cls.Type == "PACKAGE" && isGoTestFile(f.AbsolutePath)
-			// Go 包级测试：同名方法分布在多个类型时，测试名里的公共词无法确定目标类型
-			// （Resolve 之于 JavaResolver/GradleResolver/heuristicResolver），
-			// 命名关联属于过匹配；真实调用边由 call_graph 策略保留。
-			if goPkg && s.methodNameAmbiguousInDir(ctx, dirClasses, methodName) {
+			// 测试已显式调用同类另一个方法时，仅凭名字里的公共词关联属于过匹配。
+			if hasCompetingCall(calls, m, classMethodNames, methodName) {
 				continue
 			}
-			for _, m := range methods {
-				if goPkg && !isGoTestFuncName(m.Name) {
-					continue
-				}
-				if goPkg {
-					ok, typeToken := goTestMethodMatches(m.Name, methodName, knownTypes)
-					if !ok {
-						continue
-					}
-					// 测试名锚定了接收者类型时，只允许该类型的方法。
-					if typeToken != "" && typeToken != classFQN && typeToken != shortMethodName(classFQN) {
-						continue
-					}
-				} else if !matchesTestMethod(methodName, m.Name) {
-					continue
-				}
-				// 测试已显式调用同类另一个方法时，仅凭名字里的公共词关联属于过匹配。
-				if hasCompetingCall(calls, m, classMethodNames, methodName) {
-					continue
-				}
-				add(m.FullName, methodName, "naming", 70)
-			}
+			add(m.FullName, methodName, "naming", 70)
 		}
 	}
 }
 
 // methodNameAmbiguousInDir 判断方法名在同目录（Go 包）内是否由多个类型实现。
 // 只看生产类（跳过测试 PACKAGE 容器）：测试容器里的同名 helper 不是候选实现。
-func (s *Service) methodNameAmbiguousInDir(ctx context.Context, dirClasses []store.ClassRecord, methodName string) bool {
+func (s *Service) methodNameAmbiguousInDir(snap *testLinkSnapshot, dirClasses []store.ClassRecord, methodName string) bool {
 	owners := make(map[string]struct{}, 2)
 	for _, cls := range dirClasses {
 		if cls.Type == "PACKAGE" {
 			continue
 		}
-		methods, err := s.store.GetMethodsByClassID(ctx, cls.ID)
-		if err != nil {
-			continue
-		}
-		for _, m := range methods {
+		for _, m := range snap.methodsOf(cls.ID) {
 			if m.Name == methodName {
 				owners[cls.FullName] = struct{}{}
 				break
@@ -444,85 +351,10 @@ func hasCompetingCall(calls []store.CallRecord, testMethod store.MethodRecord, c
 // 与 naming 的差别：naming 只在「与目标类同名的测试类」里按方法名匹配，
 // 行为型测试名与跨类测试都不在候选集。调用边与类名约定无关，可覆盖这两类漏召。
 //
-// FQN 归一（基准暴露）：
-//   - callee 可能是接收者变量形态（entity.setName）；短名在全部方法中唯一时解析到唯一 FQN。
-//   - caller 可能带包名前缀（org...ClinicServiceTests.shouldFindVets）；
-//     按文件内测试方法 FQN 的后缀归一，保证返回口径与其它策略一致。
-func (s *Service) linkByCallGraph(ctx context.Context, files []*store.FileRecord, methodFQN string, add func(string, string, string, int)) {
-	type fileInfo struct {
-		test    bool
-		methods []store.MethodRecord
-	}
-	infos := make(map[int64]*fileInfo, len(files))
-	exact := make(map[string]struct{})
-	shortIndex := make(map[string][]string)
-	shortSeen := make(map[string]map[string]struct{})
-	for _, f := range files {
-		info := &fileInfo{test: isTestFileName(f.AbsolutePath)}
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			if isTestClass(cls, f.AbsolutePath) {
-				info.test = true
-			}
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			for _, m := range methods {
-				info.methods = append(info.methods, m)
-				exact[m.FullName] = struct{}{}
-				// 同一 FQN 可能因重载（Java overload / 同名多声明）被登记多次；
-				// 重载不是不同的可关联目标，短名唯一性必须按 FQN 去重后再判断。
-				short := shortMethodName(m.FullName)
-				if shortSeen[short] == nil {
-					shortSeen[short] = make(map[string]struct{})
-				}
-				if _, ok := shortSeen[short][m.FullName]; ok {
-					continue
-				}
-				shortSeen[short][m.FullName] = struct{}{}
-				shortIndex[short] = append(shortIndex[short], m.FullName)
-			}
-		}
-		infos[f.ID] = info
-	}
-
-	// resolveCallee：全名优先；带包/模块前缀的 callee 逐级去掉前缀做后缀精确匹配
-	// （Go selector 产出 pkg.Type.Method，而生产方法索引键为 Type.Method）；最后接受
-	// 全局唯一短名。后缀匹配要求索引中存在完全相同的 Type.Method，不会放宽到模糊名。
-	resolveCallee := func(callee string) (string, bool) {
-		if callee == "" {
-			return "", false
-		}
-		if _, ok := exact[callee]; ok {
-			return callee, true
-		}
-		parts := strings.Split(callee, ".")
-		for i := 1; i < len(parts); i++ {
-			suffix := strings.Join(parts[i:], ".")
-			if _, ok := exact[suffix]; ok {
-				return suffix, true
-			}
-		}
-		if cands := shortIndex[shortMethodName(callee)]; len(cands) == 1 {
-			return cands[0], true
-		}
-		return "", false
-	}
-
-	for _, f := range files {
-		info := infos[f.ID]
-		if info == nil || !info.test {
-			continue
-		}
-		calls, _ := s.store.GetCallsByFileID(ctx, f.ID)
-		for _, c := range calls {
-			if prod, ok := resolveCallee(c.CalleeFQN); !ok || prod != methodFQN {
-				continue
-			}
-			caller := normalizeCallerFQN(c.CallerFQN, info.methods)
-			if caller == "" || caller == methodFQN {
-				continue
-			}
-			add(caller, shortMethodName(methodFQN), "call_graph", 95)
-		}
+// 反向调用索引在快照内预建（按快照顺序），每次查询只取命中该方法的测试调用方。
+func (s *Service) linkByCallGraph(ctx context.Context, snap *testLinkSnapshot, methodFQN string, add func(string, string, string, int)) {
+	for _, caller := range snap.callersOf(ctx, methodFQN) {
+		add(caller, shortMethodName(methodFQN), "call_graph", 95)
 	}
 }
 
@@ -647,57 +479,39 @@ func splitNameWords(s string) []string {
 //
 // 目标方法所在类与测试类共享标签是类级信号；为避免把同 tag 测试类的所有
 // 方法都算作关联，方法名仍须符合命名约定（P2-4）。
-func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, methodFQN string, add func(string, string, string, int)) {
-	// 获取目标方法的标签
-	var targetClassID int64
-	var targetMethodName string
-
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			for _, m := range methods {
-				if m.FullName == methodFQN {
-					targetMethodName = m.Name
-					targetClassID = cls.ID
-					break
-				}
-			}
-		}
-	}
-
+func (s *Service) linkBySameTag(ctx context.Context, snap *testLinkSnapshot, methodFQN string, add func(string, string, string, int)) {
+	// 目标方法的类与方法名（旧实现：最后一个匹配类生效）。
+	targetClassID := snap.classIDByMethod[methodFQN]
+	targetMethodName := snap.methodNameByFQN[methodFQN]
 	if targetClassID == 0 || targetMethodName == "" {
 		return
 	}
 
 	// 获取目标方法所在类的标签
-	targetTags, _ := s.store.GetTagsByClassID(ctx, targetClassID)
+	targetTags := snap.tagsOf(ctx, targetClassID)
 	if len(targetTags) == 0 {
 		return
 	}
+	targetSet := make(map[string]bool, len(targetTags))
+	for _, t := range targetTags {
+		targetSet[t] = true
+	}
 
-	// 查找同标签的测试类
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			// 跳过自身
-			if cls.ID == targetClassID {
-				continue
-			}
-			// 只考虑测试类（含文件级识别）
-			if !isTestClass(cls, f.AbsolutePath) {
-				continue
-			}
+	// 查找同标签的测试类（testOwners 是 owners 的保序子集，判定结果不变）
+	for _, o := range snap.testOwners {
+		cls := o.cls
+		// 跳过自身
+		if cls.ID == targetClassID {
+			continue
+		}
 
-			clsTags, _ := s.store.GetTagsByClassID(ctx, cls.ID)
-			if hasCommonTag(targetTags, clsTags) {
-				methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-				for _, m := range methods {
-					if !matchesTestMethod(targetMethodName, m.Name) {
-						continue
-					}
-					add(m.FullName, m.Name, "same_tag", 60)
+		clsTags := snap.tagsOf(ctx, cls.ID)
+		if hasCommonTagSet(targetSet, clsTags) {
+			for _, m := range o.methods {
+				if !matchesTestMethod(targetMethodName, m.Name) {
+					continue
 				}
+				add(m.FullName, m.Name, "same_tag", 60)
 			}
 		}
 	}
@@ -752,13 +566,9 @@ func isTestFileName(path string) bool {
 	return false
 }
 
-// hasCommonTag 检查两个标签列表是否有共同标签。
-func hasCommonTag(a, b []string) bool {
-	set := make(map[string]bool)
-	for _, t := range a {
-		set[t] = true
-	}
-	for _, t := range b {
+// hasCommonTagSet 用已建好的标签集合检查交集，避免每个候选类重复建 map。
+func hasCommonTagSet(set map[string]bool, tags []string) bool {
+	for _, t := range tags {
 		if set[t] {
 			return true
 		}
@@ -833,145 +643,49 @@ func resolveExplicitClass(token string, allClasses map[string]store.ClassRecord)
 
 // linkByExplicit 通过显式 @TestFor 注解建立关联（置信度 100）。
 //
-// 遍历所有测试类/测试方法，解析其 Doc 中的 @TestFor(<目标类>) 注解；
-// 仅当注解指向被查询方法所属的类时才建立关联，且只关联被查询的那个方法
-// （P1-12：此前会把任意 @TestFor 的测试塞给所有生产方法）。
-func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord, allClasses map[string]store.ClassRecord, methodFQN string, add func(string, string, string, int)) {
+// 注解解析在快照内预建为「目标类 → 测试方法」反向索引；仅当注解指向被查询
+// 方法所属的类时才建立关联，且只关联被查询的那个方法（P1-12）。
+func (s *Service) linkByExplicit(ctx context.Context, snap *testLinkSnapshot, methodFQN string, add func(string, string, string, int)) {
 	targetClassFQN := extractClassFQN(methodFQN)
 	targetMethodName := methodFQN
 	if idx := strings.LastIndex(methodFQN, "."); idx >= 0 {
 		targetMethodName = methodFQN[idx+1:]
 	}
 
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			if !isTestClass(cls, f.AbsolutePath) {
-				continue
-			}
-
-			// 类级注解（如 @TestFor(OrderService) 标在测试类上）
-			classTargets := parseExplicitTargets(cls.Doc)
-
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			for _, m := range methods {
-				// 方法级注解优先，其次类级注解
-				targets := parseExplicitTargets(m.Doc)
-				if len(targets) == 0 {
-					targets = classTargets
-				}
-				for _, tok := range targets {
-					if resolveExplicitClass(tok, allClasses) != targetClassFQN {
-						continue
-					}
-					add(m.FullName, targetMethodName, "explicit", 100)
-				}
-			}
-		}
+	for _, m := range snap.explicitMethods(targetClassFQN) {
+		add(m.FullName, targetMethodName, "explicit", 100)
 	}
 }
 
 // linkByDependency 通过依赖递归建立关联。
 //
 // 策略：目标方法所在类 → 同一目录下的测试类 + 引用该类的测试类。
-func (s *Service) linkByDependency(ctx context.Context, files []*store.FileRecord, methodFQN string, add func(string, string, string, int)) {
-	// 找到目标方法所在的文件
-	var targetFile *store.FileRecord
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		for _, cls := range classes {
-			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-			for _, m := range methods {
-				if m.FullName == methodFQN {
-					targetFile = f
-					break
-				}
-			}
-			if targetFile != nil {
-				break
-			}
-		}
-		if targetFile != nil {
-			break
-		}
-	}
-
+// 两个反向索引在快照内预建，按快照顺序取候选，语义与逐文件扫描一致。
+func (s *Service) linkByDependency(ctx context.Context, snap *testLinkSnapshot, methodFQN string, add func(string, string, string, int)) {
+	// 目标方法所在的文件（旧实现：第一个包含该方法的文件生效）。
+	targetFile := snap.fileOfMethod[methodFQN]
 	if targetFile == nil {
 		return
 	}
 
-	// 构建文件名到类名的映射
-	fileToClasses := make(map[int64][]store.ClassRecord)
-	for _, f := range files {
-		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
-		fileToClasses[f.ID] = classes
-	}
-
 	// 策略1: 同一目录下的测试文件（仅 Go：同目录 *_test.go 属于同一包，构成覆盖证据）
 	targetDir := dirFromPath(targetFile.AbsolutePath)
-	for _, f := range files {
-		if f.ID == targetFile.ID {
+	for _, o := range snap.testOwnersInDir(targetDir) {
+		if o.file.ID == targetFile.ID {
 			continue
 		}
-		if !strings.EqualFold(f.Language, "go") {
-			continue
-		}
-		if dirFromPath(f.AbsolutePath) != targetDir {
-			continue
-		}
-		classes := fileToClasses[f.ID]
-		for _, cls := range classes {
-			if isTestClass(cls, f.AbsolutePath) {
-				methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-				for _, m := range methods {
-					add(m.FullName, m.Name, "dependency", 80)
-				}
-			}
+		for _, m := range o.methods {
+			add(m.FullName, m.Name, "dependency", 80)
 		}
 	}
 
-	// 策略2: 引用目标文件的测试类
-	for _, f := range files {
-		if f.ID == targetFile.ID {
+	// 策略2: 引用目标文件的测试类（import 末段等于目标目录名）。
+	for _, o := range snap.testOwnersImporting(targetDir) {
+		if o.file.ID == targetFile.ID {
 			continue
 		}
-		if len(f.Imports) == 0 {
-			continue
-		}
-
-		referencesTarget := false
-		targetPath := strings.ReplaceAll(targetFile.AbsolutePath, "\\", "/")
-		targetParts := strings.Split(targetPath, "/")
-		// 目标文件所在目录名 = 目标包路径的最后一段，用于 import 精确匹配。
-		dirName := ""
-		if len(targetParts) > 1 {
-			dirName = targetParts[len(targetParts)-2]
-		}
-
-		for _, imp := range f.Imports {
-			imp = strings.TrimSpace(imp)
-			if imp == "" {
-				continue
-			}
-			imp = strings.ReplaceAll(imp, "\\", "/")
-			// 仅认「包路径等于目标目录名」或「以 /目标目录名 结尾」的 import，
-			// 避免 strings.Contains 把 payment 误配到 mypaymentutil 之类（P2-4）。
-			if dirName != "" && (imp == dirName || strings.HasSuffix(imp, "/"+dirName)) {
-				referencesTarget = true
-				break
-			}
-		}
-
-		if referencesTarget {
-			classes := fileToClasses[f.ID]
-			for _, cls := range classes {
-				if isTestClass(cls, f.AbsolutePath) {
-					methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
-					for _, m := range methods {
-						add(m.FullName, m.Name, "dependency", 80)
-					}
-				}
-			}
+		for _, m := range o.methods {
+			add(m.FullName, m.Name, "dependency", 80)
 		}
 	}
 }

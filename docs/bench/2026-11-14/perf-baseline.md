@@ -1,6 +1,7 @@
 # 性能基线：索引吞吐、查询延迟与多租户隔离（S-3）
 
-> 最后更新：2026-11-14（追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5）
+> 最后更新：2026-11-14（追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5；
+> `/tests` `/affected` 规模修复前后对比见 §8.7）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -364,6 +365,70 @@ live heap 131.1 MiB 不变）。因此它只作端到端观测，**不把其中 
   §7.1 的冷启动指「空 Redis 缓存首次查询」，不含 OS 页缓存冷读。
 - 内存为进程内 `MemStats`，不是容器/cgroup 峰值，也未含 OS 页缓存。
 
+### 8.7 已修复：`/tests` 与 `/affected` 的逐请求全量扫描（2026-11-14 晚）
+
+**问题**：`FindTestLinksWithStats` 每次调用都做 6~8 轮「文件 → 类 → 方法」全量扫描。
+file 后端是 O(文件数) 的内存遍历；PG 后端每轮是独立 SQL（1,000 文件约 1 万次查询），
+单次约 16.8 s。结果缓存只缓存最终返回，挡不住扫描成本，所以命中缓存仍是同一量级。
+
+**修复**：
+
+- 单次存储快照：一次 `GetAllFiles` → 每文件一次 `GetClassesByFileID` → 每类一次
+  `GetMethodsByClassID`，构建 `owners` / `ownersByFQN` / `ownersByFile` / `classesByDir` /
+  `fileDir` / `knownTypes` / `testClasses` / `testOwners` / `methodsByFile` 等有序内存视图；
+  `calls` / `tags` 惰性加载并按文件/类缓存。
+- 反向索引（全部按快照原始遍历顺序构建，保证关联结果逐条不变）：
+  `@TestFor` → 目标类、生产方法 ← 测试调用方、目录/import 末段 → 测试类。
+- 缓存键：代次（`InvalidateDerivedCaches` 递增）+ 与顺序无关的文件指纹（ID/路径/语言/
+  ContentHash/Imports XOR）。指纹保证即使调用方忘记失效，文件增删/内容变更也会自愈。
+- `/affected` 对全部受影响符号复用同一份文件列表与快照，不再逐符号重新 `GetAllFiles`。
+
+**前后对比**（同机、同一 `go1.26.5`；`/tests` P50/P95 为单次查询，`/affected` 为一次完整
+影响面求值）：
+
+| 语料 / 后端 | 指标 | 改前 P50 | 改前 P95 | 改后 P50 | 改后 P95 |
+|---|---|---:|---:|---:|---:|
+| 1,000 文件 / file（n=200） | `/tests` | 3.11 ms | 4.11 ms | 0.13 ms | 0.13 ms |
+| 1,000 文件 / file（n=200） | `/affected` | 6.91 ms | 10.30 ms | 0.13 ms | 0.18 ms |
+| 1,000 文件 / PG（n=5） | `/tests` | 16,754 ms | 17,190 ms | 6.6 ms | 7.5 ms |
+| 1,000 文件 / PG（n=5） | `/affected` | 29,846 ms | 30,256 ms | 6.7 ms | 6.8 ms |
+| GOROOT 10,345 文件 / file（n=5） | `/tests` | 382.2 ms | 400.9 ms | 6.2 ms | 6.3 ms |
+| GOROOT 10,345 文件 / file（n=5） | `/affected` | 62,100 ms | 80,870 ms | 3,322 ms | 3,378 ms |
+
+- `cold_ms`：1,000 文件 file 后端 `/tests` 5.89 → 4.26 ms；PG 后端 19,627 → 9,412 ms
+  （后者是快照首次构建的一次性成本：约 3,000 次 SQL，构建后单次 6~7 ms）。
+- GOROOT 目标 `strings.TrimSpace`：links=148、affected=10,928（每个受影响符号都要单独求值，
+  3.3 s 约为 0.3 ms/符号）。
+- 关联结果逐条一致：1,000 文件 file 的 links/affected 哈希前后完全相同
+  （`e32326b4…` / `d65b5bd4…`）；PG 后端完全相同（`e513e92d…` / `c3fc6028…`）；
+  GOROOT 按内容规范化后哈希完全相同（`82302955…` / `43d656b4…`）。file 后端的
+  `GetAllFiles` 按 map 遍历返回文件，等置信度项的先后顺序跨进程本就不稳定，
+  故基准哈希先按（置信度、测试方法、策略、方法名）排序再计算。
+- 真值回归（`release-bench --manual-truth`）：Go 173 TP / 6 FP / 0 FN（Recall 1.0）、
+  Java 152 / 0 / 0、TS 33 / 0 / 0，`manual_truth` 块（含逐条 predicted 列表）改前后字节一致。
+- 负控：`TestFindTestLinksNegativeControl` 覆盖「删测试 / 加测试」×「显式失效 / 仅靠指纹」
+  四种组合；删掉测试后 `/affected` 不再返回该测试，新增测试后能查出。
+
+**失效契约**：索引重建后调用 `InvalidateDerivedCaches`（`cmd/codeschema` 已在重索引路径调用）
+递增代次，下一次查询重建快照；未失效时文件指纹变化会自动触发重建。
+
+**复跑**：
+
+```bash
+CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after \
+  go test -count=1 -run '^TestTestLinkScale$/1000' -v ./internal/scalebench
+CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after \
+  CODESCHEMA_TESTLINK_SAMPLES=5 CODESCHEMA_TESTLINK_WARMUP=1 \
+  go test -count=1 -run '^TestTestLinkScale$/goroot' -v ./internal/scalebench
+CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after \
+  CODESCHEMA_TESTLINK_SAMPLES=5 CODESCHEMA_TESTLINK_WARMUP=1 \
+  go test -count=1 -tags 'pg redis' -run '^TestFindTestLinksScalePG$' -v ./internal/store/pg
+```
+
+`before` 基线在改动前的 worktree 运行同一组命令（`CODESCHEMA_BENCH_TAG=before`）。
+GOROOT `/affected` 单次耗时受 GC 与机器负载影响，跨进程复跑可见 3.1~10.4 s 的波动；
+表中记录的是与 before 配对的那一轮，同轮内 P50/P95 稳定。
+
 ## 9. 复现
 
 ### 9.1 一条命令
@@ -424,6 +489,7 @@ make bench-perf
 | `redis-namespace-isolation.json` | 真实 Redis 两命名空间读写隔离与 Flush 边界 |
 | `redis-stale-coldstart.json` | 真实 PG+Redis：冷启动回退耗时、缓存命中、陈旧键窗口、TTL 与失效闭环 |
 | `pg-redis-concurrency.json` | 真实 PG+Redis 混合读写并发：ops、错误数、P50/P95 |
+| `testlink-scale-*.json` | `/tests` `/affected` 规模：1,000 文件（file/PG）与 GOROOT 的冷启动、P50/P95、links/affected 内容哈希 |
 
 ### 9.4 复跑注意事项
 
@@ -447,10 +513,18 @@ make bench-perf
 - [redis-namespace-isolation.json](./redis-namespace-isolation.json)
 - [redis-stale-coldstart.json](./redis-stale-coldstart.json)
 - [pg-redis-concurrency.json](./pg-redis-concurrency.json)
+- [testlink-scale-1000-before.json](./testlink-scale-1000-before.json)
+- [testlink-scale-1000-after.json](./testlink-scale-1000-after.json)
+- [testlink-scale-goroot-before.json](./testlink-scale-goroot-before.json)
+- [testlink-scale-goroot-after.json](./testlink-scale-goroot-after.json)
+- [testlink-scale-pg1000-before.json](./testlink-scale-pg1000-before.json)
+- [testlink-scale-pg1000-after.json](./testlink-scale-pg1000-after.json)
 
 基准代码：`internal/scalebench/perf_baseline_test.go`、`internal/scalebench/memory_attribution_test.go`、
-`internal/embedding/persistent_save_ab_test.go`、`internal/retrieval/persistent_save_ab_test.go`；
-活实例测试：`internal/store/pg/redis_live_extra_test.go`、`internal/store/pg/redis_integration_test.go`、
+`internal/scalebench/testlink_scale_test.go`、`internal/embedding/persistent_save_ab_test.go`、
+`internal/retrieval/persistent_save_ab_test.go`；活实例测试：`internal/store/pg/redis_live_extra_test.go`、
+`internal/store/pg/redis_integration_test.go`、`internal/store/pg/testlink_scale_pg_test.go`、
 `cmd/codeschema/store_redis_test.go`（`make test-pg-redis`，需真实 PG/Redis）；
 门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1` / `CODESCHEMA_SNAPSHOT_DIR` /
-`CODESCHEMA_PG_DSN` / `CODESCHEMA_REDIS_ADDR`。
+`CODESCHEMA_PG_DSN` / `CODESCHEMA_REDIS_ADDR` / `CODESCHEMA_TESTLINK_SCALE=1` /
+`CODESCHEMA_BENCH_TAG=before|after` / `CODESCHEMA_TESTLINK_SAMPLES` / `CODESCHEMA_TESTLINK_WARMUP`。
