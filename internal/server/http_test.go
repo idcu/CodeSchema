@@ -922,6 +922,37 @@ func TestRecoveryMiddlewareHidesPanicDetail(t *testing.T) {
 	}
 }
 
+// TestInternalErrorsAreSanitized 负控（R2-8 / P2-6）：非 ServiceError 的内部错误
+// 不得把原始文本（SQL、DSN、绝对路径）回传给客户端；HTTP 与 MCP 两条出口都要脱敏。
+func TestInternalErrorsAreSanitized(t *testing.T) {
+	const secret = "SELECT * FROM file WHERE path='/srv/secret/src/a.go' (dsn=postgres://u:p@db)"
+
+	t.Run("http", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		writeServiceError(w, fmt.Errorf("store: %s", secret))
+		body := w.Body.String()
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500, got %d", w.Code)
+		}
+		if strings.Contains(body, secret) || strings.Contains(body, "SELECT") {
+			t.Fatalf("内部错误原文泄漏: %s", body)
+		}
+		if !strings.Contains(body, "ERR_INTERNAL") {
+			t.Fatalf("应返回 ERR_INTERNAL: %s", body)
+		}
+	})
+
+	t.Run("mcp", func(t *testing.T) {
+		resp := mcpError(1, fmt.Errorf("store: %s", secret))
+		if resp.Error == nil {
+			t.Fatal("expected error response")
+		}
+		if strings.Contains(resp.Error.Message, secret) || strings.Contains(resp.Error.Message, "SELECT") {
+			t.Fatalf("MCP 内部错误原文泄漏: %s", resp.Error.Message)
+		}
+	})
+}
+
 // TestAffectedEndpointMethodParamIsQueryable 负控（P3-14）：OpenAPI 声明 /affected
 // 使用 method，handler 却只读 symbol → 按规范调用返回 400。method 应为主参数，
 // symbol 保留为兼容别名。

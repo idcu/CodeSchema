@@ -278,10 +278,10 @@ var errServiceUnavailable = errors.New("service unavailable")
 // writeResolveError 把租户解析失败映射为 404/503，避免泄露内部错误详情。
 func writeResolveError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errUnknownTenant) {
-		writeError(w, "ERR_UNKNOWN_TENANT", err.Error(), http.StatusNotFound)
+		writeError(w, "ERR_UNKNOWN_TENANT", "unknown tenant", http.StatusNotFound)
 		return
 	}
-	writeError(w, "ERR_SERVICE_UNAVAILABLE", err.Error(), http.StatusServiceUnavailable)
+	writeError(w, "ERR_SERVICE_UNAVAILABLE", "service unavailable", http.StatusServiceUnavailable)
 }
 
 // Start 启动 HTTP 服务器，阻塞直到 Shutdown 被调用。
@@ -762,7 +762,9 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, svcErr.Code, svcErr.Message, svcErr.HTTPStatus())
 		return
 	}
-	writeError(w, "ERR_INTERNAL", err.Error(), 500)
+	// 非受控错误可能含 SQL / DSN / 绝对路径，只落服务端日志，客户端统一泛化文案（R2-8）。
+	log.WithModule("http").Error("internal error", "err", err)
+	writeError(w, "ERR_INTERNAL", "internal server error", 500)
 }
 
 // querySymbols 从 query 提取符号列表：支持重复参数与逗号分隔两种写法，并兼容单值参数。

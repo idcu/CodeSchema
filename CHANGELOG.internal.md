@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 203: fix(server): 内部错误统一脱敏 + 未知租户固定 404（R2-8 / P1-11、P2-6）
+
+- 根因：`writeServiceError` 的兜底分支直接 `err.Error()` 回传 500；`mcpError`
+  同理把原始错误写进 JSON-RPC message。存储层错误通常含完整 SQL、DSN 与绝对路径，
+  一旦触发即向客户端泄漏内部结构与凭据线索。panic 路径此前已脱敏，属遗漏出口。
+- 修复：非 `*service.ServiceError` 的错误只写服务端日志（HTTP 走模块日志、
+  MCP 走 stderr），客户端统一 `ERR_INTERNAL` + `internal server error` /
+  `-32603` + `internal error`；受控错误（`ServiceError`）保持原码与原 hint。
+  未知租户/服务不可用改为固定文案，不再回显错误串。
+- 负控（先红后绿）：`TestInternalErrorsAreSanitized`——修复前 HTTP 与 MCP
+  均原样回传含 `SELECT ... path='...' (dsn=postgres://...)` 的错误（红），
+  修复后两出口均不含原文（绿）；既有 404 用例继续通过。
+- 文档：`接口层.md` 新增错误脱敏契约；counts 60374（60.4k）。
+
 ### Commit 202: feat(store): 连接池上限可配置并接入 sqlite/pg（R3-11 / P2-12）
 
 - 根因：sqlite/pg 均直接使用 `database/sql` 默认值——`MaxOpenConns=0`（无上限）。

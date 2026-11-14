@@ -691,11 +691,13 @@ func mcpError(id any, err error) jsonRPCResponse {
 			code = -32602
 		}
 		msg = svcErr.Message
-	}
-	// MCP 的 error 只有 message 一个文本字段，hint 只能内联；
-	// 用 [hint] 起头保持可解析，调用方按需拆分。
-	if svcErr, ok := err.(*service.ServiceError); ok {
+		// MCP 的 error 只有 message 一个文本字段，hint 只能内联；
+		// 用 [hint] 起头保持可解析，调用方按需拆分。
 		msg = cerrors.WithHint(svcErr.Code, msg)
+	} else {
+		// 非受控错误可能含 SQL / DSN / 绝对路径，只落服务端日志（R2-8）。
+		log.Printf("mcp: internal error: %v", err)
+		msg = "internal error"
 	}
 	return jsonRPCResponse{
 		JSONRPC: "2.0",
