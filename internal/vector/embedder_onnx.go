@@ -122,6 +122,10 @@ func (e *ONNXEmbedder) Embed(_ context.Context, text string) ([]float32, error) 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Close 会释放底层 session；此后再调用必须返回错误，不能让 nil session 触发 SIGSEGV（R6-3）。
+	if e.model == nil {
+		return nil, fmt.Errorf("onnx embedder is closed")
+	}
 	// 分词并编码
 	inputIDs, attnMask, typeIDs := e.encode(text)
 	if len(inputIDs) == 0 {

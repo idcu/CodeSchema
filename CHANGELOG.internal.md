@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 209: fix(vector): ONNX Embedder 关闭后调用不再 panic（R6-3 / P2-16）
+
+- 根因：`ONNXEmbedder.Close` 把 `e.model` 置 nil，但 `Embed` 未判空，关闭后再次推理
+  直接解引用 nil session（实测 SIGSEGV in `DynamicAdvancedSession.RunWithOptions`）；
+  长驻服务里全局单例被关闭（如租户重配）后，下一个查询即整进程崩溃。
+- 修复：`Embed` 在持锁后先判 `e.model == nil`，返回 `onnx embedder is closed` 错误；
+  `Close` 原有 nil 判断保持幂等语义（重复调用返回 nil）。
+- 负控（先红后绿，`go test -tags onnx`，本机模型 + onnxruntime 就绪）：
+  `TestONNXEmbedder_EmbedAfterClose` 修前在 `embedder_onnx.go:166` 触发
+  `SIGSEGV ... nil pointer dereference`（红）→ 修后返回错误且重复 Close 为 nil（绿）；
+  同批 `TestONNXEmbedder_Embed/Dim/EmptyText` 均通过。
+- 文档：`存储后端.md` 补充 ONNX 生命周期语义；counts 见本笔 `make counts`。
+
 ### Commit 208: fix(vector): 向量文件记录模型/维度并在不匹配时拒绝加载（R6-3 / P2-16）
 
 - 根因：`PersistentStore` 的 JSON 只存 `vectors`，没有模型标识与维度。切换 embedding

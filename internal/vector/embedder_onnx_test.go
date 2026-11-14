@@ -76,6 +76,30 @@ func TestONNXEmbedder_Dim(t *testing.T) {
 	}
 }
 
+// TestONNXEmbedder_EmbedAfterClose 负控（R6-3 / P2-16）：Close 释放 session 后，
+// 再调用 Embed 必须返回错误而不是对 nil session 触发 panic；重复 Close 应幂等。
+func TestONNXEmbedder_EmbedAfterClose(t *testing.T) {
+	emb := newTestONNXEmbedder(t)
+
+	ctx := context.Background()
+	if _, err := emb.Embed(ctx, "关闭前调用"); err != nil {
+		t.Fatalf("Embed before close: %v", err)
+	}
+	if err := emb.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	vec, err := emb.Embed(ctx, "关闭后调用")
+	if err == nil {
+		t.Fatalf("Close 后 Embed 应返回错误，实际 vec=%v err=nil", vec)
+	}
+	t.Logf("Close 后 Embed 返回错误（符合预期）: %v", err)
+
+	if err := emb.Close(); err != nil {
+		t.Errorf("重复 Close 应幂等返回 nil，实际: %v", err)
+	}
+}
+
 func TestONNXEmbedder_SemanticSimilarity(t *testing.T) {
 	emb := newTestONNXEmbedder(t)
 	defer emb.Close()
