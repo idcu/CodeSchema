@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 170: fix(pg): method 表补 full_name 列，PG 后端方法 FQN 不再恒为空（P1-5）
+
+- 背景：PG `method` 表 DDL、`GetMethodsByClassID`、`UpsertMethods`、`BulkUpsert`、`upsertMethodsTx` 均无 `full_name`，`MethodRecord.FullName` 在 PG 上恒为空。依赖方法 FQN 的能力（测试关联、标签、`/context` 方法匹配）在 PG 上全部失效；SQLite/FileStore 均正常。
+- 动作：
+  - DDL 增加 `full_name TEXT DEFAULT ''` + `ALTER TABLE method ADD COLUMN IF NOT EXISTS full_name ...`（兼容既有库）+ `idx_method_full_name` 索引。
+  - 四条写入路径（`upsertMethodsTx`/`UpsertMethods`/`BulkUpsert`）统一写入 `methodFullName(ClassFQN, Name)`；查询路径（`GetMethodsByClassID` → `queryMethods`）回读该列。
+- 负控（先红后绿）：`internal/store/pg/integration_test.go::TestPGStore_MethodFullNameRoundTrip`（`-tags pg`，嵌入式 PG）。修复前实测 `full_name not persisted: got "", want "p15.Svc.Run"`；修复后通过（13.2s）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`go vet -tags pg ./internal/store/pg/` + 该集成测试通过；`make counts-check` 通过（LoC 56356 ≈ 56.4k）。
+
 ### Commit 169: fix(store): 重索引先清 method/标签再删 class，消除孤儿累积（P1-6）
 
 - 背景：SQLite `method`/`class_tag`/`method_tag` 无外键级联，但重索引先 `DELETE FROM class`，随后 `DELETE FROM method WHERE class_id IN (SELECT ... FROM class WHERE file_id=?)` 已查不到任何 class → 旧方法永久残留；`UpsertIR` 只在 `len(ir.Methods)>0` 时删方法，类整体消失时也不清。FileStore 以 class ID 为方法 map 的键，重索引分配新 ID 后旧键无人清理，`UpsertIR`/`BulkUpsert` 同样只在有方法时覆盖。

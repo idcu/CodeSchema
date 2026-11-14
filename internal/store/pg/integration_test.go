@@ -535,3 +535,59 @@ func TestPGStore_UpsertIRFieldsConstants(t *testing.T) {
 	// 清理
 	_ = s.DeleteFile(ctx, file.ID)
 }
+
+// TestPGStore_MethodFullNameRoundTrip 负控（P1-5）：
+// method.full_name 必须持久化并可回读；否则测试关联/标签/context 在 PG 上失效。
+func TestPGStore_MethodFullNameRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("open pg: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	filePath := fmt.Sprintf("/repo/p15_%d/svc.go", time.Now().UnixNano())
+	ir := &parser.IRDocument{
+		Source: "treesitter", Language: "go", FilePath: filePath,
+		FileHash: "h", LineCount: 20, ByteSize: 200,
+		Classes: []parser.ClassIR{{Name: "Svc", FullName: "p15.Svc", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "p15.Svc", Signature: "Run()"}},
+	}
+	if err := s.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("upsert IR: %v", err)
+	}
+
+	files, err := s.GetAllFiles(ctx)
+	if err != nil {
+		t.Fatalf("get files: %v", err)
+	}
+	var fileID int64
+	for _, f := range files {
+		if f.AbsolutePath == filePath {
+			fileID = f.ID
+			break
+		}
+	}
+	if fileID == 0 {
+		t.Fatalf("file not found: %s", filePath)
+	}
+	classes, err := s.GetClassesByFileID(ctx, fileID)
+	if err != nil || len(classes) != 1 {
+		t.Fatalf("get classes: %v %d", err, len(classes))
+	}
+	methods, err := s.GetMethodsByClassID(ctx, classes[0].ID)
+	if err != nil || len(methods) != 1 {
+		t.Fatalf("get methods: %v %d", err, len(methods))
+	}
+	if methods[0].FullName != "p15.Svc.Run" {
+		t.Fatalf("full_name not persisted: got %q, want %q", methods[0].FullName, "p15.Svc.Run")
+	}
+}

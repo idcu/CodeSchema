@@ -135,10 +135,10 @@ func upsertMethodsTx(ctx context.Context, tx *sql.Tx, fileID int64, classes []pa
 		if !ok {
 			continue
 		}
-		const q = `INSERT INTO method (class_id, name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, source)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		const q = `INSERT INTO method (class_id, name, full_name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, source)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 			ON CONFLICT DO NOTHING`
-		if _, err := tx.ExecContext(ctx, q, classID, m.Name, m.Signature, m.ReturnType,
+		if _, err := tx.ExecContext(ctx, q, classID, m.Name, methodFullName(m.ClassFQN, m.Name), m.Signature, m.ReturnType,
 			m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Modifier, m.Doc, src); err != nil {
 			return err
 		}
@@ -418,7 +418,7 @@ func (s *PGStore) GetClassesByFileID(ctx context.Context, fileID int64) ([]store
 }
 
 func (s *PGStore) GetMethodsByClassID(ctx context.Context, classID int64) ([]store.MethodRecord, error) {
-	const q = `SELECT id, class_id, name, signature, return_type, start_line, start_col, end_line, end_col, doc_comment, source FROM method WHERE class_id=$1`
+	const q = `SELECT id, class_id, name, full_name, signature, return_type, start_line, start_col, end_line, end_col, doc_comment, source FROM method WHERE class_id=$1`
 	return queryMethods(ctx, s.db, q, classID)
 }
 
@@ -467,9 +467,9 @@ func (s *PGStore) UpsertMethods(ctx context.Context, classID int64, methods []pa
 	for _, m := range methods {
 		ann, _ := json.Marshal(m.Annotations)
 		extra, _ := json.Marshal(m.Extra)
-		const q = `INSERT INTO method (class_id, name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, is_static, is_abstract, is_constructor, source, extra)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING`
-		if _, err := tx.ExecContext(ctx, q, classID, m.Name, m.Signature, m.ReturnType,
+		const q = `INSERT INTO method (class_id, name, full_name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, is_static, is_abstract, is_constructor, source, extra)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`
+		if _, err := tx.ExecContext(ctx, q, classID, m.Name, methodFullName(m.ClassFQN, m.Name), m.Signature, m.ReturnType,
 			m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Modifier, m.Doc, string(ann),
 			boolToInt(m.IsStatic), boolToInt(m.IsAbstract), boolToInt(m.IsConstructor), "", string(extra)); err != nil {
 			return err
@@ -600,6 +600,14 @@ func queryClasses(ctx context.Context, db *sql.DB, q string, arg int64) ([]store
 	return out, rows.Err()
 }
 
+// methodFullName 返回方法的全限定名（ClassFQN.Name）；ClassFQN 缺失时退化为方法名。
+func methodFullName(classFQN, name string) string {
+	if classFQN == "" {
+		return name
+	}
+	return classFQN + "." + name
+}
+
 func queryMethods(ctx context.Context, db *sql.DB, q string, arg int64) ([]store.MethodRecord, error) {
 	rows, err := db.QueryContext(ctx, q, arg)
 	if err != nil {
@@ -609,10 +617,11 @@ func queryMethods(ctx context.Context, db *sql.DB, q string, arg int64) ([]store
 	var out []store.MethodRecord
 	for rows.Next() {
 		var r store.MethodRecord
-		var sig, ret, doc, src sql.NullString
-		if err := rows.Scan(&r.ID, &r.ClassID, &r.Name, &sig, &ret, &r.StartLine, &r.StartCol, &r.EndLine, &r.EndCol, &doc, &src); err != nil {
+		var fullName, sig, ret, doc, src sql.NullString
+		if err := rows.Scan(&r.ID, &r.ClassID, &r.Name, &fullName, &sig, &ret, &r.StartLine, &r.StartCol, &r.EndLine, &r.EndCol, &doc, &src); err != nil {
 			return nil, err
 		}
+		r.FullName = fullName.String
 		r.Signature = sig.String
 		r.ReturnType = ret.String
 		r.Doc = doc.String
@@ -724,11 +733,14 @@ CREATE TABLE IF NOT EXISTS class_parent (
   PRIMARY KEY(class_id, parent_class_id, parent_fqn)
 );
 CREATE TABLE IF NOT EXISTS method (
-  id SERIAL PRIMARY KEY, class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, name TEXT, signature TEXT, return_type TEXT,
+  id SERIAL PRIMARY KEY, class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, name TEXT, full_name TEXT DEFAULT '', signature TEXT, return_type TEXT,
   start_line INTEGER, start_col INTEGER, end_line INTEGER, end_col INTEGER, modifier TEXT DEFAULT '',
   doc_comment TEXT DEFAULT '', annotations TEXT DEFAULT '[]', is_static INTEGER DEFAULT 0, is_abstract INTEGER DEFAULT 0,
   is_constructor INTEGER DEFAULT 0, imports TEXT DEFAULT '[]', source TEXT DEFAULT '', extra TEXT, created_at TEXT DEFAULT now()
 );
+-- 兼容旧库：method.full_name 列缺失会导致 MethodRecord.FullName 恒为空（P1-5）。
+ALTER TABLE method ADD COLUMN IF NOT EXISTS full_name TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_method_full_name ON method(full_name);
 CREATE INDEX IF NOT EXISTS idx_method_class_line ON method(class_id, start_line, end_line);
 CREATE INDEX IF NOT EXISTS idx_method_class_id ON method(class_id);
 CREATE INDEX IF NOT EXISTS idx_method_name ON method(name);
@@ -969,8 +981,8 @@ func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) erro
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (absolute_path) DO UPDATE SET content_hash=EXCLUDED.content_hash, line_count=EXCLUDED.line_count, byte_size=EXCLUDED.byte_size, referenced_by_files=EXCLUDED.referenced_by_files, language=EXCLUDED.language, updated_at=now() RETURNING id`
 	const qClass = `INSERT INTO class (file_id, name, full_name, type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, source, extra)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`
-	const qMethod = `INSERT INTO method (class_id, name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, is_static, is_abstract, is_constructor, source, extra)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
+	const qMethod = `INSERT INTO method (class_id, name, full_name, signature, return_type, start_line, start_col, end_line, end_col, modifier, doc_comment, annotations, is_static, is_abstract, is_constructor, source, extra)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
 
 	for _, ir := range irs {
 		ref, _ := json.Marshal(ir.ReferencedBy)
@@ -1010,7 +1022,7 @@ func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) erro
 				}
 				ann, _ := json.Marshal(m.Annotations)
 				extra, _ := json.Marshal(m.Extra)
-				if _, err := tx.ExecContext(ctx, qMethod, cid, m.Name, m.Signature, m.ReturnType,
+				if _, err := tx.ExecContext(ctx, qMethod, cid, m.Name, methodFullName(m.ClassFQN, m.Name), m.Signature, m.ReturnType,
 					m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Modifier, m.Doc, string(ann),
 					boolToInt(m.IsStatic), boolToInt(m.IsAbstract), boolToInt(m.IsConstructor), "", string(extra)); err != nil {
 					return fmt.Errorf("bulk insert method %s: %w", m.Name, err)
