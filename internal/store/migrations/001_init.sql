@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS method_tag (
   tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE,
   PRIMARY KEY(method_id, tag_id)
 );
+-- 标签反查（search_by_tag）：PK 前导列是 *_id，tag_id 需单列索引避免全表扫描（R3-10）
+CREATE INDEX IF NOT EXISTS idx_class_tag_tag ON class_tag(tag_id);
+CREATE INDEX IF NOT EXISTS idx_method_tag_tag ON method_tag(tag_id);
 
 -- call：调用关系（FQN 口径，与运行时 sqlite/pg 后端一致；caller/callee 以全限定名串接 method）
 CREATE TABLE IF NOT EXISTS call (
@@ -148,6 +151,7 @@ CREATE TABLE IF NOT EXISTS call (
   line_number INTEGER,
   source TEXT DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_call_file ON call(file_id);
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);
 

@@ -755,10 +755,13 @@ CREATE TABLE IF NOT EXISTS tag (
   id SERIAL PRIMARY KEY, name TEXT UNIQUE, category TEXT
 );
 CREATE TABLE IF NOT EXISTS class_tag ( class_id INTEGER REFERENCES class(id) ON DELETE CASCADE, tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE, PRIMARY KEY(class_id, tag_id) );
+CREATE INDEX IF NOT EXISTS idx_class_tag_tag ON class_tag(tag_id);
 CREATE TABLE IF NOT EXISTS method_tag ( method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE, PRIMARY KEY(method_id, tag_id) );
+CREATE INDEX IF NOT EXISTS idx_method_tag_tag ON method_tag(tag_id);
 CREATE TABLE IF NOT EXISTS call (
   id SERIAL PRIMARY KEY, file_id INTEGER REFERENCES file(id) ON DELETE CASCADE, caller_fqn TEXT, callee_fqn TEXT, call_type TEXT DEFAULT '', line_number INTEGER, source TEXT DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_call_file ON call(file_id);
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);
 CREATE TABLE IF NOT EXISTS method_test_link (

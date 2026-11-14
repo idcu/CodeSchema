@@ -94,11 +94,13 @@ CREATE TABLE IF NOT EXISTS class_tag (
   tag_id INTEGER,
   PRIMARY KEY(class_id, tag_id)
 );
+CREATE INDEX IF NOT EXISTS idx_class_tag_tag ON class_tag(tag_id);
 CREATE TABLE IF NOT EXISTS method_tag (
   method_id INTEGER,
   tag_id INTEGER,
   PRIMARY KEY(method_id, tag_id)
 );
+CREATE INDEX IF NOT EXISTS idx_method_tag_tag ON method_tag(tag_id);
 `
 
 // NewSQLiteStore 创建 SQLite 存储实例。

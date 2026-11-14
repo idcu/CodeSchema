@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 200: perf(store): 补齐按文件清调用与标签反查索引（R3-10 / P2-11）
+
+- 根因：`class_tag` / `method_tag` 的 PK 前导列是 `*_id`，`tag_id` 无索引覆盖，
+  `search_by_tag` 反查全表扫描；PG 的 `call` 表缺 `file_id` 索引，`DeleteFile` /
+  重索引 / `GetCallsByFileID` 随调用行数线性退化（SQLite 已有 `idx_call_file`）。
+- 修复：SQLite / PG / `migrations/001_init.sql` 三处 DDL 新增
+  `idx_call_file`（PG）、`idx_class_tag_tag`、`idx_method_tag_tag`（两后端）。
+  SQLite 每次 `Open` 重放 `CREATE INDEX IF NOT EXISTS`，既有库自愈；
+  PG 需一次 `InitSchema`（服务启动即执行）。
+- 负控（先红后绿）：`TestSQLite_HotIndexes`——修复前两项标签索引缺失（红）；
+  修复后 `EXPLAIN QUERY PLAN` 实测：
+  `call` → `SEARCH call USING COVERING INDEX idx_call_file (file_id=?)`、
+  `class_tag` → `SEARCH class_tag USING INDEX idx_class_tag_tag (tag_id=?)`、
+  `method_tag` → `SEARCH method_tag USING INDEX idx_method_tag_tag (tag_id=?)`。
+- PG 侧新增 `-tags pg` 用例 `TestPGStore_HotIndexes`（`pg_indexes` 存在性 +
+  `EXPLAIN`，`enable_seqscan=off` 保证计划体现索引）；门禁以 `go vet -tags` 编译校验。
+- 文档：`存储后端.md` 新增「热点索引」；counts 60154（60.0k）。
+
 ### Commit 199: refactor(service): 删除未接线的 coverage 关联策略（R6-8 / P2-7）
 
 - 根因：`SetCoverage` / `LoadCoverageJSON` / `LoadGoCoverProfile` / `ParseGoCoverProfile`

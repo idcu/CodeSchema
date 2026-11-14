@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -21,6 +22,49 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// TestSQLite_HotIndexes 负控（R3-10）：标签反查与按文件清调用必须走索引。
+// 无索引时 class_tag/method_tag(tag_id) 与 call(file_id) 全表扫描，
+// 标签检索与重索引清理随数据量线性退化。
+func TestSQLite_HotIndexes(t *testing.T) {
+	s := newTestStore(t)
+	cases := []struct {
+		index string
+		query string
+	}{
+		{"idx_call_file", "SELECT id FROM call WHERE file_id = 1"},
+		{"idx_class_tag_tag", "SELECT class_id FROM class_tag WHERE tag_id = 1"},
+		{"idx_method_tag_tag", "SELECT method_id FROM method_tag WHERE tag_id = 1"},
+	}
+	for _, c := range cases {
+		var name string
+		if err := s.db.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, c.index,
+		).Scan(&name); err != nil {
+			t.Errorf("索引 %s 缺失: %v", c.index, err)
+			continue
+		}
+		rows, err := s.db.Query("EXPLAIN QUERY PLAN " + c.query)
+		if err != nil {
+			t.Errorf("explain %s: %v", c.index, err)
+			continue
+		}
+		plan := ""
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatalf("scan plan: %v", err)
+			}
+			plan += detail + "; "
+		}
+		_ = rows.Close()
+		t.Logf("%s → %s", c.index, strings.TrimSuffix(plan, "; "))
+		if !strings.Contains(plan, c.index) {
+			t.Errorf("查询计划未使用索引 %s: %s", c.index, plan)
+		}
+	}
 }
 
 func TestSQLite_DBFileAndDirPerm(t *testing.T) {

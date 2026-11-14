@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +216,64 @@ func TestPGStore_FKConstraints(t *testing.T) {
 //  3. constant 正常写入包级(file_id) / 类级(class_id)，二选一 CHECK 拒绝双 NULL，
 //     FK 拒绝引用不存在的 class；
 //  4. ON DELETE CASCADE：删 file 后 field/constant 从属数据级联清空。
+func TestPGStore_HotIndexes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// R3-10：按文件清调用与标签反查必须走索引（表可能很小，关掉 seqscan 以保证
+	// 计划能体现索引可用性；索引不存在时仍会给出 Seq Scan）。
+	if _, err := s.db.ExecContext(ctx, `SET enable_seqscan = off`); err != nil {
+		t.Fatalf("set enable_seqscan: %v", err)
+	}
+	cases := []struct {
+		index string
+		query string
+	}{
+		{"idx_call_file", "SELECT id FROM call WHERE file_id = 1"},
+		{"idx_class_tag_tag", "SELECT class_id FROM class_tag WHERE tag_id = 1"},
+		{"idx_method_tag_tag", "SELECT method_id FROM method_tag WHERE tag_id = 1"},
+	}
+	for _, c := range cases {
+		var name string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`, c.index,
+		).Scan(&name); err != nil {
+			t.Errorf("索引 %s 缺失: %v", c.index, err)
+			continue
+		}
+		rows, err := s.db.QueryContext(ctx, "EXPLAIN "+c.query)
+		if err != nil {
+			t.Errorf("explain %s: %v", c.index, err)
+			continue
+		}
+		plan := ""
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatalf("scan plan: %v", err)
+			}
+			plan += line + "; "
+		}
+		_ = rows.Close()
+		t.Logf("%s → %s", c.index, strings.TrimSuffix(plan, "; "))
+		if !strings.Contains(plan, c.index) {
+			t.Errorf("查询计划未使用索引 %s: %s", c.index, plan)
+		}
+	}
+}
+
 func TestPGStore_FieldConstantTables(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
