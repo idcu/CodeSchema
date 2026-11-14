@@ -108,5 +108,7 @@ func callRecordToIR(r *store.CallRecord) *parser.CallIR {
 		CalleeFQN:  r.CalleeFQN,
 		CallType:   r.CallType,
 		LineNumber: r.LineNumber,
+		Source:     r.Source,
+		Confidence: r.Confidence,
 	}
 }

@@ -193,3 +193,78 @@ func TestService_FindDependencies_InvalidSymbol(t *testing.T) {
 		t.Fatal("expected error for empty symbol")
 	}
 }
+
+// TestService_GetCallGraph_EdgeDetails 负控（R5-3）：调用子图必须为每条边给出
+// 来源与置信度；同一对 from/to 多家来源时取最高置信度；历史空来源按
+// treesitter/60 解释。
+func TestService_GetCallGraph_EdgeDetails(t *testing.T) {
+	st := store.NewStore("file")
+	dir := t.TempDir()
+	if err := st.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	fileID, err := st.UpsertFile(context.Background(), "/project/config/watcher.go", "h1", 100, 2048)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	calls := []parser.CallIR{
+		{CallerFQN: "config.NewWatcher", CalleeFQN: "config.Watcher.ReloadNow", CallType: "direct",
+			Source: parser.CallSourceRegex, Confidence: parser.ConfidenceRegex},
+		{CallerFQN: "config.NewWatcher", CalleeFQN: "config.Watcher.ReloadNow", CallType: "direct",
+			Source: parser.CallSourceLSP, Confidence: parser.ConfidenceLSP},
+		{CallerFQN: "config.Watcher.ReloadNow", CalleeFQN: "config.loadConfig", CallType: "direct"},
+	}
+	if err := st.UpsertCalls(context.Background(), fileID, calls); err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+
+	an := analyzer.NewAnalyzer(st)
+	svc := NewService(st).WithImpactAnalyzer(an)
+
+	res, err := svc.GetCallGraph(context.Background(), "config.Watcher.ReloadNow", 1)
+	if err != nil {
+		t.Fatalf("GetCallGraph: %v", err)
+	}
+
+	edges, _ := res["edges"].([]string)
+	details, ok := res["edge_details"].([]map[string]any)
+	if !ok {
+		t.Fatalf("edge_details not []map[string]any: %T", res["edge_details"])
+	}
+	if len(details) != len(edges) {
+		t.Fatalf("edge_details len=%d, edges len=%d", len(details), len(edges))
+	}
+
+	byEdge := make(map[string]map[string]any, len(details))
+	for _, d := range details {
+		from, _ := d["from"].(string)
+		to, _ := d["to"].(string)
+		byEdge[from+" -> "+to] = d
+	}
+
+	high := byEdge["config.NewWatcher -> config.Watcher.ReloadNow"]
+	if high == nil {
+		t.Fatalf("missing edge detail for NewWatcher -> ReloadNow: %+v", details)
+	}
+	if high["source"] != parser.CallSourceLSP || high["confidence"] != parser.ConfidenceLSP {
+		t.Errorf("expected highest-confidence source lsp/100, got %+v", high)
+	}
+
+	legacy := byEdge["config.Watcher.ReloadNow -> config.loadConfig"]
+	if legacy == nil {
+		t.Fatalf("missing edge detail for ReloadNow -> loadConfig: %+v", details)
+	}
+	if legacy["source"] != parser.CallSourceTreeSitter || legacy["confidence"] != parser.ConfidenceExternal {
+		t.Errorf("expected legacy empty source normalized to treesitter/60, got %+v", legacy)
+	}
+
+	sources, ok := res["edge_sources"].(map[string]int)
+	if !ok {
+		t.Fatalf("edge_sources not map[string]int: %T", res["edge_sources"])
+	}
+	if sources[parser.CallSourceLSP] != 1 || sources[parser.CallSourceTreeSitter] != 1 {
+		t.Errorf("unexpected edge_sources: %+v", sources)
+	}
+}

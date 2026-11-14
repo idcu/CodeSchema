@@ -201,6 +201,7 @@ func processEdges(rows *sql.Rows, docsByFile map[string]*parser.IRDocument, orde
 		}
 		docsByFile[fp].Calls = append(docsByFile[fp].Calls, parser.CallIR{
 			CallerFQN: caller, CalleeFQN: callee, CallType: callTypeFromKind(etype),
+			Source: parser.CallSourceSCIP, Confidence: parser.ConfidenceExternal,
 		})
 	}
 }

@@ -358,6 +358,8 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 							CallerFQN:  astCallerFQN(lang, goPkg, astPkg, curMethod),
 							CallType:   "direct",
 							LineNumber: int(start.Row) + 1,
+							Source:     parser.CallSourceTreeSitter,
+							Confidence: parser.ConfidenceTreeSitter,
 						})
 					}
 				}
@@ -453,6 +455,8 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				CallerFQN:  astCallerFQN(lang, goPkg, astPkg, curMethod),
 				CallType:   "direct",
 				LineNumber: int(start.Row) + 1,
+				Source:     parser.CallSourceTreeSitter,
+				Confidence: parser.ConfidenceTreeSitter,
 			})
 		}
 

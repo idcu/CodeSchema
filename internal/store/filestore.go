@@ -73,6 +73,7 @@ type CallRecord struct {
 	CallType   string `json:"call_type"`
 	LineNumber int    `json:"line_number"`
 	Source     string `json:"source,omitempty"`
+	Confidence int    `json:"confidence,omitempty"`
 }
 
 // Open 初始化文件存储。
@@ -310,6 +311,8 @@ func (fs *FileStore) UpsertCalls(ctx context.Context, fileID int64, calls []pars
 			CalleeFQN:  c.CalleeFQN,
 			CallType:   c.CallType,
 			LineNumber: c.LineNumber,
+			Source:     c.Source,
+			Confidence: c.Confidence,
 		})
 	}
 	fs.calls[fileID] = records
@@ -787,6 +790,7 @@ func (fs *FileStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) e
 		for _, c := range ir.Calls {
 			callRecords = append(callRecords, CallRecord{
 				CallerFQN: c.CallerFQN, CalleeFQN: c.CalleeFQN, CallType: c.CallType, LineNumber: c.LineNumber,
+				Source: c.Source, Confidence: c.Confidence,
 			})
 		}
 		fs.calls[fileID] = callRecords

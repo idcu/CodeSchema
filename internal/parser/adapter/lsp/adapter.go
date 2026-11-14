@@ -968,6 +968,8 @@ func (a *LSPAdapter) collectCalls(ctx context.Context, uri string, sites []metho
 					CalleeFQN:  callee,
 					CallType:   "direct",
 					LineNumber: line,
+					Source:     parser.CallSourceLSP,
+					Confidence: parser.ConfidenceLSP,
 				})
 			}
 		}

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -702,5 +703,80 @@ func TestSQLite_BulkUpsertRemovesStaleMethods(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("stale methods after bulk reindex: got %d, want 1", n)
+	}
+}
+
+// TestSQLite_CallSourceConfidenceRoundTrip 负控（R5-3）：调用边来源与置信度
+// 必须完整落库并读回，不能被静默丢弃。
+func TestSQLite_CallSourceConfidenceRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	fid, err := s.UpsertFile(ctx, "/repo/a.go", "h", 1, 10)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	err = s.UpsertCalls(ctx, fid, []parser.CallIR{{
+		CallerFQN: "pkg.A.Run", CalleeFQN: "pkg.B.Helper", CallType: "direct", LineNumber: 3,
+		Source: parser.CallSourceLSP, Confidence: parser.ConfidenceLSP,
+	}})
+	if err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+
+	calls, err := s.GetCallsByFileID(ctx, fid)
+	if err != nil {
+		t.Fatalf("GetCallsByFileID: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("want 1 call, got %d", len(calls))
+	}
+	if calls[0].Source != parser.CallSourceLSP || calls[0].Confidence != parser.ConfidenceLSP {
+		t.Errorf("call provenance lost: %+v", calls[0])
+	}
+}
+
+// TestSQLite_LegacyCallTableSelfHeals 负控（R5-3）：既有库的 call 表没有
+// confidence 列时必须自动补列，否则读写直接报 no such column。
+func TestSQLite_LegacyCallTableSelfHeals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.db")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE call (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, caller_fqn TEXT,
+		callee_fqn TEXT, call_type TEXT, line_number INTEGER, source TEXT DEFAULT '')`); err != nil {
+		t.Fatalf("create legacy call: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	s := NewSQLiteStore()
+	if err := s.Open(context.Background(), path); err != nil {
+		t.Fatalf("Open legacy db: %v", err)
+	}
+	defer s.Close()
+
+	fid, err := s.UpsertFile(context.Background(), "/repo/a.go", "h", 1, 10)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	err = s.UpsertCalls(context.Background(), fid, []parser.CallIR{{
+		CallerFQN: "pkg.A.Run", CalleeFQN: "pkg.B.Helper", CallType: "direct",
+		Source: parser.CallSourceRegex, Confidence: parser.ConfidenceRegex,
+	}})
+	if err != nil {
+		t.Fatalf("UpsertCalls after migration: %v", err)
+	}
+	calls, err := s.GetCallsByFileID(context.Background(), fid)
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("GetCallsByFileID: %v len=%d", err, len(calls))
+	}
+	if calls[0].Confidence != parser.ConfidenceRegex {
+		t.Errorf("confidence not persisted after self-heal: %+v", calls[0])
 	}
 }

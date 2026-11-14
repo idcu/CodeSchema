@@ -21,7 +21,10 @@ func TestAdapterXRoundTrip(t *testing.T) {
 			StartLine: 2, EndLine: 4, IsStatic: true, IsAbstract: false, IsConstructor: false,
 			Params: []ParamIR{{Name: "x", Type: "int", Index: 0}},
 		}},
-		Calls: []CallIR{{CallerFQN: "pkg.A.M", CalleeFQN: "pkg.B.N", CallType: "direct", LineNumber: 3}},
+		Calls: []CallIR{{
+			CallerFQN: "pkg.A.M", CalleeFQN: "pkg.B.N", CallType: "direct", LineNumber: 3,
+			Source: CallSourceTreeSitter, Confidence: ConfidenceTreeSitter,
+		}},
 	}
 
 	back := FromAdapterX(ToAdapterX(doc))
@@ -36,6 +39,35 @@ func TestAdapterXRoundTrip(t *testing.T) {
 	}
 	if len(back.Calls) != 1 || back.Calls[0].CalleeFQN != "pkg.B.N" {
 		t.Errorf("calls mismatch: %+v", back.Calls)
+	}
+	// R5-3：跨契约桥接必须保留调用边的来源与置信度。
+	if back.Calls[0].Source != CallSourceTreeSitter || back.Calls[0].Confidence != ConfidenceTreeSitter {
+		t.Errorf("call provenance lost in round-trip: %+v", back.Calls[0])
+	}
+}
+
+// TestNormalizeCallProvenance 负控（R5-3）：历史数据 source 为空时按低置信度
+// treesitter/60 解释；有来源但置信度缺省时回落到该来源的默认值。
+func TestNormalizeCallProvenance(t *testing.T) {
+	cases := []struct {
+		source string
+		conf   int
+		want   string
+		wantC  int
+	}{
+		{"", 0, CallSourceTreeSitter, ConfidenceExternal},
+		{CallSourceRegex, 0, CallSourceRegex, ConfidenceRegex},
+		{CallSourceTreeSitter, 0, CallSourceTreeSitter, ConfidenceTreeSitter},
+		{CallSourceLSP, 0, CallSourceLSP, ConfidenceLSP},
+		{CallSourceSCIP, 0, CallSourceSCIP, ConfidenceSCIP},
+		{CallSourceSCIP, 42, CallSourceSCIP, 42},
+	}
+	for _, c := range cases {
+		got, gotC := NormalizeCallProvenance(c.source, c.conf)
+		if got != c.want || gotC != c.wantC {
+			t.Errorf("NormalizeCallProvenance(%q,%d) = (%q,%d), want (%q,%d)",
+				c.source, c.conf, got, gotC, c.want, c.wantC)
+		}
 	}
 }
 

@@ -126,9 +126,54 @@ type ConstantIR struct {
 	Extra             map[string]any
 }
 
+// 调用边来源标识（R5-3）。每条 CallIR 都必须携带来源，便于上层判断精度。
+const (
+	CallSourceLSP        = "lsp"
+	CallSourceSCIP       = "scip"
+	CallSourceTreeSitter = "treesitter"
+	CallSourceRegex      = "regex"
+)
+
+// 调用边置信度（0-100）。数值越高表示来源越能证明「真实调用关系」。
+const (
+	ConfidenceLSP        = 100
+	ConfidenceSCIP       = 100
+	ConfidenceTreeSitter = 90
+	ConfidenceRegex      = 70
+	// ConfidenceExternal 外部索引适配器（CodeGraph/JCodeIndexer）的边精度：
+	// 只有符号级边表，无法定位精确调用点，按 scip 来源但降级。
+	ConfidenceExternal = 60
+)
+
+// NormalizeCallProvenance 归一化调用边来源/置信度。
+//
+// 历史数据 source 为空时无法追溯来源，按 treesitter/60 解释（最低可信值）；
+// 有来源但置信度为 0 时回落到该来源的默认值。
+func NormalizeCallProvenance(source string, confidence int) (string, int) {
+	if confidence > 0 {
+		return source, confidence
+	}
+	switch source {
+	case "":
+		return CallSourceTreeSitter, ConfidenceExternal
+	case CallSourceLSP:
+		return source, ConfidenceLSP
+	case CallSourceSCIP:
+		return source, ConfidenceSCIP
+	case CallSourceTreeSitter:
+		return source, ConfidenceTreeSitter
+	case CallSourceRegex:
+		return source, ConfidenceRegex
+	default:
+		return source, ConfidenceExternal
+	}
+}
+
 // CallIR 表示调用关系。
 type CallIR struct {
 	CallerFQN, CalleeFQN string
 	CallType             string // direct / interface / dynamic / unknown；非调用关系另标 imports / references / implements / extends
 	LineNumber           int
+	Source               string // 边来源：lsp / scip / treesitter / regex（R5-3）
+	Confidence           int    // 边置信度 0-100，见 Confidence* 常量（R5-3）
 }

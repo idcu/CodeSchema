@@ -25,16 +25,31 @@ type CallGraphNode struct {
 	LineCount int      // 方法行数
 }
 
+// EdgeMeta 调用边精度元信息（R5-3）。
+type EdgeMeta struct {
+	Source     string // lsp / scip / treesitter / regex
+	Confidence int    // 0-100，同边取最高
+	Count      int    // 该边在 IR 中出现的次数（多文件/多行调用）
+}
+
 // CallGraph 是完整的调用图，包含所有方法的调用关系。
 type CallGraph struct {
 	Nodes map[string]*CallGraphNode // MethodFQN -> Node
+	// EdgeMeta 以 caller+"\x00"+callee 为键记录边来源与置信度。
+	EdgeMeta map[string]EdgeMeta
 }
 
 // NewCallGraph 创建空的调用图。
 func NewCallGraph() *CallGraph {
 	return &CallGraph{
-		Nodes: make(map[string]*CallGraphNode),
+		Nodes:    make(map[string]*CallGraphNode),
+		EdgeMeta: make(map[string]EdgeMeta),
 	}
+}
+
+// edgeKey 返回调用边元信息的键。
+func edgeKey(callerFQN, calleeFQN string) string {
+	return callerFQN + "\x00" + calleeFQN
 }
 
 // AddNode 添加或获取指定方法的节点。
@@ -63,6 +78,33 @@ func (cg *CallGraph) AddEdge(callerFQN, calleeFQN string) {
 	if !contains(callee.Callers, callerFQN) {
 		callee.Callers = append(callee.Callers, callerFQN)
 	}
+}
+
+// AddEdgeWithMeta 添加调用边并记录来源/置信度；同一对 from/to 取最高置信度，
+// 置信度相同时保留先到来源，Count 累加（R5-3）。
+func (cg *CallGraph) AddEdgeWithMeta(callerFQN, calleeFQN, source string, confidence int) {
+	cg.AddEdge(callerFQN, calleeFQN)
+	if cg.EdgeMeta == nil {
+		cg.EdgeMeta = make(map[string]EdgeMeta)
+	}
+	k := edgeKey(callerFQN, calleeFQN)
+	m, ok := cg.EdgeMeta[k]
+	if !ok {
+		cg.EdgeMeta[k] = EdgeMeta{Source: source, Confidence: confidence, Count: 1}
+		return
+	}
+	m.Count++
+	if confidence > m.Confidence {
+		m.Source = source
+		m.Confidence = confidence
+	}
+	cg.EdgeMeta[k] = m
+}
+
+// EdgeInfo 返回调用边的来源/置信度元信息；未记录时 ok=false。
+func (cg *CallGraph) EdgeInfo(callerFQN, calleeFQN string) (EdgeMeta, bool) {
+	m, ok := cg.EdgeMeta[edgeKey(callerFQN, calleeFQN)]
+	return m, ok
 }
 
 // GetCallers 返回指定方法的所有直接调用者（按深度）。

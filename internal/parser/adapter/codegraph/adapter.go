@@ -257,6 +257,7 @@ func readRealSchema(ctx context.Context, db *sql.DB, docsByFile map[string]*pars
 		if doc, ok := docsByFile[callerFile]; ok {
 			doc.Calls = append(doc.Calls, parser.CallIR{
 				CallerFQN: caller, CalleeFQN: callee, CallType: callTypeFromKind(ekind),
+				Source: parser.CallSourceSCIP, Confidence: parser.ConfidenceExternal,
 			})
 		}
 	}
@@ -306,6 +307,7 @@ func readLegacySchema(ctx context.Context, db *sql.DB, docsByFile map[string]*pa
 		}
 		docsByFile[filePath].Calls = append(docsByFile[filePath].Calls, parser.CallIR{
 			CallerFQN: caller, CalleeFQN: callee, CallType: callTypeFromKind(etype),
+			Source: parser.CallSourceSCIP, Confidence: parser.ConfidenceExternal,
 		})
 	}
 	if err := edgeRows.Err(); err != nil {

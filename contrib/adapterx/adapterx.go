@@ -99,4 +99,6 @@ type CallIR struct {
 	CallerFQN, CalleeFQN string
 	CallType             string // direct / interface / dynamic / unknown
 	LineNumber           int
+	Source               string // 边来源：lsp / scip / treesitter / regex
+	Confidence           int    // 边置信度 0-100
 }

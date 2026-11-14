@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-func TestTreeSitterAdapter_Name(t *testing.T) {
-	a := NewTreeSitterAdapter()
+func TestTreeSitterAdapter_Name(t *testing.T) {	a := NewTreeSitterAdapter()
 	if a.Name() != "treesitter" {
 		t.Errorf("expected treesitter, got %s", a.Name())
 	}
@@ -1438,5 +1437,40 @@ public class OrderService {
 				t.Errorf("bare callee FQN=%q not found; calls=%+v", tc.wantCallee, doc.Calls)
 			}
 		})
+	}
+}
+
+// TestTreeSitterAdapter_CallProvenance 负控（R5-3）：解析产出的每条调用边都必须
+// 带来源与置信度，不得留空让上层无法判断精度。
+// regex 变体应为 regex/70；AST 变体为 treesitter/90（同一断言取共同下界）。
+func TestTreeSitterAdapter_CallProvenance(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	content := `package main
+
+import "fmt"
+
+func Run() {
+	fmt.Println("hi")
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.Calls) == 0 {
+		t.Fatal("expected calls parsed")
+	}
+	for _, c := range doc.Calls {
+		if c.Source == "" {
+			t.Errorf("call %s -> %s missing source", c.CallerFQN, c.CalleeFQN)
+		}
+		if c.Confidence < 70 {
+			t.Errorf("call %s -> %s confidence=%d, want >=70", c.CallerFQN, c.CalleeFQN, c.Confidence)
+		}
 	}
 }

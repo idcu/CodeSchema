@@ -1394,10 +1394,12 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 	depth = analyzer.ClampImpactDepth(depth)
 	if s.analyzer == nil {
 		return map[string]any{
-			"symbol": symbol,
-			"depth":  depth,
-			"nodes":  []string{},
-			"edges":  []string{},
+			"symbol":       symbol,
+			"depth":        depth,
+			"nodes":        []string{},
+			"edges":        []string{},
+			"edge_details": []map[string]any{},
+			"edge_sources": map[string]int{},
 		}, nil
 	}
 
@@ -1425,8 +1427,10 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 		nodeSet[c.Method] = true
 	}
 
-	// 收集节点集合内部的边（caller -> callee）
+	// 收集节点集合内部的边（caller -> callee）及其来源/置信度
 	edges := make([]string, 0)
+	edgeDetails := make([]map[string]any, 0)
+	edgeSources := make(map[string]int)
 	for n := range nodeSet {
 		node, ok := cg.Nodes[n]
 		if !ok {
@@ -1435,6 +1439,17 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 		for _, callee := range node.Callees {
 			if nodeSet[callee] {
 				edges = append(edges, n+" -> "+callee)
+				source, confidence := parser.CallSourceTreeSitter, parser.ConfidenceExternal
+				if meta, ok := cg.EdgeInfo(n, callee); ok {
+					source, confidence = meta.Source, meta.Confidence
+				}
+				edgeDetails = append(edgeDetails, map[string]any{
+					"from":       n,
+					"to":         callee,
+					"source":     source,
+					"confidence": confidence,
+				})
+				edgeSources[source]++
 			}
 		}
 	}
@@ -1445,12 +1460,21 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 	}
 	sort.Strings(nodes)
 	sort.Strings(edges)
+	sort.Slice(edgeDetails, func(i, j int) bool {
+		fi, fj := edgeDetails[i]["from"].(string), edgeDetails[j]["from"].(string)
+		if fi != fj {
+			return fi < fj
+		}
+		return edgeDetails[i]["to"].(string) < edgeDetails[j]["to"].(string)
+	})
 
 	return map[string]any{
-		"symbol": resolved,
-		"depth":  depth,
-		"nodes":  nodes,
-		"edges":  edges,
+		"symbol":       resolved,
+		"depth":        depth,
+		"nodes":        nodes,
+		"edges":        edges,
+		"edge_details": edgeDetails,
+		"edge_sources": edgeSources,
 	}, nil
 }
 

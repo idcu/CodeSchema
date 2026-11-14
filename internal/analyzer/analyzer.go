@@ -14,6 +14,7 @@ import (
 	"gitee.com/idcu-go/metrics"
 	trace "gitee.com/idcu-go/trace"
 	"github.com/idcu/codeschema/internal/ai"
+	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
 
@@ -469,7 +470,8 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 		}
 		for _, call := range calls {
 			if call.CallerFQN != "" && call.CalleeFQN != "" && isCallRelation(call.CallType) {
-				cg.AddEdge(call.CallerFQN, call.CalleeFQN)
+				source, confidence := parser.NormalizeCallProvenance(call.Source, call.Confidence)
+				cg.AddEdgeWithMeta(call.CallerFQN, call.CalleeFQN, source, confidence)
 			}
 		}
 	}

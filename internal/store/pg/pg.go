@@ -211,9 +211,13 @@ func upsertCallsTx(ctx context.Context, tx *sql.Tx, fileID int64, calls []parser
 		return fmt.Errorf("pg delete stale calls: %w", err)
 	}
 	for _, c := range calls {
-		const q = `INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source)
-			VALUES ($1,$2,$3,$4,$5,$6)`
-		if _, err := tx.ExecContext(ctx, q, fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, src); err != nil {
+		source := c.Source
+		if source == "" {
+			source = src
+		}
+		const q = `INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source, confidence)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)`
+		if _, err := tx.ExecContext(ctx, q, fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, source, c.Confidence); err != nil {
 			return fmt.Errorf("pg insert call %s->%s: %w", c.CallerFQN, c.CalleeFQN, err)
 		}
 	}
@@ -448,7 +452,7 @@ func (s *PGStore) GetMethodsByClassID(ctx context.Context, classID int64) ([]sto
 }
 
 func (s *PGStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]store.CallRecord, error) {
-	const q = `SELECT caller_fqn, callee_fqn, call_type, line_number, source FROM call WHERE file_id=$1`
+	const q = `SELECT caller_fqn, callee_fqn, call_type, line_number, source, confidence FROM call WHERE file_id=$1`
 	rows, err := s.db.QueryContext(ctx, q, fileID)
 	if err != nil {
 		return nil, err
@@ -457,7 +461,7 @@ func (s *PGStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]store.C
 	var out []store.CallRecord
 	for rows.Next() {
 		var r store.CallRecord
-		if err := rows.Scan(&r.CallerFQN, &r.CalleeFQN, &r.CallType, &r.LineNumber, &r.Source); err != nil {
+		if err := rows.Scan(&r.CallerFQN, &r.CalleeFQN, &r.CallType, &r.LineNumber, &r.Source, &r.Confidence); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -784,8 +788,10 @@ CREATE INDEX IF NOT EXISTS idx_class_tag_tag ON class_tag(tag_id);
 CREATE TABLE IF NOT EXISTS method_tag ( method_id INTEGER REFERENCES method(id) ON DELETE CASCADE, tag_id INTEGER REFERENCES tag(id) ON DELETE CASCADE, PRIMARY KEY(method_id, tag_id) );
 CREATE INDEX IF NOT EXISTS idx_method_tag_tag ON method_tag(tag_id);
 CREATE TABLE IF NOT EXISTS call (
-  id SERIAL PRIMARY KEY, file_id INTEGER REFERENCES file(id) ON DELETE CASCADE, caller_fqn TEXT, callee_fqn TEXT, call_type TEXT DEFAULT '', line_number INTEGER, source TEXT DEFAULT ''
+  id SERIAL PRIMARY KEY, file_id INTEGER REFERENCES file(id) ON DELETE CASCADE, caller_fqn TEXT, callee_fqn TEXT, call_type TEXT DEFAULT '', line_number INTEGER, source TEXT DEFAULT '', confidence INTEGER DEFAULT 0
 );
+-- 兼容旧库：call.confidence 列在早期 DDL 缺失（R5-3 新增），显式补列。
+ALTER TABLE call ADD COLUMN IF NOT EXISTS confidence INTEGER DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_call_file ON call(file_id);
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
 CREATE INDEX IF NOT EXISTS idx_call_callee ON call(callee_fqn);

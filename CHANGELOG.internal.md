@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 214: feat(parser): 调用边来源与置信度分级（R5-3 / S-4）
+
+- 根因：`CallIR` 只有 caller/callee/type/line 四字段，三后端 `call` 表虽已有 `source`
+  但生产适配器从不回填、也无置信度——上层无法区分 LSP 精确边与正则猜测边。
+- 修复：`CallIR` 新增 `Source`/`Confidence`；8 处生产适配器全部回填
+  （LSP 100、SCIP 100、treesitter AST 90、regex 70、CodeGraph/JCodeIndexer 60）；
+  `NormalizeCallProvenance` 把历史空来源解释为 `treesitter/60`。
+  File/SQLite/PG 读写透传 `source`+`confidence`；SQLite 老库用 `PRAGMA table_info`
+  自愈补列，PG 用 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`。
+  `CallGraph` 新增 `EdgeMeta`（同 from/to 取最高置信度），`get_call_graph` 增
+  `edge_details`/`edge_sources`，原 `edges` 字符串切片条数不变。
+- 负控（先红后绿）：
+  `TestSQLite_CallSourceConfidenceRoundTrip` 修前无字段（编译红）→ 修后 `lsp/100`（绿）；
+  `TestSQLite_LegacyCallTableSelfHeals` 修前老库 `no such column: confidence`（红）→
+  修后自动补列并读回 `regex/70`（绿）；
+  `TestFileStore_CallMetaRoundTrip` 修前重启后精度归零（红）→ 修后 `scip/100`（绿）；
+  `TestService_GetCallGraph_EdgeDetails` 修前无 `edge_details`（红）→ 修后
+  `edge_details` 2 条 = `edges` 2 条、重复边取 `lsp/100`、历史边归一为 `treesitter/60`（绿）；
+  `TestTreeSitterAdapter_CallProvenance` 修前 Source 空（红）→ 修后 regex/70（绿）。
+- 文档：`解析适配器.md` 新增「调用边来源与置信度」；`接口层.md` 补 `get_call_graph`
+  精度契约；`存储后端.md` 补 `call.confidence` 迁移；`架构与模块.md` 补边精度；
+  counts 62374（62.4k）。
+
 ### Commit 213: fix(store): 重索引孤儿清理补齐三后端（R3-1 / P1-6、P2-10）
 
 - 根因：file/sqlite 的 `UpsertIR` 主路径前序已修复，但仍有四个缺口：

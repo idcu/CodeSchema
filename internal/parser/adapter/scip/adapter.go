@@ -383,6 +383,8 @@ func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
 			CalleeFQN:  occ.Symbol,
 			CallType:   "direct",
 			LineNumber: line,
+			Source:     parser.CallSourceSCIP,
+			Confidence: parser.ConfidenceSCIP,
 		})
 	}
 

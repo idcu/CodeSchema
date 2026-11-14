@@ -1114,6 +1114,8 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 				CalleeFQN:  callee,
 				CallType:   "direct",
 				LineNumber: lineNum,
+				Source:     parser.CallSourceRegex,
+				Confidence: parser.ConfidenceRegex,
 			})
 		}
 	}

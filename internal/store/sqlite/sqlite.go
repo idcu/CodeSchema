@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS call (
   callee_fqn TEXT,
   call_type TEXT,
   line_number INTEGER,
-  source TEXT DEFAULT ''
+  source TEXT DEFAULT '',
+  confidence INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_call_file ON call(file_id);
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);
@@ -146,8 +147,47 @@ func (s *SQLiteStore) Open(ctx context.Context, dsn string) error {
 		_ = db.Close()
 		return fmt.Errorf("init schema: %w", err)
 	}
+	// 既有库的 call 表由旧版本创建，CREATE TABLE IF NOT EXISTS 不会补列；
+	// 缺 confidence 会让读写直接报 no such column（R5-3）。
+	if err := ensureCallConfidenceColumn(db); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("migrate call.confidence: %w", err)
+	}
 	s.db = db
 	return nil
+}
+
+// ensureCallConfidenceColumn 为既有库补 call.confidence 列（幂等）。
+func ensureCallConfidenceColumn(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(call)")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var (
+			cid, notNull, pk int
+			name, typ        string
+			dflt             sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if name == "confidence" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if found {
+		return nil
+	}
+	_, err = db.Exec("ALTER TABLE call ADD COLUMN confidence INTEGER DEFAULT 0")
+	return err
 }
 
 // Close 关闭数据库连接。
@@ -400,9 +440,9 @@ func (s *SQLiteStore) UpsertCalls(ctx context.Context, fileID int64, calls []par
 	}
 	for _, c := range calls {
 		if _, err := tx.Exec(`
-		INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number)
-		VALUES (?, ?, ?, ?, ?)`,
-			fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber); err != nil {
+		INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source, confidence)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, c.Source, c.Confidence); err != nil {
 			return fmt.Errorf("insert call: %w", err)
 		}
 	}
@@ -522,7 +562,7 @@ func (s *SQLiteStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]sto
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT caller_fqn, callee_fqn, call_type, line_number, source
+		SELECT caller_fqn, callee_fqn, call_type, line_number, source, confidence
 		FROM call WHERE file_id = ? ORDER BY id`, fileID)
 	if err != nil {
 		return nil, err
@@ -531,7 +571,7 @@ func (s *SQLiteStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]sto
 	var out []store.CallRecord
 	for rows.Next() {
 		var c store.CallRecord
-		if err := rows.Scan(&c.CallerFQN, &c.CalleeFQN, &c.CallType, &c.LineNumber, &c.Source); err != nil {
+		if err := rows.Scan(&c.CallerFQN, &c.CalleeFQN, &c.CallType, &c.LineNumber, &c.Source, &c.Confidence); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -801,9 +841,9 @@ func (s *SQLiteStore) upsertCallsLocked(fileID int64, calls []parser.CallIR) err
 	}
 	for _, c := range calls {
 		if _, err := tx.Exec(`
-		INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number)
-		VALUES (?, ?, ?, ?, ?)`,
-			fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber); err != nil {
+		INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source, confidence)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, c.Source, c.Confidence); err != nil {
 			return fmt.Errorf("insert call: %w", err)
 		}
 	}
@@ -976,8 +1016,8 @@ func (s *SQLiteStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) 
 		return fmt.Errorf("prepare del call: %w", err)
 	}
 	defer stmtDelCall.Close()
-	stmtCall, err := tx.Prepare(`INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number)
-		VALUES (?, ?, ?, ?, ?)`)
+	stmtCall, err := tx.Prepare(`INSERT INTO call (file_id, caller_fqn, callee_fqn, call_type, line_number, source, confidence)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare call: %w", err)
 	}
@@ -1033,7 +1073,7 @@ func (s *SQLiteStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) 
 				return fmt.Errorf("bulk del call: %w", err)
 			}
 			for _, c := range ir.Calls {
-				if _, err := stmtCall.Exec(fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber); err != nil {
+				if _, err := stmtCall.Exec(fileID, c.CallerFQN, c.CalleeFQN, c.CallType, c.LineNumber, c.Source, c.Confidence); err != nil {
 					return fmt.Errorf("bulk insert call: %w", err)
 				}
 			}

@@ -55,6 +55,7 @@ func ToAdapterX(doc *IRDocument) *adapterx.IRDocument {
 		out.Calls = append(out.Calls, adapterx.CallIR{
 			CallerFQN: cl.CallerFQN, CalleeFQN: cl.CalleeFQN,
 			CallType: cl.CallType, LineNumber: cl.LineNumber,
+			Source: cl.Source, Confidence: cl.Confidence,
 		})
 	}
 	return out
@@ -109,6 +110,7 @@ func FromAdapterX(doc *adapterx.IRDocument) *IRDocument {
 		out.Calls = append(out.Calls, CallIR{
 			CallerFQN: cl.CallerFQN, CalleeFQN: cl.CalleeFQN,
 			CallType: cl.CallType, LineNumber: cl.LineNumber,
+			Source: cl.Source, Confidence: cl.Confidence,
 		})
 	}
 	return out

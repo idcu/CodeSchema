@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS call (
   callee_fqn TEXT,
   call_type TEXT DEFAULT '',            -- direct / interface / dynamic / unknown
   line_number INTEGER,
-  source TEXT DEFAULT ''
+  source TEXT DEFAULT '',
+  confidence INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_call_file ON call(file_id);
 CREATE INDEX IF NOT EXISTS idx_call_caller ON call(caller_fqn);

@@ -560,3 +560,43 @@ func TestFileStore_ReindexRemovesStaleMethods(t *testing.T) {
 		t.Fatalf("stale methods after BulkUpsert reindex: got %d, want 1", got)
 	}
 }
+
+// TestFileStore_CallMetaRoundTrip 负控（R5-3）：调用边来源/置信度必须随
+// store.json 持久化，重启后仍然可读（否则每次重启边精度信息归零）。
+func TestFileStore_CallMetaRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	fs := &FileStore{}
+	if err := fs.Open(ctx, dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	fid, err := fs.UpsertFile(ctx, "/repo/a.go", "h", 1, 10)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	err = fs.UpsertCalls(ctx, fid, []parser.CallIR{{
+		CallerFQN: "pkg.A.Run", CalleeFQN: "pkg.B.Helper", CallType: "direct", LineNumber: 3,
+		Source: parser.CallSourceSCIP, Confidence: parser.ConfidenceSCIP,
+	}})
+	if err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened := &FileStore{}
+	if err := reopened.Open(ctx, dir); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	calls, err := reopened.GetCallsByFileID(ctx, fid)
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("GetCallsByFileID: %v len=%d", err, len(calls))
+	}
+	if calls[0].Source != parser.CallSourceSCIP || calls[0].Confidence != parser.ConfidenceSCIP {
+		t.Errorf("call provenance lost after restart: %+v", calls[0])
+	}
+}
