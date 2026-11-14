@@ -355,10 +355,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	curRecvType := ""    // 当前方法 receiver 类型名
 	nonGoPkg := ""       // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
-	curStructIdx := -1      // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
-	curStructOpenDepth := 0 // struct 体起始深度（type X struct { 的 `{` 计入前）
-	curStructName := ""     // 当前 struct 名（field 的 ClassFQN 归属）
-	constBlock := false     // 是否处于 const ( ... ) 块内
+	curStructIdx := -1       // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
+	curStructOpenDepth := 0  // struct 体起始深度（type X struct { 的 `{` 计入前）
+	curStructName := ""      // 当前 struct 名（field 的 ClassFQN 归属）
+	constBlock := false      // 是否处于 const ( ... ) 块内
+	hasTopLevelFunc := false // 是否存在包级函数（决定是否合成包级容器）
 
 	for scanner.Scan() {
 		select {
@@ -430,7 +431,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 					Doc:       strings.TrimSpace(docComment.String()),
 				}
 				// receiver 存在 → 方法归属 receiver 类型；否则为顶层函数，
-				// ClassFQN 留空（不再误挂到最近 class——旧 currentClass 永不闭合）。
+				// 归入合成包级容器（ClassFQN = package 名）。旧行为留空 ClassFQN，
+				// 三后端按类匹配时会把整条方法静默丢弃（P0-1），
+				// 导致 /context、检索、标签、测试关联对包级函数全部失效。
 				if recvType := parseGoReceiver(matches[1]); recvType != "" {
 					method.ClassFQN = recvType
 					// 记录当前方法 receiver 变量名/类型，供 callee 自调用限定
@@ -439,6 +442,10 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				} else {
 					curRecvVar = ""
 					curRecvType = ""
+					if goPkg != "" {
+						method.ClassFQN = goPkg
+						hasTopLevelFunc = true
+					}
 				}
 				doc.Methods = append(doc.Methods, method)
 				curMethodIdx = len(doc.Methods) - 1
@@ -486,10 +493,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			caller := ""
 			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
 				m := &doc.Methods[curMethodIdx]
-				if m.ClassFQN != "" {
-					caller = goPkg + "." + m.ClassFQN + "." + m.Name
-				} else {
+				switch {
+				case m.ClassFQN == "":
 					caller = goPkg + "." + m.Name
+				case m.ClassFQN == goPkg:
+					// 包级容器下的顶层函数：FQN 为 pkg.Func，不得重复包前缀。
+					caller = goPkg + "." + m.Name
+				default:
+					caller = goPkg + "." + m.ClassFQN + "." + m.Name
 				}
 			}
 			if strings.Contains(code, "(") {
@@ -597,7 +608,31 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		doc.Classes[len(doc.Classes)-1].EndLine = lineNum
 	}
 
+	// 合成 Go 包级容器：顶层函数必须有非空 ClassFQN 才能被三后端入库（P0-1）。
+	// 容器以 package 名作为 FullName，覆盖整个文件；同文件已有同名类型时不重复创建
+	// （同名极端场景下避免与真实类型的类映射冲突）。
+	if lang == "go" && hasTopLevelFunc && goPkg != "" && !hasClassFullName(doc.Classes, goPkg) {
+		doc.Classes = append(doc.Classes, parser.ClassIR{
+			Name:      goPkg,
+			FullName:  goPkg,
+			Type:      "PACKAGE",
+			StartLine: 1,
+			EndLine:   lineNum,
+			Doc:       "package " + goPkg,
+		})
+	}
+
 	return doc, nil
+}
+
+// hasClassFullName 报告类列表中是否已存在指定 FullName 的类。
+func hasClassFullName(classes []parser.ClassIR, fullName string) bool {
+	for _, c := range classes {
+		if c.FullName == fullName {
+			return true
+		}
+	}
+	return false
 }
 
 // —— Go 变量/常量提取辅助（2026-09-03 新增，仅 Go 精确路径） ——

@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 157: fix(parser): Go 包级函数合成包级容器入库（P0-1）
+
+- 背景：默认 treesitter 正则路径对无 receiver 的 Go 顶层函数留空 `ClassFQN`；三后端（FileStore/SQLite/PG）按 `ClassFQN`→class 匹配，找不到即 `continue` 静默丢弃。后果：`/context` 对包级函数恒 404，FTS/向量/标签/测试关联同样失效，而 `calls` 仍写入包级 `caller_fqn` 形成悬空边。
+- 动作：`internal/parser/adapter/treesitter/adapter.go` 采用合成包级容器方案——顶层函数 `ClassFQN` 置为 `package` 名，文件末尾追加 `ClassIR{Name/FullName=package, Type="PACKAGE", StartLine=1, EndLine=EOF}`（同文件已有同名类型时不重复创建）；caller FQN 对包级函数产出 `pkg.Func`（不重复包前缀），与 `MethodRecord.FullName` 对齐，悬空调用边同时消除。
+- 负控（先红后绿）：`TestGetContext_TopLevelFunc_RealParse`（service 包）真实解析→FileStore 入库→`GetContext("sample.TopLevelFunc")`。修复前实测 `ERR_SYMBOL_NOT_FOUND`；修复后命中且源码体为 `return helper(x)`，包级容器唯一，`sample.TopLevelFunc`/`sample.helper` 均在容器方法列表。
+- 回归：`TestGoCallAndTypeExtraction` 更新断言（顶层函数挂容器而非留空/误挂 Watcher）；`TestTreeSitterAdapter_Parse_Go` 类数 1→2（User + PACKAGE main）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`-race` 相关包通过；`make counts-check` 通过（LoC 55166 ≈ 55.2k）。
+- 遗留：`-tags treesitter` AST 路径的 Go 作用域跟踪仍为既有开放项（本次仅修默认正则路径）。
+
 ### Commit 155: feat(ai): P21 生产化 — 增强并发化 + 429 限流退避重试 + 提示词质量约束 + 真实端到端验证
 
 - 背景：P21（AI 标签/文档增强生产化）因 LLM API key 缺失长期阻塞。用户提供 AMD OpenAI 兼容端点（`https://developer.amd.com.cn/radeon/api/v1`，模型 `DeepSeek-V4-Flash`）后解除阻塞，本轮实施三项生产化改进并完成真实质量端到端验证。

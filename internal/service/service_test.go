@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/ai"
 	"github.com/idcu/codeschema/internal/analyzer"
 	"github.com/idcu/codeschema/internal/parser"
+	"github.com/idcu/codeschema/internal/parser/adapter/treesitter"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/vector"
@@ -74,6 +77,94 @@ func TestGetContext_Success(t *testing.T) {
 	}
 	if ctx.Trace == nil || ctx.Trace.Source != "store.GetContext" {
 		t.Error("expected context injection trace on success path")
+	}
+}
+
+// TestGetContext_TopLevelFunc_RealParse 是 P0-1 负控：真实 treesitter 解析 → FileStore 入库 →
+// GetContext 必须能命中 Go 包级函数。缺陷态下顶层函数 ClassFQN 为空，被三后端按类匹配时
+// 丢弃，`/context?symbol=sample.TopLevelFunc` 恒返回 ERR_SYMBOL_NOT_FOUND。
+func TestGetContext_TopLevelFunc_RealParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.go")
+	src := `package sample
+
+func TopLevelFunc(x int) int {
+	return helper(x)
+}
+
+func helper(x int) int { return x }
+
+type Svc struct{}
+
+func (s *Svc) Method() int { return TopLevelFunc(1) }
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	adapter := treesitter.NewTreeSitterAdapter()
+	doc, err := adapter.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	doc.FilePath = path
+	doc.LineCount = strings.Count(src, "\n")
+	doc.ByteSize = int64(len(src))
+
+	svc := newTestService(t)
+	if err := svc.store.UpsertIR(context.Background(), doc); err != nil {
+		t.Fatalf("UpsertIR: %v", err)
+	}
+
+	sctx, err := svc.GetContext(context.Background(), "sample.TopLevelFunc", 2)
+	if err != nil {
+		t.Fatalf("GetContext(sample.TopLevelFunc): %v", err)
+	}
+	if !strings.Contains(sctx.Source, "return helper(x)") {
+		t.Errorf("expected TopLevelFunc body, got %q", sctx.Source)
+	}
+
+	// 包级容器必须唯一落库，且两个顶层函数都挂在它下面。
+	files, err := svc.store.GetAllFiles(context.Background())
+	if err != nil || len(files) != 1 {
+		t.Fatalf("GetAllFiles: files=%d err=%v", len(files), err)
+	}
+	classes, err := svc.store.GetClassesByFileID(context.Background(), files[0].ID)
+	if err != nil {
+		t.Fatalf("GetClassesByFileID: %v", err)
+	}
+	containers := 0
+	var names []string
+	for _, cls := range classes {
+		if cls.Type != "PACKAGE" {
+			continue
+		}
+		containers++
+		if cls.FullName != "sample" {
+			t.Errorf("package container FullName want sample, got %q", cls.FullName)
+		}
+		methods, err := svc.store.GetMethodsByClassID(context.Background(), cls.ID)
+		if err != nil {
+			t.Fatalf("GetMethodsByClassID: %v", err)
+		}
+		for _, m := range methods {
+			names = append(names, m.FullName)
+		}
+	}
+	if containers != 1 {
+		t.Fatalf("want exactly 1 PACKAGE container, got %d", containers)
+	}
+	for _, want := range []string{"sample.TopLevelFunc", "sample.helper"} {
+		found := false
+		for _, got := range names {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("package container methods missing %q; got %v", want, names)
+		}
 	}
 }
 
@@ -956,4 +1047,3 @@ func TestGetAffected_ReturnsLinkedTests(t *testing.T) {
 		t.Errorf("expected affected test TestGetOrder, got %v", got)
 	}
 }
-

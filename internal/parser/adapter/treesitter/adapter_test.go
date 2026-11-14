@@ -70,15 +70,18 @@ func main() {
 		t.Errorf("expected language go, got %s", doc.Language)
 	}
 
-	// 检查类解析
-	if len(doc.Classes) != 1 {
-		t.Fatalf("expected 1 class, got %d", len(doc.Classes))
+	// 检查类解析：User 为真实 class；顶层函数 main 触发合成包级容器（P0-1）。
+	if len(doc.Classes) != 2 {
+		t.Fatalf("expected 2 classes (User + PACKAGE main), got %d", len(doc.Classes))
 	}
 	if doc.Classes[0].Name != "User" {
 		t.Errorf("expected class User, got %s", doc.Classes[0].Name)
 	}
 	if doc.Classes[0].Type != "CLASS" {
 		t.Errorf("expected CLASS, got %s", doc.Classes[0].Type)
+	}
+	if doc.Classes[1].Name != "main" || doc.Classes[1].Type != "PACKAGE" {
+		t.Errorf("expected PACKAGE container main, got name=%s type=%s", doc.Classes[1].Name, doc.Classes[1].Type)
 	}
 
 	// 检查方法解析

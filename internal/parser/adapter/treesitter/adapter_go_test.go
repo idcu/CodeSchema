@@ -13,12 +13,13 @@ import (
 //  1. 泛型类型 type X[T any] struct 应被识别为 class；
 //  2. 调用边 CallerFQN 应带包前缀限定（FQN 命名空间对齐，使影响面分析可查）：
 //     - NewWatcher（顶层函数）体内的 w.ReloadNow() → caller=config.NewWatcher；
-//       （w 是局部变量而非 receiver，类型不可消歧，callee 保持 w.ReloadNow）
+//     （w 是局部变量而非 receiver，类型不可消歧，callee 保持 w.ReloadNow）
 //     - ReloadNow（Watcher 方法，receiver w）体内的 loadConfig() →
-//       caller=config.Watcher.ReloadNow、callee=config.loadConfig（包级函数包限定）；
+//     caller=config.Watcher.ReloadNow、callee=config.loadConfig（包级函数包限定）；
 //  3. 自接收者调用（recv == 当前方法 receiver 变量）会被限定为 pkg.RecvType.Method；
 //     其余 receiver.Method（如局部变量 w.ReloadNow）保持原样（类型推导范畴）；
-//  4. 顶层函数 NewWatcher 的 ClassFQN 为空（不再被误挂到最近 class）。
+//  4. 顶层函数 NewWatcher 归入合成包级容器（ClassFQN = package 名），不再被误挂到
+//     最近的真实 class（如 Watcher）——P0-1：非空 ClassFQN 才能被存储后端入库。
 func TestGoCallAndTypeExtraction(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "watcher.go")
@@ -92,10 +93,19 @@ func (w *Watcher[T]) ReloadNow() {
 		t.Errorf("期望调用 config.Watcher.ReloadNow -> config.loadConfig；当前 calls=%v", doc.Calls)
 	}
 
-	// 3. 顶层函数不再被误归属到 class（ClassFQN 为空）
+	// 3. 顶层函数归入合成包级容器（ClassFQN = 包名），不挂到真实 class（Watcher）
+	var containerName string
+	for _, c := range doc.Classes {
+		if c.Type == "PACKAGE" {
+			containerName = c.FullName
+		}
+	}
+	if containerName != "config" {
+		t.Fatalf("期望合成包级容器 FullName=config，当前 classes=%v", doc.Classes)
+	}
 	for _, m := range doc.Methods {
-		if m.Name == "NewWatcher" && m.ClassFQN != "" {
-			t.Errorf("顶层函数 NewWatcher 不应挂 ClassFQN=%q（当前 methods=%v）", m.ClassFQN, doc.Methods)
+		if m.Name == "NewWatcher" && m.ClassFQN != containerName {
+			t.Errorf("顶层函数 NewWatcher 应挂包级容器 %q，实际 ClassFQN=%q", containerName, m.ClassFQN)
 		}
 	}
 
