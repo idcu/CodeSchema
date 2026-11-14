@@ -192,7 +192,7 @@ type CacheReader interface {
 // FieldConstantStore 可选接口：变量(field)/常量(constant) 表读写。
 // 仅 PG 后端实现（14 表 ID 型模型，含 field/constant 表）；FileStore/SQLiteStore
 // 未实现。调用方经类型断言探测（同 CacheReader/SkippedWriter 范式），未命中则回退。
-// 注意：cmd 层 redisCacheStore 包装后不透传本接口，启用 Redis 缓存层时需在包装层转发。
+// 注意：cmd 层 redisCacheStore 已显式转发本接口（见 cmd/codeschema/store_redis.go）。
 type FieldConstantStore interface {
 	// UpsertClassFields 全量替换类的成员变量（按 class_id 删除后插入）。
 	UpsertClassFields(ctx context.Context, classID int64, fields []FieldRecord) error
