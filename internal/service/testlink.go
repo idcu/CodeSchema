@@ -92,11 +92,24 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 
 	// 预构建全量类映射（classFQN -> ClassRecord），供 explicit 策略解析目标类
 	allClasses := make(map[string]store.ClassRecord)
+	fileDir := make(map[int64]string, len(files))
+	// 同目录（Go 包）的类集合：Go 包级测试的命名关联需要判断方法名是否跨类型歧义。
+	classesByDir := make(map[string][]store.ClassRecord)
 	for _, f := range files {
+		dir := dirFromPath(f.AbsolutePath)
+		fileDir[f.ID] = dir
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
 		for _, cls := range classes {
 			allClasses[cls.FullName] = cls
+			classesByDir[dir] = append(classesByDir[dir], cls)
 		}
+	}
+
+	// 已知类型名（含短名）：Go 包级测试名可能以 <Type>_ 前缀锚定接收者类型。
+	knownTypes := make(map[string]bool, len(allClasses)*2)
+	for fqn := range allClasses {
+		knownTypes[fqn] = true
+		knownTypes[shortMethodName(fqn)] = true
 	}
 
 	// 0. explicit 策略：@TestFor(...) 显式注解（置信度 100）
@@ -104,8 +117,9 @@ func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, 
 
 	// 1. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
 	//    同一源类可能有多个测试类（OrderServiceTest / TestOrderService），全部参与。
+	targetDir := fileDir[allClasses[targetClass].FileID]
 	for _, testClassFQN := range allTestClasses[targetClass] {
-		s.linkByNaming(ctx, files, targetClass, testClassFQN, methodFQN, addResult)
+		s.linkByNaming(ctx, files, classesByDir[targetDir], knownTypes, targetClass, testClassFQN, methodFQN, addResult)
 	}
 
 	// 2.5 call_graph 策略：测试方法直接调用目标方法。
@@ -255,7 +269,8 @@ func (s *Service) matchTestClass(cls store.ClassRecord) string {
 }
 
 // linkByNaming 通过命名约定建立方法级关联。
-func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, classFQN, testClassFQN string, methodFQN string, add func(string, string, string, int)) {
+// dirClasses 是目标类同目录（Go 包）的类集合，用于判断包级同名方法歧义。
+func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, dirClasses []store.ClassRecord, knownTypes map[string]bool, classFQN, testClassFQN string, methodFQN string, add func(string, string, string, int)) {
 	// 找到目标类及其全部方法
 	var targetMethod store.MethodRecord
 	found := false
@@ -304,11 +319,26 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 			// Go 包级容器的同包 helper（keysOfSets/newMockLSPAdapterMode）不是测试，
 			// 只让 Test/Benchmark/Example 前缀的函数参与命名匹配。
 			goPkg := cls.Type == "PACKAGE" && isGoTestFile(f.AbsolutePath)
+			// Go 包级测试：同名方法分布在多个类型时，测试名里的公共词无法确定目标类型
+			// （Resolve 之于 JavaResolver/GradleResolver/heuristicResolver），
+			// 命名关联属于过匹配；真实调用边由 call_graph 策略保留。
+			if goPkg && s.methodNameAmbiguousInDir(ctx, dirClasses, methodName) {
+				continue
+			}
 			for _, m := range methods {
 				if goPkg && !isGoTestFuncName(m.Name) {
 					continue
 				}
-				if !matchesTestMethod(methodName, m.Name) {
+				if goPkg {
+					ok, typeToken := goTestMethodMatches(m.Name, methodName, knownTypes)
+					if !ok {
+						continue
+					}
+					// 测试名锚定了接收者类型时，只允许该类型的方法。
+					if typeToken != "" && typeToken != classFQN && typeToken != shortMethodName(classFQN) {
+						continue
+					}
+				} else if !matchesTestMethod(methodName, m.Name) {
 					continue
 				}
 				// 测试已显式调用同类另一个方法时，仅凭名字里的公共词关联属于过匹配。
@@ -319,6 +349,75 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 			}
 		}
 	}
+}
+
+// methodNameAmbiguousInDir 判断方法名在同目录（Go 包）内是否由多个类型实现。
+// 只看生产类（跳过测试 PACKAGE 容器）：测试容器里的同名 helper 不是候选实现。
+func (s *Service) methodNameAmbiguousInDir(ctx context.Context, dirClasses []store.ClassRecord, methodName string) bool {
+	owners := make(map[string]struct{}, 2)
+	for _, cls := range dirClasses {
+		if cls.Type == "PACKAGE" {
+			continue
+		}
+		methods, err := s.store.GetMethodsByClassID(ctx, cls.ID)
+		if err != nil {
+			continue
+		}
+		for _, m := range methods {
+			if m.Name == methodName {
+				owners[cls.FullName] = struct{}{}
+				break
+			}
+		}
+		if len(owners) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// goTestMethodMatches 判断 Go 包级测试方法名是否指向目标方法，并返回测试名里的
+// 类型标记（`Test<Type>_<Method>` / `Example<Type>_<Method>` 中的 Type）。
+//
+// Go 惯例是 Test<Method>_<Description>；若首段是仓库内已知类型名，则测试名锚定了
+// 该类型（TestMemoryStore_SearchEmpty ↔ MemoryStore.Search），不能再链到同包其它
+// 类型的同名方法（ChromemStore.Search）。没有类型标记时，目标方法必须落在开头并
+// 构成完整词（后接 `_` 或大写字母）。
+func goTestMethodMatches(testName, methodName string, knownTypes map[string]bool) (bool, string) {
+	rest := testName
+	stripped := false
+	for _, prefix := range []string{"Test", "Benchmark", "Example"} {
+		if strings.HasPrefix(rest, prefix) {
+			rest = rest[len(prefix):]
+			stripped = true
+			break
+		}
+	}
+	if !stripped {
+		return matchesTestMethod(testName, methodName), ""
+	}
+	if i := strings.Index(rest, "_"); i > 0 && knownTypes[rest[:i]] {
+		tail := rest[i+1:]
+		if tail == methodName || (strings.HasPrefix(tail, methodName) && wordBoundary(tail[len(methodName):])) {
+			return true, rest[:i]
+		}
+		return false, rest[:i]
+	}
+	if rest == methodName {
+		return true, ""
+	}
+	if strings.HasPrefix(rest, methodName) && wordBoundary(rest[len(methodName):]) {
+		return true, ""
+	}
+	return false, ""
+}
+
+// wordBoundary 判断方法名之后是否仍是独立词（空、下划线或大写开头）。
+func wordBoundary(tail string) bool {
+	if tail == "" {
+		return true
+	}
+	return tail[0] == '_' || (tail[0] >= 'A' && tail[0] <= 'Z')
 }
 
 // hasCompetingCall 判断测试方法是否已显式调用目标类中的其它方法。

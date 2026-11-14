@@ -250,6 +250,62 @@ func TestFindTestLinks_GoPackageHelpersNotNaming(t *testing.T) {
 	}
 }
 
+// TestFindTestLinks_GoPackageAmbiguousNameNotNaming 负控：Go 包级数据里同名方法
+// 分布在多个类型上时（JavaResolver/GradleResolver/heuristicResolver 都有 Resolve），
+// 测试名里的公共词无法确定目标类型，命名关联必须放弃；真实调用边仍由 call_graph 提供。
+func TestFindTestLinks_GoPackageAmbiguousNameNotNaming(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/analyzer/resolver.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/analyzer/resolver_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {
+				{ID: 10, FileID: 1, Name: "analyzer", FullName: "analyzer", Type: "PACKAGE"},
+				{ID: 11, FileID: 1, Name: "JavaResolver", FullName: "analyzer.JavaResolver", Type: "CLASS"},
+				{ID: 12, FileID: 1, Name: "GradleResolver", FullName: "analyzer.GradleResolver", Type: "CLASS"},
+				{ID: 13, FileID: 1, Name: "heuristicResolver", FullName: "analyzer.heuristicResolver", Type: "CLASS"},
+			},
+			2: {{ID: 20, FileID: 2, Name: "analyzer", FullName: "analyzer", Type: "PACKAGE"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			11: {{ID: 110, ClassID: 11, Name: "Resolve", FullName: "analyzer.JavaResolver.Resolve"}},
+			12: {{ID: 120, ClassID: 12, Name: "Resolve", FullName: "analyzer.GradleResolver.Resolve"}},
+			13: {{ID: 130, ClassID: 13, Name: "Resolve", FullName: "analyzer.heuristicResolver.Resolve"}},
+			20: {{ID: 200, ClassID: 20, Name: "TestResolveImport", FullName: "analyzer.TestResolveImport"}},
+		},
+		calls: map[int64][]store.CallRecord{
+			2: {{CallerFQN: "analyzer.TestResolveImport", CalleeFQN: "analyzer.heuristicResolver.Resolve", CallType: "direct"}},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "analyzer.JavaResolver.Resolve", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Strategy == "naming" {
+			t.Fatalf("ambiguous package method linked by naming: %+v", l)
+		}
+	}
+
+	links, err = svc.FindTestLinks(ctx, "analyzer.heuristicResolver.Resolve", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	found := false
+	for _, l := range links {
+		if l.Strategy == "call_graph" && l.TestMethod == "analyzer.TestResolveImport" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing call_graph link for real callee; links=%+v", links)
+	}
+}
+
 // TestFindTestLinks_CallGraphBehavioralName 负控：测试方法名是行为描述、不含目标
 // 方法名时（TestCollection_Delete → DB.CreateCollection），命名策略必然漏召；
 // 直接调用边必须补上关联。Java 侧同时覆盖包名前缀 caller 与接收者变量 callee 的 FQN 归一。
