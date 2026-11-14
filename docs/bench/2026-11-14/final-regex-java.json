@@ -1,0 +1,184 @@
+{
+  "timestamp": "2026-11-14T02:04:44Z",
+  "repo": "s2-petclinic",
+  "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+  "language": "java",
+  "build_variant": "regex",
+  "files": 50,
+  "prod_files": 31,
+  "test_files": 19,
+  "prod_methods": 90,
+  "test_methods": 104,
+  "ground_truth_pairs": 123,
+  "sampled_pairs": 123,
+  "sampled": false,
+  "prods_evaluated": 31,
+  "predicted_links": 126,
+  "test_link": {
+    "tp": 123,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1,
+    "recall": 1,
+    "f1": 1
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "regex",
+    "calls": 1365,
+    "unique_callers": 157,
+    "unique_callees": 494,
+    "resolved_calls": 203,
+    "resolution_rate": 0.1487
+  },
+  "manual_truth": {
+    "dataset": "internal/releasebench/testdata/manual-truth.json",
+    "repo": "s2-petclinic",
+    "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+    "language": "java",
+    "build_variant": "regex",
+    "test_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+    ],
+    "in_scope_tests": 20,
+    "truth_pairs": 18,
+    "predicted_in_scope": 18,
+    "entries": [
+      {
+        "production": "OwnerController.initCreationForm",
+        "truth": [
+          "OwnerControllerTests.initCreationForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initCreationForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processCreationForm",
+        "truth": [
+          "OwnerControllerTests.processCreationFormHasErrors",
+          "OwnerControllerTests.processCreationFormRejectsAddressLongerThanColumn",
+          "OwnerControllerTests.processCreationFormRejectsCityLongerThanColumn",
+          "OwnerControllerTests.processCreationFormSuccess"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processCreationFormHasErrors",
+          "OwnerControllerTests.processCreationFormRejectsAddressLongerThanColumn",
+          "OwnerControllerTests.processCreationFormRejectsCityLongerThanColumn",
+          "OwnerControllerTests.processCreationFormSuccess"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.initFindForm",
+        "truth": [
+          "OwnerControllerTests.initFindForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initFindForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processFindForm",
+        "truth": [
+          "OwnerControllerTests.processFindFormByLastName",
+          "OwnerControllerTests.processFindFormIgnoresSurroundingWhitespace",
+          "OwnerControllerTests.processFindFormNoOwnersFound",
+          "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
+          "OwnerControllerTests.processFindFormSuccess",
+          "OwnerControllerTests.processFindFormWithWhitespaceOnlyLastNameReturnsAllOwners"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processFindFormByLastName",
+          "OwnerControllerTests.processFindFormIgnoresSurroundingWhitespace",
+          "OwnerControllerTests.processFindFormNoOwnersFound",
+          "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
+          "OwnerControllerTests.processFindFormSuccess",
+          "OwnerControllerTests.processFindFormWithWhitespaceOnlyLastNameReturnsAllOwners"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.initUpdateOwnerForm",
+        "truth": [
+          "OwnerControllerTests.initUpdateOwnerForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initUpdateOwnerForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processUpdateOwnerForm",
+        "truth": [
+          "OwnerControllerTests.processUpdateOwnerFormHasErrors",
+          "OwnerControllerTests.processUpdateOwnerFormSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processUpdateOwnerFormHasErrors",
+          "OwnerControllerTests.processUpdateOwnerFormSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.showOwner",
+        "truth": [
+          "OwnerControllerTests.showOwner"
+        ],
+        "predicted": [
+          "OwnerControllerTests.showOwner"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      }
+    ],
+    "micro": {
+      "tp": 18,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    }
+  }
+}

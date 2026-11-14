@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "note": "人工标注真值：逐条阅读测试方法体，记录其直接验证的生产方法（Go 为直接调用，Java 为 MockMvc 触发的 controller 方法）。真值不来自 IR 调用边，与 call_graph 策略不同源；IR 仅用于枚举标注测试文件内的方法作为评估范围。",
+  "repos": {
+    "code-schema": {
+      "language": "go",
+      "entries": [
+        {
+          "production": "Service.FindTestLinks",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": [
+            "service.TestFindTestLinks_Naming",
+            "service.TestFindTestLinks_GoPackageLevelTests",
+            "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+            "service.TestFindTestLinks_CallGraphBehavioralName",
+            "service.TestFindTestLinks_JavaTestsSuffix",
+            "service.TestFindTestLinks_SameTag",
+            "service.TestFindTestLinks_Dependency",
+            "service.TestFindTestLinks_EmptyMethod",
+            "service.TestFindTestLinks_NoTestFiles",
+            "service.TestFindTestLinks_Explicit",
+            "service.TestFindTestLinks_Explicit_MethodLevel",
+            "service.TestFindTestLinks_Coverage",
+            "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+            "service.TestFindTestLinks_MultipleTestClassesPerSource",
+            "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+            "service.TestFindTestLinks_SameDirNonGoNotDependency",
+            "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+          ]
+        },
+        {
+          "production": "service.matchesTestMethod",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestMatchesTestMethod"]
+        },
+        {
+          "production": "service.isTestClass",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestIsTestClass"]
+        },
+        {
+          "production": "service.isTestFileName",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestIsTestFileName"]
+        },
+        {
+          "production": "service.dirFromPath",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestDirFromPath"]
+        },
+        {
+          "production": "service.parseExplicitTargets",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestParseExplicitTargets"]
+        },
+        {
+          "production": "service.resolveExplicitClass",
+          "test_files": ["internal/service/testlink_test.go"],
+          "tests": ["service.TestResolveExplicitClass"]
+        },
+        {
+          "production": "MCPServer.serveStdio",
+          "test_files": ["internal/server/mcp_stdio_test.go"],
+          "tests": [
+            "server.TestMCPServer_Stdio_ToolsList",
+            "server.TestMCPServer_Stdio_EOF",
+            "server.TestMCPServer_Stdio_InvalidJSON",
+            "server.TestMCP_Stdio_LineDelimitedJSON",
+            "server.TestMCP_Stdio_ParseErrorHasNullID"
+          ]
+        }
+      ]
+    },
+    "s2-petclinic": {
+      "language": "java",
+      "entries": [
+        {
+          "production": "OwnerController.initCreationForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.initCreationForm"
+          ]
+        },
+        {
+          "production": "OwnerController.processCreationForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.processCreationFormSuccess",
+            "OwnerControllerTests.processCreationFormHasErrors",
+            "OwnerControllerTests.processCreationFormRejectsCityLongerThanColumn",
+            "OwnerControllerTests.processCreationFormRejectsAddressLongerThanColumn"
+          ]
+        },
+        {
+          "production": "OwnerController.initFindForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.initFindForm"
+          ]
+        },
+        {
+          "production": "OwnerController.processFindForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.processFindFormSuccess",
+            "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
+            "OwnerControllerTests.processFindFormByLastName",
+            "OwnerControllerTests.processFindFormIgnoresSurroundingWhitespace",
+            "OwnerControllerTests.processFindFormWithWhitespaceOnlyLastNameReturnsAllOwners",
+            "OwnerControllerTests.processFindFormNoOwnersFound"
+          ]
+        },
+        {
+          "production": "OwnerController.initUpdateOwnerForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.initUpdateOwnerForm"
+          ]
+        },
+        {
+          "production": "OwnerController.processUpdateOwnerForm",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.processUpdateOwnerFormSuccess",
+            "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
+            "OwnerControllerTests.processUpdateOwnerFormHasErrors",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+          ]
+        },
+        {
+          "production": "OwnerController.showOwner",
+          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "tests": [
+            "OwnerControllerTests.showOwner"
+          ]
+        }
+      ]
+    }
+  }
+}

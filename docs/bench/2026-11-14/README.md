@@ -4,7 +4,8 @@
 
 首轮公开基准：在 3 个真实仓库上测「测试关联 P/R/F1」与「调用图结构指标」。
 **只报告、不设 CI 阈值**（roadmap R5-4）；原始数据见同目录 `before-*.json`（S-2 首轮）、
-`baseline-r59-*.json`（R5-9 口径修正后、召回修复前）、`after-*.json`（R5-11 后）。
+`baseline-r59-*.json`（R5-9 口径修正后、召回修复前）、`after-*.json`（R5-11 后）、
+`final-*.json`（R5-12/R5-13 后，含人工真值评估）、`manual-pre184-go.json`（人工真值的修复前对照）。
 
 ## 口径
 
@@ -25,22 +26,25 @@
 
 | 仓库 | 语言 | commit | 构建变体 |
 |---|---|---|---|
-| `code-schema`（本仓） | go | 首轮 `3887a42` / 本轮前 `58625af` / after `HEAD`（R5-10/R5-11） | 默认 `regex` / `-tags treesitter` |
+| `code-schema`（本仓） | go | 首轮 `3887a42` / R5-11 前 `58625af` / 本轮前 `17f9ad1` / 本轮后 `HEAD`（R5-12/R5-13） | 默认 `regex` / `-tags treesitter` |
 | `spring-petclinic` | java | `500158f` | 默认 `regex` / `-tags treesitter` |
 | `lytd` | ts | `f5e6604` | 默认 `regex` / `-tags treesitter` |
 
-运行命令（两个变体各执行一次）：
+运行命令（两个变体各执行一次；人工真值参数可选）：
 
 ```bash
 go build -o /tmp/cs-regex ./cmd/codeschema
 go build -tags treesitter -o /tmp/cs-ts ./cmd/codeschema
 
-/tmp/cs-regex release-bench --repo <repo> --lang <lang> --out <dir>
-/tmp/cs-ts    release-bench --repo <repo> --lang <lang> --out <dir>
+/tmp/cs-regex release-bench --repo <repo> --lang <lang> --out <dir> \
+  --manual-truth internal/releasebench/testdata/manual-truth.json
+/tmp/cs-ts    release-bench --repo <repo> --lang <lang> --out <dir> \
+  --manual-truth internal/releasebench/testdata/manual-truth.json
 ```
 
 > 本仓与 petclinic 的**真值数量会随解析覆盖率变化**（自测仓库、Java 包级可见性方法），
-> 前后对比看同一行内的 P/R/F1 与 `PredictedLinks`，不要跨行比较分母。
+> 前后对比看同一行内的 P/R/F1 与 `PredictedLinks`，不要跨行比较分母。本轮本仓新增了
+> 人工真值评估器（`manual.go` + dataset），语料自身变大，Go 行的 calls/TP 含该增量。
 
 ## 测试关联：本轮前（R5-9 口径）→ 本轮后（R5-11）
 
@@ -59,33 +63,96 @@ go build -tags treesitter -o /tmp/cs-ts ./cmd/codeschema
 > S-2 首轮（`3887a42`）六组 `PredictedLinks` 均为 0（候选发现缺陷），与本轮数字不同口径，
 > 只作为「从零到可见」的起点，不参与 P/R/F1 比较。
 
-### 必须披露的口径耦合
+## 测试关联：本轮前（R5-11）→ 本轮后（R5-12/R5-13）
 
-`call_graph` 策略（R5-11）与基准真值**同为直接调用边**：真值来自 IR 直接解析，
-策略结果来自「扫描 → 入库 → 反查」链路。因此本轮后接近饱和的数字衡量的是**链路完整性
-与 FQN 归一**，不再证明某种独立启发式的判别力。命名策略的独立收益以 R5-10 的中间态衡量
-（Go regex P 0.8333 → 0.8630、Java TP 1 → 3），不由本轮 1.0 代表。
+本轮前 = `17f9ad1`；本轮后 = `HEAD` 工作树（跨文件接收者方法入库 + Go 测试文件判定）。
+同一命令、同一 R5-9 口径。本仓语料新增了人工真值评估器，Go 行的 calls/真值含该增量。
 
-### 残余漏召（23/24 条，未静默忽略）
+| 仓库 | 变体 | 预测链接（前→后） | TP（前→后） | FP（前→后） | Precision（前→后） | Recall（前→后） | F1（前→后） |
+|---|---|---:|---:|---:|---:|---:|---:|
+| code-schema (go) | regex | 1282 → 1343 | 1144 → 1181 | 9 → 4 | 0.9922 → 0.9966 | 0.9803 → 1.0000 | 0.9862 → 0.9983 |
+| code-schema (go) | treesitter | 1366 → 1380 | 1217 → 1219 | 24 → 16 | 0.9807 → 0.9871 | 0.9807 → 1.0000 | 0.9807 → 0.9935 |
+| petclinic (java) | regex | 126 → 126 | 123 → 123 | 0 → 0 | 1.0000 → 1.0000 | 1.0000 → 1.0000 | 1.0000 → 1.0000 |
+| petclinic (java) | treesitter | 164 → 164 | 160 → 160 | 0 → 0 | 1.0000 → 1.0000 | 1.0000 → 1.0000 | 1.0000 → 1.0000 |
+| lytd (ts) | regex | 0 → 0 | 0 → 0 | 0 → 0 | — | — | — |
+| lytd (ts) | treesitter | 0 → 0 | 0 → 0 | 0 → 0 | — | — | — |
 
-- `Service.FindTestLinks ← service.TestFindTestLinks_*`：callee 为接收者变量形态
-  （`svc.FindTestLinks`），短名在库内存在多个声明时无法归一为唯一 FQN。
-- `MCPServer.serveStdio ← server.TestMCPServer_Stdio_*`：调用边未被抽取/入库。
-- 归属：**调用解析 + FQN 归一**残余，留待下一轮解析精度条目；不在本轮通过放宽阈值掩盖。
+### 残余漏召（23/24 条）根因更正与清零
+
+此前把 FN 归为「callee 短名多义 + 调用边未抽取」。**该归因错误**：两条调用边
+（`svc.FindTestLinks`、`srv.serveStdio`）在 IR 中一直存在，短名在库内也唯一；
+真正缺失的是**被调方法本身**——Go 类型与方法可分局同包不同文件，三后端按
+「本文件 ClassFQN → classID」映射入库，未命中即丢弃。修复见 R5-12；两变体 FN 均清零。
+
+### 顺带发现：Go 生产文件中的 `Test*` 类型误判为测试（R5-13）
+
+`isTestClass` 只按名称前缀判定，`TestLink`/`TestResult`/`TestBatchItem` 让整个生产文件
+（`testlink.go`、`service.go`）被当成测试文件，文件内**生产方法**因此出现在
+`call_graph` 的「测试方法」结果里（Go regex 4 条 FP）。现 Go 仅在 `*_test.go` 内做名称判定。
+
+### 必须披露的口径耦合（自动真值）
+
+`call_graph` 策略（R5-11）与自动基准真值**同为直接调用边**：真值来自 IR 直接解析，
+策略结果来自「扫描 → 入库 → 反查」链路。因此接近饱和的数字衡量的是**链路完整性
+与 FQN 归一**，不再证明某种独立启发式的判别力。这正是下面引入人工真值的原因。
+
+## 人工真值（独立来源，S-2h）
+
+数据集：`internal/releasebench/testdata/manual-truth.json`。真值由**逐个阅读测试方法体**
+手工标注（Go 直接调用；Java 为 MockMvc 触发的 controller 方法），**不来自 IR 调用边**。
+IR 只用于枚举「标注测试文件内的方法」，作为评估范围（闭合世界）：
+
+- 范围内的误报计 FP；范围外的预测**忽略**（未标注文件不参与分母）；
+- 范围内漏掉的标注测试计 FN；
+- 评估前自检：生产方法必须存在于方法索引、真值测试必须位于标注文件内，防止标注漂移。
+
+规模：2 个仓库、14 个生产方法、46 条人工 pair（Go 28 / Java 18）。命令：
+
+```bash
+release-bench --repo <repo> --lang <lang> \
+  --manual-truth internal/releasebench/testdata/manual-truth.json --out <dir>
+```
+
+| 仓库 | 变体 | 真值 pair | TP | FP | FN | Precision | Recall | F1 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| code-schema (go) | regex | 28 | 28 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | treesitter | 28 | 28 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| petclinic (java) | regex | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| petclinic (java) | treesitter | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+
+**这套真值确实能挡住回归**：在 R5-12 修复前（临时移除 `EnsureMethodOwners`）用同一数据集
+实测 Go regex 为 **TP 6 / FN 22 / Recall 0.2143 / F1 0.3530**，缺口精确落在
+`Service.FindTestLinks`（17 条）与 `MCPServer.serveStdio`（5 条）——而自动基准把这两条
+目标方法从真值里一起“消失”，反而显示高 P/R。原始数据见 `manual-pre184-go.json`。
+
+### 两套口径的差异（不可混用）
+
+| 维度 | 自动真值（`test_link`） | 人工真值（`manual_truth`） |
+|---|---|---|
+| 来源 | IR 直接调用边 | 人工阅读测试体 |
+| 覆盖 | 全仓全部可解析 pair（采样评估 200 个生产方法） | 14 个生产方法、2 个测试文件（闭合标注） |
+| 范围外预测 | 计 FP | 忽略（未标注文件不参与） |
+| 主要用途 | 发现链路/FQN 断裂（如 R5-12），衡量规模与吞吐 | 验证判别语义是否正确，防止「自己印证自己」 |
+| 已知盲区 | 与 `call_graph` 同源；IR 解析不到的合法调用会**漏入真值**，把正确预测误判为 FP | 规模小、标注成本高；只覆盖选定方法 |
+
+> 自动口径中剩下的 FP 多为命名策略命中「IR 未解析到的真实调用」（如
+> `BenchmarkCollection_Query_* → Collection.Query`），按人工语义并非误报——
+> 这也是两套口径需要并排展示、不能互相替代的原因。
+
 
 ## 调用图
 
 | 仓库 | 变体 | calls（前→后） | resolution（前→后） |
 |---|---|---|---:|
-| code-schema | regex | 16473 → 16473 | 0.2131 → 0.2131 |
-| code-schema | treesitter | 18695 → 18695 | 0.2049 → 0.2049 |
+| code-schema | regex | 16473 → 16593 | 0.2131 → 0.2130 |
+| code-schema | treesitter | 18695 → 18839 | 0.2049 → 0.2048 |
 | petclinic | regex | 1365 → 1365 | 0.1487 → 0.1487 |
 | petclinic | treesitter | 1609 → 1609 | 0.1790 → 0.1790 |
 | lytd | regex | 848 → 848 | 0.0425 → 0.0425 |
 | lytd | treesitter | 407 → 407 | 0.1425 → 0.1425 |
 
-> R5-10/R5-11 不修改解析器，调用图指标与调用边规模保持不变；分辨率仍 < 0.22，
-> 跨类 receiver 消歧是后续条目。
+> 本仓 calls 的增量来自本轮新增的评估器源码（语料变大），分辨率基本不变；
+> 仍 < 0.22，跨类 receiver 消歧是后续条目。
 
 ## 结论与根因
 
@@ -110,6 +177,16 @@ go build -tags treesitter -o /tmp/cs-ts ./cmd/codeschema
    基类；Go 的行为型测试名（`TestCollection_Delete` → `DB.CreateCollection`）也不在命名候选内。
    新增 `call_graph` 策略（置信度 95）：按测试文件的直接调用边反查目标方法，与类名约定无关；
    同时做 callee 短名归一（`entity.setName`）与带包名前缀 caller 的后缀归一。
-7. **仍偏低/未覆盖（不静默删除）**：TS 的 Jest `it/test` 回调仍不在本轮范围（真值 0）；
-   调用图分辨率 < 0.22，跨类 receiver 消歧不足；call_graph 残余 23/24 条 FN 归属
-   「调用解析 + FQN 归一」；命名策略的独立判别力需在 call_graph 之外的视图继续跟踪。
+7. **跨文件接收者方法（已修，R5-12 / S-2f）。** Go 类型与方法可分局同包不同文件；
+   三后端按「本文件 ClassFQN」映射会静默丢弃方法。scanner 入库前补最小归属类，
+   `Service.FindTestLinks` / `MCPServer.serveStdio` 从「0 条、不可查」变为可查；
+   自动基准 FN 23/24 → 0，人工真值修复前 R 0.2143 → 1.0。
+8. **Go `Test*` 生产类型误判（已修，R5-13 / S-2g）。** 名称前缀判定让
+   `TestLink`/`TestResult` 所在的生产文件整体被当作测试文件；现 Go 仅在 `*_test.go`
+   内做名称判定，生产方法的调用不再出现在「测试方法」结果里。
+9. **人工真值（新增，S-2h）。** 与 `call_graph` 不同源的 14 个生产方法 / 46 条 pair，
+   独立给出 P/R/F1（本轮 1.0），并已被证明能捕获 R5-12 这类「自动真值一起消失」的回归。
+10. **仍偏低/未覆盖（不静默删除）**：TS 的 Jest `it/test` 回调仍不在本轮范围（真值 0）；
+    调用图分辨率 < 0.22，跨类 receiver 消歧不足；自动口径残余 FP 主要是
+    「IR 未解析到的真实调用被命名策略命中」，需继续缩小与人工语义的差距；人工真值规模
+    仍小（14 个方法），后续按清单扩充。

@@ -31,6 +31,7 @@ type Options struct {
 	MaxPairs      int    // 真值 pair 采样上限（默认 200）
 	MinConfidence int    // 测试关联置信度下限（默认 60）
 	Workers       int    // 扫描并发（默认 4）
+	ManualTruth   string // 人工真值数据集路径（可选；给出时追加独立 P/R/F1）
 }
 
 // Pair 一条真值：测试方法直接调用了生产方法。
@@ -62,23 +63,24 @@ type CallGraph struct {
 
 // Report 单仓基准报告。
 type Report struct {
-	Timestamp        string    `json:"timestamp"`
-	Repo             string    `json:"repo"`
-	Commit           string    `json:"commit"`
-	Language         string    `json:"language"`
-	BuildVariant     string    `json:"build_variant"`
-	Files            int       `json:"files"`
-	ProdFiles        int       `json:"prod_files"`
-	TestFiles        int       `json:"test_files"`
-	ProdMethods      int       `json:"prod_methods"`
-	TestMethods      int       `json:"test_methods"`
-	GroundTruthPairs int       `json:"ground_truth_pairs"`
-	SampledPairs     int       `json:"sampled_pairs"`
-	Sampled          bool      `json:"sampled"`
-	ProdsEvaluated   int       `json:"prods_evaluated"`
-	PredictedLinks   int       `json:"predicted_links"`
-	TestLink         PRF       `json:"test_link"`
-	CallGraph        CallGraph `json:"call_graph"`
+	Timestamp        string        `json:"timestamp"`
+	Repo             string        `json:"repo"`
+	Commit           string        `json:"commit"`
+	Language         string        `json:"language"`
+	BuildVariant     string        `json:"build_variant"`
+	Files            int           `json:"files"`
+	ProdFiles        int           `json:"prod_files"`
+	TestFiles        int           `json:"test_files"`
+	ProdMethods      int           `json:"prod_methods"`
+	TestMethods      int           `json:"test_methods"`
+	GroundTruthPairs int           `json:"ground_truth_pairs"`
+	SampledPairs     int           `json:"sampled_pairs"`
+	Sampled          bool          `json:"sampled"`
+	ProdsEvaluated   int           `json:"prods_evaluated"`
+	PredictedLinks   int           `json:"predicted_links"`
+	TestLink         PRF           `json:"test_link"`
+	CallGraph        CallGraph     `json:"call_graph"`
+	Manual           *ManualResult `json:"manual_truth,omitempty"`
 }
 
 // Run 在指定仓库上执行基准。
@@ -161,6 +163,14 @@ func Run(ctx context.Context, repoPath string, opts Options) (*Report, error) {
 
 	truth, prods := prepareEvaluation(pairs, sampled)
 	report.TestLink, report.ProdsEvaluated, report.PredictedLinks = evaluate(ctx, svc, truth, prods, opts.MinConfidence)
+
+	// 人工真值（独立来源）：只评估标注的生产方法，口径见 manual.go。
+	if opts.ManualTruth != "" {
+		report.Manual, err = evaluateManual(ctx, svc, repoPath, opts.ManualTruth, ad, idx, opts.MinConfidence)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// 调用图结构指标：解析率 = callee 能落到索引方法的边占比。
 	allCalls := append(append([]parser.CallIR{}, prodCalls...), testCalls...)
@@ -499,6 +509,9 @@ func GenerateMarkdown(r *Report) string {
 	fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %.4f |\n",
 		r.BuildVariant, r.CallGraph.Calls, r.CallGraph.UniqueCallers,
 		r.CallGraph.UniqueCallees, r.CallGraph.ResolvedCalls, r.CallGraph.ResolutionRate)
+	if r.Manual != nil {
+		fmt.Fprintf(&b, "\n%s", manualMarkdown(r.Manual))
+	}
 	return b.String()
 }
 

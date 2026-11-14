@@ -6,6 +6,28 @@
 
 ## 提交记录
 
+### Commit 186: feat(releasebench): 人工真值独立评估（R5-14 / S-2h）
+
+- 目的：现有自动真值与 `call_graph` 策略同为 IR 直接调用边，饱和数字只能证明链路完整，
+  无法挡住「真值和策略一起消失」的回归（R5-12 即为实例：目标方法连同真值一起不可见）。
+- 数据集：`internal/releasebench/testdata/manual-truth.json`，**逐个阅读测试方法体**标注，
+  Go 28 条 + Java 18 条，共 14 个生产方法、2 个闭合测试文件。真值不来自 IR；IR 仅用于
+  枚举标注文件内的方法作为评估范围（范围外预测忽略、范围内误报计 FP）。
+- 实现：`manual.go` 新增数据集加载、范围校验（生产方法必须在索引内、真值测试必须在标注
+  文件内）、逐方法与微平均 P/R/F1；`release-bench --manual-truth <path>` 追加
+  `manual_truth` 字段与 Markdown 段落，与自动口径并排输出。CLI/接口文档同步。
+- 结果（两变体一致）：Go regex/treesitter 28/28、Java 18/18（P/R/F1 = 1.0）。
+- 回归捕获验证：临时移除 `EnsureMethodOwners`（R5-12 修复）后，同数据集实测
+  **TP 6 / FN 22 / R 0.2143 / F1 0.3530**，缺口精确落在 `Service.FindTestLinks`(17)
+  与 `MCPServer.serveStdio`(5)；原始 JSON 见 `docs/bench/2026-11-14/manual-pre184-go.json`。
+- 口径差异写入 `docs/bench/2026-11-14/README.md`：来源、覆盖、范围外预测处理、用途、盲区
+  五项并排；自动口径残余 FP 多为「IR 未解析到的真实调用被命名策略命中」，按人工语义并非误报。
+- 负控：`TestScoreManualClosedScope`（范围外预测忽略、去重、TP/FP/FN 与微平均）；
+  `TestManualDatasetValid`（数据结构、重复真值、FQN 形态）。
+- 基准数据：`final-*.json`（R5-12/R5-13 后）；Go regex P 0.9922→0.9966、R 0.9803→1.0、
+  F1 0.9862→0.9983；treesitter F1 0.9807→0.9935；FN 23/24→0；Java 维持 1.0。
+- 验证：build/vet（含 pg redis treesitter）/make test 全绿；counts 59910（59.9k）。
+
 ### Commit 185: fix(service): Go 生产文件中的 Test* 类型不再整文件判为测试（R5-13 / S-2g）
 
 - 现象：`Service.FindTestLinks` 的 `call_graph` 结果里出现生产方法

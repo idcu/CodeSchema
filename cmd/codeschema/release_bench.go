@@ -17,6 +17,7 @@ func releaseBenchCmd(ctx context.Context, _ *config.Config, args []string) error
 	maxPairs := fs.Int("max-pairs", 200, "测试关联真值 pair 采样上限")
 	minConf := fs.Int("min-confidence", 60, "测试关联置信度下限")
 	workers := fs.Int("workers", 4, "扫描并发")
+	manual := fs.String("manual-truth", "", "人工真值数据集路径（可选；追加独立 P/R/F1）")
 	out := fs.String("out", "", "输出目录（写 report.json / report.md）")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -30,6 +31,7 @@ func releaseBenchCmd(ctx context.Context, _ *config.Config, args []string) error
 		MaxPairs:      *maxPairs,
 		MinConfidence: *minConf,
 		Workers:       *workers,
+		ManualTruth:   *manual,
 	})
 	if err != nil {
 		return fmt.Errorf("release-bench: %w", err)

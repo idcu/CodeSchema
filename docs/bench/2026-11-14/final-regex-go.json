@@ -1,0 +1,218 @@
+{
+  "timestamp": "2026-11-14T02:05:09Z",
+  "repo": "code-schema",
+  "commit": "270409cfe26a5c8c2bc1a70095fe78cc62eb6f5c",
+  "language": "go",
+  "build_variant": "regex",
+  "files": 224,
+  "prod_files": 123,
+  "test_files": 101,
+  "prod_methods": 1349,
+  "test_methods": 1130,
+  "ground_truth_pairs": 1736,
+  "sampled_pairs": 193,
+  "sampled": true,
+  "prods_evaluated": 144,
+  "predicted_links": 1343,
+  "test_link": {
+    "tp": 1181,
+    "fp": 4,
+    "fn": 0,
+    "precision": 0.9966,
+    "recall": 1,
+    "f1": 0.9983
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "regex",
+    "calls": 16593,
+    "unique_callers": 2077,
+    "unique_callees": 2780,
+    "resolved_calls": 3535,
+    "resolution_rate": 0.213
+  },
+  "manual_truth": {
+    "dataset": "internal/releasebench/testdata/manual-truth.json",
+    "repo": "code-schema",
+    "commit": "270409cfe26a5c8c2bc1a70095fe78cc62eb6f5c",
+    "language": "go",
+    "build_variant": "regex",
+    "test_files": [
+      "internal/server/mcp_stdio_test.go",
+      "internal/service/testlink_test.go"
+    ],
+    "in_scope_tests": 56,
+    "truth_pairs": 28,
+    "predicted_in_scope": 28,
+    "entries": [
+      {
+        "production": "Service.FindTestLinks",
+        "truth": [
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_Coverage",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+        ],
+        "predicted": [
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_Coverage",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+        ],
+        "tp": 17,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.matchesTestMethod",
+        "truth": [
+          "service.TestMatchesTestMethod"
+        ],
+        "predicted": [
+          "service.TestMatchesTestMethod"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.isTestClass",
+        "truth": [
+          "service.TestIsTestClass"
+        ],
+        "predicted": [
+          "service.TestIsTestClass"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.isTestFileName",
+        "truth": [
+          "service.TestIsTestFileName"
+        ],
+        "predicted": [
+          "service.TestIsTestFileName"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.dirFromPath",
+        "truth": [
+          "service.TestDirFromPath"
+        ],
+        "predicted": [
+          "service.TestDirFromPath"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.parseExplicitTargets",
+        "truth": [
+          "service.TestParseExplicitTargets"
+        ],
+        "predicted": [
+          "service.TestParseExplicitTargets"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.resolveExplicitClass",
+        "truth": [
+          "service.TestResolveExplicitClass"
+        ],
+        "predicted": [
+          "service.TestResolveExplicitClass"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "MCPServer.serveStdio",
+        "truth": [
+          "server.TestMCPServer_Stdio_EOF",
+          "server.TestMCPServer_Stdio_InvalidJSON",
+          "server.TestMCPServer_Stdio_ToolsList",
+          "server.TestMCP_Stdio_LineDelimitedJSON",
+          "server.TestMCP_Stdio_ParseErrorHasNullID"
+        ],
+        "predicted": [
+          "server.TestMCPServer_Stdio_EOF",
+          "server.TestMCPServer_Stdio_InvalidJSON",
+          "server.TestMCPServer_Stdio_ToolsList",
+          "server.TestMCP_Stdio_LineDelimitedJSON",
+          "server.TestMCP_Stdio_ParseErrorHasNullID"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      }
+    ],
+    "micro": {
+      "tp": 28,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    }
+  }
+}
