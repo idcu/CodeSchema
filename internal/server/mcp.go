@@ -2,18 +2,21 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	cerrors "github.com/idcu/codeschema/internal/errors"
 	auth "gitee.com/idcu-go/auth"
 	slog "gitee.com/idcu-go/log"
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
 )
@@ -73,6 +76,57 @@ type MCPServer struct {
 	// ctxDefaults 上下文裁剪的服务端默认值（来自 config.context）；
 	// 请求显式传参时以请求为准，未传时取这里的值。
 	ctxDefaults service.ContextOptions
+	// SSE 会话：GET /sse 建立连接时登记，POST /message 按 sessionId 路由响应
+	// （MCP 2024-11-05 SSE 传输，P2-20）。
+	sessMu   sync.RWMutex
+	sessions map[string]*mcpSession
+}
+
+// mcpSession 一次 SSE 连接对应的消息队列；响应经该队列推回 SSE 流。
+type mcpSession struct {
+	id   string
+	ch   chan []byte
+	done chan struct{}
+	once sync.Once
+}
+
+func (s *mcpSession) close() {
+	s.once.Do(func() { close(s.done) })
+}
+
+// newMCPSession 生成随机会话 ID 并登记。
+func (m *MCPServer) newMCPSession() *mcpSession {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		// 随机源不可用时退化为时间戳，保证会话仍可建立（不应发生）。
+		buf = []byte(strconv.FormatInt(time.Now().UnixNano(), 10))
+	}
+	s := &mcpSession{
+		id:   hex.EncodeToString(buf),
+		ch:   make(chan []byte, 64),
+		done: make(chan struct{}),
+	}
+	m.sessMu.Lock()
+	m.sessions[s.id] = s
+	m.sessMu.Unlock()
+	return s
+}
+
+func (m *MCPServer) lookupSession(id string) (*mcpSession, bool) {
+	m.sessMu.RLock()
+	s, ok := m.sessions[id]
+	m.sessMu.RUnlock()
+	return s, ok
+}
+
+func (m *MCPServer) removeSession(id string) {
+	m.sessMu.Lock()
+	s, ok := m.sessions[id]
+	delete(m.sessions, id)
+	m.sessMu.Unlock()
+	if ok {
+		s.close()
+	}
 }
 
 // TenantResolver 按租户 ID 解析出对应的运行期 Service。
@@ -122,6 +176,7 @@ func NewMCPServer(svc *service.Service, addr string) *MCPServer {
 		resolver:      func(_ context.Context, _ string) (*service.Service, error) { return svc, nil },
 		defaultTenant: "default",
 		projects:      []tenant.Info{{ID: "default"}},
+		sessions:      make(map[string]*mcpSession),
 	}
 	m.authToken.Store("")
 	return m
@@ -360,7 +415,8 @@ func (m *MCPServer) Stop() error {
 	return m.server.Shutdown(ctx)
 }
 
-// handleSSE SSE 端点，客户端通过此端点建立连接并接收事件。
+// handleSSE SSE 端点：建立会话并推送 endpoint 事件，随后把该会话的
+// JSON-RPC 响应以 `event: message` 推回（MCP 2024-11-05，P2-20）。
 func (m *MCPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -368,25 +424,48 @@ func (m *MCPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sess := m.newMCPSession()
+	defer m.removeSession(sess.id)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// 发送 endpoint 事件告知客户端消息端点
-	fmt.Fprintf(w, "event: endpoint\ndata: /message\n\n")
+	// endpoint 事件告知客户端消息端点；sessionId 用于把 POST 的响应路由回本流。
+	fmt.Fprintf(w, "event: endpoint\ndata: /message?sessionId=%s\n\n", sess.id)
 	flusher.Flush()
 
-	// 保持连接直到客户端断开或 context 取消
-	<-r.Context().Done()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case data := <-sess.ch:
+			fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
+			flusher.Flush()
+		}
+	}
 }
 
-// handleMessage 处理 JSON-RPC 消息。
+// handleMessage 处理 JSON-RPC 消息（MCP SSE 传输）：
+//   - 请求（带 id）：返回 202，响应经 GET /sse 的 event: message 推送；
+//   - 通知（无 id）：返回 202，不回包（JSON-RPC 规范）；
+//   - 解析失败：400 + JSON-RPC parse error（id=null）。
 func (m *MCPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, jsonRPCResponse{
 			JSONRPC: "2.0",
 			Error:   &rpcError{Code: -32600, Message: "method not allowed"},
+		})
+		return
+	}
+
+	sessionID := r.URL.Query().Get("sessionId")
+	sess, ok := m.lookupSession(sessionID)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, jsonRPCResponse{
+			JSONRPC: "2.0",
+			Error:   &rpcError{Code: -32600, Message: "invalid or missing sessionId (open GET /sse first)"},
 		})
 		return
 	}
@@ -400,8 +479,29 @@ func (m *MCPServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 复用纯逻辑处理器（stdio 传输同路径）
-	writeJSON(w, http.StatusOK, m.handleRequest(req))
+	resp := m.handleRequest(r.Context(), req)
+	if req.ID != nil {
+		data, err := json.Marshal(resp)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &rpcError{Code: -32603, Message: "marshal response: " + err.Error()},
+			})
+			return
+		}
+		select {
+		case sess.ch <- data:
+		case <-sess.done:
+			writeJSON(w, http.StatusGone, jsonRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &rpcError{Code: -32600, Message: "session closed"},
+			})
+			return
+		}
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // handleToolCall 处理工具调用请求。

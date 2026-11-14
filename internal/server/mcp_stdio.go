@@ -2,21 +2,22 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 )
 
-// handleRequest 处理一条 JSON-RPC 消息（纯逻辑，HTTP 与 stdio 传输复用）。
-func (m *MCPServer) handleRequest(req jsonRPCRequest) jsonRPCResponse {
-	id := req.ID
-	if id == nil {
-		id = 0
-	}
+// maxStdioLine stdio 单条消息上限（16MB），防止异常输入无限占用内存。
+const maxStdioLine = 16 << 20
 
+// handleRequest 处理一条 JSON-RPC 消息（纯逻辑，HTTP 与 stdio 传输复用）。
+// 通知（ID 为 nil）由传输层决定不回包；ctx 用于工具调用的取消/超时传递。
+func (m *MCPServer) handleRequest(ctx context.Context, req jsonRPCRequest) jsonRPCResponse {
 	switch req.Method {
 	case "initialize":
 		// MCP 初始化握手：标准 MCP 客户端（VS Code / JetBrains / SDK）连上来
@@ -30,7 +31,7 @@ func (m *MCPServer) handleRequest(req jsonRPCRequest) jsonRPCResponse {
 		}
 		return jsonRPCResponse{
 			JSONRPC: "2.0",
-			ID:      id,
+			ID:      req.ID,
 			Result: map[string]any{
 				"protocolVersion": protoVer,
 				"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -39,26 +40,25 @@ func (m *MCPServer) handleRequest(req jsonRPCRequest) jsonRPCResponse {
 		}
 
 	case "notifications/initialized":
-		// 通知类消息：MCP 规范不要求返回，但本传输在 POST 响应中回写，
-		// 返回空 result 让客户端忽略即可（严格客户端不读通知响应）。
-		return jsonRPCResponse{JSONRPC: "2.0", ID: id, Result: map[string]any{}}
+		// 通知类消息：ID 为 nil 时传输层不写响应；带 id 的非法用法回空 result。
+		return jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}}
 
 	case "tools/list":
 		return jsonRPCResponse{
 			JSONRPC: "2.0",
-			ID:      id,
+			ID:      req.ID,
 			Result: map[string][]mcpTool{
 				"tools": m.tools,
 			},
 		}
 
 	case "tools/call":
-		return m.handleToolCall(context.Background(), id, req.Params)
+		return m.handleToolCall(ctx, req.ID, req.Params)
 
 	default:
 		return jsonRPCResponse{
 			JSONRPC: "2.0",
-			ID:      id,
+			ID:      req.ID,
 			Error:   &rpcError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)},
 		}
 	}
@@ -66,24 +66,20 @@ func (m *MCPServer) handleRequest(req jsonRPCRequest) jsonRPCResponse {
 
 // StartStdio 以 stdio 传输模式启动 MCP Server（T4-1）。
 //
-// 读取 stdin 的 JSON-RPC 消息（LSP 风格 Content-Length 帧），响应写 stdout，
-// 供仅支持 stdio 的 MCP 客户端直接以子进程方式连接：
-//   codeschema mcp --stdio
+// MCP stdio 传输为「每行一条 JSON-RPC 消息」（UTF-8，消息内不得含裸换行），
+// 不是 LSP 的 Content-Length 帧。供仅支持 stdio 的 MCP 客户端以子进程方式接入：
 //
-// 帧格式：
-//   Content-Length: <N>\r\n
-//   \r\n
-//   <N 字节 JSON>
+//	codeschema mcp --stdio
 //
-// EOF 时优雅退出（父进程关闭 stdin）。
+// 通知（无 id）不回包；解析失败回 id=null 的 parse error；EOF 时优雅退出。
 func (m *MCPServer) StartStdio(ctx context.Context) error {
 	log.Printf("MCP Server starting in stdio mode")
 	return m.serveStdio(ctx, os.Stdin, os.Stdout)
 }
 
-// serveStdio 核心：从 r 读帧、调用 handleRequest、向 w 写帧。分离便于测试。
+// serveStdio 核心：逐行读消息、调用 handleRequest、逐行写响应。分离便于测试。
 func (m *MCPServer) serveStdio(ctx context.Context, r io.Reader, w io.Writer) error {
-	br := bufio.NewReader(r)
+	br := bufio.NewReaderSize(r, 64*1024)
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,76 +87,69 @@ func (m *MCPServer) serveStdio(ctx context.Context, r io.Reader, w io.Writer) er
 		default:
 		}
 
-		// 读 Content-Length 头
-		var contentLength int
-		headerDone := false
-		for {
-			line, err := br.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					return nil // 父进程关闭 stdin，优雅退出
-				}
-				return fmt.Errorf("stdio read header: %w", err)
+		line, err := readStdioLine(br)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil // 父进程关闭 stdin，优雅退出
 			}
-			line = trimCRLF(line)
-			if line == "" {
-				headerDone = true
-				break
-			}
-			var n int
-			if _, err := fmt.Sscanf(line, "Content-Length: %d", &n); err == nil {
-				contentLength = n
-			}
+			return err
 		}
-		if !headerDone {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
 			continue
 		}
-		if contentLength <= 0 || contentLength > 16*1024*1024 {
-			return fmt.Errorf("stdio invalid Content-Length: %d", contentLength)
-		}
 
-		// 读 JSON 体
-		body := make([]byte, contentLength)
-		if _, err := io.ReadFull(br, body); err != nil {
-			return fmt.Errorf("stdio read body: %w", err)
-		}
-
-		// 解析并处理
 		var req jsonRPCRequest
-		if err := json.Unmarshal(body, &req); err != nil {
+		if err := json.Unmarshal(line, &req); err != nil {
 			resp := jsonRPCResponse{
-				JSONRPC: "2.0",
+				JSONRPC: "2.0", // id 保持 nil → 序列化为 null
 				Error:   &rpcError{Code: -32700, Message: "parse error: " + err.Error()},
 			}
-			if err := writeStdioFrame(w, resp); err != nil {
+			if err := writeStdioLine(w, resp); err != nil {
 				return err
 			}
 			continue
 		}
-		resp := m.handleRequest(req)
-		if err := writeStdioFrame(w, resp); err != nil {
+		if req.ID == nil {
+			// JSON-RPC 通知：处理（当前均为无副作用）但不允许回包。
+			_ = m.handleRequest(ctx, req)
+			continue
+		}
+		if err := writeStdioLine(w, m.handleRequest(ctx, req)); err != nil {
 			return err
 		}
 	}
 }
 
-// writeStdioFrame 以 Content-Length 帧格式写入响应。
-func writeStdioFrame(w io.Writer, resp jsonRPCResponse) error {
+// readStdioLine 读取一行（含换行），EOF 时返回已读到的残余行。
+func readStdioLine(br *bufio.Reader) ([]byte, error) {
+	var buf []byte
+	for {
+		frag, err := br.ReadSlice('\n')
+		buf = append(buf, frag...)
+		if len(buf) > maxStdioLine {
+			return nil, fmt.Errorf("stdio message exceeds %d bytes", maxStdioLine)
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) && len(buf) > 0 {
+				return buf, nil
+			}
+			return nil, err
+		}
+		return buf, nil
+	}
+}
+
+// writeStdioLine 以单行 JSON 写入响应（MCP stdio 传输格式）。
+func writeStdioLine(w io.Writer, resp jsonRPCResponse) error {
 	data, err := json.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("stdio marshal response: %w", err)
 	}
-	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n", len(data)); err != nil {
-		return err
-	}
+	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
-}
-
-// trimCRLF 去除行尾 \r\n 或 \n。
-func trimCRLF(s string) string {
-	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
-		s = s[:len(s)-1]
-	}
-	return s
 }

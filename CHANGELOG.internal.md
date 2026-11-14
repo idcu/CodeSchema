@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 175: fix(mcp): 传输层符合 MCP 2024-11-05（stdio 逐行 JSON / SSE sessionId / 通知不回包）（P2-20）
+
+- 背景：三处不合规——stdio 用 LSP 式 `Content-Length` 帧，标准 MCP 客户端读不到响应；SSE 的 `endpoint` 事件不带 `sessionId`，`POST /message` 直接 200 内联回包，响应无法路由到流；通知也被回包（JSON-RPC 禁止），解析失败的 `id` 被伪造成 `0`；`tools/call` 使用 `context.Background()`，客户端断开后无法取消。
+- 动作：
+  - stdio 改为逐行 JSON：`readStdioLine`（`ReadSlice` 分段、16MB 上限）/`writeStdioLine`；通知（`id==nil`）处理但不写响应；parse error `id=null`；EOF 优雅退出。
+  - SSE：`GET /sse` 生成随机会话 ID 并下发 `data: /message?sessionId=<id>`；新增会话注册表（`sessMu`/`sessions`），响应经 `event: message` 推送；`POST /message` 校验 `sessionId`（缺失/失效 400）并返回 202；会话失效 410。
+  - `handleRequest(ctx, req)` 透传请求上下文到 `handleToolCall`，移除 `context.Background()`。
+- 负控（先红后绿）：
+  - `TestMCP_Stdio_LineDelimitedJSON`：修复前逐行输入得到 0 条响应（空输出）。
+  - `TestMCP_Stdio_ParseErrorHasNullID`：修复前无响应；修复后 `id=null`、`-32700`。
+  - `TestMCP_SSECompliance`：修复前 `endpoint` 为 `/message`（无 sessionId），POST 返回 200 内联包；修复后 endpoint 带 sessionId、POST 202、响应经 SSE `event: message` 到达（id=7）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 57364 ≈ 57.4k）。
+- 说明：HTTP `/message` 不再支持无会话的内联回包（旧行为本身不符合 MCP 传输），现有调用方需先连 `GET /sse` 获取 `sessionId`。
+
 ### Commit 174: fix(server): OpenAPI 声明与 handler 实际参数对齐，/affected 支持 method（P3-14）
 
 - 背景：`/openapi.json` 与实际实现漂移——`/context` 未声明 `chars_per_token`，`/impact`/`/tests` 未声明批量 `methods`，`/search` 未声明 `min_score`；`/affected` 规范声明 `method`，handler 只读 `symbol`，按规范调用直接 400。

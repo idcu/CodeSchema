@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
@@ -25,23 +27,43 @@ func newTestMCPServer(t *testing.T) *MCPServer {
 	return NewMCPServer(svc, ":0")
 }
 
+// mcpExchange 模拟 MCP SSE 客户端：登记会话 → POST（期望 202）→ 从会话队列
+// 取 SSE 推送的响应。解析失败等同步 400 场景直接读响应体。
+func mcpExchange(t *testing.T, srv *MCPServer, body string) (int, *jsonRPCResponse) {
+	t.Helper()
+	sess := srv.newMCPSession()
+	defer srv.removeSession(sess.id)
+	req := httptest.NewRequest(http.MethodPost, "/message?sessionId="+sess.id, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleMessage(w, req)
+	if w.Body.Len() > 0 {
+		var resp jsonRPCResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode inline response: %v", err)
+		}
+		return w.Result().StatusCode, &resp
+	}
+	select {
+	case data := <-sess.ch:
+		var resp jsonRPCResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			t.Fatalf("decode SSE response: %v", err)
+		}
+		return w.Result().StatusCode, &resp
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SSE response")
+		return 0, nil
+	}
+}
+
 func TestMCP_ToolsList(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	if w.Result().StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	code, resp := mcpExchange(t, srv, body)
+	if code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d", code)
 	}
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
@@ -64,20 +86,10 @@ func TestMCP_ToolsList(t *testing.T) {
 func TestMCP_ToolCall_Context(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"context","arguments":{"symbol":"com.example.MyClass"}}}`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	if w.Result().StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	code, resp := mcpExchange(t, srv, body)
+	if code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d", code)
 	}
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
@@ -86,16 +98,7 @@ func TestMCP_ToolCall_Context(t *testing.T) {
 func TestMCP_ToolCall_MissingSymbol(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context","arguments":{"symbol":""}}}`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
+	_, resp := mcpExchange(t, srv, body)
 	if resp.Error == nil {
 		t.Fatal("expected error for empty symbol")
 	}
@@ -104,16 +107,7 @@ func TestMCP_ToolCall_MissingSymbol(t *testing.T) {
 func TestMCP_ToolCall_InvalidMethod(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nonexistent","arguments":{}}}`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
+	_, resp := mcpExchange(t, srv, body)
 	if resp.Error == nil {
 		t.Fatal("expected error for nonexistent tool")
 	}
@@ -122,16 +116,7 @@ func TestMCP_ToolCall_InvalidMethod(t *testing.T) {
 func TestMCP_UnknownMethod(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":5,"method":"unknown"}`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
+	_, resp := mcpExchange(t, srv, body)
 	if resp.Error == nil {
 		t.Fatal("expected error for unknown method")
 	}
@@ -143,16 +128,10 @@ func TestMCP_UnknownMethod(t *testing.T) {
 func TestMCP_InvalidJSON(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `invalid json`
-
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	srv.handleMessage(w, req)
-
-	var resp jsonRPCResponse
-	json.NewDecoder(w.Result().Body).Decode(&resp)
-
+	code, resp := mcpExchange(t, srv, body)
+	if code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", code)
+	}
 	if resp.Error == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -166,15 +145,7 @@ func TestMCP_InvalidJSON(t *testing.T) {
 func TestMCP_ToolCall_ContextBatch(t *testing.T) {
 	srv := newTestMCPServer(t)
 	body := `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"context","arguments":{"symbols":["com.example.MyClass","com.example.Missing"]}}}`
-	req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.handleMessage(w, req)
-
-	var resp jsonRPCResponse
-	if err := json.NewDecoder(w.Result().Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	_, resp := mcpExchange(t, srv, body)
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
@@ -233,14 +204,7 @@ func TestMCP_ToolCall_AllTools(t *testing.T) {
 	for _, tool := range tools {
 		t.Run(tool.name, func(t *testing.T) {
 			body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + tool.name + `","arguments":` + tool.args + `}}`
-			req := httptest.NewRequest(http.MethodPost, "/message", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			srv.handleMessage(w, req)
-
-			var resp jsonRPCResponse
-			json.NewDecoder(w.Result().Body).Decode(&resp)
-
+			_, resp := mcpExchange(t, srv, body)
 			if resp.Error != nil {
 				t.Errorf("tool %s returned error: %+v", tool.name, resp.Error)
 			}
@@ -272,6 +236,83 @@ func TestMCPSSE_Endpoint(t *testing.T) {
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "text/event-stream" {
 		t.Errorf("expected text/event-stream, got %s", contentType)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "event: endpoint") || !strings.Contains(body, "sessionId=") {
+		t.Errorf("endpoint event must carry sessionId, got %q", body)
+	}
+}
+
+// TestMCP_SSECompliance 负控（P2-20）：MCP 2024-11-05 SSE 传输要求
+//  1. GET /sse 先下发 `event: endpoint`，data 为带 sessionId 的 /message 地址；
+//  2. POST /message?sessionId=... 返回 202（不回包）；
+//  3. JSON-RPC 响应经 SSE 的 `event: message` 推送。
+func TestMCP_SSECompliance(t *testing.T) {
+	srv := NewMCPServer(nil, "")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sse", srv.handleSSE)
+	mux.HandleFunc("/message", srv.handleMessage)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/sse")
+	if err != nil {
+		t.Fatalf("GET /sse: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+	reader := bufio.NewReader(resp.Body)
+	endpoint, err := readSSEData(reader, "endpoint")
+	if err != nil {
+		t.Fatalf("read endpoint event: %v", err)
+	}
+	if !strings.Contains(endpoint, "sessionId=") {
+		t.Fatalf("endpoint event must carry sessionId, got %q", endpoint)
+	}
+
+	body := `{"jsonrpc":"2.0","id":7,"method":"tools/list"}`
+	postResp, err := http.Post(ts.URL+endpoint, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST message: %v", err)
+	}
+	defer postResp.Body.Close()
+	if postResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST /message status = %d, want 202", postResp.StatusCode)
+	}
+
+	data, err := readSSEData(reader, "message")
+	if err != nil {
+		t.Fatalf("read message event: %v", err)
+	}
+	var rpcResp jsonRPCResponse
+	if err := json.Unmarshal([]byte(data), &rpcResp); err != nil {
+		t.Fatalf("SSE data is not JSON-RPC: %v (%q)", err, data)
+	}
+	if rpcResp.Error != nil {
+		t.Fatalf("tools/list error: %+v", rpcResp.Error)
+	}
+	if rpcResp.ID != float64(7) {
+		t.Fatalf("response id = %v, want 7", rpcResp.ID)
+	}
+}
+
+// readSSEData 读取首个指定事件的 data 行（忽略注释与其他事件）。
+func readSSEData(r *bufio.Reader, wantEvent string) (string, error) {
+	current := ""
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if strings.HasPrefix(line, "event:") {
+			current = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") && current == wantEvent {
+			return strings.TrimSpace(strings.TrimPrefix(line, "data:")), nil
+		}
 	}
 }
 
