@@ -74,16 +74,36 @@ func tsTypeOnlyScope(c *parser.ClassIR) bool {
 	return c != nil && (c.Type == "INTERFACE" || c.Type == "TYPE")
 }
 
+// isTSTestFile 判断是否为测试文件：只有测试文件里的 describe/it/test 才可能是
+// Jest 块声明。生产代码中的 `regexp.test('literal')` 是方法调用，不能建模为测试方法。
+func isTSTestFile(path string) bool {
+	lower := strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(lower)
+	for _, suffix := range []string{".test.ts", ".spec.ts", ".test.tsx", ".spec.tsx",
+		".test.mts", ".spec.mts", ".test.cts", ".spec.cts",
+		".test.js", ".spec.js", ".test.jsx", ".spec.jsx", ".test.mjs", ".spec.mjs"} {
+		if strings.HasSuffix(base, suffix) {
+			return true
+		}
+	}
+	return strings.Contains(lower, "/__tests__/") || strings.Contains(lower, "/__test__/")
+}
+
 // matchJestDecl 判断一行是否为 Jest 块声明，返回 "describe"/"test" 与标题。
 func matchJestDecl(line string) (kind, title string, ok bool) {
-	m := tmpJestDeclPattern.FindStringSubmatch(line)
-	if len(m) < 3 {
+	loc := tmpJestDeclPattern.FindStringSubmatchIndex(line)
+	if loc == nil || len(loc) < 6 {
 		return "", "", false
 	}
-	if m[1] == "describe" {
-		return "describe", m[2], true
+	// 锚定调用位置：`re.test('x')` 里的 `test` 前面是 `.`，是成员方法调用而非
+	// Jest 全局函数；旧实现只看裸词，把所有 `.test('literal')` 当成测试声明。
+	if loc[0] > 0 && line[loc[0]-1] == '.' {
+		return "", "", false
 	}
-	return "test", m[2], true
+	if line[loc[2]:loc[3]] == "describe" {
+		return "describe", line[loc[4]:loc[5]], true
+	}
+	return "test", line[loc[4]:loc[5]], true
 }
 
 // jestDeclKind 判断 AST 调用节点的函数名是否 Jest 块声明（含 it.only / test.each 形式）。

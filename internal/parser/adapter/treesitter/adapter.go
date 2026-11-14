@@ -433,6 +433,8 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	if lang == "ts" {
 		tsModule = tsModuleName(path)
 	}
+	// Jest 块声明只在测试文件里建模：生产代码的 `re.test('x')` 是方法调用。
+	tsJestFile := tsModule != "" && isTSTestFile(path)
 	// TS 声明文件只有类型契约，没有可执行体：签名不得登记为方法或调用边。
 	tsDeclFile := lang == "ts" && isTSDeclarationFile(path)
 	// TS 具名导入（本地名 → 模块名）：测试文件导入生产函数后，裸 callee 才能
@@ -745,7 +747,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		// Jest 块声明：describe/it/test 的回调不是声明式方法，回调体内的调用
 		// 原本 CallerFQN 为空（TS 测试关联真值恒为 0 的根因）。这里把回调合成为
 		// MethodIR（ClassFQN=模块名），并按花括号深度跟踪回调体作用域。
-		if tsModule != "" {
+		if tsJestFile {
 			if kind, title, ok := matchJestDecl(trimmed); ok {
 				if kind == "describe" {
 					jestScopes = append(jestScopes, jestScope{kind: "describe", openDepth: tsDepth, methodIdx: -1})

@@ -412,6 +412,42 @@ export declare class Server {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_TSRegExpTestIsNotJestMethod 负控：生产代码里的
+// `regexp.test('literal')` 是方法调用，不是 Jest 块声明；旧正则未锚定，
+// 会把 'literal' 合成幽灵测试方法并改写回调归属。
+func TestTreeSitterAdapter_Parse_TSRegExpTestIsNotJestMethod(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "matcher.ts")
+	content := `export function isMatchChar(): boolean {
+	return /^abc$/.test('abc');
+}
+
+export function isMatchVar(re: RegExp): boolean {
+	return re.test('xyz');
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	names := make(map[string]bool, len(doc.Methods))
+	for _, m := range doc.Methods {
+		names[m.Name] = true
+	}
+	for _, ghost := range []string{"abc", "xyz"} {
+		if names[ghost] {
+			t.Errorf("regexp.test 的字面量被登记为幽灵方法 %q: %+v", ghost, doc.Methods)
+		}
+	}
+	if !names["isMatchChar"] || !names["isMatchVar"] {
+		t.Errorf("真实方法丢失: %+v", doc.Methods)
+	}
+}
+
 // TestTreeSitterAdapter_Parse_TSInterfaceMemberNotMethod 负控：接口成员是类型契约，
 // 不登记为方法也不产生调用；同文件的类方法与顶层函数仍须正常入库。
 func TestTreeSitterAdapter_Parse_TSInterfaceMemberNotMethod(t *testing.T) {
