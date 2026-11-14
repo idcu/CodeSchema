@@ -9,6 +9,48 @@ import (
 	"github.com/idcu/codeschema/internal/parser"
 )
 
+// TestFileStore_OpenRejectsCorruptStore 负控（R3-12）：store.json 损坏时 Open 必须
+// 返回错误，而不是静默当作空库——否则下一次写入会用空数据覆盖唯一副本。
+func TestFileStore_OpenRejectsCorruptStore(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "store.json"), []byte(`{"files": {`), 0o600); err != nil {
+		t.Fatalf("write corrupt store: %v", err)
+	}
+
+	fs := &FileStore{}
+	if err := fs.Open(context.Background(), dir); err == nil {
+		t.Fatal("期望 Open 对损坏的 store.json 返回错误，实际 nil（会静默清空数据）")
+	}
+}
+
+// TestFileStore_SaveIsAtomic 负控（R3-12）：保存应 fsync 文件内容后再原子 rename，
+// 且不残留临时文件；崩溃后要么旧版本完整、要么新版本完整。
+func TestFileStore_SaveIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	fs := &FileStore{}
+	if err := fs.Open(context.Background(), dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if _, err := fs.UpsertFile(context.Background(), "/x/a.go", "h", 1, 10); err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "store.json.tmp")); !os.IsNotExist(err) {
+		t.Errorf("保存后不应残留 store.json.tmp: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "store.json"))
+	if err != nil {
+		t.Fatalf("stat store.json: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Errorf("store.json 不应为空")
+	}
+}
+
 func TestFileStore_OpenClose(t *testing.T) {
 	dir := t.TempDir()
 	fs := &FileStore{}

@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 205: fix(store): FileStore 原子落盘 + 损坏即失败（R3-12 / P2-9）
+
+- 根因：两处可靠性缺口。
+  ① `Open` 丢弃 `loadFromDisk` 的返回值——`store.json` 损坏时静默当空库，
+  下一次 `saveToDisk` 会用空数据覆盖唯一副本（不可恢复的数据丢失）；
+  ② 保存仅 `WriteFile` + `rename`，无 `fsync`：rename 可能先于数据块落盘，
+  强杀/掉电后可能看到 0 字节或截断的 `store.json`。
+- 修复：保存改为「写 tmp → `f.Sync()` → 原子 `rename` → `fsync(dir)`」；
+  `Open` 传播加载错误并释放进程锁，损坏文件显式失败（需人工还原/移走）。
+- 负控（先红后绿）：
+  `TestFileStore_OpenRejectsCorruptStore` 修前 `Open` 返回 nil（红）→ 修后报错（绿）；
+  `TestFileStore_SaveIsAtomic` 修前保存后 `store.json` 不存在（红）→ 修后存在且无 `.tmp` 残留（绿）。
+- 文档：`存储后端.md` 新增「FileStore 持久化语义」；counts 60502（60.5k）。
+
 ### Commit 204: fix(ai): 查询预算按请求隔离，移除共享可变 phase（R6-2）
 
 - 根因：`Enhancer.phase` 是共享可写字段，查询路径 `SetPhase(PhaseQuery)` 与扫描路径

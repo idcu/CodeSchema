@@ -105,8 +105,12 @@ func (fs *FileStore) Open(ctx context.Context, dsn string) error {
 	fs.tagCategories = make(map[string]string)
 	fs.nextID = 1
 
-	// 尝试从磁盘恢复数据
-	fs.loadFromDisk()
+	// 尝试从磁盘恢复数据；损坏时必须显式失败，不能静默当空库（会被后续写入覆盖）。
+	if err := fs.loadFromDisk(); err != nil {
+		_ = lk.Release()
+		fs.lock = nil
+		return fmt.Errorf("load store from %s: %w", fs.rootDir, err)
+	}
 
 	return nil
 }
@@ -637,10 +641,32 @@ func (fs *FileStore) saveToDisk() error {
 	tmpPath := filepath.Join(fs.rootDir, "store.json.tmp")
 	finalPath := filepath.Join(fs.rootDir, "store.json")
 
-	if err := fsperm.WriteFile(tmpPath, b); err != nil {
+	// 落盘顺序（R3-12）：写临时文件 → fsync 内容 → 原子 rename → fsync 目录。
+	// 保证进程被强杀/掉电后，store.json 要么是旧版本完整内容，要么是新版本完整内容，
+	// 不会出现截断或「rename 已可见但数据块未落盘」的半写状态。
+	f, err := fsperm.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fsperm.FileMode)
+	if err != nil {
+		return fmt.Errorf("create temp store: %w", err)
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write temp store: %w", err)
 	}
-	return os.Rename(tmpPath, finalPath)
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync temp store: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close temp store: %w", err)
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return fmt.Errorf("rename temp store: %w", err)
+	}
+	if d, derr := os.Open(fs.rootDir); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // loadFromDisk 从磁盘加载数据到内存。
