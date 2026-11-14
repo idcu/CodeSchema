@@ -481,6 +481,10 @@ func (h *HTTPServer) handleContext(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	symbols := querySymbols(q, "symbols", "symbol")
+	if msg := batchLimitError("symbols", len(symbols)); msg != "" {
+		writeError(w, "ERR_INVALID_PARAMETER", msg, http.StatusBadRequest)
+		return
+	}
 	opts := h.mergeContextOptions(contextOptionsFromQuery(q))
 	if len(symbols) > 1 {
 		// 批量：单轮返回 N 个符号，把 N 次请求压成 1 次（B5）。
@@ -513,6 +517,10 @@ func (h *HTTPServer) handleImpact(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	methods := querySymbols(q, "methods", "method")
+	if msg := batchLimitError("methods", len(methods)); msg != "" {
+		writeError(w, "ERR_INVALID_PARAMETER", msg, http.StatusBadRequest)
+		return
+	}
 	depth, _ := strconv.Atoi(q.Get("depth"))
 	if len(methods) > 1 {
 		writeJSON(w, http.StatusOK, svc.GetImpactBatch(r.Context(), methods, depth))
@@ -544,6 +552,10 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	methods := querySymbols(q, "methods", "method")
+	if msg := batchLimitError("methods", len(methods)); msg != "" {
+		writeError(w, "ERR_INVALID_PARAMETER", msg, http.StatusBadRequest)
+		return
+	}
 	minConfidence, _ := strconv.Atoi(q.Get("min_confidence"))
 	if len(methods) > 1 {
 		writeJSON(w, http.StatusOK, svc.GetTestsBatch(r.Context(), methods, minConfidence))
@@ -765,6 +777,20 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	// 非受控错误可能含 SQL / DSN / 绝对路径，只落服务端日志，客户端统一泛化文案（R2-8）。
 	log.WithModule("http").Error("internal error", "err", err)
 	writeError(w, "ERR_INTERNAL", "internal server error", 500)
+}
+
+// maxBatchItems 单次批量请求的符号/方法条目上限。
+//
+// 批处理逐项串行查询存储，未设上限时单请求可放大为 N 次存储查询（P2-3）；
+// HTTP 与 MCP 两条入口共用同一上限，超限按参数错误拒绝。
+const maxBatchItems = 256
+
+// batchLimitError 返回批量条目超限的错误消息；未超限返回空串。
+func batchLimitError(kind string, n int) string {
+	if n <= maxBatchItems {
+		return ""
+	}
+	return fmt.Sprintf("%s count %d exceeds limit %d", kind, n, maxBatchItems)
 }
 
 // querySymbols 从 query 提取符号列表：支持重复参数与逗号分隔两种写法，并兼容单值参数。

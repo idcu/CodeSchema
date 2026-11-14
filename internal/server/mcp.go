@@ -221,7 +221,7 @@ func defineTools() []mcpTool {
 				Type: "object",
 				Properties: map[string]toolProperty{
 					"symbol":         {Type: "string", Description: "类/方法全限定名（单符号查询，与 symbols 二选一）"},
-					"symbols":        {Type: "array", Description: "批量符号列表：一次调用取回多个符号，把 N 次调用压成 1 次", Items: &toolProperty{Type: "string"}},
+					"symbols":        {Type: "array", Description: "批量符号列表：一次调用取回多个符号，把 N 次调用压成 1 次（最多 256 项）", Items: &toolProperty{Type: "string"}},
 					"context_lines":  {Type: "number", Description: "上下文行数", Default: 5},
 					"mode":           {Type: "string", Description: "注入模式: full（默认，源码原文）/ minimal（仅元数据，评测基线）"},
 					"max_bytes":      {Type: "number", Description: "输出字节预算（<=0 不限）；超限自动降级：缩上下文→块内截断→仅首行"},
@@ -240,7 +240,7 @@ func defineTools() []mcpTool {
 				Type: "object",
 				Properties: map[string]toolProperty{
 					"method":  {Type: "string", Description: "方法全限定名（单符号查询，与 methods 二选一）"},
-					"methods": {Type: "array", Description: "批量方法列表：一次调用取回多个方法的影响面", Items: &toolProperty{Type: "string"}},
+					"methods": {Type: "array", Description: "批量方法列表：一次调用取回多个方法的影响面（最多 256 项）", Items: &toolProperty{Type: "string"}},
 					"depth":   {Type: "number", Description: "分析深度", Default: 1},
 					"project": projectProp,
 				},
@@ -253,7 +253,7 @@ func defineTools() []mcpTool {
 				Type: "object",
 				Properties: map[string]toolProperty{
 					"method":         {Type: "string", Description: "方法全限定名（单符号查询，与 methods 二选一）"},
-					"methods":        {Type: "array", Description: "批量方法列表：一次调用取回多个方法的关联单测", Items: &toolProperty{Type: "string"}},
+					"methods":        {Type: "array", Description: "批量方法列表：一次调用取回多个方法的关联单测（最多 256 项）", Items: &toolProperty{Type: "string"}},
 					"min_confidence": {Type: "integer", Description: "最小置信度", Default: 60},
 					"project":        projectProp,
 				},
@@ -534,6 +534,9 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "context":
 		opts := m.mergeContextOptions(contextOptionsFromArgs(args))
 		symbols := stringSliceArg(args, "symbols", "symbol")
+		if msg := batchLimitError("symbols", len(symbols)); msg != "" {
+			return jsonRPCResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: -32602, Message: msg}}
+		}
 		if len(symbols) > 1 {
 			// 批量：单轮返回 N 个符号，把 N 次工具调用压成 1 次（B5）。
 			return mcpResult(id, svc.GetContextBatchDetailed(ctx, symbols, opts))
@@ -551,6 +554,9 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "impact":
 		depth, _ := toInt(args["depth"])
 		methods := stringSliceArg(args, "methods", "method")
+		if msg := batchLimitError("methods", len(methods)); msg != "" {
+			return jsonRPCResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: -32602, Message: msg}}
+		}
 		if len(methods) > 1 {
 			return mcpResult(id, svc.GetImpactBatch(ctx, methods, depth))
 		}
@@ -567,6 +573,9 @@ func (m *MCPServer) handleToolCall(ctx context.Context, id any, params any) json
 	case "tests":
 		minConfidence, _ := toInt(args["min_confidence"])
 		methods := stringSliceArg(args, "methods", "method")
+		if msg := batchLimitError("methods", len(methods)); msg != "" {
+			return jsonRPCResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: -32602, Message: msg}}
+		}
 		if len(methods) > 1 {
 			return mcpResult(id, svc.GetTestsBatch(ctx, methods, minConfidence))
 		}
