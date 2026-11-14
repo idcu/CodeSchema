@@ -53,6 +53,24 @@ func TestOpenFileCreatesParents(t *testing.T) {
 	assertPerm(t, path, 0o600)
 }
 
+// TestMkdirAllTightensAllCreatedLevels 复核 P3-2：多级不存在的目录一次创建后，
+// 每一级都必须是 0700，而不只是叶子目录。
+func TestMkdirAllTightensAllCreatedLevels(t *testing.T) {
+	base := t.TempDir()
+	// 旧版本可能留下 0755 的父目录；新建的子链路仍必须全部 0700。
+	if err := os.Chmod(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(base, "a", "b", "c")
+	if err := MkdirAll(target); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, dir := range []string{target, filepath.Dir(target), filepath.Dir(filepath.Dir(target))} {
+		assertPerm(t, dir, 0o700)
+	}
+}
+
 func assertPerm(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)
