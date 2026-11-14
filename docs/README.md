@@ -27,11 +27,11 @@
 
 - Go 1.25.2；internal 包 **35** / 全仓库 **39**
 
-- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 60.5k
+- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 60.6k
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 
-- 解析适配器：treesitter（默认，始终注册兜底）/ codegraph / scip / jcodeindexer（JVM 专项索引直读，按 `parser.jcodeindexer.db` 启用）/ lsp（gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server，按 `parser.lsp.enabled` 启用）
+- 解析适配器：treesitter（默认，始终注册兜底）/ scip（按 `parser.scip.index_dir` 启用）/ codegraph、jcodeindexer（默认不注册，需显式 `parser.<adapter>.enabled: true`）/ lsp（gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server，按 `parser.lsp.enabled` 启用）
 
 ## 旧文档
 

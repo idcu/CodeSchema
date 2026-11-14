@@ -87,6 +87,46 @@ func TestNewParserRegistry_LSPGoplsRegistered(t *testing.T) {
 	}
 }
 
+// TestNewParserRegistry_CodeGraphNotDefault 负控（R5-1）：CodeGraph/JCodeIndexer
+// 不得因「配置了非默认 db 路径」就自动进入生产注册表——两个适配器的 Parse 恒返回
+// ErrSourceUnavailable（只实现 ParseAll），生产扫描只调 Parse，注册后只是遮蔽
+// 真正可用的高精度适配器。必须显式 enabled=true 才注册。
+func TestNewParserRegistry_CodeGraphNotDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// 仅配 db 路径、不配 enabled：旧实现会注册 codegraph 并抢在 scip 前被选中。
+	cfg.Parser.CodeGraph.DB = filepath.Join(t.TempDir(), "codegraph.db")
+	cfg.Parser.JCodeIndexer.DB = filepath.Join(t.TempDir(), "jcodeindexer.db")
+
+	reg := NewParserRegistry(context.Background(), cfg, t.TempDir())
+	p, err := reg.Select("go")
+	if err != nil {
+		t.Fatalf("Select(go) error: %v", err)
+	}
+	if p.Name() != "treesitter" {
+		t.Fatalf("未显式 enabled 时不应注册 codegraph/jcodeindexer，期望 treesitter 兜底，实际选中 %q", p.Name())
+	}
+}
+
+// TestNewParserRegistry_SCIPBeforeCodeGraph 负控（R5-1）：SCIP 与 CodeGraph 同时
+// 可用时（CodeGraph 显式 enabled），go 语言必须选中 scip——SCIP 的 Parse 有实际实现，
+// CodeGraph 的 Parse 恒不可用。旧优先级表把 codegraph 排在 scip 前，导致选中的是
+// 永远回退 tree-sitter 的适配器。
+func TestNewParserRegistry_SCIPBeforeCodeGraph(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Parser.SCIP.IndexDir = filepath.Join(t.TempDir(), "scipout")
+	cfg.Parser.CodeGraph.Enabled = true
+	cfg.Parser.CodeGraph.DB = filepath.Join(t.TempDir(), "codegraph.db")
+
+	reg := NewParserRegistry(context.Background(), cfg, t.TempDir())
+	p, err := reg.Select("go")
+	if err != nil {
+		t.Fatalf("Select(go) error: %v", err)
+	}
+	if p.Name() != "scip" {
+		t.Fatalf("SCIP 与 CodeGraph 同时可用时应选 scip，实际选中 %q", p.Name())
+	}
+}
+
 func TestNewSearcherWithStore_NonNil(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
 	s, b, v := NewSearcherWithStore(cfg)

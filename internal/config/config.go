@@ -121,8 +121,14 @@ func (t TenantConfig) ToConfig(base *Config) *Config {
 	if t.Parser.CodeGraph.DB != "" {
 		c.Parser.CodeGraph.DB = t.Parser.CodeGraph.DB
 	}
+	if t.Parser.CodeGraph.Enabled {
+		c.Parser.CodeGraph.Enabled = true
+	}
 	if t.Parser.JCodeIndexer.DB != "" {
 		c.Parser.JCodeIndexer.DB = t.Parser.JCodeIndexer.DB
+	}
+	if t.Parser.JCodeIndexer.Enabled {
+		c.Parser.JCodeIndexer.Enabled = true
 	}
 	if t.Parser.JCodeIndexer.ConfigFile != "" {
 		c.Parser.JCodeIndexer.ConfigFile = t.Parser.JCodeIndexer.ConfigFile
@@ -244,12 +250,20 @@ type SCIPConfig struct {
 }
 
 // CodeGraphConfig CodeGraph 适配器配置。
+//
+// Enabled 必须显式为 true 才会注册进生产解析注册表（R5-1）：本适配器的 Parse
+// 未实现（恒返回 ErrSourceUnavailable，仅支持批量 ParseAll），注册后会在优先级
+// 上遮蔽真正可用的高精度适配器。默认 false，配置 db 路径本身不再触发注册。
 type CodeGraphConfig struct {
-	DB string `yaml:"db" json:"db"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	DB      string `yaml:"db" json:"db"`
 }
 
 // JCodeIndexerConfig JCodeIndexer 适配器配置。
+//
+// Enabled 语义同 CodeGraphConfig：仅显式开启才注册，避免死适配器进生产主路。
 type JCodeIndexerConfig struct {
+	Enabled    bool              `yaml:"enabled" json:"enabled"`
 	DB         string            `yaml:"db" json:"db"`
 	ConfigFile string            `yaml:"config_file" json:"config_file"`
 	Env        map[string]string `yaml:"env" json:"env"`
@@ -645,8 +659,14 @@ func Merge(base, overlay *Config) *Config {
 	if overlay.Parser.CodeGraph.DB != "" {
 		merged.Parser.CodeGraph.DB = overlay.Parser.CodeGraph.DB
 	}
+	if overlay.Parser.CodeGraph.Enabled {
+		merged.Parser.CodeGraph.Enabled = true
+	}
 	if overlay.Parser.JCodeIndexer.DB != "" {
 		merged.Parser.JCodeIndexer.DB = overlay.Parser.JCodeIndexer.DB
+	}
+	if overlay.Parser.JCodeIndexer.Enabled {
+		merged.Parser.JCodeIndexer.Enabled = true
 	}
 	if overlay.Parser.JCodeIndexer.ConfigFile != "" {
 		merged.Parser.JCodeIndexer.ConfigFile = overlay.Parser.JCodeIndexer.ConfigFile

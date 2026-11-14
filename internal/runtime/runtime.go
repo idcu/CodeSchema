@@ -42,7 +42,9 @@ import (
 //  2. 配置 parser.lsp.enabled=true 且系统存在对应语言服务器时，注册
 //     gopls/jdtls/clangd/rust-analyzer/pyright-langserver/typescript-language-server 适配器
 //     （FallbackParser 包装：LSP 失败自动回退 tree-sitter）；
-//  3. SCIP / CodeGraph / JCodeIndexer 适配器按配置注册（可选），同样是「高精度优先、失败回退」。
+//  3. SCIP 适配器按 parser.scip.index_dir 配置注册；CodeGraph / JCodeIndexer
+//     默认不注册，需额外显式 parser.<adapter>.enabled=true（两者单文件 Parse
+//     未实现，默认不进生产主路）。注册后同样是「高精度优先、失败回退」。
 //
 // 语言优先级（高精度优先）：LSP(go/java/cpp/py/ts/rust) > SCIP > CodeGraph > JCodeIndexer(JVM) > tree-sitter。
 func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) *parser.Registry {
@@ -90,32 +92,35 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 		}
 	}
 
-	// ④ CodeGraph 适配器（可选：配置了 db 才注册）
-	if db := cfg.Parser.CodeGraph.DB; db != "" && db != config.DefaultCodeGraphDB {
-		cg := codegraph.NewCodeGraphAdapter(db)
-		if err := cg.Init(ctx, map[string]any{"db_path": db}); err != nil {
+	// ④ CodeGraph 适配器（默认不注册：需 parser.codegraph.enabled=true 显式开启）
+	// 该适配器只实现批量 ParseAll，单文件 Parse 恒返回 ErrSourceUnavailable，
+	// 生产扫描走 Parse，注册后只会遮蔽真正可用的高精度适配器（R5-1）。
+	if cgCfg := cfg.Parser.CodeGraph; cgCfg.Enabled && cgCfg.DB != "" && cgCfg.DB != config.DefaultCodeGraphDB {
+		cg := codegraph.NewCodeGraphAdapter(cgCfg.DB)
+		if err := cg.Init(ctx, map[string]any{"db_path": cgCfg.DB}); err != nil {
 			log.Printf("parser.codegraph: init failed (%v), skipping", err)
 		} else {
 			reg.Register(parser.NewFallbackParser(cg, ts))
 		}
 	}
 
-	// ⑤ JCodeIndexer 适配器（可选：JVM 专项索引直读，配置了 db 才注册）
-	if db := cfg.Parser.JCodeIndexer.DB; db != "" && db != config.DefaultJCodeIndexerDB {
-		ji := jcodeindexer.NewJCodeIndexerAdapter(db)
-		if err := ji.Init(ctx, map[string]any{"db_path": db}); err != nil {
+	// ⑤ JCodeIndexer 适配器（默认不注册：需 parser.jcodeindexer.enabled=true 显式开启）
+	// 同 CodeGraph：Parse 未实现，仅显式开启才进入生产注册表。
+	if jiCfg := cfg.Parser.JCodeIndexer; jiCfg.Enabled && jiCfg.DB != "" && jiCfg.DB != config.DefaultJCodeIndexerDB {
+		ji := jcodeindexer.NewJCodeIndexerAdapter(jiCfg.DB)
+		if err := ji.Init(ctx, map[string]any{"db_path": jiCfg.DB}); err != nil {
 			log.Printf("parser.jcodeindexer: init failed (%v), skipping", err)
 		} else {
 			reg.Register(parser.NewFallbackParser(ji, ts))
 		}
 	}
 
-	reg.SetPriority("go", []string{"gopls", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("java", []string{"jdtls", "codegraph", "jcodeindexer", "scip", "treesitter"})
-	reg.SetPriority("cpp", []string{"clangd", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("ts", []string{"typescript-language-server", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("py", []string{"pyright-langserver", "codegraph", "scip", "treesitter"})
-	reg.SetPriority("rust", []string{"rust-analyzer", "codegraph", "scip", "treesitter"})
+	reg.SetPriority("go", []string{"gopls", "scip", "codegraph", "treesitter"})
+	reg.SetPriority("java", []string{"jdtls", "scip", "jcodeindexer", "codegraph", "treesitter"})
+	reg.SetPriority("cpp", []string{"clangd", "scip", "codegraph", "treesitter"})
+	reg.SetPriority("ts", []string{"typescript-language-server", "scip", "codegraph", "treesitter"})
+	reg.SetPriority("py", []string{"pyright-langserver", "scip", "codegraph", "treesitter"})
+	reg.SetPriority("rust", []string{"rust-analyzer", "scip", "codegraph", "treesitter"})
 
 	return reg
 }

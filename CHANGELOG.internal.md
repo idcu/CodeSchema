@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 198: fix(parser): CodeGraph/JCodeIndexer 移出默认注册表 + SCIP 优先级前置（R5-1 / P1-16）
+
+- 根因：两个适配器 `Parse` 恒返回 `ErrSourceUnavailable`（只实现批量 `ParseAll`），
+  生产扫描走 `Parse`；而 `NewParserRegistry` 只要配置了非默认 `db` 路径就注册，
+  等于让一个永远回退 tree-sitter 的适配器占住优先级。更严重的是旧优先级表
+  `go: gopls, codegraph, scip, treesitter` 把 codegraph 排在 scip 前——同时配置
+  SCIP 与 CodeGraph 时，真正可用的 SCIP 被遮蔽。
+- 修复：`CodeGraphConfig` / `JCodeIndexerConfig` 新增 `Enabled bool`（默认 false），
+  注册条件改为 `Enabled && db != "" && db != 默认占位`；`TenantConfig.ToConfig`
+  与配置 `Merge` 同步透传 `Enabled`。优先级表改为
+  `gopls > scip > codegraph > treesitter`（java：`jdtls > scip > jcodeindexer >
+  codegraph > treesitter`），其余语言同理。
+- **行为变更**：仅保留 `parser.codegraph.db` / `parser.jcodeindexer.db` 的旧配置
+  不再触发注册，需显式补 `parser.codegraph.enabled: true` /
+  `parser.jcodeindexer.enabled: true`。默认（不配置）注册表不变：treesitter 兜底。
+- 负控（先红后绿）：`TestNewParserRegistry_CodeGraphNotDefault`——仅配 db 不配
+  enabled，修复前选中 `codegraph`（红），修复后 `treesitter`（绿）；
+  `TestNewParserRegistry_SCIPBeforeCodeGraph`——SCIP + CodeGraph 同时可用，修复前
+  选中 `codegraph`（红），修复后 `scip`（绿）。
+- 文档：`解析适配器.md`（启用方式表 + 行为变更说明）、`docs/README.md`、
+  `架构与模块.md`、`01-开发者/README.md`、`仓库结构.md`。
+- 验证：串行门禁全绿；counts 60560（60.6k）。
+
 ### Commit 197: feat(fsperm): 统一落盘权限 0700/0600（R3-7 / P2-13）
 
 - 背景更正：Commit 196 依据 `pathsafe` 的 `EnsureDir`（0755）判断「不做权限收紧」，
