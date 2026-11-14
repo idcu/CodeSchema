@@ -353,3 +353,78 @@ func TestContainsAll(t *testing.T) {
 		t.Error("caller map should not be mutated")
 	}
 }
+
+// TestFileStore_ReindexRemovesStaleMethods 负控（P1-6）：
+// 重索引后旧 class ID 下的 method 映射必须清理，否则内存/落盘都留孤儿。
+func TestFileStore_ReindexRemovesStaleMethods(t *testing.T) {
+	dir := t.TempDir()
+	fs := &FileStore{}
+	ctx := context.Background()
+	if err := fs.Open(ctx, dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer fs.Close()
+
+	ir := func(methods []parser.MethodIR, classes []parser.ClassIR) *parser.IRDocument {
+		return &parser.IRDocument{
+			Source: "treesitter", Language: "go", FilePath: "/repo/svc.go",
+			FileHash: "h", LineCount: 10, ByteSize: 100,
+			Classes: classes, Methods: methods,
+		}
+	}
+	svc := []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}
+
+	totalMethods := func() int {
+		fs.mu.RLock()
+		defer fs.mu.RUnlock()
+		n := 0
+		for _, ms := range fs.methods {
+			n += len(ms)
+		}
+		return n
+	}
+
+	if err := fs.UpsertIR(ctx, ir([]parser.MethodIR{
+		{Name: "Old", ClassFQN: "pkg.Svc"},
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	}, svc)); err != nil {
+		t.Fatalf("upsert #1: %v", err)
+	}
+	if err := fs.UpsertIR(ctx, ir([]parser.MethodIR{
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	}, svc)); err != nil {
+		t.Fatalf("upsert #2: %v", err)
+	}
+	if got := totalMethods(); got != 1 {
+		t.Fatalf("stale methods after UpsertIR reindex: got %d, want 1", got)
+	}
+
+	// 类整体消失。
+	if err := fs.UpsertIR(ctx, ir(nil, nil)); err != nil {
+		t.Fatalf("upsert #3: %v", err)
+	}
+	if got := totalMethods(); got != 0 {
+		t.Fatalf("stale methods after class removal: got %d, want 0", got)
+	}
+
+	// BulkUpsert 同样适用。
+	if err := fs.BulkUpsert(ctx, []*parser.IRDocument{{
+		Source: "treesitter", Language: "go", FilePath: "/repo/svc.go",
+		FileHash: "h2", LineCount: 10, ByteSize: 100,
+		Classes: svc,
+		Methods: []parser.MethodIR{{Name: "A", ClassFQN: "pkg.Svc"}, {Name: "B", ClassFQN: "pkg.Svc"}},
+	}}); err != nil {
+		t.Fatalf("bulk #1: %v", err)
+	}
+	if err := fs.BulkUpsert(ctx, []*parser.IRDocument{{
+		Source: "treesitter", Language: "go", FilePath: "/repo/svc.go",
+		FileHash: "h3", LineCount: 10, ByteSize: 100,
+		Classes: svc,
+		Methods: []parser.MethodIR{{Name: "A", ClassFQN: "pkg.Svc"}},
+	}}); err != nil {
+		t.Fatalf("bulk #2: %v", err)
+	}
+	if got := totalMethods(); got != 1 {
+		t.Fatalf("stale methods after BulkUpsert reindex: got %d, want 1", got)
+	}
+}

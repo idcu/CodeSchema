@@ -488,3 +488,88 @@ func TestSQLite_ConcurrentReadWrite(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestSQLite_ReindexRemovesStaleMethods 负控（P1-6）：
+// 重索引同一文件时，旧 class 下的 method 必须先于 class 删除（无 FK CASCADE），
+// 否则每次文件变更都留下孤儿方法。
+func TestSQLite_ReindexRemovesStaleMethods(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := func(classes []parser.ClassIR, methods []parser.MethodIR) *parser.IRDocument {
+		return &parser.IRDocument{
+			Source: "treesitter", Language: "go", FilePath: "/repo/svc.go",
+			FileHash: "h", LineCount: 10, ByteSize: 100,
+			Classes: classes, Methods: methods,
+		}
+	}
+	svcClass := []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}
+
+	// 第一轮：Svc 下有 Old/Kept 两个方法。
+	if err := s.UpsertIR(ctx, base(svcClass, []parser.MethodIR{
+		{Name: "Old", ClassFQN: "pkg.Svc"},
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	})); err != nil {
+		t.Fatalf("upsert #1: %v", err)
+	}
+
+	// 第二轮：Old 被删除，只剩 Kept。
+	if err := s.UpsertIR(ctx, base(svcClass, []parser.MethodIR{
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	})); err != nil {
+		t.Fatalf("upsert #2: %v", err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM method").Scan(&n); err != nil {
+		t.Fatalf("count method: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("stale methods after reindex: got %d, want 1", n)
+	}
+
+	// 第三轮：类整体消失，方法也必须清空。
+	if err := s.UpsertIR(ctx, base(nil, nil)); err != nil {
+		t.Fatalf("upsert #3: %v", err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM method").Scan(&n); err != nil {
+		t.Fatalf("count method: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("stale methods after class removal: got %d, want 0", n)
+	}
+}
+
+// TestSQLite_BulkUpsertRemovesStaleMethods 负控（P1-6）：
+// BulkUpsert 同样不得先删 class 再删 method。
+func TestSQLite_BulkUpsertRemovesStaleMethods(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	base := func(methods []parser.MethodIR) []*parser.IRDocument {
+		return []*parser.IRDocument{{
+			Source: "treesitter", Language: "go", FilePath: "/repo/svc.go",
+			FileHash: "h", LineCount: 10, ByteSize: 100,
+			Classes: []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}},
+			Methods: methods,
+		}}
+	}
+	if err := s.BulkUpsert(ctx, base([]parser.MethodIR{
+		{Name: "Old", ClassFQN: "pkg.Svc"},
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	})); err != nil {
+		t.Fatalf("bulk #1: %v", err)
+	}
+	if err := s.BulkUpsert(ctx, base([]parser.MethodIR{
+		{Name: "Kept", ClassFQN: "pkg.Svc"},
+	})); err != nil {
+		t.Fatalf("bulk #2: %v", err)
+	}
+
+	var n int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM method").Scan(&n); err != nil {
+		t.Fatalf("count method: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("stale methods after bulk reindex: got %d, want 1", n)
+	}
+}

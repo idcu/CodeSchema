@@ -685,6 +685,18 @@ func (s *SQLiteStore) upsertClassesLocked(fileID int64, classes []parser.ClassIR
 		return err
 	}
 	defer tx.Rollback()
+	// 无外键级联：删除 class 前必须先按旧 class_id 清理 method 与标签，
+	// 否则重索引每次都会留下孤儿（P1-6）。
+	if _, err := tx.Exec(`DELETE FROM method_tag WHERE method_id IN
+		(SELECT id FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?))`, fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM class_tag WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)", fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)", fileID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("DELETE FROM class WHERE file_id = ?", fileID); err != nil {
 		return err
 	}
@@ -887,6 +899,17 @@ func (s *SQLiteStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) 
 		return fmt.Errorf("prepare del method: %w", err)
 	}
 	defer stmtDelMethod.Close()
+	stmtDelMethodTag, err := tx.Prepare(`DELETE FROM method_tag WHERE method_id IN
+		(SELECT id FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?))`)
+	if err != nil {
+		return fmt.Errorf("prepare del method tag: %w", err)
+	}
+	defer stmtDelMethodTag.Close()
+	stmtDelClassTag, err := tx.Prepare(`DELETE FROM class_tag WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare del class tag: %w", err)
+	}
+	defer stmtDelClassTag.Close()
 	stmtMethod, err := tx.Prepare(`INSERT INTO method (class_id, name, full_name, signature, return_type, start_line, start_col, end_line, end_col, doc_comment)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
@@ -911,36 +934,41 @@ func (s *SQLiteStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) 
 			return fmt.Errorf("bulk upsert file %s: %w", ir.FilePath, err)
 		}
 
+		// 无外键级联：按「标签 → 方法 → 类」顺序清理旧数据，且必须无条件执行
+		// （类/方法可能整体消失），否则重索引留下孤儿（P1-6）。
+		if _, err := stmtDelMethodTag.Exec(fileID); err != nil {
+			return fmt.Errorf("bulk del method tag: %w", err)
+		}
+		if _, err := stmtDelClassTag.Exec(fileID); err != nil {
+			return fmt.Errorf("bulk del class tag: %w", err)
+		}
+		if _, err := stmtDelMethod.Exec(fileID); err != nil {
+			return fmt.Errorf("bulk del method: %w", err)
+		}
+		if _, err := stmtDelClass.Exec(fileID); err != nil {
+			return fmt.Errorf("bulk del class: %w", err)
+		}
+
 		// 类：插入并收集 full_name -> classID（同文件内），供方法归属。
 		classIDByFQN := make(map[string]int64, len(ir.Classes))
-		if len(ir.Classes) > 0 {
-			if _, err := stmtDelClass.Exec(fileID); err != nil {
-				return fmt.Errorf("bulk del class: %w", err)
+		for _, c := range ir.Classes {
+			var cid int64
+			if err := stmtClass.QueryRow(fileID, c.Name, c.FullName, c.Type, toJSON(c.ParentFQNs),
+				c.StartLine, c.StartCol, c.EndLine, c.EndCol, c.Modifier, c.Doc).Scan(&cid); err != nil {
+				return fmt.Errorf("bulk insert class %s: %w", c.FullName, err)
 			}
-			for _, c := range ir.Classes {
-				var cid int64
-				if err := stmtClass.QueryRow(fileID, c.Name, c.FullName, c.Type, toJSON(c.ParentFQNs),
-					c.StartLine, c.StartCol, c.EndLine, c.EndCol, c.Modifier, c.Doc).Scan(&cid); err != nil {
-					return fmt.Errorf("bulk insert class %s: %w", c.FullName, err)
-				}
-				classIDByFQN[c.FullName] = cid
-			}
+			classIDByFQN[c.FullName] = cid
 		}
 
 		// 方法：按 ClassFQN 归属到上面拿到的 classID。
-		if len(ir.Methods) > 0 {
-			if _, err := stmtDelMethod.Exec(fileID); err != nil {
-				return fmt.Errorf("bulk del method: %w", err)
+		for _, m := range ir.Methods {
+			cid, ok := classIDByFQN[m.ClassFQN]
+			if !ok {
+				continue
 			}
-			for _, m := range ir.Methods {
-				cid, ok := classIDByFQN[m.ClassFQN]
-				if !ok {
-					continue
-				}
-				if _, err := stmtMethod.Exec(cid, m.Name, m.ClassFQN+"."+m.Name, m.Signature, m.ReturnType,
-					m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Doc); err != nil {
-					return fmt.Errorf("bulk insert method %s: %w", m.Name, err)
-				}
+			if _, err := stmtMethod.Exec(cid, m.Name, m.ClassFQN+"."+m.Name, m.Signature, m.ReturnType,
+				m.StartLine, m.StartCol, m.EndLine, m.EndCol, m.Doc); err != nil {
+				return fmt.Errorf("bulk insert method %s: %w", m.Name, err)
 			}
 		}
 

@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 169: fix(store): 重索引先清 method/标签再删 class，消除孤儿累积（P1-6）
+
+- 背景：SQLite `method`/`class_tag`/`method_tag` 无外键级联，但重索引先 `DELETE FROM class`，随后 `DELETE FROM method WHERE class_id IN (SELECT ... FROM class WHERE file_id=?)` 已查不到任何 class → 旧方法永久残留；`UpsertIR` 只在 `len(ir.Methods)>0` 时删方法，类整体消失时也不清。FileStore 以 class ID 为方法 map 的键，重索引分配新 ID 后旧键无人清理，`UpsertIR`/`BulkUpsert` 同样只在有方法时覆盖。
+- 动作：
+  - SQLite `upsertClassesLocked`：按「method_tag → class_tag → method → class」顺序清理，全部无条件执行；`BulkUpsert` 新增 `stmtDelMethodTag`/`stmtDelClassTag`，清理移到插入前且不再依赖 `len()>0`。
+  - FileStore 新增 `purgeClassArtifactsLocked`（清旧 class 的 method/classTags/methodTags），在 `UpsertClasses` 与 `BulkUpsert` 覆盖 `classes[fileID]` 前调用。
+- 负控（先红后绿，3 条）：
+  - `TestSQLite_ReindexRemovesStaleMethods`：修复前重索引后 method 计数 3（期望 1），类消失后仍残留。
+  - `TestSQLite_BulkUpsertRemovesStaleMethods`：修复前 method 计数 3（期望 1）。
+  - `TestFileStore_ReindexRemovesStaleMethods`：修复前 UpsertIR 后旧/新方法共存（3，期望 1），BulkUpsert 同样。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 56288 ≈ 56.3k）。
+
 ### Commit 168: fix(service): 测试关联按被查询方法收敛，命名/同目录/同 tag 去假阳性（P1-12 + P2-4）
 
 - 背景（共享根因：策略都在「类/目录/标签」粒度上与查询方法脱钩）：

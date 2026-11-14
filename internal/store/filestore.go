@@ -247,8 +247,23 @@ func (fs *FileStore) UpsertClasses(ctx context.Context, fileID int64, classes []
 		})
 		fs.nextID++
 	}
+	fs.purgeClassArtifactsLocked(fileID)
 	fs.classes[fileID] = records
 	return nil
+}
+
+// purgeClassArtifactsLocked 清理某文件旧类派生的方法/标签映射（调用方须持写锁）。
+//
+// 重索引会分配新的 class ID；旧 ID 下的 method/classTags/methodTags 若不清理
+// 会永久成为孤儿（P1-6）。
+func (fs *FileStore) purgeClassArtifactsLocked(fileID int64) {
+	for _, old := range fs.classes[fileID] {
+		for _, m := range fs.methods[old.ID] {
+			delete(fs.methodTags, m.ID)
+		}
+		delete(fs.methods, old.ID)
+		delete(fs.classTags, old.ID)
+	}
 }
 
 // UpsertMethods 批量更新方法记录。
@@ -712,6 +727,7 @@ func (fs *FileStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) e
 			})
 			classMap[c.FullName] = id
 		}
+		fs.purgeClassArtifactsLocked(fileID)
 		fs.classes[fileID] = classRecords
 
 		if len(ir.Methods) > 0 {
