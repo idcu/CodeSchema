@@ -1,0 +1,645 @@
+{
+  "version": 1,
+  "corpus": "testlink-golden",
+  "cases": [
+    {
+      "target": "com.example.OrderService.getOrder",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "getOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "getOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "getOrder",
+          "strategy": "naming",
+          "confidence": 70
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "same_tag",
+          "confidence": 60
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "same_tag",
+          "confidence": 60
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.OrderService.getOrder",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "getOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "getOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 3
+    },
+    {
+      "target": "com.example.OrderService.getOrder",
+      "min_confidence": 100,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "getOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        }
+      ],
+      "filtered": 12
+    },
+    {
+      "target": "com.example.OrderService.createOrder",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "createOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "same_tag",
+          "confidence": 60
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.OrderService.createOrder",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "createOrder",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 1
+    },
+    {
+      "target": "com.example.OrderService.createOrder",
+      "min_confidence": 100,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "createOrder",
+          "strategy": "explicit",
+          "confidence": 100
+        }
+      ],
+      "filtered": 9
+    },
+    {
+      "target": "com.example.OrderService.cancel",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "cancel",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "cancel",
+          "strategy": "naming",
+          "confidence": 70
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "same_tag",
+          "confidence": 60
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.OrderService.cancel",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "cancel",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "example.com/order.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestCreateOrder",
+          "method_name": "TestCreateOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper",
+          "method_name": "helper",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestGetOrder",
+          "method_name": "TestGetOrder",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.OrderServiceTest.TestCancel_FromTestClass",
+          "method_name": "TestCancel_FromTestClass",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.TestHelperCallingCancel",
+          "method_name": "TestHelperCallingCancel",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "example.com/order.helper2",
+          "method_name": "helper2",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 2
+    },
+    {
+      "target": "com.example.OrderService.cancel",
+      "min_confidence": 100,
+      "links": [
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderDoc",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        },
+        {
+          "test_method": "com.example.ExplicitTest.checksOrderState",
+          "method_name": "cancel",
+          "strategy": "explicit",
+          "confidence": 100
+        }
+      ],
+      "filtered": 10
+    },
+    {
+      "target": "com.example.PaymentService.pay",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "CrossSpec.works",
+          "method_name": "pay",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example.PaymentServiceTest.TestPay",
+          "method_name": "TestPay",
+          "strategy": "dependency",
+          "confidence": 80
+        },
+        {
+          "test_method": "com.example.PaymentServiceTest.TestPay",
+          "method_name": "pay",
+          "strategy": "naming",
+          "confidence": 70
+        },
+        {
+          "test_method": "com.example.PaymentServiceTest.TestPay",
+          "method_name": "TestPay",
+          "strategy": "same_tag",
+          "confidence": 60
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.PaymentService.pay",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "CrossSpec.works",
+          "method_name": "pay",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example.PaymentServiceTest.TestPay",
+          "method_name": "TestPay",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 2
+    },
+    {
+      "target": "com.example.PaymentService.pay",
+      "min_confidence": 100,
+      "links": [],
+      "filtered": 4
+    },
+    {
+      "target": "com.example.JavaResolver.Resolve",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "Resolve",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "TestResolve",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.JavaResolver.Resolve",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "Resolve",
+          "strategy": "call_graph",
+          "confidence": 95
+        },
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "TestResolve",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.JavaResolver.Resolve",
+      "min_confidence": 100,
+      "links": [],
+      "filtered": 2
+    },
+    {
+      "target": "com.example.GradleResolver.Resolve",
+      "min_confidence": 60,
+      "links": [
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "TestResolve",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.GradleResolver.Resolve",
+      "min_confidence": 80,
+      "links": [
+        {
+          "test_method": "com.example/ambiguous.TestResolve",
+          "method_name": "TestResolve",
+          "strategy": "dependency",
+          "confidence": 80
+        }
+      ],
+      "filtered": 0
+    },
+    {
+      "target": "com.example.GradleResolver.Resolve",
+      "min_confidence": 100,
+      "links": [],
+      "filtered": 1
+    }
+  ]
+}
