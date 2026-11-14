@@ -140,23 +140,73 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 // discoverTestClasses 发现所有测试类及其对应的源类映射。
 //
 // 命名约定：OrderServiceTest ↔ OrderService（去掉 Test 后缀/前缀）
+//
+// 额外覆盖 Go 包级测试：Go 测试函数（TestXxx/BenchmarkXxx/ExampleXxx）
+// 挂在合成 PACKAGE 容器下，容器名是包名而非「*Test/Test*」类名形态，
+// 因此按「同目录同包」把测试容器归属到该目录的全部生产类。
 func (s *Service) discoverTestClasses(ctx context.Context, files []*store.FileRecord) map[string][]string {
 	result := make(map[string][]string) // classFQN -> []testClassFQN
+	seen := make(map[string]map[string]bool)
+	add := func(source, test string) {
+		if source == "" || test == "" {
+			return
+		}
+		if seen[source] == nil {
+			seen[source] = make(map[string]bool)
+		}
+		if seen[source][test] {
+			return
+		}
+		seen[source][test] = true
+		result[source] = append(result[source], test)
+	}
 
+	type classEntry struct {
+		file *store.FileRecord
+		cls  store.ClassRecord
+	}
+	var entries []classEntry
 	for _, f := range files {
 		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
 			continue
 		}
 		for _, cls := range classes {
-			testClass := s.matchTestClass(cls)
-			if testClass != "" {
-				result[testClass] = append(result[testClass], cls.FullName)
-			}
+			entries = append(entries, classEntry{file: f, cls: cls})
+		}
+	}
+
+	// 类名约定。
+	for _, e := range entries {
+		if testClass := s.matchTestClass(e.cls); testClass != "" {
+			add(testClass, e.cls.FullName)
+		}
+	}
+
+	// Go 包级测试：*_test.go 的 PACKAGE 容器 → 同目录全部生产类。
+	prodByDir := make(map[string][]string)
+	for _, e := range entries {
+		if isTestFileName(e.file.AbsolutePath) {
+			continue
+		}
+		dir := dirFromPath(e.file.AbsolutePath)
+		prodByDir[dir] = append(prodByDir[dir], e.cls.FullName)
+	}
+	for _, e := range entries {
+		if e.cls.Type != "PACKAGE" || !isGoTestFile(e.file.AbsolutePath) {
+			continue
+		}
+		for _, prodClass := range prodByDir[dirFromPath(e.file.AbsolutePath)] {
+			add(prodClass, e.cls.FullName)
 		}
 	}
 
 	return result
+}
+
+// isGoTestFile 判断是否为 Go 测试文件（*_test.go）。
+func isGoTestFile(path string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.ReplaceAll(path, "\\", "/")), "_test.go")
 }
 
 // matchTestClass 判断是否为测试类，并返回对应的源类全限定名。
@@ -258,10 +308,10 @@ func matchesTestMethod(targetName, testName string) bool {
 	if strings.HasPrefix(testName, "Should") && strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
 		return true
 	}
-	// 描述型测试名（Test*/test*/test_* 前缀）允许目标名作为子串出现，
+	// 描述型测试名（Test*/test*/test_*/Benchmark*/Example* 前缀）允许目标名作为子串出现，
 	// 如 testGetOrderShouldReturn；不带测试前缀的名字（TargetGetter 之于 Get）
 	// 不参与匹配，避免 Contains 兜底过宽（P2-4）。
-	for _, prefix := range []string{"Test", "test", "test_"} {
+	for _, prefix := range []string{"Test", "test", "test_", "Benchmark", "benchmark", "Example", "example"} {
 		if strings.HasPrefix(testName, prefix) &&
 			strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
 			return true

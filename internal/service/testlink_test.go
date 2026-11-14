@@ -143,6 +143,74 @@ func TestFindTestLinks_Naming(t *testing.T) {
 	}
 }
 
+// TestFindTestLinks_GoPackageLevelTests 负控：Go 包级测试函数（TestXxx/
+// BenchmarkXxx/ExampleXxx）挂在合成 PACKAGE 容器下，容器名是包名而不是
+// 「*Test/Test*」类名形态，旧 discoverTestClasses 直接漏掉，导致真实 Go 仓
+// 测试关联零召回（公开基准 S-2 实测 PredictedLinks=0）。
+func TestFindTestLinks_GoPackageLevelTests(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			// 生产文件：一个类型 + 合成包级容器（顶层函数）。
+			1: {
+				{ID: 10, FileID: 1, Name: "OrderService", FullName: "OrderService", Type: "CLASS"},
+				{ID: 11, FileID: 1, Name: "order", FullName: "order", Type: "PACKAGE"},
+			},
+			// 测试文件：同包同目录，测试函数挂在 PACKAGE 容器下。
+			2: {{ID: 20, FileID: 2, Name: "order", FullName: "order", Type: "PACKAGE"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "GetOrder", FullName: "OrderService.GetOrder"}},
+			11: {{ID: 110, ClassID: 11, Name: "NewOrderService", FullName: "order.NewOrderService"}},
+			20: {
+				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "order.TestGetOrder"},
+				{ID: 201, ClassID: 20, Name: "BenchmarkGetOrder", FullName: "order.BenchmarkGetOrder"},
+				{ID: 202, ClassID: 20, Name: "ExampleOrderService_GetOrder", FullName: "order.ExampleOrderService_GetOrder"},
+				{ID: 203, ClassID: 20, Name: "TestNewOrderService", FullName: "order.TestNewOrderService"},
+			},
+		},
+	}
+
+	svc := NewService(st)
+
+	cases := []struct {
+		target string
+		want   []string
+	}{
+		{
+			target: "OrderService.GetOrder",
+			want: []string{
+				"order.TestGetOrder",
+				"order.BenchmarkGetOrder",
+				"order.ExampleOrderService_GetOrder",
+			},
+		},
+		{target: "order.NewOrderService", want: []string{"order.TestNewOrderService"}},
+	}
+
+	for _, tc := range cases {
+		links, err := svc.FindTestLinks(ctx, tc.target, 60)
+		if err != nil {
+			t.Fatalf("FindTestLinks(%s): %v", tc.target, err)
+		}
+		got := make(map[string]bool, len(links))
+		for _, l := range links {
+			if l.Strategy == "naming" {
+				got[l.TestMethod] = true
+			}
+		}
+		for _, w := range tc.want {
+			if !got[w] {
+				t.Errorf("%s: missing naming link %q, got %+v", tc.target, w, links)
+			}
+		}
+	}
+}
+
 func TestFindTestLinks_SameTag(t *testing.T) {
 	ctx := context.Background()
 	st := &mockStoreWithTestData{

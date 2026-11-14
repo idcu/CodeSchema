@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 179: fix(service): Go 包级测试函数进入关联候选（R5-7 / S-2a）
+
+- 背景：公开基准 S-2 实测 3 仓库 `PredictedLinks` 全为 0。Go 的测试函数（`TestXxx`/`BenchmarkXxx`/`ExampleXxx`）挂在合成 `PACKAGE` 容器下，容器名是包名，不满足 `discoverTestClasses` 的 `*Test`/`Test*` 类名约定，100 个 `_test.go` 无一进入候选；`GetAffected` 复用同一策略，同样盲区。
+- 动作：`discoverTestClasses` 增加 Go 分支——`*_test.go` 的 `PACKAGE` 容器按「同目录同包」归属到该目录全部生产类（含类型方法）；`matchesTestMethod` 的描述型前缀扩展到 `Benchmark*`/`Example*`；结果去重。`GetAffected` 随 `FindTestLinks` 自动生效，无独立改动。
+- 负控（先红后绿）：`TestFindTestLinks_GoPackageLevelTests`——修复前 naming 链接 0 条（只剩 dependency 兜底）；修复后 `TestGetOrder`/`BenchmarkGetOrder`/`ExampleOrderService_GetOrder`/`TestNewOrderService` 均以 naming(70) 命中。
+- 实测（`release-bench --repo code-schema --lang go`）：`PredictedLinks 0 → 164`，TP 0 → 39，P 0 → 0.2378，R 0 → 0.2031，F1 0 → 0.2191（真值 1722，采样 192）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；路线图批次 E 与任务清单同步登记 `R5-7`；TS Jest 回调的范围说明已写入路线图与基准文档。
+
 ### Commit 178: feat(bench): 公开基准 release-bench（测试关联 P/R/F1 + 调用图对照）（S-2）
 
 - 背景：缺少可复现的公开基准来回答「测试关联和调用图到底有多准」。既有 `benchmark`（扫描/索引/检索性能）与 `agent-bench`（Agent 任务）都不测关联精度，也没有跨构建变体对照。
