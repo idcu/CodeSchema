@@ -433,6 +433,8 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	if lang == "ts" {
 		tsModule = tsModuleName(path)
 	}
+	// TS 声明文件只有类型契约，没有可执行体：签名不得登记为方法或调用边。
+	tsDeclFile := lang == "ts" && isTSDeclarationFile(path)
 	// TS 具名导入（本地名 → 模块名）：测试文件导入生产函数后，裸 callee 才能
 	// 限定成 `math.add` 这样的可解析 FQN。
 	tsImports := map[string]string{}
@@ -793,13 +795,6 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				nameIdx = len(matches) - 1
 			}
 			methodName := matches[nameIdx]
-			method := parser.MethodIR{
-				Name:      methodName,
-				Signature: strings.TrimSpace(trimmed),
-				StartLine: lineNum,
-				EndLine:   lineNum,
-				Doc:       strings.TrimSpace(docComment.String()),
-			}
 			// 设置 ClassFQN：按行首缩进弹出已结束的类作用域，
 			// 顶层函数（缩进不深于任何类）不再粘到上一个类（R5-5）。
 			methodIndent := indentWidth(line)
@@ -810,6 +805,18 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				currentClass = nonGoScopes[len(nonGoScopes)-1].class
 			} else {
 				currentClass = nil
+			}
+			// 声明文件没有实现：只推进作用域，不登记方法。
+			if tsDeclFile {
+				docComment.Reset()
+				continue
+			}
+			method := parser.MethodIR{
+				Name:      methodName,
+				Signature: strings.TrimSpace(trimmed),
+				StartLine: lineNum,
+				EndLine:   lineNum,
+				Doc:       strings.TrimSpace(docComment.String()),
 			}
 			if currentClass != nil {
 				method.ClassFQN = currentClass.FullName
@@ -850,7 +857,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			// `Owner owner = new Owner(); owner.addVisit(...)` 也能限定。
 			trackJavaLocalTypes(code, javaLocalTypes)
 		}
-		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
+		if !tsDeclFile && (lang == "bash" || lang == "ocaml" || strings.Contains(code, "(")) {
 			// Jest 回调体内没有声明式方法，caller 由回调合成的测试方法提供。
 			caller := jestCaller
 			if caller == "" && currentMethod != nil {

@@ -380,6 +380,38 @@ func TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall(t *testing.T) {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_TSDeclarationFileMethodsNotRegistered 负控：.d.ts 是类型
+// 契约，函数签名与接口成员都没有实现，不得登记为可执行方法或调用边。
+func TestTreeSitterAdapter_Parse_TSDeclarationFileMethodsNotRegistered(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "types.d.ts")
+	content := `export interface Options {
+    mode?: string;
+}
+
+export function outline(src: string): string[];
+
+export declare class Server {
+    constructor(port: number);
+    start(): void;
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.Methods) != 0 {
+		t.Errorf("declaration file registered %d methods: %+v", len(doc.Methods), doc.Methods)
+	}
+	if len(doc.Calls) != 0 {
+		t.Errorf("declaration file registered %d calls: %+v", len(doc.Calls), doc.Calls)
+	}
+}
+
 // TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls 负控：控制流关键字（if/for/...）
 // 经包+类限定后（demo.Foo.if）曾绕过 isKeyword 过滤，被记为调用边。
 func TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls(t *testing.T) {

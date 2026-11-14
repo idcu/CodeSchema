@@ -311,6 +311,8 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 	if lang == "ts" || lang == "js" {
 		tsModule = tsModuleName(path)
 	}
+	// TS 声明文件只有类型契约，没有可执行体：不登记方法、不产生调用边。
+	tsDeclFile := lang == "ts" && isTSDeclarationFile(path)
 	hasTopLevelTSFunc := false
 	// Jest describe 路径：`describe('greet', ...)` 内的 it/test 标题拼在其后。
 	var jestDescribes []string
@@ -434,6 +436,10 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			scopeChanged = true
 
 		case methodTypes[typ]:
+			// 声明文件只有类型契约，没有可执行体。
+			if tsDeclFile {
+				break
+			}
 			// OCaml：value_definition 可能是纯值绑定（`let s = "..." in`），
 			// 仅当含 parameter（函数定义）时登记为方法
 			if lang == "ocaml" && typ == "value_definition" && !ocamlHasParam(n) {
@@ -491,6 +497,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			trackASTJavaLocals(n, data, javaLocalTypes)
 
 		case (lang == "ts" || lang == "js") && typ == "variable_declarator":
+			if tsDeclFile {
+				break
+			}
 			// 具名箭头函数 / 函数表达式（`const f = () => {...}`）等价于具名函数：
 			// 体内的调用应归属 f。旧实现只认声明节点，调用全部落入空 caller。
 			val := n.ChildByFieldName("value")
@@ -569,6 +578,10 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			scopeChanged = true
 
 		case callTypes[typ]:
+			// 声明文件没有可执行体，签名中的标识符不是调用。
+			if tsDeclFile {
+				break
+			}
 			// Go 指针类型转换 `(*T)(x)`：function 是括号包裹的类型表达式，不是调用。
 			if lang == "go" && astGoTypeConversion(n, data) {
 				break

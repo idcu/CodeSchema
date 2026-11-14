@@ -60,6 +60,14 @@ func tsModuleName(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// isTSDeclarationFile 判断是否为 TypeScript 声明文件（.d.ts / .d.mts / .d.cts）。
+// 声明文件只有类型契约（函数签名、接口成员），没有可执行体：
+// 既不能登记为方法，也不能产生调用边。
+func isTSDeclarationFile(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasSuffix(lower, ".d.ts") || strings.HasSuffix(lower, ".d.mts") || strings.HasSuffix(lower, ".d.cts")
+}
+
 // matchJestDecl 判断一行是否为 Jest 块声明，返回 "describe"/"test" 与标题。
 func matchJestDecl(line string) (kind, title string, ok bool) {
 	m := tmpJestDeclPattern.FindStringSubmatch(line)
