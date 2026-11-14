@@ -15,7 +15,7 @@ R2-5,B,P1,请求内图复用+depth上限+ctx取消,P1-13,R2-1,3.5,一次/impact�
 R2-6,B,P1,Redis快路径nil判空,P1-9,R0-1,0.75,陈旧键+GetFileByPath未命中不panic；命中路径仍走缓存,todo,必做
 R2-7,B,P1,FTS并发读写加锁/拷贝,P1-10,R0-1,1.5,go test -race并发Index/Search无fatal；单线程结果不变,todo,必做
 R2-8,B,P1,未知租户404+错误脱敏,P1-11;P2-6,R0-1,1,未知租户404且响应体无panic/SQL/路径原文；已知租户正常,todo,必做
-R2-9,B,P1,exact模式真正精确,P1-2,R0-1,0.75,Sv不命中Svc/Svc.Method；Svc命中；java不命中javascript；fuzzy行为不变,todo,必做
+R2-9,B,P1,exact模式真正精确,P1-2,R0-1,0.75,Sv不命中Svc/Svc.Method；Svc命中；java不命中javascript；fuzzy行为不变,done,必做
 R2-10,B,P2,查询缓存key含IncludeTrace并返回副本,P2-2,R0-1,1,include_trace不同取值结果不同；修改返回对象不影响缓存,done,必做
 R3-1,C,P1,重索引全量替换与孤儿清理,P1-6;P2-10,R1-1,3,方法数变少的文件重索引后无孤儿；三后端一致；未变更文件不受影响,todo,必做
 R3-2,C,P1,PG method.full_name列与读写,P1-5,R1-1,2.5,PG method.full_name非空；/tests在PG可用；迁移可重复执行,todo,必做

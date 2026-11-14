@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 194: fix(retrieval): exact 模式改用 token 精确匹配（R2-9 / P1-2）
+
+- 问题：`Searcher.Search` 的 `SearchModeExact` 分支调用 `FTSModeFuzzy`，exact 与
+  模糊检索完全等价：`Sv` 命中 `Svc`/`Svc.Method`，`java` 命中 `javascript`。
+- 修复：exact 分支改调 `FTSModeExact`（token 全等）。`both`/`semantic` 路径不变。
+- 负控（先红后绿）：`TestSearcherExactMode`——修复前 `exact Sv 不应命中 Svc/Svc.Method,
+  实际 2 条`（红）；修复后 `Sv`/`java` 均 0 条，`Svc` 命中、`both` 仍命中（绿）。
+- 连带：`TestFullPipeline_ScanStoreIndexSearch` 原用短名 `User`/`Order` 做 exact 查询，
+  依赖的正是子串行为；按新语义改为完整 FQN `main.User`/`main.Order`。
+- 文档：`docs/01-开发者/接口层.md` 注明 `mode=exact` 为 token 精确匹配。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60260（60.3k）。
+
 ### Commit 193: fix(server): 启用认证时 CORS 不再回通配来源（R3-8 / P2-14）
 
 - 问题：CORS 中间件无条件 `Access-Control-Allow-Origin: *`，启用 Bearer 认证后

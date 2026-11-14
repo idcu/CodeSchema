@@ -64,7 +64,7 @@ func (s *Searcher) searchWithThreshold(ctx context.Context, query string, mode S
 
 	switch mode {
 	case SearchModeExact:
-		results, err = s.fts.Search(ctx, query, FTSModeFuzzy, limit)
+		results, err = s.fts.Search(ctx, query, FTSModeExact, limit)
 		if err != nil {
 			return nil, 0, fmt.Errorf("fts search: %w", err)
 		}

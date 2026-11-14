@@ -203,21 +203,22 @@ func TestFullPipeline_ScanStoreIndexSearch(t *testing.T) {
 		}
 	}
 
-	// 搜索验证
-	results, err := svc.Search(ctx, "User", "exact", 10)
+	// exact 为 token 精确匹配：类文档 token 是完整 FQN（main.User），
+	// 用短名 "User" 属于子串匹配，按语义不应命中。
+	results, err := svc.Search(ctx, "main.User", "exact", 10)
 	if err != nil {
-		t.Fatalf("Search 'User': %v", err)
+		t.Fatalf("Search 'main.User': %v", err)
 	}
 	if len(results) == 0 {
-		t.Error("expected search results for 'User'")
+		t.Error("expected search results for 'main.User'")
 	}
 
-	results, err = svc.Search(ctx, "Order", "exact", 10)
+	results, err = svc.Search(ctx, "main.Order", "exact", 10)
 	if err != nil {
-		t.Fatalf("Search 'Order': %v", err)
+		t.Fatalf("Search 'main.Order': %v", err)
 	}
 	if len(results) == 0 {
-		t.Error("expected search results for 'Order'")
+		t.Error("expected search results for 'main.Order'")
 	}
 
 	results, err = svc.Search(ctx, "FormatPrice", "exact", 10)
