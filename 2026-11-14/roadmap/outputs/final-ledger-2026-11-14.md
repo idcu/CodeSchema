@@ -149,7 +149,7 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 | code-schema | treesitter | 20031 | 0.2233 |
 | petclinic | regex | 1262 | 0.1712 |
 | petclinic | treesitter | 1609 | 0.1889 |
-| lytd | regex | 385 | 0.2519 |
+| lytd | regex | 349 | 0.1748 |
 | lytd | treesitter | 407 | 0.2236 |
 
 **并排口径「仓内可解析边」**（分母只算索引中确有候选的边，旧口径分母不变）：
@@ -160,7 +160,7 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 | code-schema | treesitter | 4495 | 4490 | 0.9989 |
 | petclinic | regex | 219 | 216 | 0.9863 |
 | petclinic | treesitter | 307 | 304 | 0.9902 |
-| lytd | regex | 97 | 97 | 1.0000 |
+| lytd | regex | 61 | 61 | 1.0000 |
 | lytd | treesitter | 91 | 91 | 1.0000 |
 
 > lytd regex 的 calls 由 848 降至 385：旧 TS 模式把 555 条顶层函数声明误当调用边，

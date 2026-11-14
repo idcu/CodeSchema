@@ -154,6 +154,18 @@ rate 0.2831 → 0.2519）。原因是被合并的重复裸名被拆开——例�
 同一个 `add` 键上算作可解析，现在分属不同模块，跨模块的裸名调用在无 import 信息时
 如实判为不可解析。这是消歧后的真实数字，不回退、不用旧口径掩盖。
 
+### Caller 归属：TS 声明式构造器不再计为调用
+
+lytd 的 `.d.ts` 中 `constructor(port: number);` 因无返回类型注解漏过方法模式，
+被 `callPattern` 记成 callee=`constructor`、caller 为空的调用边（36 条）。
+构造调用在 JS/TS 必须带 `new`，裸 `constructor(...)` 只能是声明，故按关键字过滤。
+
+同语料 lytd ts regex：calls 385 → 349，caller 为空 241 → 205。
+resolution 97/0.2519 → 61/0.1748：这 36 条假边此前恰好命中索引里唯一的
+`constructor` 方法，属**假解析**，删除后旧口径如实下降；仓内口径仍为 61/61 = 1.0000。
+剩余 205 条空 caller 是 Jest `describe/it` 回调（`expect/toBe` 等）与模块级语句，
+本身没有可归属的方法，不做伪造归属。
+
 ### 新增「仓内可解析边」口径（与旧 resolution 并排）
 
 旧 `resolution_rate = resolved / 全部调用边` 把 `fmt.Println`、`expect(...)` 这类

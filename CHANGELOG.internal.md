@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 229: fix(parser): TS 声明式构造器不再计为调用（caller 归属）
+
+- `.d.ts` 的 `constructor(port: number);` 无返回类型注解，漏过方法模式后被当成调用，
+  产生 callee=`constructor`、caller 为空的假边（lytd 36 条）。
+- `constructor` 加入关键字过滤：JS/TS 构造调用必须带 `new`，裸名只能是声明。
+- 负控：`TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall`（旧实现红，新实现绿）。
+- 实测 lytd ts regex：calls 385 → 349，caller 空 241 → 205；
+  resolution 97/0.2519 → 61/0.1748（36 条假边此前被假解析，删除后如实下降），
+  仓内口径 61/61 = 1.0000。
+- 剩余空 caller：Jest `describe/it` 回调与模块级语句，无可归属方法，不伪造。
+- 文档：bench README、`final-ledger` 同步。
+
 ### Commit 228: feat(bench): 新增「仓内可解析边」口径（与旧 resolution 并排）
 
 - `CallGraph` 增加 `repo_resolvable` / `repo_resolvable_resolved` /

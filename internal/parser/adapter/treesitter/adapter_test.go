@@ -282,6 +282,31 @@ export class UserService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall 负控：.d.ts 等声明式
+// 构造器 `constructor();` 不是调用边；旧实现记为 callee=constructor、caller 为空。
+func TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "types.d.ts")
+	content := `export declare class Server {
+    constructor(port: number);
+    start(): void;
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "constructor" || strings.HasSuffix(c.CalleeFQN, ".constructor") {
+			t.Errorf("constructor signature recorded as call: %+v", c)
+		}
+	}
+}
+
 // TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls 负控：控制流关键字（if/for/...）
 // 经包+类限定后（demo.Foo.if）曾绕过 isKeyword 过滤，被记为调用边。
 func TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls(t *testing.T) {

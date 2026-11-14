@@ -1430,6 +1430,8 @@ func isKeyword(name string) bool {
 		"recover": true, "range": true, "defer": true, "go": true,
 		"assert": true, "raise": true, "yield": true, "await": true,
 		"async": true, "super": true, "this": true, "self": true,
+		// TS 声明式构造器签名（constructor();）不是调用，JS 构造调用必须带 new。
+		"constructor": true,
 		// Java 控制流（带括号时会被 callPattern 误匹配）
 		"try": true, "synchronized": true, "do": true, "else": true, "finally": true,
 		// Kotlin 关键字
