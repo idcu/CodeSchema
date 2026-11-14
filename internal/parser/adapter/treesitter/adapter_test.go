@@ -283,7 +283,7 @@ export class UserService {
 }
 
 // TestTreeSitterAdapter_Parse_JavaAnnotationsNotCalls 负控：类/字段注解
-//（@Table(name="x")）不是调用边，旧实现记为 caller 为空的 pkg.Class.Table。
+// （@Table(name="x")）不是调用边，旧实现记为 caller 为空的 pkg.Class.Table。
 func TestTreeSitterAdapter_Parse_JavaAnnotationsNotCalls(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()

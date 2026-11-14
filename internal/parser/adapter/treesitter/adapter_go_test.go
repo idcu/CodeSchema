@@ -113,6 +113,35 @@ func (w *Watcher[T]) ReloadNow() {
 	var _ *parser.IRDocument = doc
 }
 
+// TestGoRawStringDoesNotCreateMethods 负控：反引号原始字符串里的 Go 代码不是源码，
+// 旧实现会把串内 `func Ghost() { ... }` 当方法、串内 `}` 当方法结束，导致后续真实
+// 调用（helper）caller 变为空。
+func TestGoRawStringDoesNotCreateMethods(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "embed.go")
+	src := "package demo\n\nfunc write() {\n\tsrc := `package embedded\nfunc Ghost() { Fake() }\n`\n\thelper(src)\n}\n"
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := NewTreeSitterAdapter().Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, m := range doc.Methods {
+		if m.Name == "Ghost" {
+			t.Errorf("raw string content created method: %+v", m)
+		}
+	}
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "Fake" || c.CalleeFQN == "demo.Fake" {
+			t.Errorf("raw string content created call: %+v", c)
+		}
+		if c.CalleeFQN == "helper" && c.CallerFQN != "demo.write" {
+			t.Errorf("helper caller = %q, want demo.write", c.CallerFQN)
+		}
+	}
+}
+
 // TestGoLocalVarCallQualification 负控：`x := &T{}` / `var x *T` 声明的局部变量，
 // 其 `x.Method()` 调用必须限定为 pkg.T.Method；旧实现只跟踪 receiver，保持裸 selector。
 func TestGoLocalVarCallQualification(t *testing.T) {

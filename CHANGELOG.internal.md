@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 231: fix(parser): Go 原始字符串内容不再创建假方法（caller 归属）
+
+- 方法解析用未清洗行、调用检测用 `clean` 后行：串内 `func Ghost()` 会建成方法，
+  串内 `}` 会提前结束真实方法，导致串后调用 caller 为空（本仓约 170 条）。
+- Go 分支在 `clean` 后整行为空时跳过方法/类/调用解析。
+- 负控：`TestGoRawStringDoesNotCreateMethods`（旧实现建出 Ghost 方法且 caller 丢失，红）。
+- 同语料（新增单测使 calls +71）：calls 15527 → 15598、caller 空 301 → 131、
+  resolution 4120/0.2653 → 4139/0.2654、仓内 4300/4139 = 0.9626。
+- 剩余 131 条为包级 var 初始化与接口方法签名，无方法级 caller；合成 `<pkg init>`
+  归属留待后续，不伪造。
+- 附带：`adapter_test.go` 补跑 gofmt。
+- 文档：bench README、`final-ledger` 同步。
+
 ### Commit 230: fix(parser): Java 注解不再计为调用（caller 归属）
 
 - `@Table(name="owners")` / `@Column(...)` 被 `callPattern` 记为调用，caller 为空

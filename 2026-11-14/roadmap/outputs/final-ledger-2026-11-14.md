@@ -119,7 +119,7 @@
 
 | 仓库 | 变体 | 预测链接 | TP | FP | Precision | Recall | F1 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 1562 | 1388 | 18 | 0.9872 | 0.9900 | 0.9886 |
+| code-schema (go) | regex | 1624 | 1448 | 30 | 0.9797 | 0.9897 | 0.9847 |
 | code-schema (go) | treesitter | 1657 | 1497 | 16 | 0.9894 | 0.9881 | 0.9887 |
 | petclinic (java) | regex | 126 | 123 | 0 | 1.0000 | 0.9609 | 0.9801 |
 | petclinic (java) | treesitter | 164 | 160 | 0 | 1.0000 | 0.9581 | 0.9786 |
@@ -145,7 +145,7 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 | 仓库 | 变体 | calls | resolution |
 |---|---|---:|---:|
-| code-schema | regex | 15527 | 0.2653 |
+| code-schema | regex | 15598 | 0.2654 |
 | code-schema | treesitter | 20031 | 0.2233 |
 | petclinic | regex | 1184 | 0.1824 |
 | petclinic | treesitter | 1609 | 0.1889 |
@@ -156,7 +156,7 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 | 仓库 | 变体 | 仓内候选边 | 仓内已解析 | 仓内 resolution |
 |---|---|---:|---:|---:|
-| code-schema | regex | 4281 | 4120 | 0.9624 |
+| code-schema | regex | 4300 | 4139 | 0.9626 |
 | code-schema | treesitter | 4495 | 4490 | 0.9989 |
 | petclinic | regex | 219 | 216 | 0.9863 |
 | petclinic | treesitter | 307 | 304 | 0.9902 |

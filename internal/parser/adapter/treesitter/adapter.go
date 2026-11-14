@@ -471,6 +471,12 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		// 方法体边界与调用归属；其余语言（无括号结构/缩进敏感）保持原启发式。
 		if lang == "go" {
 			code := sanitizer.clean(trimmed, lang) // 剔字符串/注释，供 brace 计数与调用检测
+			// 原始字符串/块注释内部整行被屏蔽：不得参与方法/类/调用解析，
+			// 否则串内 `func` 会创建假方法、串内 `}` 会提前结束真实方法（caller 丢失）。
+			if strings.TrimSpace(code) == "" && strings.TrimSpace(trimmed) != "" {
+				docComment.Reset()
+				continue
+			}
 
 			// 捕获 package 声明（调用图 FQN 包限定用）。
 			if strings.HasPrefix(trimmed, "package ") {
