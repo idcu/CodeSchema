@@ -195,6 +195,95 @@ func TestGoLongLine_DoesNotFailFile(t *testing.T) {
 	}
 }
 
+// parseGoSource 把源码写入临时文件并用默认适配器解析，供 Go 解析硬化用例复用。
+func parseGoSource(t *testing.T, src string) *parser.IRDocument {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	doc, err := NewTreeSitterAdapter().Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return doc
+}
+
+func findMethod(doc *parser.IRDocument, name string) *parser.MethodIR {
+	for i := range doc.Methods {
+		if doc.Methods[i].Name == name {
+			return &doc.Methods[i]
+		}
+	}
+	return nil
+}
+
+// TestGoParser_RawStringConstGeneric 是 P3-9 负控，覆盖 Go 解析三项硬化：
+//  1. 反引号原始字符串未剔除 → 字符串内伪调用被当真实调用，且串内 `{` 破坏方法深度；
+//  2. const 块闭合行带行尾注释时 `)` 不被识别 → constBlock 泄漏，吞掉后续方法体调用；
+//  3. 泛型函数 `func F[T any](` 不匹配方法正则 → 整个函数丢失。
+func TestGoParser_RawStringConstGeneric(t *testing.T) {
+	t.Run("raw_string", func(t *testing.T) {
+		src := "package sample\n\n" +
+			"func UsesRaw() string {\n" +
+			"\ts := `fake(1) {`\n" +
+			"\treturn s\n" +
+			"}\n\n" +
+			"func Next() {}\n"
+		doc := parseGoSource(t, src)
+
+		for _, c := range doc.Calls {
+			if strings.Contains(c.CalleeFQN, "fake") {
+				t.Errorf("原始字符串内伪调用不应入库：%+v", c)
+			}
+		}
+		m := findMethod(doc, "UsesRaw")
+		if m == nil {
+			t.Fatal("UsesRaw 未识别")
+		}
+		if m.EndLine != 6 {
+			t.Errorf("原始字符串内 `{` 不应影响方法闭合：EndLine want 6, got %d", m.EndLine)
+		}
+	})
+
+	t.Run("const_block_leak", func(t *testing.T) {
+		src := "package sample\n\n" +
+			"const (\n" +
+			"\tA = 1\n" +
+			") // trailing comment\n\n" +
+			"func AfterConst() {\n" +
+			"\thelper()\n" +
+			"}\n"
+		doc := parseGoSource(t, src)
+
+		found := false
+		for _, c := range doc.Calls {
+			if c.CallerFQN == "sample.AfterConst" && c.CalleeFQN == "sample.helper" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("const 块闭合后方法体调用被吞；calls=%v", doc.Calls)
+		}
+	})
+
+	t.Run("generic_func", func(t *testing.T) {
+		src := "package sample\n\n" +
+			"func Generic[T any](x T) T {\n" +
+			"\treturn x\n" +
+			"}\n"
+		doc := parseGoSource(t, src)
+
+		m := findMethod(doc, "Generic")
+		if m == nil {
+			t.Fatalf("泛型函数未识别；methods=%v", doc.Methods)
+		}
+		if m.ClassFQN != "sample" {
+			t.Errorf("泛型函数应挂包级容器，got ClassFQN=%q", m.ClassFQN)
+		}
+	})
+}
+
 // TestGoFieldAndConstantExtraction 验证 Go 路径的变量/常量 IR 产出（2026-09-03 新增）：
 //  1. 包级常量：单行 const X [Type] = v 与 const ( ... ) 块内行 X = v 均产出为
 //     ConstantIR{FilePath}（包/文件级常量）；

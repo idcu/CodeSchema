@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### Commit 161: fix(parser): Go 原始字符串 / const 块泄漏 / 泛型函数三项硬化（P3-9）
+
+- 反引号原始字符串：`codeSanitizer` 增加跨行 `inRawString` 状态，串内内容全屏蔽。修复前串内 `fake(1)` 被记录为真实调用，且串内 `{` 使方法深度失衡、`UsesRaw` 的 EndLine 停在定义行（实测 3，应为 6）。
+- const 块泄漏：闭合行由 `trimmed == ")"` 改为按前缀 `")"` 识别（支持 `) // note`），并在 func 定义行兜底复位。修复前 const 块后方法体调用被整体吞掉（实测 `calls=[]`）。
+- 泛型函数：Go 方法正则增加可选类型参数 `(?:\[[^\]]*\])?`。修复前 `func Generic[T any](` 方法数为 0，修复后可识别并挂包级容器。
+- 负控（先红后绿）：`TestGoParser_RawStringConstGeneric` 三个子用例，修复前分别实测 `sample.fake` 假调用 + EndLine=3、`calls=[]`、`methods=[]`；修复后全部通过。
+- 验证：`make test` 全绿；`make counts-check` 通过（LoC 55430 ≈ 55.4k）。
+
 ### Commit 160: fix(parser): 超长单行不再中断整次扫描（P1-15）
 
 - 背景：解析器用 `bufio.Scanner` 按行读取文件，默认单行上限 64KB；生成代码/压缩产物的长行触发 `bufio.Scanner: token too long`，`Parse` 返回错误并向上中断整次扫描，一个文件可拖垮全仓索引。

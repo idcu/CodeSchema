@@ -57,7 +57,7 @@ func initPatterns() map[string]langPatterns {
 			// 支持泛型类型参数：type Watcher[T any] struct { ... }（T1-2 真实缺陷：泛型类未识别）
 			classPattern:   regexp.MustCompile(`^(type\s+(\w+)(?:\[[^\]]*\])?\s+(struct|interface))\s*\{`),
 			classNameIndex: 2,
-			methodPattern:  regexp.MustCompile(`^func\s+(\([^)]*\)\s*)?(\w[\w.]*)\(`),
+			methodPattern:  regexp.MustCompile(`^func\s+(\([^)]*\)\s*)?(\w[\w.]*)(?:\[[^\]]*\])?\(`),
 			callPattern:    regexp.MustCompile(`(\w[\w.]*)\([^)]*\)`),
 			commentTrim:    "//",
 		},
@@ -470,6 +470,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				}
 				doc.Methods = append(doc.Methods, method)
 				curMethodIdx = len(doc.Methods) - 1
+				// 合法 Go 中 func 不可能出现在 const 块内；若出现说明上游闭合行丢失，
+				// 在此复位，避免 constBlock 继续吞掉方法体（P3-9）。
+				constBlock = false
 				methodOpenDepth = goDepth // 定义行 `{` 尚未计入
 				goDepth += braceNet(code)
 				// 方法体是否在本行开启：多行签名（`func F(` 后续参数行）尚未出现 `{`，
@@ -517,7 +520,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				switch {
 				case trimmed == "const (" || trimmed == "const(":
 					constBlock = true
-				case trimmed == ")":
+				case strings.HasPrefix(trimmed, ")"):
+					// 闭合行可能带行尾注释（`) // note`），按前缀识别，
+					// 否则 constBlock 泄漏会吞掉其后所有方法体调用（P3-9）。
 					constBlock = false
 				case curMethodIdx < 0:
 					if name, typ, val := parseGoConstLine(trimmed); name != "" {
@@ -955,6 +960,7 @@ func detectClassType(matches []string, lang string) string {
 type codeSanitizer struct {
 	inBlockComment bool
 	inTripleQuote  string // 三引号定界符（"""/'''），空表示不在三引号内
+	inRawString    bool   // Go 反引号原始字符串（可跨行，P3-9）
 }
 
 // clean 返回剔除字符串/注释后的代码行（仅保留真实代码），并更新跨行状态。
@@ -994,6 +1000,17 @@ func (c *codeSanitizer) clean(line, lang string) string {
 				continue
 			}
 			out[i] = ' '
+			i++
+			continue
+		}
+
+		// Go 反引号原始字符串状态（跨行）：内部内容全部屏蔽，
+		// 避免串内伪调用与 `{`/`}` 干扰调用检测和深度跟踪（P3-9）。
+		if c.inRawString {
+			out[i] = ' '
+			if ch == '`' {
+				c.inRawString = false
+			}
 			i++
 			continue
 		}
@@ -1040,6 +1057,14 @@ func (c *codeSanitizer) clean(line, lang string) string {
 			c.inTripleQuote = string(ch) + string(ch) + string(ch)
 			out[i], out[i+1], out[i+2] = ' ', ' ', ' '
 			i += 3
+			continue
+		}
+
+		// 进入 Go 原始字符串（反引号，可跨行）
+		if lang == "go" && ch == '`' {
+			c.inRawString = true
+			out[i] = ' '
+			i++
 			continue
 		}
 
