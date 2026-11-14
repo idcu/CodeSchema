@@ -162,6 +162,20 @@ func (ps *PersistentStore) SetContent(_ context.Context, id, content string) err
 	return ps.maybeSave()
 }
 
+// BatchSetContents 批量保存文档原文，只触发一次落盘。
+func (ps *PersistentStore) BatchSetContents(_ context.Context, ids, contents []string) error {
+	if len(ids) != len(contents) {
+		return ErrMismatchedLength
+	}
+	ps.mu.Lock()
+	for i := range ids {
+		ps.contents[ids[i]] = contents[i]
+	}
+	ps.dirties += len(ids)
+	ps.mu.Unlock()
+	return ps.maybeSave()
+}
+
 // Content 读取文档原文（DocContentStore 实现）。
 func (ps *PersistentStore) Content(_ context.Context, id string) (string, bool) {
 	ps.mu.RLock()

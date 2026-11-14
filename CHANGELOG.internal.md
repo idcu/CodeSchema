@@ -6,6 +6,14 @@
 
 ## 提交记录
 
+### 性能基线（2026-11-14，S-3）
+
+- perf(embedding)：构建期文档原文改批量落盘（`BatchSetContents`），消除
+  `SetContent` 每 10 篇触发整索引 `MarshalIndent` 的 O(n²) 写放大。
+  先红后绿：`TestIndexBuilder_BuildFromStore_BatchesDocContent` 修复前 `SetContent=4 / batch=0`，
+  修复后 `SetContent=0 / batch=1`。实测 GOROOT `src` 96,732 文档：修复前 40+ 分钟未完成（中止），
+  修复后 6.47s（file 后端，向量维度 256）。
+
 ### 独立复审批次（2026-11-14，P1=3 / P2=7 / P3=5 / 判据=3）
 
 复审报告：`2026-11-14/re-audit/outputs/audit-report-2026-11-14-reaudit.md`。逐条一笔提交、先红后绿。

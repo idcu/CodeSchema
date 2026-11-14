@@ -197,12 +197,11 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 	}
 	fmt.Fprintln(os.Stderr, " OK")
 
-	// 保存文档原文（/viz 可视化展示；底层不支持的后端静默跳过）
-	for _, d := range docs {
-		if err := b.indexer.SetDocContent(ctx, d.id, d.text); err != nil {
-			// 原文保存失败不影响索引主流程（仅可视化缺失）
-			log.WithModule("search.index_builder").Warn("set doc content failed", "id", d.id, "error", err.Error())
-		}
+	// 保存文档原文（/viz 可视化展示；底层不支持的后端静默跳过）。
+	// 构建期必须批量提交：逐篇 SetContent 会让持久化后端每 10 篇全量重写索引。
+	if err := b.indexer.BatchSetContents(ctx, ids, texts); err != nil {
+		// 原文保存失败不影响索引主流程（仅可视化缺失）
+		log.WithModule("search.index_builder").Warn("batch set doc content failed", "docs", len(ids), "error", err.Error())
 	}
 
 	result.IndexedDocs = len(docs)

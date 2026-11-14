@@ -94,6 +94,28 @@ func (idx *Indexer) SetDocContent(ctx context.Context, id, content string) error
 	return nil
 }
 
+// BatchSetContents 批量保存文档原文。
+//
+// 构建期一次提交全部原文：持久化后端若逐篇 SetContent，会在每 10 次变更时
+// 重新序列化整个索引，真实仓库规模下退化为 O(n²) 写放大。底层实现
+// BatchSetContents 时走批量通道（一次落盘），否则回退逐篇写入。
+func (idx *Indexer) BatchSetContents(ctx context.Context, ids, contents []string) error {
+	if bs, ok := idx.store.(interface {
+		BatchSetContents(context.Context, []string, []string) error
+	}); ok {
+		return bs.BatchSetContents(ctx, ids, contents)
+	}
+	for i := range ids {
+		if i >= len(contents) {
+			break
+		}
+		if err := idx.SetDocContent(ctx, ids[i], contents[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Enqueue 异步入队一个实体的索引构建任务。
 func (idx *Indexer) Enqueue(ctx context.Context, ent Embeddable) <-chan error {
 	errC := make(chan error, 1)
