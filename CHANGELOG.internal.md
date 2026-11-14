@@ -6,6 +6,35 @@
 
 ## 提交记录
 
+### Commit 183: feat(service): call_graph 策略补齐行为型/跨类测试召回（R5-11 / S-2e）
+
+- 根因归属（四个环节逐一核对）：
+  - **候选集剪枝（本笔修复）**：`discoverTestClasses` 只按类名约定建候选。petclinic 123 条真值中
+    120 条目标方法属于 `NamedEntity`/`BaseEntity` 等**没有同名测试类**的基类；Go 的行为型测试名
+    （`TestCollection_Delete` → `DB.CreateCollection`）也不在任何命名候选里。
+  - **FQN/命名匹配（本笔归一）**：callee 常见接收者变量形态（`entity.setName`），caller 带包名前缀
+    （`org...ClinicServiceTests.shouldFindVets`），与库内短 FQN 口径不一致。
+  - **调用解析**：Java 单 tab + 包级可见性方法已随 R5-8 修复；本轮残余 5 条（`serveStdio`）。
+  - **同包可见性**：已随 R5-8 修复，本轮无新增。
+- 动作：新增 `linkByCallGraph`（策略名 `call_graph`，置信度 95）：遍历测试文件的直接调用边，
+  callee 全名优先、短名唯一时接受变量形态；caller 按文件内方法 FQN 后缀归一。与类名约定解耦。
+- 负控（先红后绿）：`TestFindTestLinks_CallGraphBehavioralName` 的 go/java 两个子测试——
+  修复前 go 只有 dependency 的粗粒度链接、java 零输出（红）；修复后均返回 `call_graph` 链接（绿）。
+- 实测（同一命令/语料/真值；本轮前 = `58625af`）：
+  | 组 | 前 P/R/F1 | 后 P/R/F1 |
+  |---|---|---|
+  | go regex | 0.8333 / 0.1114 / 0.1965 | **0.9922 / 0.9803 / 0.9862** |
+  | go treesitter | 0.7356 / 0.1031 / 0.1809 | **0.9807 / 0.9807 / 0.9807** |
+  | java regex | 1.0000 / 0.0081 / 0.0161 | **1.0000 / 1.0000 / 1.0000** |
+  | java treesitter | 1.0000 / 0.0063 / 0.0125 | **1.0000 / 1.0000 / 1.0000** |
+  | ts 两变体 | 真值 0（范围外） | 不变 |
+  未放宽任何阈值（min-confidence 仍为 60）。
+- **口径披露**：`call_graph` 与真值同为直接调用边，本轮后的饱和数字衡量「扫描→入库→反查→FQN 归一」
+  链路完整性，不再代表独立启发式判别力；命名策略的独立收益由 R5-10 中间态（Go P 0.8630）衡量。
+- 残余 23/24 条 FN：`svc.FindTestLinks` 短名多义、`serveStdio` 调用边未抽取；归属「调用解析 + FQN 归一」，
+  已在 `docs/bench/2026-11-14/README.md` 记录，留待下一轮，不静默删除。
+- 验证：`go test ./internal/service/` 全绿；六组 `release-bench` 全量重跑；`make counts-check` 通过。
+
 ### Commit 182: fix(service): 命名匹配按词边界 + JUnit 描述型前缀（R5-10 / S-2d）
 
 - 背景：`matchesTestMethod` 对描述型测试名用 `strings.Contains` 兜底，`Analyze` 会命中 `TestAnalyzer_*`（benchmark 实测 `Analyzer.Analyze` 产生 20+ 条 FP）；反向缺口是 JUnit 描述型方法名 `processCreationFormSuccess`/`addPetAddsPersistedPet` 无法命中目标方法。另有 Go 包级容器里的同包 helper（`keysOfSets`/`newMockLSPAdapterMode`）被当作测试，且生产文件的 PACKAGE 容器与测试容器同名时也会被当作测试类扫描。

@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-11-14T01:49:06Z",
+  "repo": "code-schema",
+  "commit": "be25fcae47960017b05dffa3ab3e2b0abd1d07ed",
+  "language": "go",
+  "build_variant": "treesitter",
+  "files": 222,
+  "prod_files": 122,
+  "test_files": 100,
+  "prod_methods": 1339,
+  "test_methods": 1092,
+  "ground_truth_pairs": 1854,
+  "sampled_pairs": 186,
+  "sampled": true,
+  "prods_evaluated": 142,
+  "predicted_links": 174,
+  "test_link": {
+    "tp": 128,
+    "fp": 46,
+    "fn": 1113,
+    "precision": 0.7356,
+    "recall": 0.1031,
+    "f1": 0.1809
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "treesitter",
+    "calls": 18695,
+    "unique_callers": 2077,
+    "unique_callees": 2769,
+    "resolved_calls": 3831,
+    "resolution_rate": 0.2049
+  }
+}

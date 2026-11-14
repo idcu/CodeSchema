@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-14T01:32:16Z",
+  "timestamp": "2026-11-14T01:48:12Z",
   "repo": "s2-petclinic",
   "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
   "language": "java",
@@ -13,14 +13,14 @@
   "sampled_pairs": 160,
   "sampled": false,
   "prods_evaluated": 37,
-  "predicted_links": 1,
+  "predicted_links": 164,
   "test_link": {
-    "tp": 1,
+    "tp": 160,
     "fp": 0,
-    "fn": 159,
+    "fn": 0,
     "precision": 1,
-    "recall": 0.0063,
-    "f1": 0.0125
+    "recall": 1,
+    "f1": 1
   },
   "call_graph": {
     "adapter": "treesitter",

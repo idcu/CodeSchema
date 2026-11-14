@@ -1,11 +1,12 @@
 // Package service 提供测试关联策略实现。
 //
-// 五种策略（按置信度降序）：
-//   - explicit (100): 显式注解匹配（@TestFor(...) 解析目标类）
-//   - coverage (90):  覆盖率数据反查（注入 coverage 报告）
-//   - dependency (80): 导入依赖递归
-//   - naming   (70):  命名约定（OrderServiceTest ↔ OrderService）
-//   - same_tag (60):  同 Tag 聚类
+// 六种策略（按置信度降序）：
+//   - explicit  (100): 显式注解匹配（@TestFor(...) 解析目标类）
+//   - call_graph(95):  测试方法直接调用目标方法（与候选类命名无关）
+//   - coverage  (90):  覆盖率数据反查（注入 coverage 报告）
+//   - dependency(80):  导入依赖递归
+//   - naming    (70):  命名约定（OrderServiceTest ↔ OrderService）
+//   - same_tag  (60):  同 Tag 聚类
 package service
 
 import (
@@ -103,6 +104,11 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 	for _, testClassFQN := range allTestClasses[targetClass] {
 		s.linkByNaming(ctx, files, targetClass, testClassFQN, methodFQN, addResult)
 	}
+
+	// 2.5 call_graph 策略：测试方法直接调用目标方法。
+	//      行为型测试名（TestCollection_Delete 之于 CreateCollection）与跨类测试
+	//      都不在 naming 的候选集里，直接调用边与类名约定无关。
+	s.linkByCallGraph(ctx, files, methodFQN, addResult)
 
 	// 3. same_tag 策略：同 Tag 聚类
 	s.linkBySameTag(ctx, files, methodFQN, addResult)
@@ -303,6 +309,94 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 			}
 		}
 	}
+}
+
+// linkByCallGraph 通过「测试方法 → 生产方法」的直接调用边建立关联（置信度 95）。
+//
+// 与 naming 的差别：naming 只在「与目标类同名的测试类」里按方法名匹配，
+// 行为型测试名与跨类测试都不在候选集。调用边与类名约定无关，可覆盖这两类漏召。
+//
+// FQN 归一（基准暴露）：
+//   - callee 可能是接收者变量形态（entity.setName）；短名在全部方法中唯一时解析到唯一 FQN。
+//   - caller 可能带包名前缀（org...ClinicServiceTests.shouldFindVets）；
+//     按文件内测试方法 FQN 的后缀归一，保证返回口径与其它策略一致。
+func (s *Service) linkByCallGraph(ctx context.Context, files []*store.FileRecord, methodFQN string, add func(string, string, string, int)) {
+	type fileInfo struct {
+		test    bool
+		methods []store.MethodRecord
+	}
+	infos := make(map[int64]*fileInfo, len(files))
+	exact := make(map[string]struct{})
+	shortIndex := make(map[string][]string)
+	for _, f := range files {
+		info := &fileInfo{test: isTestFileName(f.AbsolutePath)}
+		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+		for _, cls := range classes {
+			if isTestClass(cls, f.AbsolutePath) {
+				info.test = true
+			}
+			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
+			for _, m := range methods {
+				info.methods = append(info.methods, m)
+				exact[m.FullName] = struct{}{}
+				shortIndex[shortMethodName(m.FullName)] = append(shortIndex[shortMethodName(m.FullName)], m.FullName)
+			}
+		}
+		infos[f.ID] = info
+	}
+
+	// resolveCallee 与基准真值同口径：全名优先，短名唯一时接受变量形态。
+	resolveCallee := func(callee string) (string, bool) {
+		if callee == "" {
+			return "", false
+		}
+		if _, ok := exact[callee]; ok {
+			return callee, true
+		}
+		if cands := shortIndex[shortMethodName(callee)]; len(cands) == 1 {
+			return cands[0], true
+		}
+		return "", false
+	}
+
+	for _, f := range files {
+		info := infos[f.ID]
+		if info == nil || !info.test {
+			continue
+		}
+		calls, _ := s.store.GetCallsByFileID(ctx, f.ID)
+		for _, c := range calls {
+			if prod, ok := resolveCallee(c.CalleeFQN); !ok || prod != methodFQN {
+				continue
+			}
+			caller := normalizeCallerFQN(c.CallerFQN, info.methods)
+			if caller == "" || caller == methodFQN {
+				continue
+			}
+			add(caller, shortMethodName(methodFQN), "call_graph", 95)
+		}
+	}
+}
+
+// normalizeCallerFQN 把调用边里的 caller（可能带包名前缀）对齐到文件内的方法 FQN。
+func normalizeCallerFQN(caller string, methods []store.MethodRecord) string {
+	if caller == "" {
+		return ""
+	}
+	for _, m := range methods {
+		if caller == m.FullName || strings.HasSuffix(caller, "."+m.FullName) {
+			return m.FullName
+		}
+	}
+	return ""
+}
+
+// shortMethodName 取 FQN 的最后一段（方法名）。
+func shortMethodName(fqn string) string {
+	if i := strings.LastIndex(fqn, "."); i >= 0 {
+		return fqn[i+1:]
+	}
+	return fqn
 }
 
 // matchesTestMethod 判断测试方法名是否匹配目标方法名（跨框架：Go/JUnit/pytest/Jest）。

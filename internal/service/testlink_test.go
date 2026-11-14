@@ -87,8 +87,8 @@ func (m *mockStoreWithTestData) GetMethodsByClassID(_ context.Context, classID i
 	return m.methods[classID], nil
 }
 
-func (m *mockStoreWithTestData) GetCallsByFileID(_ context.Context, _ int64) ([]store.CallRecord, error) {
-	return nil, nil
+func (m *mockStoreWithTestData) GetCallsByFileID(_ context.Context, fileID int64) ([]store.CallRecord, error) {
+	return m.calls[fileID], nil
 }
 
 func TestFindTestLinks_Naming(t *testing.T) {
@@ -248,6 +248,77 @@ func TestFindTestLinks_GoPackageHelpersNotNaming(t *testing.T) {
 			t.Fatalf("Go package helper leaked into naming links: %+v", l)
 		}
 	}
+}
+
+// TestFindTestLinks_CallGraphBehavioralName 负控：测试方法名是行为描述、不含目标
+// 方法名时（TestCollection_Delete → DB.CreateCollection），命名策略必然漏召；
+// 直接调用边必须补上关联。Java 侧同时覆盖包名前缀 caller 与接收者变量 callee 的 FQN 归一。
+func TestFindTestLinks_CallGraphBehavioralName(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("go", func(t *testing.T) {
+		st := &mockStoreWithTestData{
+			files: []*store.FileRecord{
+				{ID: 1, AbsolutePath: "/proj/chromem/db.go", Language: "go"},
+				{ID: 2, AbsolutePath: "/proj/chromem/db_test.go", Language: "go"},
+			},
+			classes: map[int64][]store.ClassRecord{
+				1: {{ID: 10, FileID: 1, Name: "DB", FullName: "DB", Type: "CLASS"}},
+				2: {{ID: 20, FileID: 2, Name: "chromem", FullName: "chromem", Type: "PACKAGE"}},
+			},
+			methods: map[int64][]store.MethodRecord{
+				10: {{ID: 100, ClassID: 10, Name: "CreateCollection", FullName: "DB.CreateCollection"}},
+				20: {{ID: 200, ClassID: 20, Name: "TestCollection_Delete", FullName: "chromem.TestCollection_Delete"}},
+			},
+			calls: map[int64][]store.CallRecord{
+				2: {{CallerFQN: "chromem.TestCollection_Delete", CalleeFQN: "DB.CreateCollection", CallType: "direct"}},
+			},
+		}
+		links, err := NewService(st).FindTestLinks(ctx, "DB.CreateCollection", 60)
+		if err != nil {
+			t.Fatalf("FindTestLinks: %v", err)
+		}
+		assertCallGraphLink(t, links, "chromem.TestCollection_Delete")
+	})
+
+	t.Run("java", func(t *testing.T) {
+		st := &mockStoreWithTestData{
+			files: []*store.FileRecord{
+				{ID: 1, AbsolutePath: "/proj/model/NamedEntity.java", Language: "java"},
+				{ID: 2, AbsolutePath: "/proj/service/ClinicServiceTests.java", Language: "java"},
+			},
+			classes: map[int64][]store.ClassRecord{
+				1: {{ID: 10, FileID: 1, Name: "NamedEntity", FullName: "NamedEntity", Type: "CLASS"}},
+				2: {{ID: 20, FileID: 2, Name: "ClinicServiceTests", FullName: "ClinicServiceTests", Type: "CLASS"}},
+			},
+			methods: map[int64][]store.MethodRecord{
+				10: {{ID: 100, ClassID: 10, Name: "setName", FullName: "NamedEntity.setName"}},
+				20: {{ID: 200, ClassID: 20, Name: "shouldFindVets", FullName: "ClinicServiceTests.shouldFindVets"}},
+			},
+			calls: map[int64][]store.CallRecord{
+				2: {{
+					CallerFQN: "org.springframework.samples.petclinic.service.ClinicServiceTests.shouldFindVets",
+					CalleeFQN: "entity.setName",
+					CallType:  "direct",
+				}},
+			},
+		}
+		links, err := NewService(st).FindTestLinks(ctx, "NamedEntity.setName", 60)
+		if err != nil {
+			t.Fatalf("FindTestLinks: %v", err)
+		}
+		assertCallGraphLink(t, links, "ClinicServiceTests.shouldFindVets")
+	})
+}
+
+func assertCallGraphLink(t *testing.T, links []TestLink, want string) {
+	t.Helper()
+	for _, l := range links {
+		if l.TestMethod == want && l.Strategy == "call_graph" {
+			return
+		}
+	}
+	t.Fatalf("missing call_graph link %q; got %+v", want, links)
 }
 
 // TestFindTestLinks_JavaTestsSuffix 负控：JUnit/Spring 常见的 `*Tests` 后缀
