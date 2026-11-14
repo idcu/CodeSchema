@@ -1,0 +1,354 @@
+{
+  "timestamp": "2026-11-14T08:47:00Z",
+  "repo": "lytd",
+  "commit": "f5e66040adf0c24ef3938020f3b04545b9ddde80",
+  "language": "ts",
+  "build_variant": "treesitter",
+  "files": 116,
+  "prod_files": 109,
+  "test_files": 7,
+  "prod_methods": 75,
+  "test_methods": 33,
+  "ground_truth_pairs": 33,
+  "sampled_pairs": 33,
+  "sampled": false,
+  "prods_evaluated": 17,
+  "predicted_links": 33,
+  "test_link": {
+    "tp": 33,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1,
+    "recall": 1,
+    "f1": 1
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "treesitter",
+    "calls": 368,
+    "unique_callers": 73,
+    "unique_callees": 139,
+    "resolved_calls": 88,
+    "resolution_rate": 0.2391,
+    "repo_resolvable": 88,
+    "repo_resolvable_resolved": 88,
+    "repo_resolution_rate": 1,
+    "repo_unresolved_prefixed": 0
+  },
+  "manual_truth": {
+    "dataset": "internal/releasebench/testdata/manual-truth.json",
+    "repo": "lytd",
+    "commit": "f5e66040adf0c24ef3938020f3b04545b9ddde80",
+    "language": "ts",
+    "build_variant": "treesitter",
+    "test_files": [
+      "examples/01-simple-lib/__tests__/index.test.ts",
+      "examples/02-react-like-app/__tests__/App.test.tsx",
+      "examples/03-mono/packages/app/__tests__/basic.test.ts",
+      "examples/03-mono/packages/bar/__tests__/basic.test.ts",
+      "examples/03-mono/packages/core/__tests__/basic.test.ts",
+      "examples/08-real-app/__tests__/index.test.ts",
+      "examples/08-real-app/__tests__/math.test.ts"
+    ],
+    "in_scope_tests": 33,
+    "truth_pairs": 33,
+    "predicted_in_scope": 33,
+    "entries": [
+      {
+        "production": "index.buildPage",
+        "truth": [
+          "index.test.buildPage_produces_a_complete_HTML_document_with_head_and_body",
+          "index.test.buildPage_renders_a_primary_card_with_tags",
+          "index.test.buildPage_renders_buttons_including_a_disabled_one"
+        ],
+        "predicted": [
+          "index.test.buildPage_produces_a_complete_HTML_document_with_head_and_body",
+          "index.test.buildPage_renders_a_primary_card_with_tags",
+          "index.test.buildPage_renders_buttons_including_a_disabled_one"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.getSummary",
+        "truth": [
+          "index.test.getSummary_returns_a_capitalized_title_and_computed_totals"
+        ],
+        "predicted": [
+          "index.test.getSummary_returns_a_capitalized_title_and_computed_totals"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.add",
+        "truth": [
+          "math.test.add_adds_two_positive_numbers",
+          "math.test.add_handles_negative_operands"
+        ],
+        "predicted": [
+          "math.test.add_adds_two_positive_numbers",
+          "math.test.add_handles_negative_operands"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.sub",
+        "truth": [
+          "math.test.sub_subtracts_b_from_a"
+        ],
+        "predicted": [
+          "math.test.sub_subtracts_b_from_a"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.mul",
+        "truth": [
+          "math.test.mul_multiplies_two_numbers"
+        ],
+        "predicted": [
+          "math.test.mul_multiplies_two_numbers"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.div",
+        "truth": [
+          "math.test.div_divides_two_numbers",
+          "math.test.div_throws_on_division_by_zero"
+        ],
+        "predicted": [
+          "math.test.div_divides_two_numbers",
+          "math.test.div_throws_on_division_by_zero"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.sum",
+        "truth": [
+          "math.test.sum_returns_0_for_an_empty_array",
+          "math.test.sum_sums_an_array_of_numbers"
+        ],
+        "predicted": [
+          "math.test.sum_returns_0_for_an_empty_array",
+          "math.test.sum_sums_an_array_of_numbers"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.average",
+        "truth": [
+          "math.test.average_computes_the_average_of_an_array",
+          "math.test.average_returns_0_for_an_empty_array"
+        ],
+        "predicted": [
+          "math.test.average_computes_the_average_of_an_array",
+          "math.test.average_returns_0_for_an_empty_array"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "math.clamp",
+        "truth": [
+          "math.test.clamp_keeps_values_within_range"
+        ],
+        "predicted": [
+          "math.test.clamp_keeps_values_within_range"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "App.greet",
+        "truth": [
+          "App.test.02_react_like_app_greet_greets_with_excitement_when_excited_true",
+          "App.test.02_react_like_app_greet_greets_without_excitement"
+        ],
+        "predicted": [
+          "App.test.02_react_like_app_greet_greets_with_excitement_when_excited_true",
+          "App.test.02_react_like_app_greet_greets_without_excitement"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.greet",
+        "truth": [
+          "index.test.greet_greets_a_name_with_capitalization",
+          "index.test.greet_returns_default_greeting_for_empty_input"
+        ],
+        "predicted": [
+          "index.test.greet_greets_a_name_with_capitalization",
+          "index.test.greet_returns_default_greeting_for_empty_input"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.add",
+        "truth": [
+          "index.test.add_sums_two_numbers"
+        ],
+        "predicted": [
+          "index.test.add_sums_two_numbers"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.factorial",
+        "truth": [
+          "index.test.factorial_computes_base_cases",
+          "index.test.factorial_computes_larger_values",
+          "index.test.factorial_throws_on_invalid_input"
+        ],
+        "predicted": [
+          "index.test.factorial_computes_base_cases",
+          "index.test.factorial_computes_larger_values",
+          "index.test.factorial_throws_on_invalid_input"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.times",
+        "truth": [
+          "basic.test.mono_core_times_calls_fn_n_times_and_collects_results",
+          "basic.test.mono_core_times_passes_the_correct_index_each_call",
+          "basic.test.mono_core_times_returns_empty_array_for_zero"
+        ],
+        "predicted": [
+          "basic.test.mono_core_times_calls_fn_n_times_and_collects_results",
+          "basic.test.mono_core_times_passes_the_correct_index_each_call",
+          "basic.test.mono_core_times_returns_empty_array_for_zero"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.renderReport",
+        "truth": [
+          "basic.test.mono_app_renderReport_produces_a_multi_line_report"
+        ],
+        "predicted": [
+          "basic.test.mono_app_renderReport_produces_a_multi_line_report"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.repeat",
+        "truth": [
+          "basic.test.mono_bar_repeat_repeats_a_value_without_separator_by_default",
+          "basic.test.mono_bar_repeat_repeats_with_a_separator",
+          "basic.test.mono_bar_repeat_returns_empty_for_zero_count"
+        ],
+        "predicted": [
+          "basic.test.mono_bar_repeat_repeats_a_value_without_separator_by_default",
+          "basic.test.mono_bar_repeat_repeats_with_a_separator",
+          "basic.test.mono_bar_repeat_returns_empty_for_zero_count"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "index.fibonacci",
+        "truth": [
+          "basic.test.mono_bar_fibonacci_computes_base_cases",
+          "basic.test.mono_bar_fibonacci_computes_larger_values",
+          "basic.test.mono_bar_fibonacci_throws_on_invalid_input"
+        ],
+        "predicted": [
+          "basic.test.mono_bar_fibonacci_computes_base_cases",
+          "basic.test.mono_bar_fibonacci_computes_larger_values",
+          "basic.test.mono_bar_fibonacci_throws_on_invalid_input"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      }
+    ],
+    "micro": {
+      "tp": 33,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    }
+  }
+}

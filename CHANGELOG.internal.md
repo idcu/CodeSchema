@@ -6,6 +6,46 @@
 
 ## 提交记录
 
+### Commit 255: fix(testlink): Go 包级命名关联按类型锚定，清掉 15–16 条 FP（S-2k）
+
+- 根因两类：①Go 类 FQN 不含包前缀，`Resolve`/`Search`/`Dim`/`Embed`/`Close`/`AddEdge`
+  等同包多类型同名方法被命名策略逐个链接；②测试名里的类型锚定被忽略
+  （`TestMemoryStore_SearchEmpty` 链到 `ChromemStore.Search`）。
+- 实现：`linkByNaming` 增加三条 Go 包级规则——同目录同名多类型放弃命名（交 `call_graph`）；
+  `Test<Type>_<Method>`/`Example<Type>_<Method>` 只允许该类型；无锚定时目标方法须在
+  剩余测试名开头构成完整词。新增 `methodNameAmbiguousInDir`、`goTestMethodMatches`。
+- 红测：`TestFindTestLinks_GoPackageAmbiguousNameNotNaming`（包内三个 `Resolve`，
+  断言命名不链接、`call_graph` 仍命中）。
+- 真值：补入新增负控与 `TestFindTestLinks_CallGraphOverloadSameFQN` 对
+  `service.NewService`/`Service.FindTestLinks` 的真实调用，Go 169 → 173 对；
+  按「扩大真值、不删例」处理，不是改写标注。
+- 复跑：regex 1834/1819/15/0 → 1838/1838/0/0（F1 0.9959 → 1.0）；
+  treesitter 1865/1849/16/0 → 1860/1860/0/0（F1 0.9957 → 1.0）；
+  人工真值两变体 173/0/0、F1 1.0。
+- 计数：非 vendor LoC 66464（66.5k）。
+
+### Commit 254: fix(parser): TS 接口/类型成员不再登记为方法（S-2k）
+
+- 根因：`interface X { M(): T }` 与 `type X = { M(): T }` 的成员是类型签名，
+  AST 只登记有实现的方法，正则路径却按方法模式全量登记。
+- 实现：`tsTypeOnlyScope` 按 `ClassIR.Type == "INTERFACE"|"TYPE"` 判定，命中时只推进
+  作用域、不登记方法（`jest.go` 共享，两变体一致）。
+- 红测：`TestTreeSitterAdapter_Parse_TSInterfaceMemberNotMethod` 断言接口成员不入方法、
+  真实类方法与顶层函数保留、类方法到 `helper` 的调用边保留。
+- 复跑：lytd ts regex 生产方法 70 → 67，calls/resolved 不变；自动/人工 33/0/0。
+
+### Commit 253: fix(parser): 跳过 .d.ts 声明文件的伪方法（S-2k）
+
+- 根因：`.d.ts`/`.d.mts`/`.d.cts` 只有类型契约、没有可执行体，签名行被登记为方法，
+  又被 `callPattern` 记成调用边（lytd：789 条方法、36 条假边）。
+- 实现：`isTSDeclarationFile` 在正则与 AST 两条路径前置判定，声明文件不登记方法、
+  不产生调用边。
+- 红测：`TestTreeSitterAdapter_Parse_TSDeclarationFileMethodsNotRegistered`
+  断言 `.d.ts` 夹具（interface/function/declare class）方法数与调用边均为 0。
+- 复跑：lytd ts regex 生产方法 859 → 70，calls 408 → 372、resolved 109 → 89
+  （删除假边所致，仓内 89/89 = 1.0）；AST 去掉 1 条 `import` 假边（369 → 368）。
+  测试关联两变体 33/33 不变。
+
 ### Commit 252: feat(parser): Jest 回调建模为 IR 方法，TS 测试关联首次可度量（S-2j）
 
 - 根因：`describe/it/test` 回调不是声明式节点，回调体内的调用没有 `CallerFQN`；
