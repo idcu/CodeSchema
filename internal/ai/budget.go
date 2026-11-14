@@ -5,26 +5,64 @@ import "sync/atomic"
 // Budget 管控 AI 增强层的调用次数硬限。
 //
 // 按作用域分为两类预算：
-//   - 扫描期预算（perScan）：每次全量扫描的 AI 调用次数上限。
-//   - 查询期预算（perQuery）：每次查询的 AI 调用次数上限。
+//   - 扫描期预算（perScan）：每次全量扫描的 AI 调用次数上限，经 ResetScan 归零。
+//   - 查询期预算（perQuery）：由每次查询新建的 QueryBudget 独立持有（R6-2），
+//     进程级 Budget 只保存限额模板，不持有跨请求的查询计数。
 //
-// 计数器在每次扫描 / 查询开始时由调用方 Reset，超限后对应作用域的增强被跳过，
-// 不影响主流程（索引始终可用）。limit 为负数表示不限制。
+// 超限后对应作用域的增强被跳过，不影响主流程（索引始终可用）。
+// limit 为负数表示不限制。
 //
-// 计数使用原子读写，保证「并发化 enhanceTagsWithAI（worker pool 并发调用
-// LLM）」下无数据竞争（P21 生产化）。tryConsume* 的「检查+递增」为原子操作，
-// 并发消费不会超发预算。
+// 计数使用原子读写，保证并发调用下无数据竞争与超发。
 type Budget struct {
 	scanLimit  int64
 	queryLimit int64
 	scanUsed   atomic.Int64
-	queryUsed  atomic.Int64
+}
+
+// QueryBudget 单次查询独立的预算作用域（每次查询新建，计数互不影响）。
+type QueryBudget struct {
+	limit int64
+	used  atomic.Int64
 }
 
 // NewBudget 创建预算管控器。
 // perScan / perQuery 为负表示对应作用域不限制调用次数。
 func NewBudget(perScan, perQuery int) *Budget {
 	return &Budget{scanLimit: int64(perScan), queryLimit: int64(perQuery)}
+}
+
+// NewQueryBudget 为一次查询创建独立预算作用域（限额继承 Budget.queryLimit）。
+func (b *Budget) NewQueryBudget() *QueryBudget {
+	return &QueryBudget{limit: b.queryLimit}
+}
+
+// tryConsume 尝试消费一次查询预算；成功返回 true。并发安全（原子 CAS）。
+func (q *QueryBudget) tryConsume() bool {
+	if q.limit < 0 {
+		return true
+	}
+	for {
+		cur := q.used.Load()
+		if cur >= q.limit {
+			return false
+		}
+		if q.used.CompareAndSwap(cur, cur+1) {
+			return true
+		}
+	}
+}
+
+// Remaining 返回本次查询剩余可用次数（不限时返回 -1）。
+func (q *QueryBudget) Remaining() int {
+	if q.limit < 0 {
+		return -1
+	}
+	return int(q.limit - q.used.Load())
+}
+
+// Exhausted 报告本次查询预算是否已耗尽。
+func (q *QueryBudget) Exhausted() bool {
+	return q.limit >= 0 && q.used.Load() >= q.limit
 }
 
 // tryConsumeScan 尝试消费一次扫描期预算；成功返回 true。并发安全（原子 CAS）。
@@ -43,30 +81,9 @@ func (b *Budget) tryConsumeScan() bool {
 	}
 }
 
-// tryConsumeQuery 尝试消费一次查询期预算；成功返回 true。并发安全（原子 CAS）。
-func (b *Budget) tryConsumeQuery() bool {
-	if b.queryLimit < 0 {
-		return true
-	}
-	for {
-		cur := b.queryUsed.Load()
-		if cur >= b.queryLimit {
-			return false
-		}
-		if b.queryUsed.CompareAndSwap(cur, cur+1) {
-			return true
-		}
-	}
-}
-
 // ResetScan 重置扫描期计数（每次扫描开始时调用）。
 func (b *Budget) ResetScan() {
 	b.scanUsed.Store(0)
-}
-
-// ResetQuery 重置查询期计数（每次查询开始时调用）。
-func (b *Budget) ResetQuery() {
-	b.queryUsed.Store(0)
 }
 
 // ScanRemaining 返回扫描期剩余可用次数（不限时返回 -1）。
@@ -77,20 +94,7 @@ func (b *Budget) ScanRemaining() int {
 	return int(b.scanLimit - b.scanUsed.Load())
 }
 
-// QueryRemaining 返回查询期剩余可用次数（不限时返回 -1）。
-func (b *Budget) QueryRemaining() int {
-	if b.queryLimit < 0 {
-		return -1
-	}
-	return int(b.queryLimit - b.queryUsed.Load())
-}
-
 // ScanExhausted 报告扫描期预算是否已耗尽。
 func (b *Budget) ScanExhausted() bool {
 	return b.scanLimit >= 0 && b.scanUsed.Load() >= b.scanLimit
-}
-
-// QueryExhausted 报告查询期预算是否已耗尽。
-func (b *Budget) QueryExhausted() bool {
-	return b.queryLimit >= 0 && b.queryUsed.Load() >= b.queryLimit
 }

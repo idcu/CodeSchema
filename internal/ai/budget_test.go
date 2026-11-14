@@ -38,13 +38,14 @@ func TestBudget_QueryUnlimited(t *testing.T) {
 	if b.tryConsumeScan() {
 		t.Error("scan with limit 0 should be exhausted immediately")
 	}
+	q := b.NewQueryBudget()
 	for i := 0; i < 100; i++ {
-		if !b.tryConsumeQuery() {
+		if !q.tryConsume() {
 			t.Fatalf("query should be unlimited, failed at %d", i)
 		}
 	}
-	if b.QueryRemaining() != -1 {
-		t.Errorf("QueryRemaining unlimited want -1, got %d", b.QueryRemaining())
+	if q.Remaining() != -1 {
+		t.Errorf("QueryRemaining unlimited want -1, got %d", q.Remaining())
 	}
 }
 
@@ -53,18 +54,20 @@ func TestBudget_IndependentScopes(t *testing.T) {
 	if !b.tryConsumeScan() {
 		t.Fatal("scan consume failed")
 	}
-	if !b.tryConsumeQuery() {
+	q := b.NewQueryBudget()
+	if !q.tryConsume() {
 		t.Fatal("query consume failed (must be independent of scan)")
 	}
 	if b.tryConsumeScan() {
 		t.Error("scan should be exhausted after 1")
 	}
-	if b.tryConsumeQuery() {
+	if q.tryConsume() {
 		t.Error("query should be exhausted after 1")
 	}
-	b.ResetQuery()
-	if !b.tryConsumeQuery() {
-		t.Error("query should reset independently of scan")
+	// 新请求（新 QueryBudget）不受上一请求影响
+	q2 := b.NewQueryBudget()
+	if !q2.tryConsume() {
+		t.Error("每个查询应拥有独立预算")
 	}
 }
 
@@ -103,10 +106,12 @@ func TestBudget_ConcurrentConsume_NoOvershoot(t *testing.T) {
 	}
 }
 
-// TestBudget_ConcurrentQuery_Independent 验证并发查询期消费与扫描期独立。
+// TestBudget_ConcurrentQuery_Independent 验证同一查询作用域内的并发消费不超发，
+// 且扫描期完全不受影响。
 func TestBudget_ConcurrentQuery_Independent(t *testing.T) {
 	const qlimit = 20
 	b := NewBudget(-1, qlimit) // 扫描不限，查询限 20
+	q := b.NewQueryBudget()
 	var success atomic.Int64
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
@@ -114,7 +119,7 @@ func TestBudget_ConcurrentQuery_Independent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for n := 0; n < 200; n++ {
-				if b.tryConsumeQuery() {
+				if q.tryConsume() {
 					success.Add(1)
 				}
 			}

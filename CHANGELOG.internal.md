@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 204: fix(ai): 查询预算按请求隔离，移除共享可变 phase（R6-2）
+
+- 根因：`Enhancer.phase` 是共享可写字段，查询路径 `SetPhase(PhaseQuery)` 与扫描路径
+  `SetPhase(PhaseScan)` 在长驻服务里并发改写（`-race` 实测 DATA RACE）；
+  查询预算计数 `Budget.queryUsed` 只在进程启动时归零，前一请求耗尽后，
+  后续请求在进程生命周期内永久拿不到 AI 消歧。
+- 修复：`Enhancer` 改为不可变——`phase` 与查询预算在构造时确定；
+  新增 `ForQuery()` 返回「本次请求独立 `QueryBudget`」的实例（共享 client 与限额模板，
+  计数互不影响）。删除 `SetPhase` / `Budget.ResetQuery` / `QueryRemaining` /
+  `QueryExhausted` / `tryConsumeQuery`；扫描期新增 `Enhancer.ResetScanBudget()`，
+  由 `Analyzer.TagAll` 每次扫描开始时调用。Service 查询路径改用
+  `s.enhancer.ForQuery()`，并发请求之间不再互相重置/耗尽。
+- 负控（先红后绿，`go test -race`）：
+  `TestEnhancer_ConcurrentPhaseRace` 修前报 `DATA RACE ... Enhancer.phase`；
+  `TestEnhancer_QueryBudgetPerRequest` 修前第 2 次请求即 `budget exceeded`。
+  修复后分别改为 `TestEnhancer_ConcurrentPhases_NoRace` / 复用同名用例，均通过。
+- 文档：`架构与模块.md` 注明两类预算的生命周期；counts 60434（60.4k）。
+
 ### Commit 203: fix(server): 内部错误统一脱敏 + 未知租户固定 404（R2-8 / P1-11、P2-6）
 
 - 根因：`writeServiceError` 的兜底分支直接 `err.Error()` 回传 500；`mcpError`

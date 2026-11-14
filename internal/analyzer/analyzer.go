@@ -127,7 +127,7 @@ func (a *Analyzer) TagAll(ctx context.Context) error {
 
 	// AI 增强层（可选）：预算超限/LLM 失败时优雅跳过
 	if a.enhancer != nil {
-		a.enhancer.SetPhase(ai.PhaseScan)
+		a.enhancer.ResetScanBudget()
 		a.enhanceTagsWithAI(ctx, tagger)
 	}
 

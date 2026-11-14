@@ -1171,7 +1171,8 @@ func (s *Service) disambiguateMethodResults(ctx context.Context, query string, r
 
 	// 对每组 ≥2 的候选做消歧：保留最佳，取消其余
 	drop := make(map[int]bool)
-	s.enhancer.SetPhase(ai.PhaseQuery)
+	// 每次查询使用独立预算实例，避免长驻服务中查询预算跨请求泄漏（R6-2）。
+	enh := s.enhancer.ForQuery()
 	for _, group := range groups {
 		if len(group) < 2 {
 			continue
@@ -1180,7 +1181,7 @@ func (s *Service) disambiguateMethodResults(ctx context.Context, query string, r
 		for _, c := range group {
 			candidates = append(candidates, c.methodIR)
 		}
-		best, err := s.enhancer.Disambiguate(ctx, candidates, query)
+		best, err := enh.Disambiguate(ctx, candidates, query)
 		if err != nil || best < 0 || best >= len(group) {
 			continue // 失败回退：该组不消歧
 		}

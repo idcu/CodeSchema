@@ -66,25 +66,39 @@ func NewMethodEntity(rec store.MethodRecord) IRable { return methodEntity{rec: r
 
 // Enhancer 通过 LLMClient 对实体做标签补全 / 文档补全 / 同名方法消歧，
 // 并受 Budget 硬限约束。所有失败均返回错误且不影响主流程（调用方应记录日志后继续）。
+//
+// 并发约定（R6-2）：Enhancer 不可变，phase 与查询预算在构造时确定；
+// 查询路径必须用 ForQuery 取得「本次请求独立预算」的实例，禁止共享可变 phase。
 type Enhancer struct {
 	client LLMClient
 	budget *Budget
 	phase  Phase
+	query  *QueryBudget // 非 nil 表示查询期实例（每次查询独立）
 }
 
-// NewEnhancer 创建 AI 增强器，默认处于扫描期（PhaseScan）。
+// NewEnhancer 创建 AI 增强器，处于扫描期（PhaseScan）。
 func NewEnhancer(client LLMClient, budget *Budget) *Enhancer {
 	return &Enhancer{client: client, budget: budget, phase: PhaseScan}
 }
 
-// SetPhase 切换作用域（扫描 / 查询），决定消耗哪类预算。
-func (e *Enhancer) SetPhase(p Phase) { e.phase = p }
+// ForQuery 返回一次查询专用的增强器：独立查询预算，互不泄漏，phase 不可变。
+func (e *Enhancer) ForQuery() *Enhancer {
+	return &Enhancer{
+		client: e.client,
+		budget: e.budget,
+		phase:  PhaseQuery,
+		query:  e.budget.NewQueryBudget(),
+	}
+}
+
+// ResetScanBudget 重置扫描期计数（每次全量扫描开始时调用）。
+func (e *Enhancer) ResetScanBudget() { e.budget.ResetScan() }
 
 // BudgetRemaining 返回当前作用域剩余可用预算（不限时返回 -1）。
 // 供编排层在调用前做低开销预检，避免空调用 LLM。
 func (e *Enhancer) BudgetRemaining() int {
-	if e.phase == PhaseQuery {
-		return e.budget.QueryRemaining()
+	if e.query != nil {
+		return e.query.Remaining()
 	}
 	return e.budget.ScanRemaining()
 }
@@ -143,8 +157,8 @@ func (e *Enhancer) Disambiguate(ctx context.Context, candidates []parser.MethodI
 
 // consume 按当前作用域消费一次预算。
 func (e *Enhancer) consume() bool {
-	if e.phase == PhaseQuery {
-		return e.budget.tryConsumeQuery()
+	if e.query != nil {
+		return e.query.tryConsume()
 	}
 	return e.budget.tryConsumeScan()
 }
