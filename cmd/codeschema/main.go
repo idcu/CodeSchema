@@ -18,6 +18,7 @@ import (
 
 	gcm "gitee.com/idcu-go/graceful"
 	"github.com/idcu/codeschema/internal/config"
+	"github.com/idcu/codeschema/internal/fsperm"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/scheduler"
@@ -245,7 +246,7 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	// 持久化 IDF 词典
 	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+	if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
 		if err := builder.SaveIDF(idfFile); err != nil {
 			fmt.Printf("WARN: save IDF dictionary: %v\n", err)
 		}
@@ -315,7 +316,7 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	} else {
 		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
 		// 持久化 IDF 词典（全量构建后立即保存一次）
-		if err := os.MkdirAll(filepath.Dir(idfFile), 0755); err == nil {
+		if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
 			if err := builder.SaveIDF(idfFile); err != nil {
 				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
 			}
