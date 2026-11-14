@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 
-	"github.com/idcu/codeschema/internal/ai"
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
-	"github.com/idcu/codeschema/internal/store"
 	trace "gitee.com/idcu-go/trace"
+	"github.com/idcu/codeschema/internal/ai"
+	"github.com/idcu/codeschema/internal/store"
 )
 
 // init 注册分析器模块的监控指标。
@@ -140,8 +143,26 @@ type docUpdater interface {
 	UpdateMethodDoc(ctx context.Context, methodID int64, doc string) error
 }
 
+// aiWorkers 并发 LLM 调用的 worker 数（CPU 数，上限封顶防过载）。
+// 由增强并发化逻辑内部按实体总量取 min，避免启动过多空转 worker。
+const aiWorkersCap = 4
+
+// enhanceJob 描述一个待 AI 增强的实体（类或方法）及其写回目标。
+type enhanceJob struct {
+	isMethod bool
+	classID  int64
+	methodID int64
+	ent      ai.IRable
+	needDoc  bool // 原 Doc 为空且 store 支持 Doc 写回
+}
+
 // enhanceTagsWithAI 在规则标签之上叠加 AI 标签与文档补全（失败隔离）。
-func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
+//
+// 并发化（P21 生产化）：把串行逐实体调用 LLM 改为 worker pool 并发，
+// 显著缩短大仓扫描耗时。预算按原子计数（Budget）硬限，并发不会超发；
+// 失败（网络 / 限流 / 解析）隔离，不影响主流程。store 读写并发安全
+// （FileStore 等以 sync.RWMutex 保护）。
+func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, _ *ai.Tagger) {
 	files, err := a.store.GetAllFiles(ctx)
 	if err != nil {
 		a.logger.Warn("AI enhance: get all files failed", "error", err)
@@ -151,70 +172,119 @@ func (a *Analyzer) enhanceTagsWithAI(ctx context.Context, tagger *ai.Tagger) {
 	// 可选：Doc 补全写回能力（FileStore 支持，sqlite/pg 未实现时跳过）
 	du, _ := a.store.(docUpdater)
 
-	var aiTagged, aiDocd, skipped int
+	// 先收集全部待增强实体（不阻塞 LLM 阶段）。
+	jobs := make([]enhanceJob, 0, 256)
 	for _, f := range files {
 		classes, err := a.store.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
 			continue
 		}
 		for _, cls := range classes {
-			// 类级：AI 标签补全（合并已有规则标签）+ Doc 补全
-			if a.enhancer.BudgetRemaining() > 0 {
-				tags, err := a.enhancer.EnhanceTag(ctx, ai.NewClassEntity(cls))
-				if err == nil && len(tags) > 0 {
-					existing, _ := a.store.GetTagsByClassID(ctx, cls.ID)
-					if merged := mergeUnique(existing, tags); len(merged) > 0 {
-						if err := a.store.UpsertTags(ctx, cls.ID, merged); err != nil {
-							a.logger.Warn("upsert class tags failed", "class", cls.FullName, "error", err)
-						}
-						aiTagged++
-					}
-				}
-			} else {
-				skipped++
-			}
-			if cls.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
-				if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewClassEntity(cls)); err == nil && doc != "" {
-					if err := du.UpdateClassDoc(ctx, cls.ID, doc); err != nil {
-						a.logger.Warn("update class doc failed", "class", cls.FullName, "error", err)
-					}
-					aiDocd++
-				}
-			}
-
+			jobs = append(jobs, enhanceJob{
+				classID: cls.ID,
+				ent:     ai.NewClassEntity(cls),
+				needDoc: cls.Doc == "" && du != nil,
+			})
 			methods, err := a.store.GetMethodsByClassID(ctx, cls.ID)
 			if err != nil {
 				continue
 			}
 			for _, m := range methods {
-				if a.enhancer.BudgetRemaining() > 0 {
-					tags, err := a.enhancer.EnhanceTag(ctx, ai.NewMethodEntity(m))
-					if err == nil && len(tags) > 0 {
-						existing, _ := a.store.GetTagsByMethodID(ctx, m.ID)
-						if merged := mergeUnique(existing, tags); len(merged) > 0 {
-							if err := a.store.UpsertMethodTags(ctx, m.ID, merged); err != nil {
-								a.logger.Warn("upsert method tags failed", "method", m.FullName, "error", err)
-							}
-							aiTagged++
-						}
-					}
-				} else {
-					skipped++
-				}
-				if m.Doc == "" && du != nil && a.enhancer.BudgetRemaining() > 0 {
-					if doc, err := a.enhancer.EnhanceDoc(ctx, ai.NewMethodEntity(m)); err == nil && doc != "" {
-						if err := du.UpdateMethodDoc(ctx, m.ID, doc); err != nil {
-							a.logger.Warn("update method doc failed", "method", m.FullName, "error", err)
-						}
-						aiDocd++
-					}
-				}
+				jobs = append(jobs, enhanceJob{
+					isMethod: true,
+					classID:  cls.ID,
+					methodID: m.ID,
+					ent:      ai.NewMethodEntity(m),
+					needDoc:  m.Doc == "" && du != nil,
+				})
 			}
 		}
 	}
 
+	if len(jobs) == 0 {
+		return
+	}
+
+	// worker 数：按实体量收敛，避免小实体集启动过多空转 goroutine。
+	workers := runtime.NumCPU()
+	if workers > aiWorkersCap {
+		workers = aiWorkersCap
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	// 统计计数（并发写，用原子 + 互斥量保护）。
+	var aiTagged, aiDocd, skipped atomic.Int64
+	var jobCh = make(chan enhanceJob, len(jobs))
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				a.enhanceOne(ctx, job, du, &aiTagged, &aiDocd, &skipped)
+			}
+		}()
+	}
+	wg.Wait()
+
 	a.logger.Info("AI enhancement completed",
-		"ai_tagged", aiTagged, "ai_doc_completed", aiDocd, "skipped_budget", skipped)
+		"ai_tagged", aiTagged.Load(), "ai_doc_completed", aiDocd.Load(),
+		"skipped_budget", skipped.Load(), "workers", workers, "entities", len(jobs))
+}
+
+// enhanceOne 处理单个实体的 AI 标签 / 文档补全（失败隔离）。
+// budget 由 Enhancer 内部原子 consume 门禁，并发下不会超发。
+func (a *Analyzer) enhanceOne(ctx context.Context, job enhanceJob, du docUpdater, aiTagged, aiDocd, skipped *atomic.Int64) {
+	// 标签补全：合并已有规则标签后写回。
+	if a.enhancer.BudgetRemaining() > 0 {
+		if tags, err := a.enhancer.EnhanceTag(ctx, job.ent); err == nil && len(tags) > 0 {
+			if job.isMethod {
+				existing, _ := a.store.GetTagsByMethodID(ctx, job.methodID)
+				if merged := mergeUnique(existing, tags); len(merged) > 0 {
+					if err := a.store.UpsertMethodTags(ctx, job.methodID, merged); err != nil {
+						a.logger.Warn("upsert method tags failed", "method", job.ent.QualifiedName(), "error", err)
+					}
+					aiTagged.Add(1)
+				}
+			} else {
+				existing, _ := a.store.GetTagsByClassID(ctx, job.classID)
+				if merged := mergeUnique(existing, tags); len(merged) > 0 {
+					if err := a.store.UpsertTags(ctx, job.classID, merged); err != nil {
+						a.logger.Warn("upsert class tags failed", "class", job.ent.QualifiedName(), "error", err)
+					}
+					aiTagged.Add(1)
+				}
+			}
+		}
+	} else {
+		skipped.Add(1)
+	}
+
+	// 文档补全：仅当原 Doc 为空且 store 支持写回。
+	if job.needDoc && a.enhancer.BudgetRemaining() > 0 {
+		if doc, err := a.enhancer.EnhanceDoc(ctx, job.ent); err == nil && doc != "" {
+			if job.isMethod {
+				if err := du.UpdateMethodDoc(ctx, job.methodID, doc); err != nil {
+					a.logger.Warn("update method doc failed", "method", job.ent.QualifiedName(), "error", err)
+				}
+			} else {
+				if err := du.UpdateClassDoc(ctx, job.classID, doc); err != nil {
+					a.logger.Warn("update class doc failed", "class", job.ent.QualifiedName(), "error", err)
+				}
+			}
+			aiDocd.Add(1)
+		}
+	}
 }
 
 // mergeUnique 合并两组标签并去重（保持顺序：先已有、后新增）。

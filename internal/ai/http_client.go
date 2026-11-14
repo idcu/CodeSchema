@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/idcu/codeschema/internal/errors"
 	httputil "gitee.com/idcu-go/httputil"
 	log "gitee.com/idcu-go/log"
+	retry "gitee.com/idcu-go/retry"
+	"github.com/idcu/codeschema/internal/errors"
 )
 
 // HTTPClientConfig OpenAI 兼容 Chat Completions 客户端的配置。
@@ -129,32 +130,64 @@ func (c *openAICompatClient) Choose(ctx context.Context, prompt string) (int, er
 }
 
 // chat 执行一次 Chat Completions 调用。
+//
+// 对可重试错误（网络超时 / 429 限流等，由 retry.RetryableError 启发式判定）做
+// 指数退避重试，提高 LLM 真实可用性（P21 生产化：并发增强下 429 限流常见，
+// 退避重试可显著提升成功率）。不可重试错误（参数 / 权限 / 不存在等）立即返回。
 func (c *openAICompatClient) chat(ctx context.Context, prompt string) (string, error) {
-	data, statusCode, err := httputil.DoRaw(ctx, http.MethodPost, c.baseURL+"/chat/completions", chatRequest{
-		Model:     c.model,
-		Messages:  []chatMessage{{Role: "user", Content: prompt}},
-		MaxTokens: 512,
-	}, httputil.WithClient(c.client), httputil.WithToken(c.apiKey))
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", errors.ErrLLMUnavailable, err)
-	}
-	if statusCode != http.StatusOK {
-		var errResp chatResponse
-		_ = json.Unmarshal(data, &errResp)
-		msg := "non-200 status"
-		if errResp.Error != nil && errResp.Error.Message != "" {
-			msg = errResp.Error.Message
+	var lastErr error
+	var content string
+	err := retry.Do(ctx, func() error {
+		data, statusCode, err := httputil.DoRaw(ctx, http.MethodPost, c.baseURL+"/chat/completions", chatRequest{
+			Model:     c.model,
+			Messages:  []chatMessage{{Role: "user", Content: prompt}},
+			MaxTokens: 512,
+		}, httputil.WithClient(c.client), httputil.WithToken(c.apiKey))
+		if err != nil {
+			lastErr = fmt.Errorf("%w: %v", errors.ErrLLMUnavailable, err)
+			return lastErr
 		}
-		c.logger.Warn("llm call failed", "status", statusCode, "error", msg)
-		return "", fmt.Errorf("%w: status %d: %s", errors.ErrLLMUnavailable, statusCode, msg)
-	}
+		if statusCode != http.StatusOK {
+			var errResp chatResponse
+			_ = json.Unmarshal(data, &errResp)
+			msg := "non-200 status"
+			if errResp.Error != nil && errResp.Error.Message != "" {
+				msg = errResp.Error.Message
+			}
+			lastErr = fmt.Errorf("%w: status %d: %s", errors.ErrLLMUnavailable, statusCode, msg)
+			if statusCode == http.StatusTooManyRequests {
+				c.logger.Warn("llm rate limited, will retry", "status", statusCode, "error", msg)
+			} else {
+				c.logger.Warn("llm call failed", "status", statusCode, "error", msg)
+			}
+			// 429 等可重试错误由 retry.Do 退避重试；其余立即返回。
+			return lastErr
+		}
 
-	var parsed chatResponse
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return "", fmt.Errorf("%w: parse response: %v", errors.ErrEnhanceFailed, err)
+		var parsed chatResponse
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			lastErr = fmt.Errorf("%w: parse response: %v", errors.ErrEnhanceFailed, err)
+			return lastErr
+		}
+		if len(parsed.Choices) == 0 {
+			lastErr = fmt.Errorf("%w: empty choices", errors.ErrEnhanceFailed)
+			return lastErr
+		}
+		content = parsed.Choices[0].Message.Content
+		return nil
+	},
+		retry.WithMaxAttempts(c.retryAttempts()),
+		retry.WithExponentialBackoff(200*time.Millisecond, 3*time.Second),
+		retry.WithRetryIf(retry.RetryableError),
+	)
+	if err != nil {
+		return "", err
 	}
-	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("%w: empty choices", errors.ErrEnhanceFailed)
-	}
-	return parsed.Choices[0].Message.Content, nil
+	return content, nil
+}
+
+// retryAttempts 返回 LLM 调用的最大尝试次数（含首次）。
+// 高并发增强下 429 限流常见，退避重试 3 次（默认）提升成功率；过多反而加剧限流。
+func (c *openAICompatClient) retryAttempts() int {
+	return 3
 }

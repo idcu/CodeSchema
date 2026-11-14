@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/idcu/codeschema/internal/errors"
 	"gitee.com/idcu-go/metrics"
+	"github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -150,10 +150,15 @@ func (e *Enhancer) consume() bool {
 }
 
 // buildTagPrompt 构造标签推导提示词。
+//
+// 明确约束输出格式为「分类:标签」前缀：六类 biz/tech/risk/test（layer/lang
+// 由规则引擎负责，不要求模型产出），每行一个，避免模型把分类名与标签值混淆。
+// 分类：biz=业务域、tech=技术特征、risk=风险、test=测试类型。
 func buildTagPrompt(ent IRable) string {
 	return fmt.Sprintf(
-		"为以下代码实体推导业务(biz)/技术(tech)/风险(risk)/测试(test)标签，"+
-			"每行一个标签，不要编号：\n名称: %s\n全限定名: %s\n类型: %s\n文档: %s",
+		"为以下代码实体推导标签，每行一个，格式必须是「分类:标签」前缀，"+
+			"分类仅限 biz(业务域)/tech(技术特征)/risk(风险)/test(测试类型) 四类，"+
+			"不要输出 layer/lang 分类，不要编号或解释：\n名称: %s\n全限定名: %s\n类型: %s\n文档: %s\n示例：\nbiz:订单中心\ntech:缓存\ntest:单元测试",
 		ent.Name(), ent.QualifiedName(), ent.Kind(), ent.DocComment(),
 	)
 }

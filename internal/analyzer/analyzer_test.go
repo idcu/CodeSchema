@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/ai"
@@ -10,7 +11,12 @@ import (
 )
 
 // mockStore 实现 store.Store 接口，用于分析器测试。
+//
+// tag 相关方法（UpsertTags/UpsertMethodTags/GetTagsByClassID/GetTagsByMethodID）
+// 受 mu 保护：AI 增强并发化（enhanceTagsWithAI worker pool）并发读写这些 map，
+// 无锁会触发 -race 数据竞争。
 type mockStore struct {
+	mu         sync.RWMutex
 	files      []*store.FileRecord
 	classes    map[int64][]store.ClassRecord  // fileID -> classes
 	methods    map[int64][]store.MethodRecord // classID -> methods
@@ -37,6 +43,8 @@ func (m *mockStore) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodI
 func (m *mockStore) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error     { return nil }
 func (m *mockStore) UpsertIR(_ context.Context, _ *parser.IRDocument) error              { return nil }
 func (m *mockStore) UpsertTags(_ context.Context, classID int64, tags []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.classTags == nil {
 		m.classTags = make(map[int64][]string)
 	}
@@ -44,6 +52,8 @@ func (m *mockStore) UpsertTags(_ context.Context, classID int64, tags []string) 
 	return nil
 }
 func (m *mockStore) UpsertMethodTags(_ context.Context, methodID int64, tags []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.methodTags == nil {
 		m.methodTags = make(map[int64][]string)
 	}
@@ -51,9 +61,13 @@ func (m *mockStore) UpsertMethodTags(_ context.Context, methodID int64, tags []s
 	return nil
 }
 func (m *mockStore) GetTagsByClassID(_ context.Context, classID int64) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.classTags[classID], nil
 }
 func (m *mockStore) GetTagsByMethodID(_ context.Context, methodID int64) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.methodTags[methodID], nil
 }
 func (m *mockStore) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) {
@@ -1784,5 +1798,62 @@ func TestAnalyzer_TagAll_WithExhaustedBudget_SkipsEnhance(t *testing.T) {
 	}
 	if !hasLayerTag {
 		t.Errorf("expected rule tags still produced with exhausted budget, got %v", tags)
+	}
+}
+
+// TestAnalyzer_TagAll_WithEnhancer_Concurrent 验证 AI 增强并发化（P21）：
+// 并发 worker 处理所有实体，AI 标签正确写入，且预算不被超发（-race 无数据竞争）。
+func TestAnalyzer_TagAll_WithEnhancer_Concurrent(t *testing.T) {
+	st := newTestStore()
+	an := NewAnalyzer(st)
+	// 实体数 = 4 类 + 5 方法 = 9。mockStore 未实现 docUpdater → needDoc 恒 false，
+	// 每个实体仅消费 1 次预算（标签补全）。预算=9 恰好覆盖全部标签调用。
+	const budget = 9
+	budgetObj := ai.NewBudget(budget, 10)
+	an.SetEnhancer(ai.NewEnhancer(mockLLM{}, budgetObj))
+
+	if err := an.TagAll(context.Background()); err != nil {
+		t.Fatalf("TagAll: %v", err)
+	}
+
+	// 全部 4 个类应叠加 AI 标签
+	for _, classID := range []int64{1, 2, 3, 4} {
+		tags, err := st.GetTagsByClassID(context.Background(), classID)
+		if err != nil {
+			t.Fatalf("GetTagsByClassID(%d): %v", classID, err)
+		}
+		found := false
+		for _, tag := range tags {
+			if tag == "biz:ai" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("class %d: expected AI tag biz:ai, got %v", classID, tags)
+		}
+	}
+
+	// 全部 5 个方法应叠加 AI 标签
+	for _, methodID := range []int64{1, 2, 3, 4, 5} {
+		tags, err := st.GetTagsByMethodID(context.Background(), methodID)
+		if err != nil {
+			t.Fatalf("GetTagsByMethodID(%d): %v", methodID, err)
+		}
+		found := false
+		for _, tag := range tags {
+			if tag == "biz:ai" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("method %d: expected AI tag biz:ai, got %v", methodID, tags)
+		}
+	}
+
+	// 预算应已用尽（9 次标签消费），且绝不超发
+	if rem := budgetObj.ScanRemaining(); rem != 0 {
+		t.Errorf("ScanRemaining want 0 after all enhanced, got %d", rem)
 	}
 }
