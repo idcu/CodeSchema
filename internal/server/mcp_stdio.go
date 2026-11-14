@@ -15,6 +15,23 @@ import (
 // maxStdioLine stdio 单条消息上限（16MB），防止异常输入无限占用内存。
 const maxStdioLine = 16 << 20
 
+// supportedProtocolVersions 本服务真实支持的 MCP 协议版本（按优先级）。
+//
+// 当前仅实现 2024-11-05 SSE/stdio 语义；2025-03-26（Streamable HTTP）等新版本
+// 的行为差异尚未实现，不能对客户端声称支持（P2-7）。
+var supportedProtocolVersions = []string{"2024-11-05"}
+
+// negotiateProtocolVersion 返回服务端支持的最高版本；客户端版本不支持时回退
+// 到本服务默认版本，由客户端决定是否继续（MCP 握手约定）。
+func negotiateProtocolVersion(requested string) string {
+	for _, v := range supportedProtocolVersions {
+		if requested == v {
+			return v
+		}
+	}
+	return supportedProtocolVersions[0]
+}
+
 // handleRequest 处理一条 JSON-RPC 消息（纯逻辑，HTTP 与 stdio 传输复用）。
 // 通知（ID 为 nil）由传输层决定不回包；ctx 用于工具调用的取消/超时传递。
 func (m *MCPServer) handleRequest(ctx context.Context, req jsonRPCRequest) jsonRPCResponse {
@@ -23,10 +40,10 @@ func (m *MCPServer) handleRequest(ctx context.Context, req jsonRPCRequest) jsonR
 		// MCP 初始化握手：标准 MCP 客户端（VS Code / JetBrains / SDK）连上来
 		// 第一步必发 initialize 并期待 protocolVersion + capabilities 返回，否则直接断开。
 		// 原实现缺此分支 → 所有真实客户端握手失败（端口虽通但协议不干活）。
-		protoVer := "2024-11-05"
+		protoVer := supportedProtocolVersions[0]
 		if p, ok := req.Params.(map[string]any); ok {
 			if v, ok := p["protocolVersion"].(string); ok && v != "" {
-				protoVer = v // 回显客户端请求的版本，最大化客户端兼容
+				protoVer = negotiateProtocolVersion(v)
 			}
 		}
 		return jsonRPCResponse{

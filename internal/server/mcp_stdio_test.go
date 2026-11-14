@@ -116,6 +116,33 @@ func TestMCP_Stdio_LineDelimitedJSON(t *testing.T) {
 	}
 }
 
+// TestMCP_Initialize_NegotiatesSupportedVersion 负控（P2-7）：
+// initialize 只能回显服务端真实支持的协议版本，不得盲目回显客户端任意版本。
+func TestMCP_Initialize_NegotiatesSupportedVersion(t *testing.T) {
+	srv := NewMCPServer(nil, "")
+	cases := []struct{ requested, want string }{
+		{"2024-11-05", "2024-11-05"},
+		{"2025-03-26", "2024-11-05"},
+		{"not-a-version", "2024-11-05"},
+		{"", "2024-11-05"},
+	}
+	for _, tc := range cases {
+		resp := srv.handleRequest(context.Background(), jsonRPCRequest{
+			JSONRPC: "2.0",
+			ID:      1,
+			Method:  "initialize",
+			Params:  map[string]any{"protocolVersion": tc.requested},
+		})
+		result, ok := resp.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("requested %q: result type = %T", tc.requested, resp.Result)
+		}
+		if got := result["protocolVersion"]; got != tc.want {
+			t.Errorf("requested %q: protocolVersion = %v, want %s", tc.requested, got, tc.want)
+		}
+	}
+}
+
 // TestMCP_Stdio_ParseErrorHasNullID 负控（P2-20）：解析失败时 id 必须是 null，
 // 不能伪造成 0（0 是合法请求 ID）。
 func TestMCP_Stdio_ParseErrorHasNullID(t *testing.T) {
