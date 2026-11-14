@@ -75,12 +75,12 @@ func (w *Watcher[T]) ReloadNow() {
 	}
 
 	// 2. 调用归属精确断言（包限定 FQN）：
-	//    config.NewWatcher -> w.ReloadNow（w 为局部变量，callee 不可消歧，保持 w.ReloadNow）；
+	//    config.NewWatcher -> config.Watcher.ReloadNow（w 为 &Watcher[T]{} 局部变量，类型可推导）；
 	//    config.Watcher.ReloadNow -> config.loadConfig（包级函数包限定）。
 	hasNewWatcherCall := false
 	hasReloadNowCall := false
 	for _, c := range doc.Calls {
-		if c.CallerFQN == "config.NewWatcher" && c.CalleeFQN == "w.ReloadNow" {
+		if c.CallerFQN == "config.NewWatcher" && c.CalleeFQN == "config.Watcher.ReloadNow" {
 			hasNewWatcherCall = true
 		}
 		if c.CallerFQN == "config.Watcher.ReloadNow" && c.CalleeFQN == "config.loadConfig" {
@@ -88,7 +88,7 @@ func (w *Watcher[T]) ReloadNow() {
 		}
 	}
 	if !hasNewWatcherCall {
-		t.Errorf("期望调用 config.NewWatcher -> w.ReloadNow；当前 calls=%v", doc.Calls)
+		t.Errorf("期望调用 config.NewWatcher -> config.Watcher.ReloadNow；当前 calls=%v", doc.Calls)
 	}
 	if !hasReloadNowCall {
 		t.Errorf("期望调用 config.Watcher.ReloadNow -> config.loadConfig；当前 calls=%v", doc.Calls)
@@ -111,6 +111,49 @@ func (w *Watcher[T]) ReloadNow() {
 	}
 
 	var _ *parser.IRDocument = doc
+}
+
+// TestGoLocalVarCallQualification 负控：`x := &T{}` / `var x *T` 声明的局部变量，
+// 其 `x.Method()` 调用必须限定为 pkg.T.Method；旧实现只跟踪 receiver，保持裸 selector。
+func TestGoLocalVarCallQualification(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "local.go")
+	src := `package demo
+
+type ConfigWatcher struct{}
+
+func (c *ConfigWatcher) Start() {}
+
+func Run() {
+	cfg := &ConfigWatcher{}
+	cfg.Start()
+	var svc *ConfigWatcher
+	svc.Start()
+}
+`
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := NewTreeSitterAdapter().Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	var qualified int
+	for _, c := range doc.Calls {
+		if c.CallerFQN != "demo.Run" {
+			continue
+		}
+		if c.CalleeFQN == "demo.ConfigWatcher.Start" {
+			qualified++
+		}
+		if strings.HasPrefix(c.CalleeFQN, "cfg.") || strings.HasPrefix(c.CalleeFQN, "svc.") {
+			t.Errorf("局部变量 selector 未消歧: %s", c.CalleeFQN)
+		}
+	}
+	if qualified != 2 {
+		t.Errorf("qualified Start calls = %d, want 2; calls=%+v", qualified, doc.Calls)
+	}
 }
 
 // TestGoMultiLineSignature_CallAttribution 是 P1-14 负控：Go 多行函数签名

@@ -132,6 +132,17 @@ Go 的降幅主要来自 `len/cap/append/make/close` 等内建伪调用被正确
 Java 的 103 条降幅含 72 条控制流关键字。`test_link` 的 TP/真值同步收缩
 （这些伪边此前也进了自动真值），属口径修正而非召回退化。
 
+### Go 局部变量 selector 消歧（CallerFQN 不变）
+
+方法体内 `x := &T{}` / `var x *T` 声明的局部变量，其 `x.Method()` 现限定为
+`pkg.T.Method`（此前只跟踪 receiver，保持 `x.Method` 裸 selector）。
+
+单元负控 `TestGoLocalVarCallQualification` 先红后绿。但在**现有严格 resolution 口径**下
+数字几乎不动：code-schema go regex 可解析边 4109 → 4111（calls +18 来自新增单测，
+rate 0.2653 → 0.2652）。原因是基准 `methodIndex` 的键是 `Type.Method`（无包前缀），
+而新 callee 是 `pkg.Type.Method`，只能靠短名回退；`Start/Reload` 这类短名多义时仍判不可解析。
+真实收益需要「仓内可解析边」口径（见下节）才能显形，旧口径分母不做调整。
+
 ### 残余漏召（23/24 条）根因更正与清零
 
 此前把 FN 归为「callee 短名多义 + 调用边未抽取」。**该归因错误**：两条调用边

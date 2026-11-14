@@ -145,7 +145,7 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 | 仓库 | 变体 | calls | resolution |
 |---|---|---:|---:|
-| code-schema | regex | 15486 | 0.2653 |
+| code-schema | regex | 15504 | 0.2652 |
 | code-schema | treesitter | 20031 | 0.2233 |
 | petclinic | regex | 1262 | 0.1712 |
 | petclinic | treesitter | 1609 | 0.1889 |

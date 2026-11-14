@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 226: feat(parser): Go 局部变量 selector 类型消歧
+
+- 方法体内 `x := &T{}` / `x := T{}` / `var x *T` 记入局部类型表，`x.Method()` 限定为
+  `pkg.T.Method`；离开方法清空，不做跨方法/数据流推导。
+- 负控：`TestGoLocalVarCallQualification`（旧实现 2 条 selector 未消歧，红）；
+  `TestGoCallAndTypeExtraction` 的 `w.ReloadNow` 期望同步升级为 `config.Watcher.ReloadNow`。
+- 严格 resolution 口径下 code-schema go regex：resolved 4109 → 4111，
+  calls 15486 → 15504（+18 来自新增单测），rate 0.2653 → 0.2652。
+  新 callee 为 `pkg.Type.Method`，而基准索引键为 `Type.Method`，只能走短名回退，
+  多义短名仍判不可解析——真实收益留给新增的「仓内可解析边」口径，旧分母不变。
+- 文档：`解析适配器.md`、bench README、`final-ledger` 同步。
+
 ### Commit 225: fix(parser): 关键字假调用按裸名过滤（Java/Go 内建）
 
 - `detectCalls` 先把裸名做包/类限定再查 `isKeyword`，导致 `if (` → `pkg.Class.if`、

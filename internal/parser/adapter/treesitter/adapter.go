@@ -411,7 +411,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	goPkg := ""             // 当前 Go 文件 package 声明（调用图 FQN 包限定用）
 	curRecvVar := ""        // 当前方法 receiver 变量名（自调用 callee 限定用）
 	curRecvType := ""       // 当前方法 receiver 类型名
-	nonGoPkg := ""          // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
+	// 当前方法体内局部变量 → 类型（`x := &T{}` / `var x *T`），供 selector 消歧。
+	goLocalTypes := map[string]string{}
+	nonGoPkg := "" // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
 	curStructIdx := -1       // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
 	curStructOpenDepth := 0  // struct 体起始深度（type X struct { 的 `{` 计入前）
@@ -512,9 +514,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 					// 记录当前方法 receiver 变量名/类型，供 callee 自调用限定
 					curRecvType = recvType
 					curRecvVar = goRecvVar(matches[1])
+					goLocalTypes = map[string]string{}
 				} else {
 					curRecvVar = ""
 					curRecvType = ""
+					goLocalTypes = map[string]string{}
 					if goPkg != "" {
 						method.ClassFQN = goPkg
 						hasTopLevelFunc = true
@@ -537,6 +541,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 					methodBodyOpen = false
 					curRecvVar = ""
 					curRecvType = ""
+					goLocalTypes = map[string]string{}
 				}
 				docComment.Reset()
 				continue
@@ -558,6 +563,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 						methodBodyOpen = false
 						curRecvVar = ""
 						curRecvType = ""
+						goLocalTypes = map[string]string{}
 					}
 				}
 				docComment.Reset()
@@ -614,8 +620,12 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 					caller = goPkg + "." + m.ClassFQN + "." + m.Name
 				}
 			}
+			// 类型声明行通常不含 `(`（`x := &T{}`），须在调用检测之外收集。
+			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
+				trackGoLocalTypes(code, goLocalTypes)
+			}
 			if strings.Contains(code, "(") {
-				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "")
+				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes)
 			}
 			goDepth += braceNet(code)
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
@@ -625,6 +635,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				methodBodyOpen = false
 				curRecvVar = "" // 重置 receiver 跟踪
 				curRecvType = ""
+				goLocalTypes = map[string]string{}
 			}
 			// struct 体闭合检测（深度回落至起始深度）
 			if curStructIdx >= 0 && goDepth <= curStructOpenDepth {
@@ -732,7 +743,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			if currentClass != nil {
 				curClass = currentClass.Name
 			}
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass)
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass, nil)
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -1170,7 +1181,7 @@ func (c *codeSanitizer) clean(line, lang string) string {
 // caller 为当前方法的 FQN；pkg/recvVar/recvType 供 Go 精确路径的 callee 限定；
 // nonGoPkg/currentClass 供 Java/Kotlin/C# 显式包声明语言的裸 callee 限定
 // （把当前类内无点前缀的方法调用限定为 nonGoPkg.Class.Method）。
-func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType, nonGoPkg, currentClass string) {
+func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType, nonGoPkg, currentClass string, localTypes map[string]string) {
 	matches := pattern.FindAllStringSubmatch(line, -1)
 	for _, m := range matches {
 		if len(m) >= 2 {
@@ -1179,7 +1190,7 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 			if isKeyword(m[1]) || len(m[1]) <= 1 {
 				continue
 			}
-			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass)
+			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass, localTypes)
 			// 跳过关键字和常见误匹配
 			if isKeyword(callee) || len(callee) <= 1 {
 				continue
@@ -1204,11 +1215,19 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 //   - 无点前缀的裸名（当前作用域方法调用）→ 若有 nonGoPkg+currentClass（Java/Kotlin/C#）限定为
 //     nonGoPkg.CurrentClass.callee；否则若 pkg 非空（Go 包级函数）限定为 pkg.callee；
 //   - 其余 receiver.Method（无法消歧 receiver 类型）→ 保持原样。
-func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string) string {
+func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string, localTypes map[string]string) string {
 	if strings.Contains(callee, ".") {
 		// 自接收者调用：recv == 当前方法 receiver 变量 → pkg.RecvType.Method（Go 精确路径）
 		if recvVar != "" && recvType != "" && strings.HasPrefix(callee, recvVar+".") {
 			return pkg + "." + recvType + strings.TrimPrefix(callee, recvVar)
+		}
+		// 局部变量 selector：`x := &T{}` / `var x *T` → pkg.T.Method
+		if localTypes != nil {
+			if i := strings.Index(callee, "."); i > 0 {
+				if typ, ok := localTypes[callee[:i]]; ok && typ != "" {
+					return pkg + "." + typ + callee[i:]
+				}
+			}
 		}
 		// 已带 pkg 前缀或无法消歧的 receiver.Method → 保持
 		return callee
@@ -1224,6 +1243,32 @@ func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string
 	}
 	// 无包信息（Python/TS/Rust/C++ 等）→ 原样返回，保持原启发式行为
 	return callee
+}
+
+var (
+	goVarDeclPattern   = regexp.MustCompile(`^\s*var\s+(\w+)\s+(\*?)([A-Za-z_]\w*)(?:\[[^\]]*\])?`)
+	goShortDeclPattern = regexp.MustCompile(`^\s*(\w+(?:\s*,\s*\w+)*)\s*:=\s*&?([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*\{`)
+)
+
+// trackGoLocalTypes 记录方法体内局部变量类型，供 `x.Method()` 消歧：
+//   - `var x *T` / `var x T` → T
+//   - `x := &T{}` / `x := T{}`（含泛型 `T[P]`）→ T
+//
+// 仅按行内声明增量收集，不做数据流分析；离开方法时由调用方清空。
+func trackGoLocalTypes(code string, locals map[string]string) {
+	if locals == nil {
+		return
+	}
+	if m := goVarDeclPattern.FindStringSubmatch(code); len(m) >= 4 && m[3] != "" {
+		locals[m[1]] = m[3]
+	}
+	if m := goShortDeclPattern.FindStringSubmatch(code); len(m) >= 3 && m[2] != "" {
+		for _, name := range strings.Split(m[1], ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				locals[name] = m[2]
+			}
+		}
+	}
 }
 
 // goRecvVar 从方法定义的 receiver 段解析归属变量名。
