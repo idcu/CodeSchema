@@ -659,6 +659,332 @@ func TestPGStore_UpsertIRFieldsConstants(t *testing.T) {
 	_ = s.DeleteFile(ctx, file.ID)
 }
 
+// TestPGStore_TagsBulkAndMisc 补齐嵌入式 PG 未覆盖的读写路径（2026-11-14）：
+// DriverName / SetPoolLimits / PoolStats、MarkParseSkipped + GetFileByID、
+// UpsertFile、标签读写与 AND 检索、BulkUpsert 多文件全量替换。
+func TestPGStore_TagsBulkAndMisc(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// 1) 驱动名与连接池
+	if got := s.DriverName(); got != "pg" {
+		t.Fatalf("DriverName = %q, want pg", got)
+	}
+	if err := s.SetPoolLimits(4, 2); err != nil {
+		t.Fatalf("SetPoolLimits: %v", err)
+	}
+	if got := s.PoolStats().MaxOpenConnections; got != 4 {
+		t.Fatalf("MaxOpenConnections = %d, want 4", got)
+	}
+
+	// 2) 旁路文件：MarkParseSkipped 写入 parse_skipped，GetFileByID 可回读
+	skippedPath := fmt.Sprintf("/tmp/pg-skip/file-%d.go", time.Now().UnixNano())
+	skippedID, err := s.MarkParseSkipped(ctx, skippedPath, 4096, 77)
+	if err != nil {
+		t.Fatalf("MarkParseSkipped: %v", err)
+	}
+	skipped, err := s.GetFileByID(ctx, skippedID)
+	if err != nil || skipped == nil {
+		t.Fatalf("GetFileByID: %v (file=%v)", err, skipped)
+	}
+	if skipped.AbsolutePath != skippedPath || skipped.ParseStatus != "parse_skipped" ||
+		skipped.ByteSize != 4096 || skipped.LineCount != 77 {
+		t.Fatalf("skipped file mismatch: %+v", skipped)
+	}
+
+	// 3) UpsertFile 直接写入 parse_ok
+	upsertPath := fmt.Sprintf("/tmp/pg-up/file-%d.go", time.Now().UnixNano())
+	upsertID, err := s.UpsertFile(ctx, upsertPath, "hash-up", 12, 345)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	up, err := s.GetFileByID(ctx, upsertID)
+	if err != nil || up == nil {
+		t.Fatalf("GetFileByID(upsert): %v", err)
+	}
+	if up.ParseStatus != "parse_ok" || up.ContentHash != "hash-up" || up.LineCount != 12 || up.ByteSize != 345 {
+		t.Fatalf("upsert file mismatch: %+v", up)
+	}
+
+	// 4) 标签读写：类/方法标签、AND 检索、分类映射、全量替换
+	file, classID, alphaID, betaID := seedTaggedIR(t, ctx, s)
+	authTag := fmt.Sprintf("auth-%d", time.Now().UnixNano())
+	handlerTag := fmt.Sprintf("handler-%d", time.Now().UnixNano())
+	asyncTag := fmt.Sprintf("async-%d", time.Now().UnixNano())
+	if err := s.UpsertTags(ctx, classID, []string{authTag, handlerTag}); err != nil {
+		t.Fatalf("UpsertTags: %v", err)
+	}
+	if err := s.UpsertMethodTags(ctx, alphaID, []string{asyncTag}); err != nil {
+		t.Fatalf("UpsertMethodTags: %v", err)
+	}
+	classTags, err := s.GetTagsByClassID(ctx, classID)
+	if err != nil || !sameSet(classTags, []string{authTag, handlerTag}) {
+		t.Fatalf("GetTagsByClassID = %v (%v)", classTags, err)
+	}
+	methodTags, err := s.GetTagsByMethodID(ctx, alphaID)
+	if err != nil || !sameSet(methodTags, []string{asyncTag}) {
+		t.Fatalf("GetTagsByMethodID = %v (%v)", methodTags, err)
+	}
+	cids, mids, err := s.SearchByTag(ctx, authTag)
+	if err != nil || !hasID(cids, classID) || len(mids) != 0 {
+		t.Fatalf("SearchByTag = %v/%v (%v)", cids, mids, err)
+	}
+	cids, mids, err = s.SearchByTags(ctx, []string{authTag, handlerTag})
+	if err != nil || !hasID(cids, classID) || len(mids) != 0 {
+		t.Fatalf("SearchByTags AND = %v/%v (%v)", cids, mids, err)
+	}
+	cids, _, err = s.SearchByTags(ctx, []string{authTag, asyncTag})
+	if err != nil || len(cids) != 0 {
+		t.Fatalf("SearchByTags 跨类/方法不应命中: %v (%v)", cids, err)
+	}
+	all, err := s.GetAllTagsWithCategories(ctx)
+	if err != nil {
+		t.Fatalf("GetAllTagsWithCategories: %v", err)
+	}
+	for _, tag := range []string{authTag, handlerTag, asyncTag} {
+		if all[tag] == "" {
+			t.Fatalf("tag %q missing category: %v", tag, all)
+		}
+	}
+	// 全量替换：旧标签应清空
+	if err := s.UpsertTags(ctx, classID, []string{authTag}); err != nil {
+		t.Fatalf("re-UpsertTags: %v", err)
+	}
+	classTags, err = s.GetTagsByClassID(ctx, classID)
+	if err != nil || !sameSet(classTags, []string{authTag}) {
+		t.Fatalf("class tags replace failed: %v (%v)", classTags, err)
+	}
+	_ = betaID
+
+	// 5) BulkUpsert：多文件写入 + 再次调用全量替换（无残留旧方法）
+	p1 := fmt.Sprintf("/tmp/pg-bulk/a-%d.go", time.Now().UnixNano())
+	p2 := fmt.Sprintf("/tmp/pg-bulk/b-%d.go", time.Now().UnixNano())
+	bulk := []*parser.IRDocument{
+		{
+			Source: "pg-bulk", Language: "go", FilePath: p1, FileHash: "b1",
+			Classes: []parser.ClassIR{{Name: "A", FullName: "pkg.A", Type: "CLASS"}},
+			Methods: []parser.MethodIR{{Name: "Old", ClassFQN: "pkg.A"}},
+		},
+		{
+			Source: "pg-bulk", Language: "go", FilePath: p2, FileHash: "b2",
+			Classes: []parser.ClassIR{{Name: "B", FullName: "pkg.B", Type: "CLASS"}},
+			Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.B"}},
+		},
+	}
+	if err := s.BulkUpsert(ctx, bulk); err != nil {
+		t.Fatalf("BulkUpsert: %v", err)
+	}
+	f1, err := s.GetFileByPath(ctx, p1)
+	if err != nil || f1 == nil {
+		t.Fatalf("bulk file1: %v", err)
+	}
+	cls1, err := s.GetClassesByFileID(ctx, f1.ID)
+	if err != nil || len(cls1) != 1 {
+		t.Fatalf("bulk classes: %v n=%d", err, len(cls1))
+	}
+	ms1, err := s.GetMethodsByClassID(ctx, cls1[0].ID)
+	if err != nil || len(ms1) != 1 || ms1[0].Name != "Old" {
+		t.Fatalf("bulk methods: %v %+v", err, ms1)
+	}
+	// 第二次 BulkUpsert：A 收敛为单个 New 方法
+	bulk[0].FileHash = "b1-v2"
+	bulk[0].Methods = []parser.MethodIR{{Name: "New", ClassFQN: "pkg.A"}}
+	if err := s.BulkUpsert(ctx, bulk); err != nil {
+		t.Fatalf("re-BulkUpsert: %v", err)
+	}
+	cls1, err = s.GetClassesByFileID(ctx, f1.ID)
+	if err != nil || len(cls1) != 1 {
+		t.Fatalf("re-bulk classes: %v n=%d", err, len(cls1))
+	}
+	ms1, err = s.GetMethodsByClassID(ctx, cls1[0].ID)
+	if err != nil || len(ms1) != 1 || ms1[0].Name != "New" {
+		t.Fatalf("bulk replace failed: %v %+v", err, ms1)
+	}
+
+	// 清理
+	_ = s.DeleteFile(ctx, file.ID)
+	_ = s.DeleteFile(ctx, skippedID)
+	_ = s.DeleteFile(ctx, upsertID)
+	_ = s.DeleteFile(ctx, f1.ID)
+	if f2, err := s.GetFileByPath(ctx, p2); err == nil && f2 != nil {
+		_ = s.DeleteFile(ctx, f2.ID)
+	}
+}
+
+// TestPGStore_DirectUpsertClassesMethodsCalls 覆盖 Store 接口中三个「全量替换」
+// 写入口的独立调用路径：此前只有 UpsertIR/BulkUpsert 的内部事务路径被验证，
+// 直接调用 UpsertClasses/UpsertMethods/UpsertCalls 的行为（含二次调用清空旧数据、
+// UpsertClasses 级联清理旧方法）没有断言。
+func TestPGStore_DirectUpsertClassesMethodsCalls(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	path := fmt.Sprintf("/tmp/pg-direct/direct-%d.go", time.Now().UnixNano())
+	fileID, err := s.UpsertFile(ctx, path, "direct-hash", 2, 64)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	defer func() { _ = s.DeleteFile(ctx, fileID) }()
+
+	// 1) UpsertClasses 直接调用
+	if err := s.UpsertClasses(ctx, fileID, []parser.ClassIR{
+		{Name: "Alpha", FullName: "pkg.Alpha", Type: "CLASS", StartLine: 1, EndLine: 20},
+	}); err != nil {
+		t.Fatalf("UpsertClasses: %v", err)
+	}
+	classes, err := s.GetClassesByFileID(ctx, fileID)
+	if err != nil || len(classes) != 1 || classes[0].FullName != "pkg.Alpha" {
+		t.Fatalf("classes after UpsertClasses: %v %+v", err, classes)
+	}
+	classID := classes[0].ID
+
+	// 2) UpsertMethods 直接调用 + 二次全量替换
+	if err := s.UpsertMethods(ctx, classID, []parser.MethodIR{
+		{Name: "Old", ClassFQN: "pkg.Alpha"},
+		{Name: "Keep", ClassFQN: "pkg.Alpha"},
+	}); err != nil {
+		t.Fatalf("UpsertMethods: %v", err)
+	}
+	methods, err := s.GetMethodsByClassID(ctx, classID)
+	if err != nil || len(methods) != 2 {
+		t.Fatalf("methods after UpsertMethods: %v %+v", err, methods)
+	}
+	if err := s.UpsertMethods(ctx, classID, []parser.MethodIR{
+		{Name: "Keep", ClassFQN: "pkg.Alpha"},
+	}); err != nil {
+		t.Fatalf("re-UpsertMethods: %v", err)
+	}
+	methods, err = s.GetMethodsByClassID(ctx, classID)
+	if err != nil || len(methods) != 1 || methods[0].Name != "Keep" {
+		t.Fatalf("methods replace failed: %v %+v", err, methods)
+	}
+
+	// 3) UpsertCalls 直接调用 + 二次全量替换
+	if err := s.UpsertCalls(ctx, fileID, []parser.CallIR{
+		{CallerFQN: "pkg.Alpha.Old", CalleeFQN: "pkg.Alpha.Keep", CallType: "direct", LineNumber: 3, Confidence: 90},
+	}); err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+	calls, err := s.GetCallsByFileID(ctx, fileID)
+	if err != nil || len(calls) != 1 || calls[0].CallerFQN != "pkg.Alpha.Old" {
+		t.Fatalf("calls after UpsertCalls: %v %+v", err, calls)
+	}
+	if err := s.UpsertCalls(ctx, fileID, []parser.CallIR{
+		{CallerFQN: "pkg.Alpha.Keep", CalleeFQN: "pkg.Alpha.Keep", CallType: "direct", LineNumber: 4, Confidence: 90},
+	}); err != nil {
+		t.Fatalf("re-UpsertCalls: %v", err)
+	}
+	calls, err = s.GetCallsByFileID(ctx, fileID)
+	if err != nil || len(calls) != 1 || calls[0].CallerFQN != "pkg.Alpha.Keep" {
+		t.Fatalf("calls replace failed: %v %+v", err, calls)
+	}
+
+	// 4) UpsertClasses 空集合：类与方法一并清空（全量替换 + 级联）
+	if err := s.UpsertClasses(ctx, fileID, nil); err != nil {
+		t.Fatalf("clear classes: %v", err)
+	}
+	classes, err = s.GetClassesByFileID(ctx, fileID)
+	if err != nil || len(classes) != 0 {
+		t.Fatalf("classes not cleared: %v %+v", err, classes)
+	}
+	methods, err = s.GetMethodsByClassID(ctx, classID)
+	if err != nil || len(methods) != 0 {
+		t.Fatalf("methods not cascaded: %v %+v", err, methods)
+	}
+}
+
+// seedTaggedIR 写入一个含两个方法的合成 IR，返回文件/类/方法 ID。
+func seedTaggedIR(t *testing.T, ctx context.Context, s *PGStore) (*store.FileRecord, int64, int64, int64) {
+	t.Helper()
+	path := fmt.Sprintf("/tmp/pg-tags/file-%d.go", time.Now().UnixNano())
+	ir := &parser.IRDocument{
+		Source: "pg-tags", Language: "go", FilePath: path, FileHash: "tag-hash",
+		Classes: []parser.ClassIR{{Name: "Tagged", FullName: "pkg.Tagged", Type: "CLASS"}},
+		Methods: []parser.MethodIR{
+			{Name: "Alpha", ClassFQN: "pkg.Tagged"},
+			{Name: "Beta", ClassFQN: "pkg.Tagged"},
+		},
+	}
+	if err := s.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("seed UpsertIR: %v", err)
+	}
+	file, err := s.GetFileByPath(ctx, path)
+	if err != nil || file == nil {
+		t.Fatalf("seed GetFileByPath: %v", err)
+	}
+	classes, err := s.GetClassesByFileID(ctx, file.ID)
+	if err != nil || len(classes) != 1 {
+		t.Fatalf("seed classes: %v n=%d", err, len(classes))
+	}
+	methods, err := s.GetMethodsByClassID(ctx, classes[0].ID)
+	if err != nil || len(methods) != 2 {
+		t.Fatalf("seed methods: %v n=%d", err, len(methods))
+	}
+	alpha, beta := int64(0), int64(0)
+	for _, m := range methods {
+		switch m.Name {
+		case "Alpha":
+			alpha = m.ID
+		case "Beta":
+			beta = m.ID
+		}
+	}
+	if alpha == 0 || beta == 0 {
+		t.Fatalf("seed method ids not found: %+v", methods)
+	}
+	return file, classes[0].ID, alpha, beta
+}
+
+func sameSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	m := make(map[string]int, len(got))
+	for _, s := range got {
+		m[s]++
+	}
+	for _, s := range want {
+		m[s]--
+		if m[s] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func hasID(ids []int64, want int64) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestPGStore_MethodFullNameRoundTrip 负控（P1-5）：
 // method.full_name 必须持久化并可回读；否则测试关联/标签/context 在 PG 上失效。
 func TestPGStore_MethodFullNameRoundTrip(t *testing.T) {

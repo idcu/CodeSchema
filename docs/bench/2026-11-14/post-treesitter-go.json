@@ -1,92 +1,65 @@
 {
-  "timestamp": "2026-11-14T05:22:17Z",
+  "timestamp": "2026-11-14T05:54:08Z",
   "repo": "code-schema",
-  "commit": "a8fd6e7aab4e99c72799426532fc862733583582",
+  "commit": "5265541e36ba1c1feb8eacd83d437120e3647e99",
   "language": "go",
   "build_variant": "treesitter",
   "files": 229,
   "prod_files": 125,
   "test_files": 104,
-  "prod_methods": 1413,
-  "test_methods": 1175,
-  "ground_truth_pairs": 2265,
-  "sampled_pairs": 189,
+  "prod_methods": 1417,
+  "test_methods": 1185,
+  "ground_truth_pairs": 2373,
+  "sampled_pairs": 198,
   "sampled": true,
-  "prods_evaluated": 135,
-  "predicted_links": 1683,
+  "prods_evaluated": 142,
+  "predicted_links": 1719,
   "test_link": {
-    "tp": 1516,
-    "fp": 16,
+    "tp": 1567,
+    "fp": 19,
     "fn": 18,
-    "precision": 0.9896,
-    "recall": 0.9883,
-    "f1": 0.9889
+    "precision": 0.988,
+    "recall": 0.9886,
+    "f1": 0.9883
   },
   "call_graph": {
     "adapter": "treesitter",
     "build_variant": "treesitter",
-    "calls": 20210,
-    "unique_callers": 2222,
-    "unique_callees": 2925,
-    "resolved_calls": 4511,
-    "resolution_rate": 0.2232,
-    "repo_resolvable": 4516,
-    "repo_resolvable_resolved": 4511,
-    "repo_resolution_rate": 0.9989
+    "calls": 20452,
+    "unique_callers": 2235,
+    "unique_callees": 2971,
+    "resolved_calls": 4543,
+    "resolution_rate": 0.2221,
+    "repo_resolvable": 4676,
+    "repo_resolvable_resolved": 4543,
+    "repo_resolution_rate": 0.9716
   },
   "manual_truth": {
     "dataset": "internal/releasebench/testdata/manual-truth.json",
     "repo": "code-schema",
-    "commit": "a8fd6e7aab4e99c72799426532fc862733583582",
+    "commit": "5265541e36ba1c1feb8eacd83d437120e3647e99",
     "language": "go",
     "build_variant": "treesitter",
     "test_files": [
-      "internal/server/mcp_stdio_test.go",
-      "internal/service/testlink_test.go"
+      "internal/service/service_test.go",
+      "internal/service/testlink_test.go",
+      "internal/store/filestore_test.go"
     ],
-    "in_scope_tests": 55,
-    "truth_pairs": 27,
-    "predicted_in_scope": 27,
+    "in_scope_tests": 109,
+    "truth_pairs": 167,
+    "predicted_in_scope": 170,
     "entries": [
       {
-        "production": "Service.FindTestLinks",
+        "production": "FileStore.BulkUpsert",
         "truth": [
-          "service.TestFindTestLinks_CallGraphBehavioralName",
-          "service.TestFindTestLinks_Dependency",
-          "service.TestFindTestLinks_EmptyMethod",
-          "service.TestFindTestLinks_Explicit",
-          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
-          "service.TestFindTestLinks_Explicit_MethodLevel",
-          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
-          "service.TestFindTestLinks_GoPackageLevelTests",
-          "service.TestFindTestLinks_JavaTestsSuffix",
-          "service.TestFindTestLinks_MultipleTestClassesPerSource",
-          "service.TestFindTestLinks_Naming",
-          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
-          "service.TestFindTestLinks_NoTestFiles",
-          "service.TestFindTestLinks_SameDirNonGoNotDependency",
-          "service.TestFindTestLinks_SameTag",
-          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_ReindexRemovesStaleMethods"
         ],
         "predicted": [
-          "service.TestFindTestLinks_CallGraphBehavioralName",
-          "service.TestFindTestLinks_Dependency",
-          "service.TestFindTestLinks_EmptyMethod",
-          "service.TestFindTestLinks_Explicit",
-          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
-          "service.TestFindTestLinks_Explicit_MethodLevel",
-          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
-          "service.TestFindTestLinks_GoPackageLevelTests",
-          "service.TestFindTestLinks_JavaTestsSuffix",
-          "service.TestFindTestLinks_MultipleTestClassesPerSource",
-          "service.TestFindTestLinks_Naming",
-          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
-          "service.TestFindTestLinks_NoTestFiles",
-          "service.TestFindTestLinks_SameDirNonGoNotDependency",
-          "service.TestFindTestLinks_SameTag",
-          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_ReindexRemovesStaleMethods"
         ],
-        "tp": 16,
+        "tp": 2,
         "fp": 0,
         "fn": 0,
         "precision": 1,
@@ -94,12 +67,833 @@
         "f1": 1
       },
       {
-        "production": "service.matchesTestMethod",
+        "production": "FileStore.Close",
         "truth": [
-          "service.TestMatchesTestMethod"
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_HealthCheck",
+          "store.TestFileStore_OpenClose",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
         ],
         "predicted": [
-          "service.TestMatchesTestMethod"
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_HealthCheck",
+          "store.TestFileStore_OpenClose",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "tp": 13,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.DeleteFile",
+        "truth": [
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.GetCallsByFileID",
+        "truth": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip"
+        ],
+        "predicted": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.GetClassesByFileID",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.GetFileByPath",
+        "truth": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "predicted": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.GetMethodsByClassID",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.GetTagsByMethodID",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.HealthCheck",
+        "truth": [
+          "store.TestFileStore_HealthCheck"
+        ],
+        "predicted": [
+          "store.TestFileStore_HealthCheck"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.Open",
+        "truth": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_HealthCheck",
+          "store.TestFileStore_OpenClose",
+          "store.TestFileStore_OpenRejectsCorruptStore",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "predicted": [
+          "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_HealthCheck",
+          "store.TestFileStore_OpenClose",
+          "store.TestFileStore_OpenRejectsCorruptStore",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "tp": 14,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.SearchByTags",
+        "truth": [
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "predicted": [
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertCalls",
+        "truth": [
+          "store.TestFileStore_CallMetaRoundTrip"
+        ],
+        "predicted": [
+          "store.TestFileStore_CallMetaRoundTrip"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertClasses",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertFile",
+        "truth": [
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile"
+        ],
+        "predicted": [
+          "store.TestFileStore_CallMetaRoundTrip",
+          "store.TestFileStore_DeleteFile",
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_Persistence",
+          "store.TestFileStore_SaveIsAtomic",
+          "store.TestFileStore_SearchByTags_MethodTags",
+          "store.TestFileStore_SearchByTags_MultiTagAND",
+          "store.TestFileStore_UpsertAndGetFile"
+        ],
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertIR",
+        "truth": [
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "predicted": [
+          "store.TestFileStore_ReindexRemovesStaleMethods",
+          "store.TestFileStore_UpsertIR"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertMethodTags",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertMethods",
+        "truth": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "predicted": [
+          "store.TestFileStore_DeleteFileClearsMethodTags",
+          "store.TestFileStore_SearchByTags_MethodTags"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "FileStore.UpsertTags",
+        "truth": [
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "predicted": [
+          "store.TestFileStore_SearchByTags_MultiTagAND"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.NewService",
+        "truth": [
+          "service.TestCoverageStrategyRemoved",
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch",
+          "service.TestGetAffected_NormalizesBareName",
+          "service.TestGetAffected_ReturnsLinkedTests",
+          "service.TestGetAffected_StableOrder",
+          "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+          "service.TestSearchConfig_MatchSymbolDoc",
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted",
+          "service.TestSearch_Disambiguate_NoEnhancer",
+          "service.newTestService"
+        ],
+        "predicted": [
+          "service.TestCoverageStrategyRemoved",
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch",
+          "service.TestGetAffected_NormalizesBareName",
+          "service.TestGetAffected_ReturnsLinkedTests",
+          "service.TestGetAffected_StableOrder",
+          "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+          "service.TestSearchConfig_MatchSymbolDoc",
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted",
+          "service.TestSearch_Disambiguate_NoEnhancer",
+          "service.newTestService"
+        ],
+        "tp": 27,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.FindDependencies",
+        "truth": [
+          "service.TestFindDependencies_EmptySymbol"
+        ],
+        "predicted": [
+          "service.TestFindDependencies_EmptySymbol"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.FindTestLinks",
+        "truth": [
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+        ],
+        "predicted": [
+          "service.TestFindTestLinks_CallGraphBehavioralName",
+          "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
+          "service.TestFindTestLinks_Dependency",
+          "service.TestFindTestLinks_EmptyMethod",
+          "service.TestFindTestLinks_Explicit",
+          "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+          "service.TestFindTestLinks_Explicit_MethodLevel",
+          "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+          "service.TestFindTestLinks_GoPackageLevelTests",
+          "service.TestFindTestLinks_JavaTestsSuffix",
+          "service.TestFindTestLinks_MultipleTestClassesPerSource",
+          "service.TestFindTestLinks_Naming",
+          "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+          "service.TestFindTestLinks_NoTestFiles",
+          "service.TestFindTestLinks_SameDirNonGoNotDependency",
+          "service.TestFindTestLinks_SameTag",
+          "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
+        ],
+        "tp": 17,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.GetAffected",
+        "truth": [
+          "service.TestGetAffected_EmptySymbol",
+          "service.TestGetAffected_NormalizesBareName",
+          "service.TestGetAffected_RequiresSymbol",
+          "service.TestGetAffected_ReturnsLinkedTests",
+          "service.TestGetAffected_StableOrder"
+        ],
+        "predicted": [
+          "service.TestGetAffected_EmptySymbol",
+          "service.TestGetAffected_NormalizesBareName",
+          "service.TestGetAffected_RequiresSymbol",
+          "service.TestGetAffected_ReturnsLinkedTests",
+          "service.TestGetAffected_StableOrder"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.GetCallGraph",
+        "truth": [
+          "service.TestGetCallGraph_EmptySymbol"
+        ],
+        "predicted": [
+          "service.TestGetCallGraph_EmptySymbol"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.GetContext",
+        "truth": [
+          "service.TestGetContext_EmptySymbol",
+          "service.TestGetContext_Success",
+          "service.TestGetContext_TopLevelFunc_RealParse"
+        ],
+        "predicted": [
+          "service.TestGetContext_EmptySymbol",
+          "service.TestGetContext_Success",
+          "service.TestGetContext_TopLevelFunc_RealParse"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.GetImpact",
+        "truth": [
+          "service.TestGetImpact_EmptyMethod",
+          "service.TestGetImpact_Success",
+          "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+          "service.TestGetImpact_WithoutAnalyzer_EmptyBackwardCompat"
+        ],
+        "predicted": [
+          "service.TestGetImpact_EmptyMethod",
+          "service.TestGetImpact_Success",
+          "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+          "service.TestGetImpact_WithoutAnalyzer_EmptyBackwardCompat"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.GetTests",
+        "truth": [
+          "service.TestGetTests_EmptyMethod",
+          "service.TestGetTests_Success"
+        ],
+        "predicted": [
+          "service.TestGetTests_EmptyMethod",
+          "service.TestGetTests_Success"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.Health",
+        "truth": [
+          "service.TestHealth"
+        ],
+        "predicted": [
+          "service.TestHealth"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.Search",
+        "truth": [
+          "service.TestSearch_EmptyQuery",
+          "service.TestSearch_Success",
+          "service.TestSearch_WithSearcher",
+          "service.TestSearch_WithSearcher_ModeMapping"
+        ],
+        "predicted": [
+          "service.TestSearchByTags_MethodResult",
+          "service.TestSearchByTags_MultiTagAND",
+          "service.TestSearchByTags_Validation",
+          "service.TestSearchConfig_EmptyPattern",
+          "service.TestSearchConfig_MatchSymbolDoc",
+          "service.TestSearchConfig_NoHit",
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted",
+          "service.TestSearch_Disambiguate_NoEnhancer",
+          "service.TestSearch_EmptyQuery",
+          "service.TestSearch_Success",
+          "service.TestSearch_WithSearcher",
+          "service.TestSearch_WithSearcher_ModeMapping"
+        ],
+        "tp": 4,
+        "fp": 9,
+        "fn": 0,
+        "precision": 0.3077,
+        "recall": 1,
+        "f1": 0.4706
+      },
+      {
+        "production": "Service.SearchByTag",
+        "truth": [
+          "service.TestSearchByTags_MultiTagAND"
+        ],
+        "predicted": null,
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      {
+        "production": "Service.SearchByTags",
+        "truth": [
+          "service.TestSearchByTags_MethodResult",
+          "service.TestSearchByTags_MultiTagAND",
+          "service.TestSearchByTags_Validation"
+        ],
+        "predicted": [
+          "service.TestSearchByTags_MethodResult",
+          "service.TestSearchByTags_MultiTagAND",
+          "service.TestSearchByTags_Validation"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.SearchConfig",
+        "truth": [
+          "service.TestSearchConfig_EmptyPattern",
+          "service.TestSearchConfig_MatchSymbolDoc",
+          "service.TestSearchConfig_NoHit"
+        ],
+        "predicted": [
+          "service.TestSearchConfig_EmptyPattern",
+          "service.TestSearchConfig_MatchSymbolDoc",
+          "service.TestSearchConfig_NoHit"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.WithAIEnhancer",
+        "truth": [
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted"
+        ],
+        "predicted": null,
+        "tp": 0,
+        "fp": 0,
+        "fn": 2,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      {
+        "production": "Service.WithImpactAnalyzer",
+        "truth": [
+          "service.TestGetAffected_NormalizesBareName",
+          "service.TestGetAffected_StableOrder",
+          "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests"
+        ],
+        "predicted": null,
+        "tp": 0,
+        "fp": 0,
+        "fn": 3,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      {
+        "production": "Service.WithSearcher",
+        "truth": [
+          "service.TestSearch_WithSearcher",
+          "service.TestSearch_WithSearcher_ModeMapping"
+        ],
+        "predicted": [
+          "service.TestSearch_WithSearcher",
+          "service.TestSearch_WithSearcher_ModeMapping"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.disambiguateMethodResults",
+        "truth": [
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted",
+          "service.TestSearch_Disambiguate_NoEnhancer"
+        ],
+        "predicted": [
+          "service.TestSearch_Disambiguate",
+          "service.TestSearch_Disambiguate_BudgetExhausted",
+          "service.TestSearch_Disambiguate_NoEnhancer"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.enrichResults",
+        "truth": [
+          "service.TestEnrichResults_AlreadyFilled",
+          "service.TestEnrichResults_FillsKindAndFile"
+        ],
+        "predicted": [
+          "service.TestEnrichResults_AlreadyFilled",
+          "service.TestEnrichResults_FillsKindAndFile"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Service.resolveSymbol",
+        "truth": [
+          "service.TestResolveSymbol_Class",
+          "service.TestResolveSymbol_ClassWithInterfaceType",
+          "service.TestResolveSymbol_FQN",
+          "service.TestResolveSymbol_File",
+          "service.TestResolveSymbol_Invalid",
+          "service.TestResolveSymbol_Method"
+        ],
+        "predicted": [
+          "service.TestResolveSymbol_Class",
+          "service.TestResolveSymbol_ClassWithInterfaceType",
+          "service.TestResolveSymbol_FQN",
+          "service.TestResolveSymbol_File",
+          "service.TestResolveSymbol_Invalid",
+          "service.TestResolveSymbol_Method"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "ServiceError.HTTPStatus",
+        "truth": [
+          "service.TestServiceError_HTTPStatus"
+        ],
+        "predicted": [
+          "service.TestServiceError_HTTPStatus"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "store.containsAll",
+        "truth": [
+          "store.TestContainsAll"
+        ],
+        "predicted": [
+          "store.TestContainsAll"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.dirFromPath",
+        "truth": [
+          "service.TestDirFromPath"
+        ],
+        "predicted": [
+          "service.TestDirFromPath"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "service.extractClassFQN",
+        "truth": [
+          "service.TestExtractClassFQN"
+        ],
+        "predicted": [
+          "service.TestExtractClassFQN"
         ],
         "tp": 1,
         "fp": 0,
@@ -139,12 +933,12 @@
         "f1": 1
       },
       {
-        "production": "service.dirFromPath",
+        "production": "service.matchesTestMethod",
         "truth": [
-          "service.TestDirFromPath"
+          "service.TestMatchesTestMethod"
         ],
         "predicted": [
-          "service.TestDirFromPath"
+          "service.TestMatchesTestMethod"
         ],
         "tp": 1,
         "fp": 0,
@@ -169,6 +963,21 @@
         "f1": 1
       },
       {
+        "production": "service.parseInt64",
+        "truth": [
+          "service.TestParseInt64"
+        ],
+        "predicted": [
+          "service.TestParseInt64"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
         "production": "service.resolveExplicitClass",
         "truth": [
           "service.TestResolveExplicitClass"
@@ -184,22 +993,14 @@
         "f1": 1
       },
       {
-        "production": "MCPServer.serveStdio",
+        "production": "service.sortByConfidenceDesc",
         "truth": [
-          "server.TestMCPServer_Stdio_EOF",
-          "server.TestMCPServer_Stdio_InvalidJSON",
-          "server.TestMCPServer_Stdio_ToolsList",
-          "server.TestMCP_Stdio_LineDelimitedJSON",
-          "server.TestMCP_Stdio_ParseErrorHasNullID"
+          "service.TestSortByConfidenceDesc"
         ],
         "predicted": [
-          "server.TestMCPServer_Stdio_EOF",
-          "server.TestMCPServer_Stdio_InvalidJSON",
-          "server.TestMCPServer_Stdio_ToolsList",
-          "server.TestMCP_Stdio_LineDelimitedJSON",
-          "server.TestMCP_Stdio_ParseErrorHasNullID"
+          "service.TestSortByConfidenceDesc"
         ],
-        "tp": 5,
+        "tp": 1,
         "fp": 0,
         "fn": 0,
         "precision": 1,
@@ -208,12 +1009,12 @@
       }
     ],
     "micro": {
-      "tp": 27,
-      "fp": 0,
-      "fn": 0,
-      "precision": 1,
-      "recall": 1,
-      "f1": 1
+      "tp": 161,
+      "fp": 9,
+      "fn": 6,
+      "precision": 0.9471,
+      "recall": 0.9641,
+      "f1": 0.9555
     }
   }
 }

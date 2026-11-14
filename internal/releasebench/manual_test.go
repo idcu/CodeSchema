@@ -11,11 +11,20 @@ func TestManualDatasetValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if ds.Version != 1 {
-		t.Fatalf("version = %d, want 1", ds.Version)
+	if ds.Version != 2 {
+		t.Fatalf("version = %d, want 2", ds.Version)
 	}
 	if len(ds.Repos) < 2 {
 		t.Fatalf("repos = %d, want >= 2 (go + java)", len(ds.Repos))
+	}
+	pairs := 0
+	for _, repo := range ds.Repos {
+		for _, e := range repo.Entries {
+			pairs += len(e.Tests)
+		}
+	}
+	if pairs < 200 {
+		t.Fatalf("truth pairs = %d, want >= 200（45 对样本量不足，v2 起守住扩展规模）", pairs)
 	}
 	for name, repo := range ds.Repos {
 		if repo.Language == "" {

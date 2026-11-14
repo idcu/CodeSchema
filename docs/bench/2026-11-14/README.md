@@ -5,7 +5,8 @@
 首轮公开基准：在 3 个真实仓库上测「测试关联 P/R/F1」与「调用图结构指标」。
 **只报告、不设 CI 阈值**（roadmap R5-4）；原始数据见同目录 `before-*.json`（S-2 首轮）、
 `baseline-r59-*.json`（R5-9 口径修正后、召回修复前）、`after-*.json`（R5-11 后）、
-`final-*.json`（R5-12/R5-13 后，含人工真值评估）、`manual-pre184-go.json`（人工真值的修复前对照）。
+`final-*.json`（R5-12/R5-13 后的历史归档，人工真值仍为 45 对）、`post-*.json`（本轮终态，
+人工真值 207 对 + 解析/链接修复后）、`manual-pre184-go.json`（人工真值的修复前对照）。
 
 ## 口径
 
@@ -269,34 +270,71 @@ caller 为空 36 → 30，净移除 6 条假边。剩余 30 条为包级 `var` �
 策略结果来自「扫描 → 入库 → 反查」链路。因此接近饱和的数字衡量的是**链路完整性
 与 FQN 归一**，不再证明某种独立启发式的判别力。这正是下面引入人工真值的原因。
 
-## 人工真值（独立来源，S-2h）
+## 人工真值（独立来源，S-2h；2026-11-14 扩至 207 对）
 
-数据集：`internal/releasebench/testdata/manual-truth.json`。真值由**逐个阅读测试方法体**
-手工标注（Go 直接调用；Java 为 MockMvc 触发的 controller 方法），**不来自 IR 调用边**。
-IR 只用于枚举「标注测试文件内的方法」，作为评估范围（闭合世界）：
+数据集：`internal/releasebench/testdata/manual-truth.json`（`version: 2`）。
+真值由**逐个阅读测试方法体**手工标注，**不来自 IR 调用边**，也不使用
+`call_graph` 策略的中间结果。IR 只用于枚举「标注测试文件内的方法」，作为评估范围：
 
 - 范围内的误报计 FP；范围外的预测**忽略**（未标注文件不参与分母）；
 - 范围内漏掉的标注测试计 FN；
 - 评估前自检：生产方法必须存在于方法索引、真值测试必须位于标注文件内，防止标注漂移。
 
-规模：2 个仓库、14 个生产方法、45 条人工 pair（Go 27 / Java 18）。
-Go 由 28 降为 27：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步移除该失效引用，
-本次只修数据有效性，判分口径未变。命令：
+### 标注规则（v2）
+
+1. **候选生成（纯文本）**：对标注测试文件的每个函数/方法体按花括号配对截取，再用
+   `receiver.Method(` / `Method(` 正则抽候选；随后逐条阅读测试体与生产方法签名，
+   确认接收者类型。候选生成阶段不读索引、不读 IR 调用边。
+2. **纳入**：接收者类型可由声明（结构体字段、局部变量、构造实参）静态确定的直接调用；
+   Java 为 MockMvc 触发、且测试体内显式引用被测 controller/handler 的调用。
+3. **排除**：接口字段/容器动态派发（`st := store.NewStore("file")` 后的 `st.*`、
+   `svc.store.*`）、mock 实现、反射/事件回调、只由字符串或注解间接触发的行为。
+4. **FQN 口径**：Go 生产方法 `Type.Method`、包级函数 `pkg.Func`，测试 `pkg.TestX`；
+   Java 生产 `Class.method`，测试方法（含嵌套类）统一归最外层类。
+5. **闭合世界**：只评测标注文件内的方法集合；范围外预测忽略，避免未标注文件稀释 FP。
+6. **规模守护**：`TestManualDatasetValid` 要求 `version == 2` 且 `pairs >= 200`，
+   防止数据集回退到不足统计意义的规模。
+7. **置信说明**：比例指标给出 **Wilson 95% 置信区间**（二项分布，不对称近似）；
+   207 对样本下 Go recall 的区间半宽约 ±3pp，Java 40 对约 ±9pp。
+
+规模：2 个仓库、**207 条人工 pair（Go 167 / Java 40）**；Go 标注
+`internal/store/filestore_test.go`、`internal/service/testlink_test.go`、
+`internal/service/service_test.go`，Java 标注 4 个测试类。命令：
 
 ```bash
 release-bench --repo <repo> --lang <lang> \
   --manual-truth internal/releasebench/testdata/manual-truth.json --out <dir>
 ```
 
-| 仓库 | 变体 | 真值 pair | TP | FP | FN | Precision | Recall | F1 |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 27 | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
-| code-schema (go) | treesitter | 27 | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
-| petclinic (java) | regex | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
-| petclinic (java) | treesitter | 18 | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+### 扩展前后（同命令、同口径）
 
-> 同目录 `final-*-go.json` / `manual-pre184-go.json` 为修复前的归档原始数据，
-> 其中的 28 条 pair 含已删除的 `TestFindTestLinks_Coverage`，仅作历史证据，不再作为当前基线。
+扩展前为 45 对（Go 27 / Java 18），扩展后为 207 对。扩展过程中发现并修复了
+4 个引擎缺陷（Java 行内注解方法、包限定 callee 解析、Go 跨行调用、AST Go 局部变量
+类型），另修复 2 个 treesitter 一致性问题（Java 嵌套类 FQN、`new X().m()` 提取）。
+
+| 仓库 | 变体 | 规模 | TP | FP | FN | Precision | Recall | F1 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| code-schema (go) | regex | 27（v1） | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | regex | 167（v2） | 160 | 9 | 7 | 0.9467 | 0.9581 | 0.9524 |
+| code-schema (go) | treesitter | 27（v1） | 27 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | treesitter | 167（v2） | 161 | 9 | 6 | 0.9471 | 0.9641 | 0.9555 |
+| petclinic (java) | regex | 18（v1） | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| petclinic (java) | regex | 40（v2） | 40 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| petclinic (java) | treesitter | 18（v1） | 18 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| petclinic (java) | treesitter | 40（v2） | 40 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 |
+
+Wilson 95% 置信区间（v2）：
+
+| 仓库 | 变体 | Precision（95% CI） | Recall（95% CI） |
+|---|---|---|---|
+| code-schema (go) | regex | 0.9467（0.9019–0.9717） | 0.9581（0.9160–0.9796） |
+| code-schema (go) | treesitter | 0.9471（0.9025–0.9719） | 0.9641（0.9238–0.9834） |
+| petclinic (java) | regex / treesitter | 1.0000（0.9124–1.0000） | 1.0000（0.9124–1.0000） |
+
+> v1 的 1.0000 是 27/18 对小样本下的饱和，不能外推。扩展后 Go 的 9 条 FP 集中在
+> 命名策略对 `Service.Search`（9 条）的过匹配；7 条 FN 为接收者类型需跨语句推导
+> （`svc := newTestService(t)`）与嵌套调用（`TypeOf(NewService(...))`）抽取不到，
+> 已在数据集 `note` 中逐条记录。Java 40 对仍全中。
 
 **这套真值确实能挡住回归**：在 R5-12 修复前（临时移除 `EnsureMethodOwners`）用同一数据集
 实测 Go regex 为 **TP 6 / FN 22 / Recall 0.2143 / F1 0.3530**，缺口精确落在
@@ -307,15 +345,16 @@ release-bench --repo <repo> --lang <lang> \
 
 | 维度 | 自动真值（`test_link`） | 人工真值（`manual_truth`） |
 |---|---|---|
-| 来源 | IR 直接调用边 | 人工阅读测试体 |
-| 覆盖 | 全仓全部可解析 pair（采样评估 200 个生产方法） | 14 个生产方法、2 个测试文件（闭合标注） |
+| 来源 | IR 直接调用边 | 人工阅读测试体（纯文本候选 + 人工确认） |
+| 覆盖 | 全仓全部可解析 pair（采样评估 200 个生产方法） | 167（Go）+ 40（Java）条 pair、7 个标注测试文件/类 |
 | 范围外预测 | 计 FP | 忽略（未标注文件不参与） |
 | 主要用途 | 发现链路/FQN 断裂（如 R5-12），衡量规模与吞吐 | 验证判别语义是否正确，防止「自己印证自己」 |
-| 已知盲区 | 与 `call_graph` 同源；IR 解析不到的合法调用会**漏入真值**，把正确预测误判为 FP | 规模小、标注成本高；只覆盖选定方法 |
+| 已知盲区 | 与 `call_graph` 同源；IR 解析不到的合法调用会**漏入真值**，把正确预测误判为 FP | 只覆盖选定方法；接口派发类调用按规则不计入 |
 
 > 自动口径中剩下的 FP 多为命名策略命中「IR 未解析到的真实调用」（如
 > `BenchmarkCollection_Query_* → Collection.Query`），按人工语义并非误报——
 > 这也是两套口径需要并排展示、不能互相替代的原因。
+
 
 
 ## 调用图
@@ -332,16 +371,16 @@ release-bench --repo <repo> --lang <lang> \
 > 本仓 calls 的增量来自本轮新增的评估器源码（语料变大），分辨率基本不变；
 > 仍 < 0.22，跨类 receiver 消歧是后续条目。
 
-## 最终复测（caller 归属与 treesitter 变体修复后）
+## 最终复测（人工真值 207 对 + 调用图修复后）
 
-两变体 × 三仓，命令与上面一致；原始数据 `post-<变体>-<仓库>.json`。
+两变体 × 三仓，命令与上面一致；原始数据 `post-<变体>-<仓库>.json`（commit `5265541`）。
 
 | 仓库 | 变体 | 测试对（真值/采样） | 预测链接 | TP | FP | FN | F1 | calls | resolved | resolution |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 2141 / 195 | 1484 | 1484 | 30 | 15 | 0.9851 | 15532 | 4149 | 0.2671 |
-| code-schema (go) | treesitter | 2265 / 189 | 1516 | 1516 | 16 | 18 | 0.9889 | 20210 | 4511 | 0.2232 |
-| petclinic (java) | regex | 128 / 128 | 123 | 123 | 0 | 5 | 0.9801 | 1184 | 216 | 0.1824 |
-| petclinic (java) | treesitter | 167 / 167 | 160 | 160 | 0 | 7 | 0.9786 | 1609 | 304 | 0.1889 |
+| code-schema (go) | regex | 2284 / 191 | 1677 | 1521 | 16 | 23 | 0.9873 | 16327 | 4315 | 0.2643 |
+| code-schema (go) | treesitter | 2373 / 198 | 1719 | 1567 | 19 | 18 | 0.9883 | 20452 | 4543 | 0.2221 |
+| petclinic (java) | regex | 128 / 128 | 126 | 123 | 0 | 5 | 0.9801 | 1183 | 215 | 0.1817 |
+| petclinic (java) | treesitter | 167 / 167 | 164 | 160 | 0 | 7 | 0.9786 | 1609 | 304 | 0.1889 |
 | lytd (ts) | regex | 0 / 0 | 0 | — | — | — | — | 349 | 61 | 0.1748 |
 | lytd (ts) | treesitter | 0 / 0 | 0 | — | — | — | — | 413 | 93 | 0.2252 |
 
@@ -349,18 +388,21 @@ release-bench --repo <repo> --lang <lang> \
 
 | 仓库 | 变体 | 仓内候选边 | 仓内已解析 | 仓内 resolution |
 |---|---|---:|---:|---:|
-| code-schema (go) | regex | 4310 | 4149 | 0.9626 |
-| code-schema (go) | treesitter | 4516 | 4511 | 0.9989 |
-| petclinic (java) | regex | 219 | 216 | 0.9863 |
+| code-schema (go) | regex | 4485 | 4315 | 0.9621 |
+| code-schema (go) | treesitter | 4676 | 4543 | 0.9716 |
+| petclinic (java) | regex | 218 | 215 | 0.9862 |
 | petclinic (java) | treesitter | 307 | 304 | 0.9902 |
 | lytd (ts) | regex | 61 | 61 | 1.0000 |
 | lytd (ts) | treesitter | 93 | 93 | 1.0000 |
 
-人工真值（Go 27 / Java 18）两变体均 TP=真值、FP=FN=0、F1=1.0000。
+人工真值（Go 167 / Java 40，共 207 对）：Go regex TP 160 / FP 9 / FN 7、F1 0.9524；
+Go treesitter TP 161 / FP 9 / FN 6、F1 0.9555；Java 两变体 40/40、F1 1.0000。
 
-> 自动口径 F1 由 0.9983 降到 0.9851 / 0.9889 的原因：解析器补齐后测试方法总数与
-> pair 数上升（Go 2141 → 2265），新增方法里有 15–18 条关联未被策略命中；
-> 这是覆盖率扩大后的真实 FN，不是既有链路上的回退。
+> 自动口径 F1 0.9873 / 0.9883 低于 v1 小样本的 1.0000：真值 pair 随解析覆盖扩大而增长
+> （Go regex 2141 → 2284、treesitter 2265 → 2373），新增 pair 中有 18–23 条关联未被
+> 策略命中；这是覆盖率扩大后的真实 FN，不是既有链路上的回退。调用图 treesitter
+> 仓内 resolution 由 0.9989 降到 0.9716，原因是局部变量类型限定后更多裸 selector 进入
+> 「仓内候选」分母，而跨包/接口派发的部分仍未解析。
 
 ## 结论与根因
 
@@ -392,9 +434,11 @@ release-bench --repo <repo> --lang <lang> \
 8. **Go `Test*` 生产类型误判（已修，R5-13 / S-2g）。** 名称前缀判定让
    `TestLink`/`TestResult` 所在的生产文件整体被当作测试文件；现 Go 仅在 `*_test.go`
    内做名称判定，生产方法的调用不再出现在「测试方法」结果里。
-9. **人工真值（新增，S-2h）。** 与 `call_graph` 不同源的 14 个生产方法 / 45 条 pair，
-   独立给出 P/R/F1（本轮 1.0），并已被证明能捕获 R5-12 这类「自动真值一起消失」的回归。
+9. **人工真值（S-2h，v2 已扩展）。** 与 `call_graph` 不同源的 **207 条 pair**
+   （Go 167 / Java 40），独立给出 P/R/F1 与 Wilson 95% CI（Go regex F1 0.9524、
+   treesitter 0.9555，Java 1.0000），并已被证明能捕获 R5-12 这类
+   「自动真值一起消失」的回归。
 10. **仍偏低/未覆盖（不静默删除）**：TS 的 Jest `it/test` 回调仍不在本轮范围（真值 0）；
     调用图全量分辨率 < 0.27，跨类 receiver 消歧不足；自动口径残余 FP 主要是
-    「IR 未解析到的真实调用被命名策略命中」，需继续缩小与人工语义的差距；人工真值规模
-    仍小（14 个方法），后续按清单扩充。
+    「IR 未解析到的真实调用被命名策略命中」，需继续缩小与人工语义的差距；人工真值
+    覆盖仍限于 code-schema 与 petclinic 两仓，后续按清单扩充。

@@ -1,71 +1,560 @@
 {
-  "version": 1,
-  "note": "人工标注真值：逐条阅读测试方法体，记录其直接验证的生产方法（Go 为直接调用，Java 为 MockMvc 触发的 controller 方法）。真值不来自 IR 调用边，与 call_graph 策略不同源；IR 仅用于枚举标注测试文件内的方法作为评估范围。",
+  "version": 2,
+  "note": "人工标注真值（扩展版）：先以纯文本检索列出候选调用点，再逐条阅读测试方法体与接收者类型确认；不使用 IR 调用边或 FindTestLinks 输出。仅收录接收者可静态确定的直接调用；接口字段动态派发、mock 实现、反射/事件回调不计入。Go 闭合范围为 3 个测试文件，Java 为 4 个测试类。",
   "repos": {
     "code-schema": {
       "language": "go",
       "entries": [
         {
-          "production": "Service.FindTestLinks",
-          "test_files": ["internal/service/testlink_test.go"],
+          "production": "FileStore.BulkUpsert",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
           "tests": [
-            "service.TestFindTestLinks_Naming",
-            "service.TestFindTestLinks_GoPackageLevelTests",
-            "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+            "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+            "store.TestFileStore_ReindexRemovesStaleMethods"
+          ]
+        },
+        {
+          "production": "FileStore.Close",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+            "store.TestFileStore_CallMetaRoundTrip",
+            "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_HealthCheck",
+            "store.TestFileStore_OpenClose",
+            "store.TestFileStore_Persistence",
+            "store.TestFileStore_ReindexRemovesStaleMethods",
+            "store.TestFileStore_SaveIsAtomic",
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND",
+            "store.TestFileStore_UpsertAndGetFile",
+            "store.TestFileStore_UpsertIR"
+          ]
+        },
+        {
+          "production": "FileStore.DeleteFile",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_DeleteFileClearsMethodTags"
+          ]
+        },
+        {
+          "production": "FileStore.GetCallsByFileID",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+            "store.TestFileStore_CallMetaRoundTrip"
+          ]
+        },
+        {
+          "production": "FileStore.GetClassesByFileID",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND"
+          ]
+        },
+        {
+          "production": "FileStore.GetFileByPath",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+            "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_Persistence",
+            "store.TestFileStore_UpsertAndGetFile",
+            "store.TestFileStore_UpsertIR"
+          ]
+        },
+        {
+          "production": "FileStore.GetMethodsByClassID",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_SearchByTags_MethodTags"
+          ]
+        },
+        {
+          "production": "FileStore.GetTagsByMethodID",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags"
+          ]
+        },
+        {
+          "production": "FileStore.HealthCheck",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_HealthCheck"
+          ]
+        },
+        {
+          "production": "FileStore.Open",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
+            "store.TestFileStore_CallMetaRoundTrip",
+            "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_HealthCheck",
+            "store.TestFileStore_OpenClose",
+            "store.TestFileStore_OpenRejectsCorruptStore",
+            "store.TestFileStore_Persistence",
+            "store.TestFileStore_ReindexRemovesStaleMethods",
+            "store.TestFileStore_SaveIsAtomic",
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND",
+            "store.TestFileStore_UpsertAndGetFile",
+            "store.TestFileStore_UpsertIR"
+          ]
+        },
+        {
+          "production": "FileStore.SearchByTags",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertCalls",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_CallMetaRoundTrip"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertClasses",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertFile",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_CallMetaRoundTrip",
+            "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_Persistence",
+            "store.TestFileStore_SaveIsAtomic",
+            "store.TestFileStore_SearchByTags_MethodTags",
+            "store.TestFileStore_SearchByTags_MultiTagAND",
+            "store.TestFileStore_UpsertAndGetFile"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertIR",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_ReindexRemovesStaleMethods",
+            "store.TestFileStore_UpsertIR"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertMethodTags",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_SearchByTags_MethodTags"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertMethods",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_SearchByTags_MethodTags"
+          ]
+        },
+        {
+          "production": "FileStore.UpsertTags",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestFileStore_SearchByTags_MultiTagAND"
+          ]
+        },
+        {
+          "production": "service.NewService",
+          "test_files": [
+            "internal/service/service_test.go",
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestCoverageStrategyRemoved",
             "service.TestFindTestLinks_CallGraphBehavioralName",
-            "service.TestFindTestLinks_JavaTestsSuffix",
-            "service.TestFindTestLinks_SameTag",
+            "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
             "service.TestFindTestLinks_Dependency",
             "service.TestFindTestLinks_EmptyMethod",
-            "service.TestFindTestLinks_NoTestFiles",
             "service.TestFindTestLinks_Explicit",
-            "service.TestFindTestLinks_Explicit_MethodLevel",
             "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+            "service.TestFindTestLinks_Explicit_MethodLevel",
+            "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+            "service.TestFindTestLinks_GoPackageLevelTests",
+            "service.TestFindTestLinks_JavaTestsSuffix",
             "service.TestFindTestLinks_MultipleTestClassesPerSource",
+            "service.TestFindTestLinks_Naming",
             "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+            "service.TestFindTestLinks_NoTestFiles",
             "service.TestFindTestLinks_SameDirNonGoNotDependency",
+            "service.TestFindTestLinks_SameTag",
+            "service.TestFindTestLinks_SameTagRequiresMethodNameMatch",
+            "service.TestGetAffected_NormalizesBareName",
+            "service.TestGetAffected_ReturnsLinkedTests",
+            "service.TestGetAffected_StableOrder",
+            "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+            "service.TestSearchConfig_MatchSymbolDoc",
+            "service.TestSearch_Disambiguate",
+            "service.TestSearch_Disambiguate_BudgetExhausted",
+            "service.TestSearch_Disambiguate_NoEnhancer",
+            "service.newTestService"
+          ]
+        },
+        {
+          "production": "Service.FindDependencies",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestFindDependencies_EmptySymbol"
+          ]
+        },
+        {
+          "production": "Service.FindTestLinks",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestFindTestLinks_CallGraphBehavioralName",
+            "service.TestFindTestLinks_CallGraphPackageQualifiedCallee",
+            "service.TestFindTestLinks_Dependency",
+            "service.TestFindTestLinks_EmptyMethod",
+            "service.TestFindTestLinks_Explicit",
+            "service.TestFindTestLinks_ExplicitScopedToQueriedMethod",
+            "service.TestFindTestLinks_Explicit_MethodLevel",
+            "service.TestFindTestLinks_GoPackageHelpersNotNaming",
+            "service.TestFindTestLinks_GoPackageLevelTests",
+            "service.TestFindTestLinks_JavaTestsSuffix",
+            "service.TestFindTestLinks_MultipleTestClassesPerSource",
+            "service.TestFindTestLinks_Naming",
+            "service.TestFindTestLinks_NoSubstringNamingFalsePositive",
+            "service.TestFindTestLinks_NoTestFiles",
+            "service.TestFindTestLinks_SameDirNonGoNotDependency",
+            "service.TestFindTestLinks_SameTag",
             "service.TestFindTestLinks_SameTagRequiresMethodNameMatch"
           ]
         },
         {
-          "production": "service.matchesTestMethod",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestMatchesTestMethod"]
+          "production": "Service.GetAffected",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetAffected_EmptySymbol",
+            "service.TestGetAffected_NormalizesBareName",
+            "service.TestGetAffected_RequiresSymbol",
+            "service.TestGetAffected_ReturnsLinkedTests",
+            "service.TestGetAffected_StableOrder"
+          ]
         },
         {
-          "production": "service.isTestClass",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestIsTestClass"]
+          "production": "Service.GetCallGraph",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetCallGraph_EmptySymbol"
+          ]
         },
         {
-          "production": "service.isTestFileName",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestIsTestFileName"]
+          "production": "Service.GetContext",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetContext_EmptySymbol",
+            "service.TestGetContext_Success",
+            "service.TestGetContext_TopLevelFunc_RealParse"
+          ]
+        },
+        {
+          "production": "Service.GetImpact",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetImpact_EmptyMethod",
+            "service.TestGetImpact_Success",
+            "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests",
+            "service.TestGetImpact_WithoutAnalyzer_EmptyBackwardCompat"
+          ]
+        },
+        {
+          "production": "Service.GetTests",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetTests_EmptyMethod",
+            "service.TestGetTests_Success"
+          ]
+        },
+        {
+          "production": "Service.Health",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestHealth"
+          ]
+        },
+        {
+          "production": "Service.Search",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearch_EmptyQuery",
+            "service.TestSearch_Success",
+            "service.TestSearch_WithSearcher",
+            "service.TestSearch_WithSearcher_ModeMapping"
+          ]
+        },
+        {
+          "production": "Service.SearchByTag",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearchByTags_MultiTagAND"
+          ]
+        },
+        {
+          "production": "Service.SearchByTags",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearchByTags_MethodResult",
+            "service.TestSearchByTags_MultiTagAND",
+            "service.TestSearchByTags_Validation"
+          ]
+        },
+        {
+          "production": "Service.SearchConfig",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearchConfig_EmptyPattern",
+            "service.TestSearchConfig_MatchSymbolDoc",
+            "service.TestSearchConfig_NoHit"
+          ]
+        },
+        {
+          "production": "Service.WithAIEnhancer",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearch_Disambiguate",
+            "service.TestSearch_Disambiguate_BudgetExhausted"
+          ]
+        },
+        {
+          "production": "Service.WithImpactAnalyzer",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestGetAffected_NormalizesBareName",
+            "service.TestGetAffected_StableOrder",
+            "service.TestGetImpact_WithAnalyzer_IncludesRelatedTests"
+          ]
+        },
+        {
+          "production": "Service.WithSearcher",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearch_WithSearcher",
+            "service.TestSearch_WithSearcher_ModeMapping"
+          ]
+        },
+        {
+          "production": "Service.disambiguateMethodResults",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestSearch_Disambiguate",
+            "service.TestSearch_Disambiguate_BudgetExhausted",
+            "service.TestSearch_Disambiguate_NoEnhancer"
+          ]
+        },
+        {
+          "production": "Service.enrichResults",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestEnrichResults_AlreadyFilled",
+            "service.TestEnrichResults_FillsKindAndFile"
+          ]
+        },
+        {
+          "production": "Service.resolveSymbol",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestResolveSymbol_Class",
+            "service.TestResolveSymbol_ClassWithInterfaceType",
+            "service.TestResolveSymbol_FQN",
+            "service.TestResolveSymbol_File",
+            "service.TestResolveSymbol_Invalid",
+            "service.TestResolveSymbol_Method"
+          ]
+        },
+        {
+          "production": "ServiceError.HTTPStatus",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestServiceError_HTTPStatus"
+          ]
+        },
+        {
+          "production": "store.containsAll",
+          "test_files": [
+            "internal/store/filestore_test.go"
+          ],
+          "tests": [
+            "store.TestContainsAll"
+          ]
         },
         {
           "production": "service.dirFromPath",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestDirFromPath"]
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestDirFromPath"
+          ]
+        },
+        {
+          "production": "service.extractClassFQN",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestExtractClassFQN"
+          ]
+        },
+        {
+          "production": "service.isTestClass",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestIsTestClass"
+          ]
+        },
+        {
+          "production": "service.isTestFileName",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestIsTestFileName"
+          ]
+        },
+        {
+          "production": "service.matchesTestMethod",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestMatchesTestMethod"
+          ]
         },
         {
           "production": "service.parseExplicitTargets",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestParseExplicitTargets"]
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestParseExplicitTargets"
+          ]
+        },
+        {
+          "production": "service.parseInt64",
+          "test_files": [
+            "internal/service/service_test.go"
+          ],
+          "tests": [
+            "service.TestParseInt64"
+          ]
         },
         {
           "production": "service.resolveExplicitClass",
-          "test_files": ["internal/service/testlink_test.go"],
-          "tests": ["service.TestResolveExplicitClass"]
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
+          "tests": [
+            "service.TestResolveExplicitClass"
+          ]
         },
         {
-          "production": "MCPServer.serveStdio",
-          "test_files": ["internal/server/mcp_stdio_test.go"],
+          "production": "service.sortByConfidenceDesc",
+          "test_files": [
+            "internal/service/testlink_test.go"
+          ],
           "tests": [
-            "server.TestMCPServer_Stdio_ToolsList",
-            "server.TestMCPServer_Stdio_EOF",
-            "server.TestMCPServer_Stdio_InvalidJSON",
-            "server.TestMCP_Stdio_LineDelimitedJSON",
-            "server.TestMCP_Stdio_ParseErrorHasNullID"
+            "service.TestSortByConfidenceDesc"
           ]
         }
       ]
@@ -75,14 +564,36 @@
       "entries": [
         {
           "production": "OwnerController.initCreationForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
           "tests": [
             "OwnerControllerTests.initCreationForm"
           ]
         },
         {
+          "production": "OwnerController.initFindForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
+          "tests": [
+            "OwnerControllerTests.initFindForm"
+          ]
+        },
+        {
+          "production": "OwnerController.initUpdateOwnerForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
+          "tests": [
+            "OwnerControllerTests.initUpdateOwnerForm"
+          ]
+        },
+        {
           "production": "OwnerController.processCreationForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
           "tests": [
             "OwnerControllerTests.processCreationFormSuccess",
             "OwnerControllerTests.processCreationFormHasErrors",
@@ -91,15 +602,10 @@
           ]
         },
         {
-          "production": "OwnerController.initFindForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
-          "tests": [
-            "OwnerControllerTests.initFindForm"
-          ]
-        },
-        {
           "production": "OwnerController.processFindForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
           "tests": [
             "OwnerControllerTests.processFindFormSuccess",
             "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
@@ -110,15 +616,10 @@
           ]
         },
         {
-          "production": "OwnerController.initUpdateOwnerForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
-          "tests": [
-            "OwnerControllerTests.initUpdateOwnerForm"
-          ]
-        },
-        {
           "production": "OwnerController.processUpdateOwnerForm",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
           "tests": [
             "OwnerControllerTests.processUpdateOwnerFormSuccess",
             "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
@@ -128,9 +629,97 @@
         },
         {
           "production": "OwnerController.showOwner",
-          "test_files": ["src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"],
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
           "tests": [
             "OwnerControllerTests.showOwner"
+          ]
+        },
+        {
+          "production": "PetController.initCreationForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java"
+          ],
+          "tests": [
+            "PetControllerTests.initCreationForm"
+          ]
+        },
+        {
+          "production": "PetController.initUpdateForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java"
+          ],
+          "tests": [
+            "PetControllerTests.initUpdateForm"
+          ]
+        },
+        {
+          "production": "PetController.processCreationForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java"
+          ],
+          "tests": [
+            "PetControllerTests.processCreationFormSuccess",
+            "PetControllerTests.processCreationFormWithBlankName",
+            "PetControllerTests.processCreationFormWithDuplicateName",
+            "PetControllerTests.processCreationFormWithMissingPetType",
+            "PetControllerTests.processCreationFormWithInvalidBirthDate",
+            "PetControllerTests.processCreationFormWithDataIntegrityViolation"
+          ]
+        },
+        {
+          "production": "PetController.processUpdateForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java"
+          ],
+          "tests": [
+            "PetControllerTests.processUpdateFormSuccess",
+            "PetControllerTests.processUpdateFormWithSameName",
+            "PetControllerTests.processUpdateFormWithDuplicateName",
+            "PetControllerTests.processUpdateFormWithInvalidBirthDate",
+            "PetControllerTests.processUpdateFormWithBlankName",
+            "PetControllerTests.processUpdateFormWithDataIntegrityViolation"
+          ]
+        },
+        {
+          "production": "VetController.showResourcesVetList",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "VetControllerTests.showResourcesVetList"
+          ]
+        },
+        {
+          "production": "VetController.showVetList",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "VetControllerTests.showVetListHtml",
+            "VetControllerTests.showVetListRedirectsOutOfBoundsPageToFirstPage"
+          ]
+        },
+        {
+          "production": "VisitController.initNewVisitForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java"
+          ],
+          "tests": [
+            "VisitControllerTests.initNewVisitForm"
+          ]
+        },
+        {
+          "production": "VisitController.processNewVisitForm",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java"
+          ],
+          "tests": [
+            "VisitControllerTests.processNewVisitFormSuccess",
+            "VisitControllerTests.processNewVisitFormHasErrors",
+            "VisitControllerTests.processNewVisitFormHasErrorsWhenVisitDateIsNotInFuture",
+            "VisitControllerTests.processNewVisitFormHasErrorsWhenDescriptionIsTooLong"
           ]
         }
       ]
