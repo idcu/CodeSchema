@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log"
 
@@ -12,6 +14,17 @@ import (
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/store/redis"
 )
+
+// redisNamespace 由存储驱动 + DSN 派生键命名空间：多租户/多实例共用同一
+// Redis 时键互不覆盖，Flush 也只影响自身（P1-4）。
+func redisNamespace(cfg *config.Config) string {
+	sum := sha256.Sum256([]byte(cfg.Storage.Driver + "|" + cfg.Storage.DSN))
+	return "codeschema-" + hex.EncodeToString(sum[:6])
+}
+
+func newRedisCacheForConfig(cfg *config.Config) (*redis.RedisCache, error) {
+	return redis.NewRedisCacheFromURLWithNamespace(cfg.Storage.KV, redisNamespace(cfg))
+}
 
 // 将 Redis L2 缓存层接入统一分发：当以 -tags redis 构建时，本文件覆盖
 // redisCacheApplier，使 newStore 在基础存储之上叠加 Redis 缓存/反查层。
@@ -32,7 +45,7 @@ func applyRedisCache(ctx context.Context, cfg *config.Config, base store.Store) 
 	if cfg.Storage.KV == "" {
 		return base, nil
 	}
-	cache, err := redis.NewRedisCacheFromURL(cfg.Storage.KV)
+	cache, err := newRedisCacheForConfig(cfg)
 	if err != nil {
 		log.Printf("[warn] redis 缓存未启用（连接 %s 失败：%v），回退基础存储", cfg.Storage.KV, err)
 		return base, nil

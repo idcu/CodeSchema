@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 172: fix(redis): 键加租户命名空间与 TTL，Flush 限定本命名空间（P1-4）
+
+- 背景：Redis L2 缓存所有键均为裸键（`class:<fqn>` 等），多租户/多实例共用同一 Redis 时同名 FQN 互相覆盖；写入不设 TTL，删除/重建后残留键永久驻留并可能返回陈旧数据；`Flush` 用 `SCAN "*"` 清整库，会误删同库其他应用/租户的数据。
+- 动作：
+  - `RedisCache` 增加 `prefix`/`ttl`，新增 `normalizeNamespace`（空回退 `codeschema:`）、`key(parts...)`、`touch`；所有 `class/method/classpath/methodpath/caller/callee/file` 键统一加前缀，写入后统一 `Expire` 默认 24h。
+  - `Flush` 改为游标 `SCAN <prefix>*` + `DEL`，不再使用 `*`。
+  - 抽出 `kvBackend` 接口（`goRedisBackend` 适配，`redis.Nil` 归一为 `errKeyNotFound`），测试用内存 fake，无新增依赖。
+  - 新增 `NewRedisCacheWithNamespace`/`NewRedisCacheFromURLWithNamespace`；`cmd/codeschema` 按 `sha256(driver|dsn)` 前 6 字节派生 `codeschema-<12hex>:`（`redisNamespace`/`newRedisCacheForConfig`），`applyRedisCache` 与 `rebuild-kv` 共用。
+- 负控（先红后绿，3 条，`internal/store/redis/redis_test.go`，`-tags redis`）：
+  - `TestRedisCache_NamespaceIsolatesTenants`：修复前 tenant-b 读到 tenant-a 的类（prefix 置空验证）。
+  - `TestRedisCache_SetsTTL`：修复前 `class:pkg.Svc` 等 7 个键全部无 TTL（ttl=0 验证）。
+  - `TestRedisCache_FlushScopedToNamespace`：修复前 `Flush` 后 `unrelated:key` 也被删（remaining: []，Scan "*" 验证）。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`go build -tags redis ./...`、`go vet -tags redis ./internal/store/redis/ ./cmd/codeschema/`、`go test -tags redis -count=1 -run TestRedisCache_ ./internal/store/redis/`（ok 0.410s）；`make counts-check` 通过（LoC 56877 ≈ 56.9k）。
+
 ### Commit 171: fix(tenant): 省略 DSN 时真正回退 ./data/<id>，PG 租户派生独立索引目录（P1-3）
 
 - 背景：`cloneConfig` 把全局默认 `storage.dsn: ./data` 预填进每个租户配置，`resolveTargets` 用合并后的值判断 `DSN == ""` 永不成立 → 所有租户共用 `./data`；`deriveIndexDirs` 只处理 file/sqlite，PG 租户的 FTS/向量/IDF 保持全局默认 `./data/fts` 等，多租户互相覆盖。

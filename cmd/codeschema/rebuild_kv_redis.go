@@ -11,7 +11,6 @@ import (
 	"github.com/idcu/codeschema/internal/config"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
-	"github.com/idcu/codeschema/internal/store/redis"
 )
 
 // rebuildKVCmd 从基础存储全量重建 Redis L2 缓存（KV 反查层）。
@@ -33,7 +32,7 @@ func rebuildKVCmd(ctx context.Context, cfg *config.Config, args []string) error 
 	}
 	defer st.Close()
 
-	cache, err := redis.NewRedisCacheFromURL(cfg.Storage.KV)
+	cache, err := newRedisCacheForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("connect redis: %w", err)
 	}
