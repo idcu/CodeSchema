@@ -15,7 +15,7 @@
 |---|---|
 | 基线 HEAD | `78f00ee3`（审计对象） |
 | 终态 HEAD | 本文件所在提交（`git log -1 --oneline`） |
-| 提交数（基线后） | 98 笔（含本笔总账） |
+| 提交数（基线后） | 99 笔（含本笔总账） |
 | 计数 | internal 36 / 全仓 40 包；非 vendor LoC 65242（65.2k）；MCP 12；HTTP 23 |
 | 门禁 | `go build` / `go vet` / `go vet -tags "pg redis treesitter"` / `make test`（40 包）/ `make fmt-check` / `make counts-check` 全绿 |
 | 清单状态 | 55 done / 5 deferred / 1 cut / 1 blocked + 收尾 R5-15、R3-13、R5-16、R5-17、R3-14、R5-18（done） |
@@ -178,15 +178,15 @@
 ### 3.1 测试关联（自动真值，R5-9 口径）
 
 真值 = IR 直接调用边；`PredictedLinks` 为按测试方法去重后的链接数，0 表示策略链完全无输出；
-P/R/F1 为微平均。Java 行未复跑，预测链接沿用旧口径原始条数（158/162，含跨策略重复；
-去重口径应等于 TP+FP = 156/160）。
+P/R/F1 为微平均。Go 与 Java 六行均在同一口径下复跑（Java 语料经镜像恢复至
+`500158f7`，50 个 `.java`），不存在旧口径数字混排；lytd 仓库不在环境，不并列。
 
 | 仓库 | 变体 | 预测链接 | TP | FP | Precision | Recall | F1 |
 |---|---|---:|---:|---:|---:|---:|---:|
 | code-schema (go) | regex | 1791 | 1776 | 15 | 0.9916 | 0.9927 | 0.9921 |
 | code-schema (go) | treesitter | 1854 | 1838 | 16 | 0.9914 | 0.9930 | 0.9922 |
-| petclinic (java) | regex | 158 | 156 | 0 | 1.0000 | 0.9571 | 0.9781 |
-| petclinic (java) | treesitter | 162 | 160 | 0 | 1.0000 | 0.9581 | 0.9786 |
+| petclinic (java) | regex | 156 | 156 | 0 | 1.0000 | 0.9571 | 0.9781 |
+| petclinic (java) | treesitter | 160 | 160 | 0 | 1.0000 | 0.9581 | 0.9786 |
 | lytd (ts) | regex/treesitter | 0 | 0 | 0 | — | — | — |
 
 > 解析器补齐后 pair 规模继续上升（Go regex 2920 / treesitter 2958，Java regex 163 /
@@ -233,8 +233,8 @@ S-2h 扩展到 207 对后，Go 的 9 条 FP（naming 过匹配）与 7 条 FN（
 |---|---|---:|---:|---:|---:|---:|
 | code-schema | regex | 5381 | 4445 | 936 | 0 | 0.8261 |
 | code-schema | treesitter | 5504 | 4586 | 918 | 0 | 0.8332 |
-| petclinic | regex | 283 | 280 | 3* | — | 0.9894 |
-| petclinic | treesitter | 307 | 304 | 3* | — | 0.9902 |
+| petclinic | regex | 283 | 280 | 3 | — | 0.9894 |
+| petclinic | treesitter | 307 | 304 | 3 | — | 0.9902 |
 | lytd | regex | 61 | 61 | 0 | 0 | 1.0000 |
 | lytd | treesitter | 93 | 93 | 0 | 0 | 1.0000 |
 
@@ -246,7 +246,8 @@ S-2h 扩展到 207 对后，Go 的 9 条 FP（naming 过匹配）与 7 条 FN（
 > +680）；新增 Go 测试文件再贡献 66 条同类边。936 条全部是前缀差异，短名歧义 0，
 > 生产 `resolveCallee`（`37cca60` 起支持逐级去前缀）全部可链接，人工真值 Go 169/169
 > 佐证无漏链。新增 `repo_unresolved_prefixed` 字段固化前缀差异条数（短名多义由差值推导）。
-> Java 的 3 条未复跑拆分（仓库不在环境），不猜分项。
+> Java 的 3 条亦为本轮实测的前缀差异（`repo_unresolved_prefixed`），短名多义为 0；
+> 与 Go 同源机制，不是解析缺口。
 
 > treesitter Go 仓内 resolution 为 0.8332（regex 0.8261）：本轮新增 PG 并发用例与适配器
 > 用例后，更多带类型前缀的测试调用进入「仓内候选」分母，解析边数同步增长
@@ -298,7 +299,7 @@ S-2h 扩展到 207 对后，Go 的 9 条 FP（naming 过匹配）与 7 条 FN（
 
 1. **自动真值同源**：测试关联自动口径与 `call_graph` 策略共用直接调用边；IR 解析不到的合法调用会漏入真值，把正确预测误判为 FP。缓解：人工真值并排展示；扩充人工数据集。
 2. **人工真值覆盖面有限**：321 条 pair（Go 169 / Java 152）已具备统计分辨率（Go recall 95% CI 半宽约 ±2.2pp，Java ±3.5pp），但仍只覆盖 code-schema 与 petclinic 两个仓库的 12 个测试文件/类；不能外推为全仓 1.0。TS 无人工真值。
-3. **调用图分辨率低**：全量口径最高 0.2513（Go regex），TS 0.1748–0.2252；跨类 receiver 消歧与外部依赖解析仍是缺口。仓内严格口径 0.8261–1.0000（Go 0.8261/0.8332，Java 0.9894/0.9902）；Go 侧未解析的 936/918 条**全部**是 callee 多了包/外层类型前缀（`pkg.Type.Method` vs 索引 `Type.Method`），生产 `resolveCallee` 后缀规则可链接，短名歧义为 0；真实不可解析来自外部 API/框架与无 import 信息的跨模块裸名。Java 的 3 条未复跑拆分。
+3. **调用图分辨率低**：全量口径最高 0.2513（Go regex），TS 0.1748–0.2252；跨类 receiver 消歧与外部依赖解析仍是缺口。仓内严格口径 0.8261–1.0000（Go 0.8261/0.8332，Java 0.9894/0.9902）；Go 侧未解析的 936/918 条**全部**是 callee 多了包/外层类型前缀（`pkg.Type.Method` vs 索引 `Type.Method`），生产 `resolveCallee` 后缀规则可链接，短名歧义为 0；真实不可解析来自外部 API/框架与无 import 信息的跨模块裸名。Java 的 3 条亦为实测前缀差异（两变体各 3 条，短名歧义 0）。
 4. **TS 测试关联不可用**：Jest 回调未建模，`PredictedLinks=0`；调用图可报告，测试关联需新条目。
 5. **残余 FP**：Go regex 自动口径 15 条，treesitter 16 条；Java 0 条。多为「IR 未解析到的真实调用被命名策略命中」，按人工语义并非误报；两套口径不可混用。
 6. **P0-1 的 FQN 变化**：历史索引可能需要重建；本轮未提供自动迁移命令，升级需重新扫描（文档已标注）。

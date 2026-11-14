@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-14T06:37:51Z",
+  "timestamp": "2026-11-14T07:09:38Z",
   "repo": "s2-petclinic",
   "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
   "language": "java",
@@ -13,7 +13,7 @@
   "sampled_pairs": 163,
   "sampled": false,
   "prods_evaluated": 38,
-  "predicted_links": 158,
+  "predicted_links": 156,
   "test_link": {
     "tp": 156,
     "fp": 0,
@@ -32,10 +32,11 @@
     "resolution_rate": 0.1813,
     "repo_resolvable": 283,
     "repo_resolvable_resolved": 280,
-    "repo_resolution_rate": 0.9894
+    "repo_resolution_rate": 0.9894,
+    "repo_unresolved_prefixed": 3
   },
   "manual_truth": {
-    "dataset": "/Volumes/Data/code-schema/internal/releasebench/testdata/manual-truth.json",
+    "dataset": "internal/releasebench/testdata/manual-truth.json",
     "repo": "s2-petclinic",
     "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
     "language": "java",

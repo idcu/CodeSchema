@@ -6,6 +6,26 @@
 
 ## 提交记录
 
+### Commit 249: docs(bench): 恢复 Java 语料并按新口径复跑，总账数字同源
+
+- 语料恢复：GitHub 直连超时/重置、gitee 镜像要求认证，最终经
+  `https://gitclone.com/github.com/spring-projects/spring-petclinic.git` 克隆，
+  checkout `500158f732419217507c7656904b8e6aa1bcc0d6`；目录名 `s2-petclinic`
+  以匹配 `manual-truth.json`，共 50 个 `.java`。
+- Java 新口径复跑（与 Go 同一 `cfc9ad6` 二进制口径）：
+  - regex：calls 1544 / 仓内候选 283 / 已解析 280 / 仓内 resolution 0.9894 /
+    前缀差异 3；pairs 163、pred 156、TP/FP/FN 156/0/7、P 1.0 / R 0.9571 / F1 0.9781；
+  - treesitter：calls 1609 / 307 / 304 / 0.9902 / 前缀差异 3；pairs 167、pred 160、
+    160/0/7、P 1.0 / R 0.9581 / F1 0.9786；
+  - 人工真值两变体均 145/0/7、P 1.0 / R 0.9539 / F1 0.9764。
+- 前缀差异 3 条为本轮实测（`repo_unresolved_prefixed`），短名多义 = 未解析 − 前缀差异 = 0；
+  与 Go 同为 `pkg.Type.Method` 形态差异，生产 `resolveCallee` 可链接。
+- 预测链接按 `TestMethod` 去重后实测 156/160（= TP+FP），替代旧归档原始条数 158/162；
+  归档 JSON 已用新报告覆盖（`docs/bench/2026-11-14/terminal-{regex,treesitter}-java.json`）。
+- 文档统一：`docs/bench/2026-11-14/README.md` 与总账 §3.1/§3.3/§5 全部改为复跑实测值，
+  删除「未复跑/沿用归档/旧口径原始条数/3*」表述；lytd 仍标注仓库不在环境，不并列。
+- 无代码改动，门禁与计数不变（LoC 65242）。
+
 ### Commit 248: fix(bench): 拆出仓内未解析的两类原因，归因 resolution 下滑
 
 - 现象：Go 仓内 resolution 从 `0.9626 / 0.9989`（regex / ts）降到
@@ -31,7 +51,7 @@
 - 复跑（`cfc9ad6`）：Go regex calls 17689 / 仓内 5381 / 4445 / 0.8261 / 前缀 936 /
   歧义 0；ts 20752 / 5504 / 4586 / 0.8332 / 918 / 0。自动 test_link
   regex 1776/15/13 F1 0.9921、ts 1838/16/13 F1 0.9922；人工真值 Go 169/169 不变。
-  Java 仓库不在环境，未复跑，沿用归档。
+  Java 仓库不在环境，未复跑，沿用归档（Commit 249 已恢复语料并按同一口径复跑）。
 
 ### Commit 247: 收尾（Java 真值扩至 152 对 + 实参内层调用修复 + PG 并发写）
 
