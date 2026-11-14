@@ -425,7 +425,24 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 //
 // 从 Store 中读取所有调用记录，构建方法间的调用关系图。
 // 每个调用记录生成一条边（caller -> callee）。
+// callGraphCtxKey 请求级调用图缓存键：同一请求链路上避免重复建图。
+type callGraphCtxKey struct{}
+
+// WithCallGraph 把已构建的调用图挂到 ctx，后续同请求的 BuildCallGraph 直接复用。
+func WithCallGraph(ctx context.Context, cg *CallGraph) context.Context {
+	return context.WithValue(ctx, callGraphCtxKey{}, cg)
+}
+
+// CallGraphFromContext 取出请求级调用图；不存在时返回 nil。
+func CallGraphFromContext(ctx context.Context) *CallGraph {
+	cg, _ := ctx.Value(callGraphCtxKey{}).(*CallGraph)
+	return cg
+}
+
 func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
+	if cg := CallGraphFromContext(ctx); cg != nil {
+		return cg, nil
+	}
 	span := trace.Start("build_call_graph")
 	defer span.End()
 
@@ -441,6 +458,10 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 	}
 
 	for _, f := range files {
+		// 长扫描期间允许调用方取消：每文件检查一次，避免取消后仍在全量遍历。
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		calls, err := a.store.GetCallsByFileID(ctx, f.ID)
 		if err != nil {
 			metrics.IncCounter("analyzer_errors_total", "get_calls")
@@ -451,6 +472,10 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 				cg.AddEdge(call.CallerFQN, call.CalleeFQN)
 			}
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	metrics.SetGauge("analyzer_nodes_total", float64(cg.NodeCount()), "callgraph")
@@ -667,17 +692,20 @@ func (a *Analyzer) FindImpactNodes(ctx context.Context, methodFQN string, depth 
 		return nil, nil, fmt.Errorf("build call graph: %w", err)
 	}
 
-	if depth <= 0 {
-		depth = 10 // 默认深度
+	callersN, calleesN, resolved, err := ImpactWithDepthInGraph(ctx, cg, methodFQN, depth)
+	if err != nil {
+		return nil, nil, fmt.Errorf("impact in graph: %w", err)
 	}
-
-	// 调用图节点 FQN 命名空间取决于解析适配器（Go 默认路径产出「包限定全名」，
-	// 其它语言/旧数据可能存「裸名」）；双向归一化定位命中节点。
-	resolved, ok := resolveImpactNode(cg, methodFQN)
-	if ok {
-		callers = cg.GetCallers(resolved, depth)
-		callees = cg.GetCallees(resolved, depth)
+	if resolved != "" {
 		methodFQN = resolved
+	}
+	callers = make([]string, 0, len(callersN))
+	for _, n := range callersN {
+		callers = append(callers, n.Method)
+	}
+	callees = make([]string, 0, len(calleesN))
+	for _, n := range calleesN {
+		callees = append(callees, n.Method)
 	}
 
 	a.logger.Debug("impact analysis complete", "method", methodFQN, "callers", len(callers), "callees", len(callees))
@@ -759,6 +787,48 @@ type ImpactNode struct {
 	Depth  int    `json:"depth"`
 }
 
+// MaxImpactDepth 影响面 / 调用图的最大展开深度。
+// 没有上限时大 depth 会对全图逐节点做全仓扫描，长尾延迟不可控。
+const MaxImpactDepth = 10
+
+// ClampImpactDepth 收口深度参数：<=0 视为直接关系（1），超过上限收敛到 MaxImpactDepth。
+func ClampImpactDepth(depth int) int {
+	if depth <= 0 {
+		return 1
+	}
+	if depth > MaxImpactDepth {
+		return MaxImpactDepth
+	}
+	return depth
+}
+
+// ImpactWithDepthInGraph 在已构建的调用图上执行双向 BFS，
+// 返回带层级的 callers/callees 与归一化后的 FQN。
+//
+// 供同一请求内需要多次查询影响面的场景复用同一张图，避免重复 BuildCallGraph。
+func ImpactWithDepthInGraph(ctx context.Context, cg *CallGraph, symbol string, depth int) (callers, callees []ImpactNode, resolved string, err error) {
+	if cg == nil {
+		return nil, nil, "", fmt.Errorf("nil call graph")
+	}
+	if depth <= 0 {
+		depth = MaxImpactDepth
+	}
+	r, ok := resolveImpactNode(cg, symbol)
+	if !ok {
+		return nil, nil, "", nil
+	}
+	resolved = r
+	callers, err = cg.GetCallersWithDepthContext(ctx, resolved, depth)
+	if err != nil {
+		return nil, nil, resolved, err
+	}
+	callees, err = cg.GetCalleesWithDepthContext(ctx, resolved, depth)
+	if err != nil {
+		return nil, nil, resolved, err
+	}
+	return callers, callees, resolved, nil
+}
+
 // FindImpactNodesWithDepth 查找指定方法的影响面，返回带深度的调用者与被调用者。
 //
 // 与 FindImpactNodes 的区别：每个节点附带其距目标方法的层级距离（深度 1 为直接调用者/被调用者），
@@ -774,15 +844,11 @@ func (a *Analyzer) FindImpactNodesWithDepth(ctx context.Context, methodFQN strin
 		return nil, nil, fmt.Errorf("build call graph: %w", err)
 	}
 
-	if depth <= 0 {
-		depth = 10 // 默认深度
+	callers, callees, resolved, err := ImpactWithDepthInGraph(ctx, cg, methodFQN, depth)
+	if err != nil {
+		return nil, nil, fmt.Errorf("impact in graph: %w", err)
 	}
-
-	// 调用图节点 FQN 命名空间可能因解析适配器而异；双向归一化定位命中节点。
-	resolved, ok := resolveImpactNode(cg, methodFQN)
-	if ok {
-		callers = cg.GetCallersWithDepth(resolved, depth)
-		callees = cg.GetCalleesWithDepth(resolved, depth)
+	if resolved != "" {
 		methodFQN = resolved
 	}
 

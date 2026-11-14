@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 212: perf(service): 请求内调用图复用 + depth 上限 + ctx 取消（R2-5 / P1-13）
+
+- 根因：`GetImpact` 先 `ResolveImpactNode` 再 `FindImpactNodesWithDepth`，`GetCallGraph`
+  再叠加一次 `BuildCallGraph`；`FindTestLinks` 的 call_graph 策略还会重复建图——
+  实测一次 `/impact` 建图 2 次、`/call-graph` 3 次。`depth` 只有下限，传 100 原样下传；
+  `BuildCallGraph` 循环内不检查 ctx。
+- 修复：新增 `analyzer.MaxImpactDepth=10` 与 `ClampImpactDepth`；`BuildCallGraph` 逐文件
+  及收尾检查 `ctx.Err()`；新增 `WithCallGraph/CallGraphFromContext` 请求级复用与
+  `ImpactWithDepthInGraph`（图内归一化 + 双向 BFS）；`GetImpact/GetCallGraph` 各只建图一次。
+- 负控（先红后绿）：
+  `TestService_GetImpactBuildsGraphOnce` 修前实测 `expected 1 ... got 2`（红）→ 修后
+  `GetCallsByFileID` 计数 1（绿）；`TestService_GetCallGraphBuildsGraphOnce` 修前三处调用点
+  （`BuildCallGraph`+`ResolveImpactNode`+`FindImpactNodes`）→ 修后 1（绿）；
+  `TestClampImpactDepth` 修前未定义（编译红）→ 0/-5→1、100→10、3→3（绿）；
+  `TestBuildCallGraph_HonorsCanceledContext` 修前不返回错误（红）→ 修后 `context.Canceled`（绿）。
+  既有 `TestService_GetImpact*`、`TestGetAffected_*` 全部保持通过（结果不丢）。
+- 文档：`接口层.md` 影响面 depth 契约与单次建图；`架构与模块.md` 同步；counts 61734（61.7k）。
+
 ### Commit 211: fix(analyzer): 影响面 BFS 去重与 GetAffected 归一化/稳定排序（R2-2 / P1-8、P2-1、P2-3）
 
 - 根因：`GetCallersWithDepth/GetCalleesWithDepth` 出队才标记 visited，同一祖先被多个

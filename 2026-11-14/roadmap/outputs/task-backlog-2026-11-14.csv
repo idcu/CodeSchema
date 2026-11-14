@@ -11,7 +11,7 @@ R2-1,B,P1,调用边口径只保留direct call,P1-7,R1-1,5,import/reference/imple
 R2-2,B,P1,影响面确定性与BFS/归一化,P1-8;P2-1;P2-3,R2-1,3.5,歧义裸名连续100次结果一致；BFS去重；GetAffected稳定排序,done,必做
 R2-3,B,P1,explicit测试关联按methodFQN过滤,P1-12,R1-1,1.5,查A只回A的@TestFor；查B回B；查C为空；A的测试仍返回,done,必做
 R2-4,B,P2,测试关联策略收紧+reason/confidence,P2-4,R2-1;R2-3,4,每条关联带reason与confidence；夹具无未标注假阳性；真实关联不丢,done,必做
-R2-5,B,P1,请求内图复用+depth上限+ctx取消,P1-13,R2-1,3.5,一次/impact只构建一次图；depth有上限；ctx取消生效；结果不丢且P95不劣化,todo,必做
+R2-5,B,P1,请求内图复用+depth上限+ctx取消,P1-13,R2-1,3.5,一次/impact只构建一次图；depth有上限；ctx取消生效；结果不丢且P95不劣化,done,必做
 R2-6,B,P1,Redis快路径nil判空,P1-9,R0-1,0.75,陈旧键+GetFileByPath未命中不panic；命中路径仍走缓存,done,必做
 R2-7,B,P1,FTS并发读写加锁/拷贝,P1-10,R0-1,1.5,go test -race并发Index/Search无fatal；单线程结果不变,done,必做
 R2-8,B,P1,未知租户404+错误脱敏,P1-11;P2-6,R0-1,1,未知租户404且响应体无panic/SQL/路径原文；已知租户正常,done,必做

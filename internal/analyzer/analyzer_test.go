@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -1936,6 +1937,34 @@ func TestResolveImpactNode_SuffixMatchDeterministic(t *testing.T) {
 		if !ok || got != first {
 			t.Fatalf("nondeterministic result at iteration %d: %q (first %q)", i, got, first)
 		}
+	}
+}
+
+// TestBuildCallGraph_HonorsCanceledContext 负控（P1-13）：
+// 建图循环必须响应 ctx 取消，长扫描期间取消请求应尽快返回。
+func TestBuildCallGraph_HonorsCanceledContext(t *testing.T) {
+	an := NewAnalyzer(newTestStore())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := an.BuildCallGraph(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestClampImpactDepth 负控（P1-13）：深度必须有上限，避免大 depth 触发全图全量遗漏扫描。
+func TestClampImpactDepth(t *testing.T) {
+	if got := ClampImpactDepth(0); got != 1 {
+		t.Fatalf("depth 0: expected 1, got %d", got)
+	}
+	if got := ClampImpactDepth(-5); got != 1 {
+		t.Fatalf("negative depth: expected 1, got %d", got)
+	}
+	if got := ClampImpactDepth(100); got != MaxImpactDepth {
+		t.Fatalf("depth 100: expected %d, got %d", MaxImpactDepth, got)
+	}
+	if got := ClampImpactDepth(3); got != 3 {
+		t.Fatalf("depth 3: expected 3, got %d", got)
 	}
 }
 

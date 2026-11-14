@@ -916,9 +916,7 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 	if method == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "method is required"}
 	}
-	if depth <= 0 {
-		depth = 1
-	}
+	depth = analyzer.ClampImpactDepth(depth)
 
 	result := &ImpactResult{
 		Method:  method,
@@ -940,17 +938,19 @@ func (s *Service) GetImpact(ctx context.Context, method string, depth int) (*Imp
 		return result, nil
 	}
 
-	// 双向归一化定位命中节点（覆盖查询符号与图节点命名空间不一致），
-	// 与 GetCallGraph 一致地把解析后的 FQN 回填到结果 Method，便于调用方确认实际分析对象。
-	resolved := method
-	if r, ok := s.analyzer.ResolveImpactNode(ctx, method); ok {
-		resolved = r
+	// 单次请求只构建一次调用图：归一化与双向 BFS 复用同一张图。
+	cg, err := s.analyzer.BuildCallGraph(ctx)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("build call graph: %v", err)}
 	}
-	result.Method = resolved
-
-	callers, callees, err := s.analyzer.FindImpactNodesWithDepth(ctx, resolved, depth)
+	// 后续 enrich（FindTestLinks 的 call_graph 策略）复用同一张图。
+	ctx = analyzer.WithCallGraph(ctx, cg)
+	callers, callees, resolved, err := analyzer.ImpactWithDepthInGraph(ctx, cg, method, depth)
 	if err != nil {
 		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact nodes: %v", err)}
+	}
+	if resolved != "" {
+		result.Method = resolved
 	}
 
 	result.Callers = s.enrichImpactNodes(ctx, callers)
@@ -1391,9 +1391,7 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
-	if depth <= 0 {
-		depth = 1
-	}
+	depth = analyzer.ClampImpactDepth(depth)
 	if s.analyzer == nil {
 		return map[string]any{
 			"symbol": symbol,
@@ -1408,23 +1406,23 @@ func (s *Service) GetCallGraph(ctx context.Context, symbol string, depth int) (m
 		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("build call graph: %v", err)}
 	}
 
-	// 双向归一化定位命中节点；未命中则仍以原始 symbol 作为子图根。
+	// 双向归一化 + BFS 复用同一张图；未命中则仍以原始 symbol 作为子图根。
 	resolved := symbol
-	if r, ok := s.analyzer.ResolveImpactNode(ctx, symbol); ok {
+	callers, callees, r, err := analyzer.ImpactWithDepthInGraph(ctx, cg, symbol, depth)
+	if err != nil {
+		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact: %v", err)}
+	}
+	if r != "" {
 		resolved = r
 	}
 
 	// 双向 BFS 收集节点集合
 	nodeSet := map[string]bool{resolved: true}
-	callers, callees, err := s.analyzer.FindImpactNodes(ctx, resolved, depth)
-	if err != nil {
-		return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact: %v", err)}
-	}
 	for _, c := range callers {
-		nodeSet[c] = true
+		nodeSet[c.Method] = true
 	}
 	for _, c := range callees {
-		nodeSet[c] = true
+		nodeSet[c.Method] = true
 	}
 
 	// 收集节点集合内部的边（caller -> callee）

@@ -7,6 +7,14 @@
 //   - 文件依赖图（FileGraph）：文件间的 import/include 依赖
 package analyzer
 
+import "context"
+
+// qItem BFS 队列项：fqn + 剩余可展开深度。
+type qItem struct {
+	fqn   string
+	depth int
+}
+
 // CallGraphNode 调用图节点，表示一个方法及其调用关系。
 type CallGraphNode struct {
 	MethodFQN string   // 方法全限定名
@@ -87,9 +95,18 @@ func (cg *CallGraph) GetCallersWithDepth(methodFQN string, depth int) []ImpactNo
 	if depth <= 0 {
 		return nil
 	}
-	type qItem struct {
-		fqn   string
-		depth int
+	result, _ := getCallersWithDepth(context.Background(), cg, methodFQN, depth)
+	return result
+}
+
+// GetCallersWithDepthContext 与 GetCallersWithDepth 相同，但在 BFS 每轮检查 ctx 取消。
+func (cg *CallGraph) GetCallersWithDepthContext(ctx context.Context, methodFQN string, depth int) ([]ImpactNode, error) {
+	return getCallersWithDepth(ctx, cg, methodFQN, depth)
+}
+
+func getCallersWithDepth(ctx context.Context, cg *CallGraph, methodFQN string, depth int) ([]ImpactNode, error) {
+	if depth <= 0 {
+		return nil, nil
 	}
 	// 发现即标记：同一祖先可能被多个同层节点发现，出队才标记会产生重复项。
 	visited := map[string]bool{methodFQN: true}
@@ -97,6 +114,9 @@ func (cg *CallGraph) GetCallersWithDepth(methodFQN string, depth int) []ImpactNo
 	queue := []qItem{{fqn: methodFQN, depth: depth}}
 
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		item := queue[0]
 		queue = queue[1:]
 		node, ok := cg.Nodes[item.fqn]
@@ -113,7 +133,7 @@ func (cg *CallGraph) GetCallersWithDepth(methodFQN string, depth int) []ImpactNo
 			queue = append(queue, qItem{fqn: caller, depth: item.depth - 1})
 		}
 	}
-	return result
+	return result, nil
 }
 
 // GetCalleesWithDepth 返回指定方法的所有被调用者（带距目标的层级距离）。
@@ -123,9 +143,18 @@ func (cg *CallGraph) GetCalleesWithDepth(methodFQN string, depth int) []ImpactNo
 	if depth <= 0 {
 		return nil
 	}
-	type qItem struct {
-		fqn   string
-		depth int
+	result, _ := getCalleesWithDepth(context.Background(), cg, methodFQN, depth)
+	return result
+}
+
+// GetCalleesWithDepthContext 与 GetCalleesWithDepth 相同，但在 BFS 每轮检查 ctx 取消。
+func (cg *CallGraph) GetCalleesWithDepthContext(ctx context.Context, methodFQN string, depth int) ([]ImpactNode, error) {
+	return getCalleesWithDepth(ctx, cg, methodFQN, depth)
+}
+
+func getCalleesWithDepth(ctx context.Context, cg *CallGraph, methodFQN string, depth int) ([]ImpactNode, error) {
+	if depth <= 0 {
+		return nil, nil
 	}
 	// 发现即标记，避免多父节点重复入队产生的重复项。
 	visited := map[string]bool{methodFQN: true}
@@ -133,6 +162,9 @@ func (cg *CallGraph) GetCalleesWithDepth(methodFQN string, depth int) []ImpactNo
 	queue := []qItem{{fqn: methodFQN, depth: depth}}
 
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		item := queue[0]
 		queue = queue[1:]
 		node, ok := cg.Nodes[item.fqn]
@@ -149,7 +181,7 @@ func (cg *CallGraph) GetCalleesWithDepth(methodFQN string, depth int) []ImpactNo
 			queue = append(queue, qItem{fqn: callee, depth: item.depth - 1})
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (cg *CallGraph) collectCallers(fqn string, depth int, visited map[string]bool, result *[]string) {
