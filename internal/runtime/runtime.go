@@ -199,6 +199,9 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	}
 	libDir := filepath.Join("down", "onnxruntime")
 	var em vector.Embedder
+	// modelID 记录到向量文件，用于加载时校验模型/维度未被切换（R6-3）。
+	// LocalEmbedder 是确定性哈希向量，与语义模型不通用，故单独标识。
+	modelID := "local-tfidf-v1"
 
 	if dl := vector.NewModelDownloader(modelDir, cfg.Storage.Vector.ModelDownloadURL, cfg.Storage.Vector.ModelSHA256); dl != nil {
 		if _, err := dl.Ensure(context.Background(), cfg.Storage.Vector.EmbeddingModel); err != nil {
@@ -216,6 +219,7 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	if onnxEm != nil {
 		log.Printf("semantic: ONNX embedder active (%s, dim=%d)", cfg.Storage.Vector.EmbeddingModel, onnxEm.Dim())
 		em = onnxEm
+		modelID = "onnx:" + cfg.Storage.Vector.EmbeddingModel
 	} else {
 		// 未启用 -tags onnx 构建时 NewONNXEmbedderOrFallback 返回 nil（桩实现），
 		// 即便模型/运行时文件存在也不会加载；此时使用 LocalEmbedder（确定性哈希向量，
@@ -254,9 +258,9 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 		}
 	}
 	if store == nil {
-		pstore, err := vector.NewPersistentStore(vecFile)
+		pstore, err := vector.NewPersistentStoreWithModel(vecFile, modelID, em.Dim())
 		if err != nil {
-			log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory", vecFile, err)
+			log.Printf("WARN: new persistent vector store (%s): %v, fallback to memory（切换模型/维度后需删除旧向量文件重建）", vecFile, err)
 			store = vector.NewMemoryStore()
 		} else {
 			store = pstore

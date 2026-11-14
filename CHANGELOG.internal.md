@@ -6,6 +6,27 @@
 
 ## 提交记录
 
+### Commit 208: fix(vector): 向量文件记录模型/维度并在不匹配时拒绝加载（R6-3 / P2-16）
+
+- 根因：`PersistentStore` 的 JSON 只存 `vectors`，没有模型标识与维度。切换 embedding
+  模型（如默认构建 LocalEmbedder 1024 维 ↔ `-tags onnx` BGE 512 维）后仍会加载旧向量：
+  维度不同则余弦恒 0，同维不同模型则结果静默错配，且没有任何告警。
+- 修复：序列化结构新增 `model_id` / `dim`；`NewPersistentStoreWithModel(filePath, modelID, dim)`
+  在加载时校验——文件声明的维度/模型与期望不一致即返回错误；旧版文件按首条向量长度
+  推断维度，与期望不符同样拒绝，相符则加载并在下次保存补写元数据。文件内向量长度
+  与声明维度不一致（历史脏数据）同样拒绝加载。`NewPersistentStore` 保持原语义（不校验）。
+  运行时（`runtime.NewSearcherWithStore`）以 `onnx:<embedding_model>` / `local-tfidf-v1`
+  加实际 `Dim()` 装配，校验失败降级内存并在日志提示删除旧文件重建。
+- 负控（先红后绿）：
+  先只加字段与写入、不加校验，`TestPersistentStore_ModelAndDimMismatchRejected`
+  在维度不符时仍加载成功（红）；补校验后同模型同维通过、维度/模型不符均报错（绿）。
+  `TestPersistentStore_LegacyFileInfersDim` 修前旧文件 4 维按期望 8 维加载成功（红）→
+  修后拒绝，4 维加载并在升级后拒绝不同模型（绿）。
+  `TestPersistentStore_InconsistentVectorRejected` 修前含 3 维脏数据仍加载成功（红）→
+  修后报错（绿）。
+- 文档：`存储后端.md` 补充模型/维度校验语义；`03-部署运维/README.md` 注明切换模型需删除
+  `data/vector/vector.json` 并重建；counts 见本笔 `make counts`。
+
 ### Commit 207: fix(vector): chromem 删除真正生效且不可检索（R6-3 / P2-17）
 
 - 根因：`ChromemStore.Delete` 恒返回 `chromem-go does not support single document deletion`，

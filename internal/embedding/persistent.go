@@ -22,13 +22,17 @@ type PersistentStore struct {
 	vecs     map[string][]float32
 	contents map[string]string // id → 原文（DocContentStore 可选能力，持久化）
 	filePath string
-	dirties  int // 自上次保存以来的变更计数
+	modelID  string // 期望/记录的 embedding 模型标识（空表示不做校验）
+	dim      int    // 期望/记录的向量维度（0 表示不做校验）
+	dirties  int    // 自上次保存以来的变更计数
 }
 
 // persistentData 序列化结构（向后兼容：旧文件仅含 vectors，contents 缺失时初始化为空 map）。
 type persistentData struct {
 	Vectors  map[string][]float32 `json:"vectors"`
 	Contents map[string]string    `json:"contents,omitempty"`
+	ModelID  string               `json:"model_id,omitempty"`
+	Dim      int                  `json:"dim,omitempty"`
 }
 
 // NewPersistentStore 创建持久化向量存储。
@@ -36,10 +40,22 @@ type persistentData struct {
 // filePath 为存储文件路径（如 "./data/vector.json"）。
 // 如果文件已存在，自动加载历史数据。
 func NewPersistentStore(filePath string) (*PersistentStore, error) {
+	return NewPersistentStoreWithModel(filePath, "", 0)
+}
+
+// NewPersistentStoreWithModel 创建带模型标识与维度校验的持久化向量存储。
+//
+// 数据文件记录写入时的 modelID / dim；加载时若与传入值不一致则返回错误，
+// 避免切换 embedding 模型（或维度）后沿用旧向量导致余弦恒 0 / 结果静默错配。
+// 旧版文件（无 model_id/dim 字段）以实际向量长度推断维度并补写元数据。
+// modelID 或 dim 传空/0 表示该项不校验。
+func NewPersistentStoreWithModel(filePath, modelID string, dim int) (*PersistentStore, error) {
 	ps := &PersistentStore{
 		vecs:     make(map[string][]float32),
 		contents: make(map[string]string),
 		filePath: filePath,
+		modelID:  modelID,
+		dim:      dim,
 	}
 
 	// 尝试加载已有数据
@@ -169,7 +185,7 @@ func (ps *PersistentStore) save() error {
 	if err := fsperm.MkdirAll(filepath.Dir(ps.filePath)); err != nil {
 		return fmt.Errorf("persistent: mkdir: %w", err)
 	}
-	data := persistentData{Vectors: ps.vecs, Contents: ps.contents}
+	data := persistentData{Vectors: ps.vecs, Contents: ps.contents, ModelID: ps.modelID, Dim: ps.dim}
 	raw, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("persistent: marshal: %w", err)
@@ -203,7 +219,45 @@ func (ps *PersistentStore) load() error {
 	if data.Contents != nil {
 		ps.contents = data.Contents
 	}
+
+	// 模型/维度校验（R6-3）：切换 embedding 模型或维度后，旧向量与查询向量不在
+	// 同一空间（维度不同直接算不出余弦，同维不同模型则结果静默错配），必须拒绝加载。
+	fileDim := data.Dim
+	if fileDim == 0 {
+		fileDim = inferDim(ps.vecs)
+	}
+	if ps.dim > 0 && fileDim > 0 && fileDim != ps.dim {
+		return fmt.Errorf("dimension mismatch: file=%d, expected=%d (model=%q)",
+			fileDim, ps.dim, ps.modelID)
+	}
+	if ps.dim > 0 {
+		for id, vec := range ps.vecs {
+			if len(vec) != ps.dim {
+				return fmt.Errorf("vector %q has dim %d, expected %d", id, len(vec), ps.dim)
+			}
+		}
+	}
+	if data.ModelID != "" && ps.modelID != "" && data.ModelID != ps.modelID {
+		return fmt.Errorf("model mismatch: file=%q, expected=%q", data.ModelID, ps.modelID)
+	}
+	// 旧版文件无元数据时，把推断结果/调用方期望固化下来，后续保存即完成格式升级。
+	if data.Dim > 0 {
+		ps.dim = data.Dim
+	}
+	if data.ModelID != "" {
+		ps.modelID = data.ModelID
+	}
 	return nil
+}
+
+// inferDim 从已有向量推断维度（取第一条非空向量的长度），无数据时返回 0。
+func inferDim(vecs map[string][]float32) int {
+	for _, vec := range vecs {
+		if len(vec) > 0 {
+			return len(vec)
+		}
+	}
+	return 0
 }
 
 // maybeSave 当变更累积到阈值时自动保存。

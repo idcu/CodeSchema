@@ -57,6 +57,11 @@ func NewPersistentStore(filePath string) (*PersistentStore, error) {
 	return embedding.NewPersistentStore(filePath)
 }
 
+// NewPersistentStoreWithModel 创建带模型标识/维度校验的持久化向量存储。
+func NewPersistentStoreWithModel(filePath, modelID string, dim int) (*PersistentStore, error) {
+	return embedding.NewPersistentStoreWithModel(filePath, modelID, dim)
+}
+
 // NewIndexer 创建向量索引器。
 func NewIndexer(store VectorStore, model Embedder, workers int) *Indexer {
 	return embedding.NewIndexer(store, model, workers)

@@ -61,6 +61,7 @@ watcher:
 - `pg`（`-tags pg`）：亿级横向。
 - Redis（`-tags redis`）：热点 L2 缓存，提升大仓反查。
 - 向量检索后端：`storage.vector.driver` 默认空（文件 `PersistentStore`）；设 `chromem` 切换为持久化 `ChromemStore`（chromem-go 纯 Go，无需额外依赖，已接入生产分发）。
+- **模型/维度切换**：`vector.json` 记录写入时的模型标识与维度，启动时与当前 `embedding_model` / 实际 `Embedder.Dim()` 比对，不一致会拒绝加载并降级内存（日志含 `fallback to memory`）。切换模型（含默认构建 ↔ `-tags onnx`）前需删除 `data/vector/vector.json` 并重建索引，否则需手动确认旧向量已失效。
 
 ## 健康与可观测
 
