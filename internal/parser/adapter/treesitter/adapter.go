@@ -347,13 +347,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	// Go 专属结构跟踪：花括号净深度 + 当前方法作用域。
 	// 用途（T1-2 真实缺陷修复）：调用归属 CallerFQN、receiver 决定 ClassFQN、
 	// 顶层函数不再被误挂到最近 class。仅 Go 启用——其余语言走原启发式路径。
-	goDepth := 0         // 已见 `{`/`}` 净深度（字符串/注释已剔除）
-	curMethodIdx := -1   // doc.Methods 中当前所在方法索引（-1 = 不在任何方法内）
-	methodOpenDepth := 0 // 方法体起始深度（方法定义行之前的 goDepth）
-	goPkg := ""          // 当前 Go 文件 package 声明（调用图 FQN 包限定用）
-	curRecvVar := ""     // 当前方法 receiver 变量名（自调用 callee 限定用）
-	curRecvType := ""    // 当前方法 receiver 类型名
-	nonGoPkg := ""       // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
+	goDepth := 0            // 已见 `{`/`}` 净深度（字符串/注释已剔除）
+	curMethodIdx := -1      // doc.Methods 中当前所在方法索引（-1 = 不在任何方法内）
+	methodOpenDepth := 0    // 方法体起始深度（方法定义行之前的 goDepth）
+	methodBodyOpen := false // 方法体 `{` 是否已出现（多行签名续行识别用）
+	goPkg := ""             // 当前 Go 文件 package 声明（调用图 FQN 包限定用）
+	curRecvVar := ""        // 当前方法 receiver 变量名（自调用 callee 限定用）
+	curRecvType := ""       // 当前方法 receiver 类型名
+	nonGoPkg := ""          // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
 	curStructIdx := -1       // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
 	curStructOpenDepth := 0  // struct 体起始深度（type X struct { 的 `{` 计入前）
@@ -451,6 +452,23 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				curMethodIdx = len(doc.Methods) - 1
 				methodOpenDepth = goDepth // 定义行 `{` 尚未计入
 				goDepth += braceNet(code)
+				// 方法体是否在本行开启：多行签名（`func F(` 后续参数行）尚未出现 `{`，
+				// 需要把后续续行视为签名而非方法体，否则首个续行就会被误判为方法闭合（P1-14）。
+				methodBodyOpen = strings.Contains(code, "{")
+				docComment.Reset()
+				continue
+			}
+
+			// 多行签名续行：`{` 未出现前，本行属于参数/返回值声明，累积进 Signature，
+			// 不计调用、不触发方法闭合；出现 `{` 的当行开启方法体。
+			if curMethodIdx >= 0 && !methodBodyOpen {
+				if t := strings.TrimSpace(line); t != "" {
+					doc.Methods[curMethodIdx].Signature += " " + t
+				}
+				goDepth += braceNet(code)
+				if strings.Contains(code, "{") {
+					methodBodyOpen = true
+				}
 				docComment.Reset()
 				continue
 			}
@@ -509,7 +527,8 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			goDepth += braceNet(code)
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
 				curMethodIdx = -1 // 方法体已闭合
-				curRecvVar = ""   // 重置 receiver 跟踪
+				methodBodyOpen = false
+				curRecvVar = "" // 重置 receiver 跟踪
 				curRecvType = ""
 			}
 			// struct 体闭合检测（深度回落至起始深度）

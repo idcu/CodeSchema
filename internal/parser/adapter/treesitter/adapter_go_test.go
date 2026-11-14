@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/parser"
@@ -110,6 +111,58 @@ func (w *Watcher[T]) ReloadNow() {
 	}
 
 	var _ *parser.IRDocument = doc
+}
+
+// TestGoMultiLineSignature_CallAttribution 是 P1-14 负控：Go 多行函数签名
+// （签名行无 `{`）此前会在首个参数续行处被误判为方法体闭合，导致方法体内
+// 调用的 CallerFQN 为空、analyzer 不建边。修复后签名续行累积进 Signature，
+// 方法体调用归属 sample.MultiLine。
+func TestGoMultiLineSignature_CallAttribution(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "multi.go")
+	src := `package sample
+
+func helper(x int) int { return x }
+
+func MultiLine(
+	a int,
+	b string,
+) int {
+	return helper(a) + len(b)
+}
+`
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewTreeSitterAdapter()
+	doc, err := a.Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	var multi *parser.MethodIR
+	for i := range doc.Methods {
+		if doc.Methods[i].Name == "MultiLine" {
+			multi = &doc.Methods[i]
+		}
+	}
+	if multi == nil {
+		t.Fatalf("MultiLine 未识别；methods=%v", doc.Methods)
+	}
+	if !strings.Contains(multi.Signature, "b string") {
+		t.Errorf("多行签名应累积续行，实际 Signature=%q", multi.Signature)
+	}
+
+	found := false
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "sample.MultiLine" && c.CalleeFQN == "sample.helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("期望调用 sample.MultiLine -> sample.helper，实际 calls=%v", doc.Calls)
+	}
 }
 
 // TestGoFieldAndConstantExtraction 验证 Go 路径的变量/常量 IR 产出（2026-09-03 新增）：

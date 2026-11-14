@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 158: fix(parser): Go 多行函数签名不再提前闭合方法（P1-14）
+
+- 背景：`func F(` 签名行未出现 `{` 时，`methodOpenDepth == goDepth`；下一行参数续行在「进入本行前深度」判定中即满足 `goDepth <= methodOpenDepth`，方法被误判闭合，方法体调用的 `CallerFQN` 为空 → analyzer 不建边，影响面/调用图丢边。
+- 动作：`adapter.go` 增加 `methodBodyOpen` 状态——定义行按是否含 `{` 设置；`{` 出现前，续行累积进 `Signature`、不检测调用、不触发闭合；`{` 出现当行开启方法体；闭合时复位。
+- 负控（先红后绿）：`TestGoMultiLineSignature_CallAttribution`。修复前实测 `Signature="func MultiLine("`、调用为 `{caller="" callee="sample.helper"}`；修复后签名含 `b string`，调用为 `sample.MultiLine -> sample.helper`。
+- 验证：`make test` 全绿；`make counts-check` 通过（LoC 55238 ≈ 55.2k）。
+
 ### Commit 157: fix(parser): Go 包级函数合成包级容器入库（P0-1）
 
 - 背景：默认 treesitter 正则路径对无 receiver 的 Go 顶层函数留空 `ClassFQN`；三后端（FileStore/SQLite/PG）按 `ClassFQN`→class 匹配，找不到即 `continue` 静默丢弃。后果：`/context` 对包级函数恒 404，FTS/向量/标签/测试关联同样失效，而 `calls` 仍写入包级 `caller_fqn` 形成悬空边。
