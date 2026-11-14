@@ -806,8 +806,8 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			} else {
 				currentClass = nil
 			}
-			// 声明文件没有实现：只推进作用域，不登记方法。
-			if tsDeclFile {
+			// 声明文件与 interface/type 成员没有实现：只推进作用域，不登记方法。
+			if tsDeclFile || (lang == "ts" && tsTypeOnlyScope(currentClass)) {
 				docComment.Reset()
 				continue
 			}

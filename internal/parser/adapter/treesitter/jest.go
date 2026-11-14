@@ -68,6 +68,12 @@ func isTSDeclarationFile(path string) bool {
 	return strings.HasSuffix(lower, ".d.ts") || strings.HasSuffix(lower, ".d.mts") || strings.HasSuffix(lower, ".d.cts")
 }
 
+// tsTypeOnlyScope 判断类作用域是否只有类型契约（interface/type）。
+// 其成员没有实现，不得登记为方法或调用边。
+func tsTypeOnlyScope(c *parser.ClassIR) bool {
+	return c != nil && (c.Type == "INTERFACE" || c.Type == "TYPE")
+}
+
 // matchJestDecl 判断一行是否为 Jest 块声明，返回 "describe"/"test" 与标题。
 func matchJestDecl(line string) (kind, title string, ok bool) {
 	m := tmpJestDeclPattern.FindStringSubmatch(line)

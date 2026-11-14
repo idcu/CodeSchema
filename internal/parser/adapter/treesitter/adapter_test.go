@@ -412,6 +412,57 @@ export declare class Server {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_TSInterfaceMemberNotMethod 负控：接口成员是类型契约，
+// 不登记为方法也不产生调用；同文件的类方法与顶层函数仍须正常入库。
+func TestTreeSitterAdapter_Parse_TSInterfaceMemberNotMethod(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "types.ts")
+	content := `export interface Repository<T> {
+  getAll(): T[];
+  add(item: T): void;
+}
+
+class Card {
+  render(): string {
+    return helper();
+  }
+}
+
+export function top(): void {}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := map[string]string{}
+	for _, m := range doc.Methods {
+		got[m.ClassFQN+"."+m.Name] = m.Name
+	}
+	for _, bad := range []string{"Repository.getAll", "Repository.add"} {
+		if _, ok := got[bad]; ok {
+			t.Errorf("interface member registered as method: %s; methods=%+v", bad, doc.Methods)
+		}
+	}
+	for _, want := range []string{"Card.render", "types.top"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("missing method %q; methods=%+v", want, doc.Methods)
+		}
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "Card.render" && c.CalleeFQN == "helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("call Card.render -> helper not found; calls=%+v", doc.Calls)
+	}
+}
+
 // TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls 负控：控制流关键字（if/for/...）
 // 经包+类限定后（demo.Foo.if）曾绕过 isKeyword 过滤，被记为调用边。
 func TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls(t *testing.T) {
