@@ -4,7 +4,7 @@ R1-1,A,P0,顶层函数入库（file/sqlite/pg+IR+Redis）,P0-1,R0-1,6,三后端�
 R1-2,A,P1,Go多行函数签名作用域,P1-14,R0-1,2.5,多行签名方法产生正确CallerFQN与调用边；单行签名行为不变,todo,必做
 R1-3,A,P1,方法EndLine回填,P1-1,R1-2,2.5,Svc.Method的end_line>start_line且覆盖方法体；嵌套闭包不越界,todo,必做
 R1-4,A,P1,超长行跳过而非整次失败,P1-15,R0-1,0.75,100KB单行文件扫描exit 0并标parse_skipped；其余文件正常入库,todo,必做
-R1-5,A,P3,viz负数参数校验,P3-1,R0-1,0.5,limit=-1与offset=-1返回400；无panic日志；limit=1正常,todo,必做
+R1-5,A,P3,viz负数参数校验,P3-1,R0-1,0.5,limit=-1与offset=-1返回400；无panic日志；limit=1正常,done,必做
 R1-6,A,P1,文档纠偏（性能方向/计数/语言数/fsperm/MCP声明）,审计§八/§九,R0-1,1,存储性能方向纠真；23路由/33 internal包/11 CI job/31语言/无fsperm与实测一致；counts-check绿且不改基线,todo,必做
 R1-7,A,P3,Go原始字符串/泛型/constBlock解析,P3-9,R1-2,1.75,反引号含大括号与泛型签名不破坏深度与EndLine；普通函数不变,todo,必做
 R2-1,B,P1,调用边口径只保留direct call,P1-7,R1-1,5,import/reference/implements/extends不产生调用边；/impact不含importer；direct call仍出现,todo,必做

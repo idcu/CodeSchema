@@ -16,21 +16,25 @@ func (f *fakeVizStore) ListDocuments(ctx context.Context) ([]VizDocInfo, error) 
 	return f.docs, nil
 }
 
-// TestVizAPIDocuments_PaginationBounds 是 P3-1 负控：offset/limit 为负数或越界时，
+// TestVizAPIDocuments_PaginationBounds 是 P3-1 负控：offset/limit 为负数或非法值时
 // 旧实现直接切片 docs[offset:end]，触发 slice bounds out of range panic（线上被
-// recovery 兜成 500）。修复后一律夹取到 [0,len] 并返回 200。
+// recovery 兜成 500）。修复后负数/非法值返回 400，正数越界仍夹取到 [0,len]。
 func TestVizAPIDocuments_PaginationBounds(t *testing.T) {
 	h := NewVizHandler(&fakeVizStore{docs: []VizDocInfo{{ID: "a"}, {ID: "b"}, {ID: "c"}}}, nil, 3, "")
 
 	cases := []struct {
-		url      string
-		wantDocs int
+		url        string
+		wantStatus int
+		wantDocs   int
 	}{
-		{"/viz/api/documents?limit=-1", 0},
-		{"/viz/api/documents?offset=-2", 3},
-		{"/viz/api/documents?offset=-2&limit=-3", 0},
-		{"/viz/api/documents?offset=99&limit=10", 0},
-		{"/viz/api/documents?offset=1&limit=1", 1},
+		{"/viz/api/documents?limit=-1", 400, 0},
+		{"/viz/api/documents?offset=-2", 400, 0},
+		{"/viz/api/documents?offset=-2&limit=-3", 400, 0},
+		{"/viz/api/documents?offset=abc", 400, 0},
+		{"/viz/api/documents?limit=1.5", 400, 0},
+		{"/viz/api/documents?offset=99&limit=10", 200, 0},
+		{"/viz/api/documents?offset=1&limit=1", 200, 1},
+		{"/viz/api/documents?limit=0", 200, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.url, func(t *testing.T) {
@@ -38,8 +42,11 @@ func TestVizAPIDocuments_PaginationBounds(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.apiDocuments(rec, req)
 
-			if rec.Code != 200 {
-				t.Fatalf("status want 200, got %d body=%s", rec.Code, rec.Body.String())
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status want %d, got %d body=%s", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+			if tc.wantStatus != 200 {
+				return
 			}
 			var resp struct {
 				Total     int          `json:"total"`

@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 187: fix(server): viz 分页负数/非法参数返回 400（R1-5 / P3-1）
+
+- 背景：Commit 162 已用「夹取到 [0,len]」消除 `docs[offset:end]` panic，但批次 A 退出标准
+  要求 `limit=-1` / `offset=-1` 返回 **400**；且 `offset=abc`、`limit=1.5` 此前被静默忽略。
+- 修复：`apiDocuments` 改用 `vizPageParam`——缺省取默认值，负数/非整数返回 400，
+  正数越界仍夹取到 `[0,len]`（`limit=0` 合法，返回空页）。
+- 负控（先红后绿）：`TestVizAPIDocuments_PaginationBounds` 扩为 8 组；修复前 4 组负数/非法值
+  实测 200（红），修复后负数/非法值 400、正常与越界值 200（绿）。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test` 全绿。
+
 ### Commit 186: feat(releasebench): 人工真值独立评估（R5-14 / S-2h）
 
 - 目的：现有自动真值与 `call_graph` 策略同为 IR 直接调用边，饱和数字只能证明链路完整，

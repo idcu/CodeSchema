@@ -117,30 +117,16 @@ func (h *VizHandler) apiDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 支持分页。offset/limit 均夹取到合法区间：负数或越界参数直接切片会 panic（P3-1）。
-	offset := 0
-	limit := len(docs)
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
-			offset = v
-		}
+	// 支持分页。负数/非整数值返回 400（P3-1：直接切片会 panic）；正数越界夹取到 [0,len]。
+	offset, err := vizPageParam(r, "offset", 0, len(docs))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
 	}
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			limit = v
-		}
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > len(docs) {
-		offset = len(docs)
-	}
-	if limit < 0 {
-		limit = 0
-	}
-	if limit > len(docs)-offset {
-		limit = len(docs) - offset
+	limit, err := vizPageParam(r, "limit", len(docs)-offset, len(docs)-offset)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
 	}
 	end := offset + limit
 
@@ -151,6 +137,22 @@ func (h *VizHandler) apiDocuments(w http.ResponseWriter, r *http.Request) {
 		"documents": docs[offset:end],
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// vizPageParam 解析分页参数：缺省取 def，负数或非整数报错，正数越界夹取到 max。
+func vizPageParam(r *http.Request, name string, def, max int) (int, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	if v > max {
+		v = max
+	}
+	return v, nil
 }
 
 // apiDocument 返回单个文档的详细信息（含内容）。
