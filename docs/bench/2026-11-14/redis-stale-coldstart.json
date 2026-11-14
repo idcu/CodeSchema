@@ -1,0 +1,16 @@
+{
+  "cache_key_ttl_seconds": 86400,
+  "cold_start_1000_files_ms": 14088.462,
+  "cold_start_1_file_ms": 23.907,
+  "cold_start_fallback": "全表遍历（GetAllFiles + 每文件查类/方法），成本随索引规模线性增长",
+  "cold_start_minimal_ms": 1424.308,
+  "empty_index_ms": 2.698,
+  "namespace": "it-cold-1794663600420247000",
+  "pg_dsn": "postgres://codeschema:codeschema@localhost:5432/cs_it_1794663600175311000?sslmode=disable",
+  "redis": "redis://127.0.0.1:6379/0",
+  "result": "冷启动回退 PG 正确；陈旧键窗口存在且由 InvalidateFile 闭环；空索引首次查询 not found",
+  "stale_hit_full_ms": 12902.309,
+  "stale_hit_minimal_ms": 2.388,
+  "stale_hit_note": "完整模式含关联单测扫描（FindTestLinksWithStats），与缓存命中无关；最小模式隔离定位路径",
+  "verified_at": "2026-11-14T21:40:46+08:00"
+}

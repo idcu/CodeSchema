@@ -102,42 +102,11 @@ func (c *redisCacheStore) MarkParseSkipped(ctx context.Context, path string, byt
 	return id, nil
 }
 
-// populate 把类、方法、调用关系与文件→类索引 best-effort 推入 Redis；
-// 任一错误仅记录，不影响主路径。
+// populate 把当前文件 IR best-effort 同步进 Redis：先失效旧版本键，再写当前
+// 类/方法/调用与文件→类索引。任一错误仅记录，不影响主路径。
 func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
-	fqns := make([]string, 0, len(ir.Classes))
-	for i := range ir.Classes {
-		if err := c.cache.PutClass(ctx, &ir.Classes[i]); err != nil {
-			log.Printf("[warn] redis 写入类 %s 失败：%v", ir.Classes[i].FullName, err)
-		}
-		// 类 FQN → 源文件路径反查索引（service 缓存快速路径依赖）。
-		if err := c.cache.PutClassPath(ctx, ir.Classes[i].FullName, ir.FilePath); err != nil {
-			log.Printf("[warn] redis 写入类路径索引 %s 失败：%v", ir.Classes[i].FullName, err)
-		}
-		fqns = append(fqns, ir.Classes[i].FullName)
-	}
-	// 方法 FQN（ClassFQN.Name）→ 方法体 + 源文件路径（service 方法符号快速路径）。
-	methodFQNs := make([]string, 0, len(ir.Methods))
-	for i := range ir.Methods {
-		fqn := ir.Methods[i].ClassFQN + "." + ir.Methods[i].Name
-		methodFQNs = append(methodFQNs, fqn)
-		if err := c.cache.PutMethod(ctx, &ir.Methods[i]); err != nil {
-			log.Printf("[warn] redis 写入方法 %s 失败：%v", fqn, err)
-		}
-		if err := c.cache.PutMethodPath(ctx, fqn, ir.FilePath); err != nil {
-			log.Printf("[warn] redis 写入方法路径索引 %s 失败：%v", fqn, err)
-		}
-	}
-	if err := c.cache.PutFileClasses(ctx, ir.FilePath, fqns); err != nil {
-		log.Printf("[warn] redis 写入文件→类索引 %s 失败：%v", ir.FilePath, err)
-	}
-	if err := c.cache.PutFileMethods(ctx, ir.FilePath, methodFQNs); err != nil {
-		log.Printf("[warn] redis 写入文件→方法索引 %s 失败：%v", ir.FilePath, err)
-	}
-	for i := range ir.Calls {
-		if err := c.cache.PutCall(ctx, &ir.Calls[i]); err != nil {
-			log.Printf("[warn] redis 写入调用 %s→%s 失败：%v", ir.Calls[i].CallerFQN, ir.Calls[i].CalleeFQN, err)
-		}
+	if err := c.cache.SyncIR(ctx, ir); err != nil {
+		log.Printf("[warn] redis 同步 %s 缓存失败：%v", ir.FilePath, err)
 	}
 }
 

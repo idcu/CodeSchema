@@ -346,10 +346,62 @@ func (c *RedisCache) PutFileMethods(ctx context.Context, path string, fqns []str
 	return c.touch(ctx, key)
 }
 
+// SyncIR 把一次重索引的文件 IR 同步进缓存（best-effort，返回聚合错误）。
+//
+// 调用方应在主存储写入成功后调用。开头先按旧版本建立的反向索引失效该文件
+// 的类/方法/路径键，避免重索引后已删除的实体继续命中缓存；随后写入当前 IR。
+func (c *RedisCache) SyncIR(ctx context.Context, ir *parser.IRDocument) error {
+	if ir == nil || ir.FilePath == "" {
+		return nil
+	}
+	var errs []error
+	if err := c.InvalidateFile(ctx, ir.FilePath); err != nil {
+		errs = append(errs, fmt.Errorf("invalidate %s: %w", ir.FilePath, err))
+	}
+	classFQNs := make([]string, 0, len(ir.Classes))
+	for i := range ir.Classes {
+		cls := &ir.Classes[i]
+		classFQNs = append(classFQNs, cls.FullName)
+		if err := c.PutClass(ctx, cls); err != nil {
+			errs = append(errs, fmt.Errorf("put class %s: %w", cls.FullName, err))
+		}
+		if err := c.PutClassPath(ctx, cls.FullName, ir.FilePath); err != nil {
+			errs = append(errs, fmt.Errorf("put class path %s: %w", cls.FullName, err))
+		}
+	}
+	methodFQNs := make([]string, 0, len(ir.Methods))
+	for i := range ir.Methods {
+		m := &ir.Methods[i]
+		fqn := methodFQN(m)
+		methodFQNs = append(methodFQNs, fqn)
+		if err := c.PutMethod(ctx, m); err != nil {
+			errs = append(errs, fmt.Errorf("put method %s: %w", fqn, err))
+		}
+		if err := c.PutMethodPath(ctx, fqn, ir.FilePath); err != nil {
+			errs = append(errs, fmt.Errorf("put method path %s: %w", fqn, err))
+		}
+	}
+	if err := c.PutFileClasses(ctx, ir.FilePath, classFQNs); err != nil {
+		errs = append(errs, fmt.Errorf("put file classes %s: %w", ir.FilePath, err))
+	}
+	if err := c.PutFileMethods(ctx, ir.FilePath, methodFQNs); err != nil {
+		errs = append(errs, fmt.Errorf("put file methods %s: %w", ir.FilePath, err))
+	}
+	for i := range ir.Calls {
+		call := &ir.Calls[i]
+		if err := c.PutCall(ctx, call); err != nil {
+			errs = append(errs, fmt.Errorf("put call %s->%s: %w", call.CallerFQN, call.CalleeFQN, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // InvalidateFile 删除某文件相关的类/方法缓存与反查索引。
 //
-// 键从写入时建立的 file:<path> 与 filemethods:<path> 集合枚举；调用边
-// （caller:/callee:）无法按下标反查，交由 TTL 自然过期，避免全命名空间扫描。
+// 键从写入时建立的 file:<path> 与 filemethods:<path> 集合枚举。本文件实体的
+// 出边（caller:<fqn>）一并删除：重索引会按当前 IR 重建，删除不会丢其他文件的
+// 数据。入边（callee:<fqn>）可能来自其他未重索引的文件，不能在此删除，交由
+// TTL 自然过期（见包注释），避免误删有效边。
 func (c *RedisCache) InvalidateFile(ctx context.Context, path string) error {
 	classFQNs, err := c.ClassesOfFile(ctx, path)
 	if err != nil {
@@ -359,13 +411,13 @@ func (c *RedisCache) InvalidateFile(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	keys := make([]string, 0, 2+2*len(classFQNs)+2*len(methodFQNs))
+	keys := make([]string, 0, 2+3*len(classFQNs)+3*len(methodFQNs))
 	keys = append(keys, c.key("file:", path), c.key("filemethods:", path))
 	for _, fqn := range classFQNs {
-		keys = append(keys, c.key("class:", fqn), c.key("classpath:", fqn))
+		keys = append(keys, c.key("class:", fqn), c.key("classpath:", fqn), c.key("caller:", fqn))
 	}
 	for _, fqn := range methodFQNs {
-		keys = append(keys, c.key("method:", fqn), c.key("methodpath:", fqn))
+		keys = append(keys, c.key("method:", fqn), c.key("methodpath:", fqn), c.key("caller:", fqn))
 	}
 	return c.backend.Del(ctx, keys...)
 }

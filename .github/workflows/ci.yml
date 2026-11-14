@@ -373,7 +373,9 @@ jobs:
       - name: PG/Redis integration tests (-tags 'pg redis')
         # services 容器暴露到 localhost:5432/6379，job env 已指好 DSN/ADDR；
         # Redis 不可达时测试自 Skip（不失败），故 healthcheck 已保证容器就绪前提下本 step 真实验证。
-        run: go test -tags 'pg redis' -count=1 -timeout 300s ./internal/store/pg/...
+        run: |
+          go test -tags 'pg redis' -count=1 -timeout 300s ./internal/store/pg/...
+          go test -tags 'redis' -count=1 -timeout 300s ./cmd/codeschema/...
 
   # === 标签隔离代码看护（-tags onnx/pg/redis：默认二进制不含，需显式开启） ===
   # 防止 ONNX 嵌入 / PG / Redis 存储在默认构建外长期无人编译而腐化。

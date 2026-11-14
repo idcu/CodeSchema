@@ -1,6 +1,6 @@
 # 性能基线：索引吞吐、查询延迟与多租户隔离（S-3）
 
-> 最后更新：2026-11-14（追加索引快照流式原子落盘实测，见 §8.5；调用图缓存与内存归因见 §6.1 / §8.4）
+> 最后更新：2026-11-14（追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -18,6 +18,7 @@
 | `/search`（large） | P50 244.9 ms / P95 256.8 ms，0 错误 |
 | 多租户并发 | 顺序总和 6,474.9 ms → 并发墙钟 4,751.3 ms（争用比 0.734） |
 | 多租户隔离 | **通过**：store 路径 0 越界、FTS 目录互异、连接池上限生效、Redis 命名空间互异 |
+| PG+Redis 后端并发 | 480 次混合读写 / 0 错误，P50 8.5 ms / P95 84.7 ms（真实实例，见 §7.1） |
 | 查询错误率 | 7,294 次并发查询 / 0 错误 |
 
 发现的明确结构性问题：持久化向量存储的 O(n²) 写放大（§8.1）、调用图逐请求全量重建
@@ -190,16 +191,41 @@ P99 / max：
 | FTS 目录互异且 `fts.json` 存在 | 通过（三个目录互不相同） |
 | 连接池上限按租户配置生效 | 通过（`PoolStats().MaxOpenConnections` = 4/6/8） |
 | Redis 命名空间前缀互异 | 通过（`codeschema-a96612cbe87f` / `847f00f30128` / `2f5c87f67ee8`） |
-| Redis 活实例读写隔离 | **未验证**：未设置 `CODESCHEMA_REDIS_ADDR`，只校验了命名空间派生公式 |
+| Redis 活实例读写隔离 | 已验证（见 §7.1，真实 `redis:7-alpine`） |
 
 说明：
 
 - Redis 命名空间公式为 `sha256(driver + "|" + DSN)` 前 6 字节；三租户 DSN 互异，派生结果互异。
-  读写隔离由 `go test ./internal/store/redis -run Namespace` 覆盖，但**本基准未连真实 Redis**，不虚报。
+  读写隔离另由 §7.1 在真实 Redis 上验证（两个命名空间同名 FQN 互不覆盖、Flush 不越界）。
 - 争用比 0.734 表示并发仍有净收益（墙钟比串行总和少 26.6%），同时存在可观测争用。
   本轮**未做锁等待/IO 剖析**，不把争用归因到具体锁或 FTS 写路径。
 - 并发阶段的 scan 明显慢于 §5 单租户同语料（如 `go` 1,944.6 ms vs 216.1 ms），
   差异同时来自 sqlite 写入与三租户争用，两者本轮未拆分，不能单归于某一项。
+
+### 7.1 PG + Redis 活实例补测（2026-11-14 晚）
+
+环境：`redis:7-alpine`（localhost:6379）、`postgres:16-alpine`（localhost:5432），
+真实进程，无内存模拟实现。PG 测试用临时库 `cs_it_<timestamp>` 隔离（共享库已有 39,839 文件，
+冷启动全表回退会直接打满超时），测试结束即 `DROP DATABASE`。
+
+| 验证项 | 实测 | 结论 |
+|---|---|---|
+| Redis 命名空间读写隔离 | 两命名空间写入同名 FQN（类名 `One`/`Two`、路径 `a.go`/`b.go`）互不覆盖；`Flush` 一个后另一个仍可读 | 通过 |
+| 冷启动（空缓存首次查询） | 1 文件索引：23.9 ms；1,000 文件索引（最小模式隔离定位）：1,424.3 ms | 回退路径为全表遍历，**成本随索引规模线性增长** |
+| 缓存命中（同一查询） | 最小模式 2.4 ms（vs 冷启动 1,424.3 ms，约 596×） | 热路径 O(1) |
+| 陈旧键窗口 | `SyncIR` 写入后删除 PG 行，查询仍命中 Redis 并返回原源码 | 窗口存在，由 24h TTL 兜底 |
+| 失效闭环 | `InvalidateFile` 后再查返回 `ERR_SYMBOL_NOT_FOUND` | 通过 |
+| 空索引首次查询 | 2.7 ms，返回 `ERR_SYMBOL_NOT_FOUND` | 不报错、不挂起 |
+| PG + Redis 并发 | 8 writer × 10 文件 + 8 reader × 50 次读，480 ops，0 错误；P50 8.5 ms / P95 84.7 ms；终态 PG 与 Redis 类/调用边一致 | 通过 |
+
+补充口径：
+
+- 冷启动完整模式 1,000 文件为 14,088 ms，其中 `FindTestLinksWithStats` 的关联单测扫描占大头
+  （同一查询在缓存命中后仍需 12,902 ms）；因此定位路径用最小模式隔离，避免把单测扫描
+  误算成缓存未命中成本。
+- 重索引现在先失效本文件旧键再写新 IR（`RedisCache.SyncIR`）：旧类/旧方法/旧路径/旧出边不再可读；
+  `callee:` 入边可能来自其他文件，保留 TTL 兜底，避免误删有效边。
+- 原始数据：`redis-namespace-isolation.json` / `redis-stale-coldstart.json` / `pg-redis-concurrency.json`。
 
 ## 8. 瓶颈位置与修复
 
@@ -326,9 +352,9 @@ scan 吞吐 1,262 → 1,725 files/s（+36.7%），隔离口径峰值 1,872.3 →
 
 ### 8.6 未验证边界
 
-- 未连真实 Redis（见 §7）；未验证 PG/redis 后端的并发性能。
 - 未做并发查询吞吐上限测试（查询循环带 1 ms sleep，只用于争用与错误率观测）。
 - 未测 ONNX 真实推理、watch 增量索引、冷启动（OS 页缓存未预热）等场景。
+  §7.1 的冷启动指「空 Redis 缓存首次查询」，不含 OS 页缓存冷读。
 - 内存为进程内 `MemStats`，不是容器/cgroup 峰值，也未含 OS 页缓存。
 
 ## 9. 复现
@@ -388,6 +414,9 @@ make bench-perf
 | `perf-multitenant.json` | 顺序/并发墙钟、争用比、goroutine 峰值、查询次数与错误、逐租户明细、隔离断言 |
 | `mem-attribution-large*.json` | file 后端分阶段 live heap、构建峰值、调用图驻留增量、快照导出目录（`before-keyword-fix` / `keyword-fix` / `gogc20` / `stream-atomic`） |
 | `save-ab-vector.json` / `save-ab-fts.json` | 真实语料上向量/FTS 快照落盘 A/B：旧 `MarshalIndent` 与流式原子写的时长、堆峰值增量、分配量 |
+| `redis-namespace-isolation.json` | 真实 Redis 两命名空间读写隔离与 Flush 边界 |
+| `redis-stale-coldstart.json` | 真实 PG+Redis：冷启动回退耗时、缓存命中、陈旧键窗口、TTL 与失效闭环 |
+| `pg-redis-concurrency.json` | 真实 PG+Redis 混合读写并发：ops、错误数、P50/P95 |
 
 ### 9.4 复跑注意事项
 
@@ -408,7 +437,13 @@ make bench-perf
 - [mem-attribution-large-stream-atomic.json](./mem-attribution-large-stream-atomic.json)
 - [save-ab-vector.json](./save-ab-vector.json)
 - [save-ab-fts.json](./save-ab-fts.json)
+- [redis-namespace-isolation.json](./redis-namespace-isolation.json)
+- [redis-stale-coldstart.json](./redis-stale-coldstart.json)
+- [pg-redis-concurrency.json](./pg-redis-concurrency.json)
 
 基准代码：`internal/scalebench/perf_baseline_test.go`、`internal/scalebench/memory_attribution_test.go`、
 `internal/embedding/persistent_save_ab_test.go`、`internal/retrieval/persistent_save_ab_test.go`；
-门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1` / `CODESCHEMA_SNAPSHOT_DIR`。
+活实例测试：`internal/store/pg/redis_live_extra_test.go`、`internal/store/pg/redis_integration_test.go`、
+`cmd/codeschema/store_redis_test.go`（`make test-pg-redis`，需真实 PG/Redis）；
+门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1` / `CODESCHEMA_SNAPSHOT_DIR` /
+`CODESCHEMA_PG_DSN` / `CODESCHEMA_REDIS_ADDR`。

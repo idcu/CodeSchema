@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### 后端实测补齐（2026-11-14）：Redis 重索引失效 + PG/Redis 活实例三项
+
+- fix(redis)：新增 `RedisCache.SyncIR`，重索引时先 `InvalidateFile`（清本文件类/方法/路径
+  与出边 `caller:<fqn>`）再写当前 IR；`callee:` 入边保留 TTL 兜底以免误删其他文件的有效边。
+  `cmd/codeschema` 的 `populate` 改走 `SyncIR`，本文件删除的实体不再残留可读。
+  先红后绿：`TestRedisCache_SyncIRInvalidatesRemovedEntities`、
+  `TestRedisCacheStore_ReindexInvalidatesRemovedEntities`（真实 Redis）。
+- 活实例实测（`redis:7-alpine` + `postgres:16-alpine`，真实进程）：
+  命名空间同名 FQN 互不覆盖且 Flush 不越界；冷启动空缓存回源 1 文件 23.9 ms、
+  1,000 文件 1,424.3 ms（全表遍历线性增长），缓存命中最小模式 2.4 ms（约 596×）；
+  删 PG 行后仍命中 Redis（陈旧窗口，TTL 86,400 s），`InvalidateFile` 后回 `ERR_SYMBOL_NOT_FOUND`；
+  PG+Redis 8 writer × 10 + 8 reader × 50，480 ops / 0 错误，P50 8.5 ms / P95 84.7 ms，终态一致。
+- 门禁：`make test-pg-redis` 与 CI `pg-redis` job 追加 `./cmd/codeschema/...`。
+- 文档：`perf-baseline.md` §7.1 / §8.6、`存储后端.md` Redis 陈旧键语义与活实例表、
+  `测试与CI.md` 门禁范围；原始数据 `redis-namespace-isolation.json`、
+  `redis-stale-coldstart.json`、`pg-redis-concurrency.json`。
+
 ### 结构性问题 2 后续（2026-11-14）：索引快照流式 + 原子落盘
 
 - perf(persist)：新增 `internal/atomicfile`（tmp → fsync → rename → fsync dir，失败清理 tmp）。

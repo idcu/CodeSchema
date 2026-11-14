@@ -101,6 +101,7 @@ test-cover:
 test-pg-redis:
 	@echo "==> Running PG/Redis real-instance integration tests ..."
 	$(GO) test -tags 'pg redis' -count=1 -timeout 300s ./internal/store/pg/...
+	$(GO) test -tags 'redis' -count=1 -timeout 300s ./cmd/codeschema/...
 	@echo "==> PG/Redis integration tests OK."
 
 # 性能基准测试

@@ -337,6 +337,72 @@ func TestRedisCache_InvalidateFileRemovesOnlyTarget(t *testing.T) {
 	}
 }
 
+// TestRedisCache_SyncIRInvalidatesRemovedEntities 负控（重索引陈旧键）：
+// 同一文件重索引后，上一版本里已删除的类/方法/路径键必须消失，
+// 文件索引只剩当前 IR 的成员，旧方法的出边也不得继续可读。
+func TestRedisCache_SyncIRInvalidatesRemovedEntities(t *testing.T) {
+	ctx := context.Background()
+	backend := newMemBackend()
+	c := newRedisCache(backend, "tenant-a")
+	path := "/repo/svc.go"
+
+	first := &parser.IRDocument{
+		FilePath: path,
+		Classes: []parser.ClassIR{
+			{Name: "Old", FullName: "pkg.Old"},
+		},
+		Methods: []parser.MethodIR{
+			{Name: "Gone", ClassFQN: "pkg.Old"},
+		},
+		Calls: []parser.CallIR{
+			{CallerFQN: "pkg.Old.Gone", CalleeFQN: "pkg.Target"},
+		},
+	}
+	if err := c.SyncIR(ctx, first); err != nil {
+		t.Fatalf("sync first: %v", err)
+	}
+
+	second := &parser.IRDocument{
+		FilePath: path,
+		Classes: []parser.ClassIR{
+			{Name: "New", FullName: "pkg.New"},
+		},
+		Methods: []parser.MethodIR{
+			{Name: "Keep", ClassFQN: "pkg.New"},
+		},
+	}
+	if err := c.SyncIR(ctx, second); err != nil {
+		t.Fatalf("sync second: %v", err)
+	}
+
+	if cls, _ := c.GetClass(ctx, "pkg.Old"); cls != nil {
+		t.Errorf("重索引后旧类仍可读: %+v", cls)
+	}
+	if p, ok := c.ClassPath(ctx, "pkg.Old"); ok {
+		t.Errorf("重索引后旧类路径仍可读: %s", p)
+	}
+	if m, _ := c.GetMethod(ctx, "pkg.Old.Gone"); m != nil {
+		t.Errorf("重索引后旧方法仍可读: %+v", m)
+	}
+	if p, ok := c.MethodPath(ctx, "pkg.Old.Gone"); ok {
+		t.Errorf("重索引后旧方法路径仍可读: %s", p)
+	}
+	if callees, _ := c.CalleesOf(ctx, "pkg.Old.Gone"); len(callees) != 0 {
+		t.Errorf("重索引后旧方法出边仍可读: %v", callees)
+	}
+
+	fqns, _ := c.ClassesOfFile(ctx, path)
+	if len(fqns) != 1 || fqns[0] != "pkg.New" {
+		t.Errorf("文件→类索引应只剩 pkg.New，实际 %v", fqns)
+	}
+	if cls, err := c.GetClass(ctx, "pkg.New"); err != nil || cls == nil {
+		t.Errorf("当前类未写入: got=%+v err=%v", cls, err)
+	}
+	if m, err := c.GetMethod(ctx, "pkg.New.Keep"); err != nil || m == nil {
+		t.Errorf("当前方法未写入: got=%+v err=%v", m, err)
+	}
+}
+
 // TestRedisCache_FlushScopedToNamespace 负控（P1-4）：
 // Flush 只能清理本命名空间的键，不得 SCAN "*" 清空整个库。
 func TestRedisCache_FlushScopedToNamespace(t *testing.T) {

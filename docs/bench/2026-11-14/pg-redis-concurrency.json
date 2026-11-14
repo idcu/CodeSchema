@@ -1,0 +1,14 @@
+{
+  "errors": 0,
+  "files_per_w": 10,
+  "ops": 480,
+  "p50_ms": 8.494,
+  "p95_ms": 84.716,
+  "pg_dsn": "postgres://codeschema:codeschema@localhost:5432/codeschema?sslmode=disable",
+  "readers": 8,
+  "reads_per_rd": 50,
+  "redis": "redis://127.0.0.1:6379/0",
+  "result": "零错误；PG 与 Redis 终态一致（类/调用边可读）",
+  "verified_at": "2026-11-14T21:40:49+08:00",
+  "writers": 8
+}
