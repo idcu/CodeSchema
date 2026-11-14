@@ -535,13 +535,17 @@ func TestIsTestClass(t *testing.T) {
 		path     string
 		expected bool
 	}{
-		{name: "Test suffix", cls: store.ClassRecord{Name: "OrderServiceTest"}, path: "/x/service.go", expected: true},
-		{name: "Test prefix", cls: store.ClassRecord{Name: "TestOrderService"}, path: "/x/service.go", expected: true},
-		{name: "Tests suffix", cls: store.ClassRecord{Name: "OrderServiceTests"}, path: "/x/service.go", expected: true},
-		{name: "Spec suffix", cls: store.ClassRecord{Name: "OrderServiceSpec"}, path: "/x/service.go", expected: true},
+		{name: "Test suffix", cls: store.ClassRecord{Name: "OrderServiceTest"}, path: "/x/OrderServiceTest.java", expected: true},
+		{name: "Test prefix", cls: store.ClassRecord{Name: "TestOrderService"}, path: "/x/TestOrderService.java", expected: true},
+		{name: "Tests suffix", cls: store.ClassRecord{Name: "OrderServiceTests"}, path: "/x/OrderServiceTests.java", expected: true},
+		{name: "Spec suffix", cls: store.ClassRecord{Name: "OrderServiceSpec"}, path: "/x/OrderServiceSpec.java", expected: true},
 		{name: "Not test", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/service.go", expected: false},
 		{name: "Empty", cls: store.ClassRecord{Name: ""}, path: "/x/service.go", expected: false},
 		{name: "Go test file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/service_test.go", expected: true},
+		// Go 的测试函数只能位于 *_test.go；生产文件里的 Test* 类型（TestLink/TestResult）
+		// 不是测试类，否则整个文件被误判为测试，文件内生产调用会被当作「测试方法」。
+		{name: "Go production Test* type", cls: store.ClassRecord{Name: "TestResult"}, path: "/x/service.go", expected: false},
+		{name: "Go test file Test* type", cls: store.ClassRecord{Name: "TestResult"}, path: "/x/service_test.go", expected: true},
 		{name: "pytest module file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/test_order.py", expected: true},
 		{name: "pytest module file 2", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order_test.py", expected: true},
 		{name: "Jest test file", cls: store.ClassRecord{Name: "OrderService"}, path: "/x/order.test.ts", expected: true},
@@ -651,8 +655,8 @@ func TestFindTestLinks_Explicit(t *testing.T) {
 	ctx := context.Background()
 	st := &mockStoreWithTestData{
 		files: []*store.FileRecord{
-			{ID: 1, AbsolutePath: "/project/internal/order/service.go", Language: "go"},
-			{ID: 2, AbsolutePath: "/project/internal/order/service_spec.go", Language: "go"},
+			{ID: 1, AbsolutePath: "/project/internal/order/OrderService.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/project/internal/order/OrderServiceSpec.java", Language: "java"},
 		},
 		classes: map[int64][]store.ClassRecord{
 			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "com.example.OrderService"}},
@@ -841,9 +845,9 @@ func TestFindTestLinks_ExplicitScopedToQueriedMethod(t *testing.T) {
 	ctx := context.Background()
 	st := &mockStoreWithTestData{
 		files: []*store.FileRecord{
-			{ID: 1, AbsolutePath: "/proj/a.go", Language: "go"},
-			{ID: 2, AbsolutePath: "/proj/atest.go", Language: "go"},
-			{ID: 3, AbsolutePath: "/proj/b.go", Language: "go"},
+			{ID: 1, AbsolutePath: "/proj/A.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/proj/ATest.java", Language: "java"},
+			{ID: 3, AbsolutePath: "/proj/B.java", Language: "java"},
 		},
 		classes: map[int64][]store.ClassRecord{
 			1: {{ID: 10, FileID: 1, Name: "A", FullName: "com.example.A"}},

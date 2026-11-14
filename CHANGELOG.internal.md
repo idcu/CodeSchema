@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 185: fix(service): Go 生产文件中的 Test* 类型不再整文件判为测试（R5-13 / S-2g）
+
+- 现象：`Service.FindTestLinks` 的 `call_graph` 结果里出现生产方法
+  （`Service.GetTests`/`GetAffected`/`getContextModeUncached`/`enrichImpactNodes`）。
+- 根因：`isTestClass` 只按类名前缀判定，生产文件里的 `TestLink`/`TestResult`/`TestBatchItem`
+  让整个文件被当作测试文件，文件内所有调用都被当成「测试方法 → 生产方法」的边。
+- 修复：Go 源码仅在 `*_test.go` 内做名称判定（Go 测试函数只能存在于 `_test.go`）；
+  其它语言保持名称约定。Java 夹具路径改为 `.java` 以继续覆盖名称约定。
+- 负控（先红后绿）：`TestIsTestClass` 增加
+  `{TestResult, /x/service.go} = false` 与 `{TestResult, /x/service_test.go} = true`；
+  修复前首个用例红，修复后全绿。
+- 实测（本仓全量扫描，Go regex）：`Service.FindTestLinks` 结果 40 → 36 条，
+  消失的 4 条均为生产方法；基准 FP 9 → 4、P 0.9922 → 0.9966。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test` 全绿；
+  `make counts` = 59529（59.5k，与既有文档一致）。
+
 ### Commit 184: fix(parser/scanner): 跨文件接收者方法入库（残余 FN 根因）
 
 - **根因更正**：Commit 183 把残余 FN 归为「调用解析 + FQN 归一」。实测推翻该结论——

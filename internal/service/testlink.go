@@ -562,6 +562,17 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 //   - 文件路径约定：*_test.go / *_test.py / test_*.py / *.test.ts|js / *.spec.ts|js（pytest/Jest 以文件命名的测试）
 //     （文件级识别需由调用方传入 path；空 path 时仅按类名判断）
 func isTestClass(cls store.ClassRecord, path string) bool {
+	if path != "" {
+		if isTestFileName(path) {
+			return true
+		}
+		// Go 的测试函数只能位于 *_test.go；生产文件中以 Test 开头的类型
+		// （TestLink/TestResult/TestBatchItem）不是测试类。否则整个生产文件会被
+		// 误判为测试文件，文件内所有生产调用都会被当成「测试方法」进入关联结果。
+		if strings.HasSuffix(strings.ToLower(path), ".go") {
+			return false
+		}
+	}
 	name := cls.Name
 	if strings.HasSuffix(name, "Test") || strings.HasPrefix(name, "Test") ||
 		strings.HasSuffix(name, "Tests") || strings.HasSuffix(name, "Spec") {
