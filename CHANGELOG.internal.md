@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 177: fix(parser): Java 方法体语句不再被误判为方法声明（S-2 前置）
+
+- 背景：Java/Groovy 的方法模式无行首锚点、类型捕获组允许空白，`return helper(a);` 被解释为「返回类型 `return` + 方法名 `helper`」；该行随后被 `continue`，方法体内调用边全部丢失。公开基准的 Java 夹具因此真值 pair 恒为 0，且大仓 `ProdMethods` 会按语句行数虚增。
+- 动作：非 Go 通用路径新增 `isStatementLine` 行首语句关键字判定（`return/new/throw/if/for/...`），语句行不参与方法声明解析，继续进入 `detectCalls`；方法声明解析不变。
+- 负控（先红后绿）：`TestTreeSitterAdapter_Parse_JavaBodyStatementsAreNotMethods`——修复前 `methods = [add helper helper mul]`（4 个，`return helper(a, b);` 伪造成 `helper`），修复后 3 个且 `calls` 含 `helper`/`mul` 两条边；AST 路径（`-tags treesitter`）同测通过。
+- 验证：`go test ./internal/parser/adapter/treesitter/ ./internal/releasebench/` 全绿（两构建变体）；`make counts-check` 通过（LoC 58109 ≈ 58.1k）。
+
 ### Commit 176: fix(parser): LSP 符号层级/调用边/空结果回退/进程回收（P0-2）
 
 - 背景：LSP 路径「高精度」名不副实——`documentSymbol` 被按 `SymbolInformation` 反序列化（空字段也算成功），容器名丢失导致 `MethodIR.ClassFQN` 为空、方法入库被丢弃；从不抽取调用边；非空文件拿到 0 符号时静默返回空 IR 并写 hash（后续扫描永久跳过）；`Close` 只 `Kill` 不 `Wait`，遗留僵尸；`Registry` 无 `Close`，长驻 LSP 子进程无人释放。

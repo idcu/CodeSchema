@@ -43,6 +43,9 @@ type TreeSitterAdapter struct {
 	patterns map[string]langPatterns
 }
 
+// BuildVariant 返回当前构建的解析实现标识（供基准报告区分正则/真语法树）。
+func BuildVariant() string { return "regex" }
+
 // NewTreeSitterAdapter 创建适配器实例并初始化所有语言模式。
 func NewTreeSitterAdapter() *TreeSitterAdapter {
 	return &TreeSitterAdapter{
@@ -607,8 +610,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			continue
 		}
 
-		// 解析方法/函数定义
-		if matches := patterns.methodPattern.FindStringSubmatch(line); len(matches) >= 2 {
+		// 解析方法/函数定义。
+		// 行首语句关键字（return/new/if/...）开头的行不是方法声明：
+		// Java/Groovy 的模式未加行首锚点且类型组过宽，会把 `return helper(a);`
+		// 读成「返回类型 return + 方法名 helper」，既虚增方法数又让整行被 continue
+		// 吞掉、丢失方法体内的调用边（S-2 基准真值为 0 的根因）。
+		if matches := patterns.methodPattern.FindStringSubmatch(line); len(matches) >= 2 && !isStatementLine(trimmed) {
 			methodName := matches[len(matches)-1]
 			method := parser.MethodIR{
 				Name:      methodName,
@@ -1202,6 +1209,30 @@ func braceNet(s string) int {
 		}
 	}
 	return n
+}
+
+// stmtLineKeywords 行首语句关键字集合：以这些词开头的行不可能是方法声明。
+//
+// 仅用于非 Go 通用路径的方法解析抑制。Java/Groovy 的方法模式没有行首锚点，
+// 且「类型」捕获组允许空白，会把 `return helper(a);` 解释为
+// 「返回类型 return + 方法名 helper」，导致方法数虚增、方法体调用边被吞。
+var stmtLineKeywords = map[string]bool{
+	"return": true, "throw": true, "new": true, "else": true, "case": true,
+	"assert": true, "yield": true, "await": true, "if": true, "for": true,
+	"while": true, "switch": true, "catch": true, "finally": true, "do": true,
+	"try": true, "continue": true, "break": true, "super": true, "this": true,
+}
+
+// isStatementLine 报告一行（已去首尾空白）是否以语句关键字开头。
+func isStatementLine(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	end := strings.IndexAny(trimmed, " \t(;{")
+	if end < 0 {
+		end = len(trimmed)
+	}
+	return stmtLineKeywords[trimmed[:end]]
 }
 
 // isKeyword 判断是否为语言关键字，避免误匹配。

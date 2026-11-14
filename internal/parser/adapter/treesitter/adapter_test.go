@@ -137,6 +137,67 @@ public interface OrderService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaBodyStatementsAreNotMethods 负控：
+// Java 方法体内的 `return helper(a);` / `new Foo().bar();` 曾被正则方法模式
+// 误判为「返回类型 + 方法名」声明，导致方法数虚增且调用边被整行 continue 吞掉。
+func TestTreeSitterAdapter_Parse_JavaBodyStatementsAreNotMethods(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Calculator.java")
+	content := `package demo;
+
+public class Calculator {
+    public int add(int a, int b) {
+        return helper(a, b);
+    }
+
+    private int helper(int a, int b) {
+        Calculator c = new Calculator();
+        return c.mul(a, b);
+    }
+
+    private int mul(int a, int b) { return a * b; }
+}
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// 方法体语句不得被当作方法声明：add/helper/mul 共 3 个。
+	if len(doc.Methods) != 3 {
+		names := make([]string, 0, len(doc.Methods))
+		for _, m := range doc.Methods {
+			names = append(names, m.Name)
+		}
+		t.Fatalf("methods = %v (len=%d), want [add helper mul]", names, len(doc.Methods))
+	}
+	for _, m := range doc.Methods {
+		if m.ClassFQN != "Calculator" {
+			t.Errorf("method %s ClassFQN = %q, want Calculator", m.Name, m.ClassFQN)
+		}
+	}
+
+	// 方法体内的调用必须被抽取（调用边依赖这些行不再被 continue 吞掉）。
+	var sawHelper, sawMul bool
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "" {
+			t.Errorf("call %+v has empty CallerFQN", c)
+		}
+		if strings.HasSuffix(c.CalleeFQN, "helper") {
+			sawHelper = true
+		}
+		if strings.HasSuffix(c.CalleeFQN, "mul") {
+			sawMul = true
+		}
+	}
+	if !sawHelper || !sawMul {
+		t.Fatalf("calls = %+v, want edges to helper and mul", doc.Calls)
+	}
+}
+
 func TestTreeSitterAdapter_Parse_TypeScript(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()
