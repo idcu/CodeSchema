@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 190: fix(service): 查询缓存 key 含 IncludeTrace，命中返回深拷贝（R2-10 / P2-2）
+
+- 问题：`queryCacheKey` 未包含 `IncludeTrace`。先请求 `include_trace=false` 并写入缓存后，
+  后续 `true` 请求命中同一 key，`_trace` 静默缺失；且命中路径只做浅拷贝，
+  `RelatedTests` 切片与 `Trace`/`Trace.Config` 与缓存共享，调用方修改会污染后续读取。
+- 修复：key 追加 `IncludeTrace`；新增 `cloneSymbolContext`，复制 `RelatedTests` 切片与
+  `Trace`/`Trace.Config` 后置 `CacheHit=true` 返回。
+- 负控（先红后绿）：
+  - `TestQueryCacheKeyIncludesIncludeTrace`——修复前 `include_trace=true 命中了
+    include_trace=false 的缓存条目`（红）；
+  - `TestQueryCacheReturnsDeepCopy`——修复前调用方改 `RelatedTests[0]` 后二次读取
+    拿到 `[被污染]`（红）；修复后两项均绿，`TestQueryCache*` 全组保持绿。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60101（60.1k）。
+
 ### Commit 189: fix(parser/scip): 懒加载并发首次 Parse 竞态（R5-6 / P3-6）
 
 - 问题：`Parse`/`ParseAll` 用裸 `if !a.loaded { a.loadIndex() }` 触发懒加载，

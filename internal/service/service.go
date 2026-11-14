@@ -158,10 +158,32 @@ func (s *Service) QueryCacheStats() ttlcache.Stats {
 }
 
 // queryCacheKey 构造缓存 key：世代号 + 符号 + 全部影响输出的裁剪参数。
+// IncludeTrace 必须入 key：否则先 false 后 true 会命中无 _trace 的缓存条目。
 func (s *Service) queryCacheKey(symbol string, o ContextOptions) string {
-	return fmt.Sprintf("e%d|%s|%s|%d|%d|%d|%d|%.4g|%s",
+	return fmt.Sprintf("e%d|%s|%s|%d|%d|%d|%d|%.4g|%s|%t",
 		s.cacheEpoch.Load(), symbol, o.Mode, o.ContextLines,
-		o.MaxBytes, o.MaxTokens, o.MaxLineChars, o.charsPerToken(), o.PathStyle)
+		o.MaxBytes, o.MaxTokens, o.MaxLineChars, o.charsPerToken(), o.PathStyle, o.IncludeTrace)
+}
+
+// cloneSymbolContext 深拷贝缓存条目，隔离调用方对返回对象的修改。
+// RelatedTests 切片与 Trace/Trace.Config 均复制，避免污染缓存内容。
+func cloneSymbolContext(sc *SymbolContext) *SymbolContext {
+	if sc == nil {
+		return nil
+	}
+	out := *sc
+	if sc.RelatedTests != nil {
+		out.RelatedTests = append([]string(nil), sc.RelatedTests...)
+	}
+	if sc.Trace != nil {
+		trace := *sc.Trace
+		if sc.Trace.Config != nil {
+			cfg := *sc.Trace.Config
+			trace.Config = &cfg
+		}
+		out.Trace = &trace
+	}
+	return &out
 }
 
 // WithPathRoot 注入虚拟根，启用 path_style=virtual 的路径虚拟化输出。
@@ -391,13 +413,11 @@ func (s *Service) GetContextMode(ctx context.Context, symbol string, opts Contex
 	key := s.queryCacheKey(symbol, opts)
 	if hit, ok := s.queryCache.Get(key); ok && hit != nil {
 		metrics.IncCounter("querycache_hits_total", string(opts.Mode))
-		cached := *hit
-		if hit.Trace != nil {
-			traceCopy := *hit.Trace
-			traceCopy.CacheHit = true
-			cached.Trace = &traceCopy
+		cached := cloneSymbolContext(hit)
+		if cached.Trace != nil {
+			cached.Trace.CacheHit = true
 		}
-		return &cached, nil
+		return cached, nil
 	}
 	metrics.IncCounter("querycache_misses_total", string(opts.Mode))
 	got, err := s.getContextModeUncached(ctx, symbol, opts)

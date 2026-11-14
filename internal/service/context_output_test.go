@@ -260,6 +260,76 @@ func TestQueryCache(t *testing.T) {
 	}
 }
 
+// TestQueryCacheKeyIncludesIncludeTrace P2-2 负控：include_trace 不同取值必须各自成 key。
+// 修复前 key 不含该参数，先 false 再 true 会命中无 _trace 的缓存条目。
+func TestQueryCacheKeyIncludesIncludeTrace(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	svc.EnableQueryCache(time.Minute, 16)
+	ctx := context.Background()
+	symbol := "com.example.OrderService.GetUser"
+
+	plain, err := svc.GetContextMode(ctx, symbol, ContextOptions{Mode: ModeFull, IncludeTrace: false})
+	if err != nil {
+		t.Fatalf("include_trace=false: %v", err)
+	}
+	if plain.Trace != nil {
+		t.Fatal("include_trace=false 不应返回 _trace")
+	}
+
+	traced, err := svc.GetContextMode(ctx, symbol, ContextOptions{Mode: ModeFull, IncludeTrace: true})
+	if err != nil {
+		t.Fatalf("include_trace=true: %v", err)
+	}
+	if traced.Trace == nil {
+		t.Fatal("include_trace=true 命中了 include_trace=false 的缓存条目（_trace 静默缺失）")
+	}
+	if traced.Trace.CacheHit {
+		t.Fatal("include_trace 取值不同不应命中同一缓存条目")
+	}
+}
+
+// TestQueryCacheReturnsDeepCopy P2-2 负控：命中返回对象必须与缓存隔离。
+// 修复前是浅拷贝，调用方改 RelatedTests / Trace 会污染缓存，后续读取拿到脏值。
+func TestQueryCacheReturnsDeepCopy(t *testing.T) {
+	svc := newTestService(t)
+	svc.EnableQueryCache(time.Minute, 16)
+	ctx := context.Background()
+	symbol := "com.example.OrderService.GetUser"
+	opts := ContextOptions{Mode: ModeFull, IncludeTrace: true}
+
+	// 直接预置缓存条目，避免依赖测试关联策略的可用性。
+	svc.queryCache.Set(svc.queryCacheKey(symbol, opts), &SymbolContext{
+		Symbol:       symbol,
+		Source:       "cached",
+		RelatedTests: []string{"pkg.TestA"},
+		Trace: &TraceEntry{
+			Source: "store.GetContext",
+			Config: &TraceConfig{Mode: string(ModeFull)},
+		},
+	})
+
+	first, err := svc.GetContextMode(ctx, symbol, opts)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if len(first.RelatedTests) != 1 || first.RelatedTests[0] != "pkg.TestA" {
+		t.Fatalf("预置缓存未命中: %+v", first)
+	}
+	first.RelatedTests[0] = "被污染"
+	first.Trace.Source = "被污染"
+	first.Trace.Config.Mode = "被污染"
+
+	second, err := svc.GetContextMode(ctx, symbol, opts)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second.RelatedTests[0] != "pkg.TestA" || second.Trace.Source != "store.GetContext" ||
+		second.Trace.Config.Mode != string(ModeFull) {
+		t.Fatalf("调用方修改命中结果污染了缓存: %+v", second)
+	}
+}
+
 // TestQueryCacheDisabled 未启用缓存时行为与启用前完全一致（向后兼容）。
 func TestQueryCacheDisabled(t *testing.T) {
 	svc := newTestService(t)
