@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 167: fix(analyzer): 影响面后缀匹配结果确定化，消除 map 遍历顺序跳变（P1-8）
+
+- 背景：`resolveImpactNode` 的后缀匹配直接 `for nodeFQN := range cg.Nodes` 命中即返回；多包同名符号（`a.pkg.B.Foo` / `z.pkg.A.Foo`）时结果随 map 遍历顺序变化，同一 `/impact` 查询多次调用返回不同 FQN 与影响面。
+- 动作：收集全部后缀命中，`sort.Strings` 后取字典序最小者；注释明确确定性契约与消歧方式（传更精确 FQN）。
+- 负控（先红后绿）：`internal/analyzer/analyzer_test.go::TestResolveImpactNode_SuffixMatchDeterministic`（3 个同名节点 + 200 次重复查询）。修复前实测返回 `z.pkg.A.Foo`（期望字典序最小 `a.pkg.B.Foo`）；修复后 200 次稳定同一结果。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 55867 ≈ 55.9k）。
+
 ### Commit 166: fix(analyzer): 调用图只纳入真实调用关系，非调用边不再制造假影响面（P1-7）
 
 - 背景：`BuildAll`/`BuildCallGraph` 建边时完全丢弃 `CallIR.CallType`，任何非空 `CallerFQN/CalleeFQN` 都成为调用边；而 CodeGraph/JCodeIndexer 适配器把 imports/references/implements/extends 映射成 `dynamic`/`interface`，于是文件依赖与类层次关系被当作调用，`/impact`、`/affected` 出现假影响面。

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -717,7 +718,8 @@ func (a *Analyzer) ResolveImpactNode(ctx context.Context, symbol string) (string
 //   - 去前缀：查询比节点更限定（config.Watcher.ReloadNow → 命中 Watcher.ReloadNow）
 //   - 后缀：节点比查询更限定（查询 Watcher.ReloadNow → 命中 config.Watcher.ReloadNow）
 //
-// 先精确/去前缀（确定性高），后后缀（节点多包前缀时可能多命中，取首个，影响面查询容忍）。
+// 先精确/去前缀（确定性高），后后缀（节点多包前缀时可能多命中，按 FQN
+// 字典序取最小者，保证同一查询跨请求结果稳定；调用方可传更精确的 FQN 消歧）。
 func resolveImpactNode(cg *CallGraph, fqn string) (string, bool) {
 	// 1) 精确匹配 + 逐级去前缀
 	for _, cand := range normalizeImpactSymbol(fqn) {
@@ -726,12 +728,18 @@ func resolveImpactNode(cg *CallGraph, fqn string) (string, bool) {
 		}
 	}
 	// 2) 后缀匹配（节点比查询多包前缀）：config.Watcher.ReloadNow 命中查询 Watcher.ReloadNow / ReloadNow
+	//    多命中时排序后取首个，避免 map 遍历顺序导致结果跳变。
+	var matches []string
 	for nodeFQN := range cg.Nodes {
-		if nodeFQN == fqn || strings.HasSuffix(nodeFQN, "."+fqn) {
-			return nodeFQN, true
+		if strings.HasSuffix(nodeFQN, "."+fqn) {
+			matches = append(matches, nodeFQN)
 		}
 	}
-	return "", false
+	if len(matches) == 0 {
+		return "", false
+	}
+	sort.Strings(matches)
+	return matches[0], true
 }
 
 // ImpactNode 影响面节点（带深度层级，供编排层直接消费）。

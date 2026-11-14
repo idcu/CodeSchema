@@ -1914,3 +1914,27 @@ func TestCallGraph_ExcludesNonCallRelations(t *testing.T) {
 		assertGraph(t, cg)
 	})
 }
+
+// TestResolveImpactNode_SuffixMatchDeterministic 负控（P1-8）：
+// 后缀匹配多命中时，结果必须稳定（按 FQN 字典序），不能随 map 遍历顺序跳变。
+func TestResolveImpactNode_SuffixMatchDeterministic(t *testing.T) {
+	cg := NewCallGraph()
+	cg.AddEdge("z.pkg.A.Foo", "callee.one")
+	cg.AddEdge("a.pkg.B.Foo", "callee.two")
+	cg.AddEdge("other.pkg.C.Foo", "callee.three")
+
+	const want = "a.pkg.B.Foo" // 字典序最小
+	first, ok := resolveImpactNode(cg, "Foo")
+	if !ok {
+		t.Fatal("expected suffix match")
+	}
+	if first != want {
+		t.Fatalf("expected deterministic %q, got %q", want, first)
+	}
+	for i := 0; i < 200; i++ {
+		got, ok := resolveImpactNode(cg, "Foo")
+		if !ok || got != first {
+			t.Fatalf("nondeterministic result at iteration %d: %q (first %q)", i, got, first)
+		}
+	}
+}
