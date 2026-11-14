@@ -20,6 +20,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"gitee.com/idcu-go/recovery"
+
+	"github.com/idcu/codeschema/internal/ignore"
 )
 
 // Watcher 是文件监听器的统一接口。
@@ -30,11 +32,8 @@ type Watcher interface {
 	Stop() error
 }
 
-// DefaultIgnoreDirs 默认忽略的目录名（与主流工具链约定一致）。
-var DefaultIgnoreDirs = []string{
-	".git", "node_modules", "target", "build", "vendor",
-	".idea", ".vscode", "__pycache__",
-}
+// DefaultIgnoreDirs 默认忽略的目录名（与 scanner 同源，见 internal/ignore）。
+var DefaultIgnoreDirs = ignore.DefaultDirs
 
 // fileState 缓存单个文件的变更特征，用于轮询检测。
 type fileState struct {
@@ -43,14 +42,7 @@ type fileState struct {
 }
 
 func buildIgnoreSet(extra []string) map[string]bool {
-	ign := make(map[string]bool, len(DefaultIgnoreDirs)+len(extra))
-	for _, d := range DefaultIgnoreDirs {
-		ign[d] = true
-	}
-	for _, d := range extra {
-		ign[d] = true
-	}
-	return ign
+	return ignore.DirSet(extra...)
 }
 
 // ---------------------------------------------------------------------------

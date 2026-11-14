@@ -9,11 +9,12 @@ import (
 
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
+	trace "gitee.com/idcu-go/trace"
 	"github.com/idcu/codeschema/internal/hash"
+	"github.com/idcu/codeschema/internal/ignore"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter"
 	"github.com/idcu/codeschema/internal/store"
-	trace "gitee.com/idcu-go/trace"
 )
 
 // init 注册扫描器模块的监控指标。
@@ -76,10 +77,10 @@ func (s *Scanner) SetOnDelete(fn func(ctx context.Context, filePath string) erro
 // ProcessFile 处理单个文件：哈希闸门 → 适配器选择 → 解析 → 入库。
 //
 // 流程：
-//  1. 计算文件 SHA-256 哈希。
+//  1. 一次读盘得到内容：SHA-256、行数、解析共用同一份字节（R6-5）。
 //  2. 如果文件不存在，触发删除回调并返回。
 //  3. 查询 store 中是否已有相同哈希的文件 → 跳过。
-//  4. 按语言选择适配器，解析文件得到 IR。
+//  4. 按语言选择适配器，解析文件得到 IR（优先复用已读内容）。
 //  5. 填充元信息（哈希、字节数、行数）。
 //  6. 调用 store.UpsertIR 完成增量入库。
 //  7. 增量索引回调（P8.3）。
@@ -96,8 +97,8 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 		}
 	}
 
-	// 1. 计算哈希，如果文件不存在则触发删除处理
-	h, err := hash.File(path)
+	// 1. 单次读盘：哈希、行数、解析共用（R6-5）。
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// 文件已被删除，触发删除回调
@@ -109,9 +110,11 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 			metrics.IncCounter("scanner_processed_total", "deleted")
 			return nil
 		}
-		metrics.IncCounter("scanner_errors_total", "sha256")
-		return fmt.Errorf("sha256 %s: %w", path, err)
+		metrics.IncCounter("scanner_errors_total", "read")
+		return fmt.Errorf("read %s: %w", path, err)
 	}
+	h := hash.Bytes(data)
+	lineCount := countLinesBytes(data)
 
 	// 2. 哈希闸门：相同哈希跳过
 	existing, _ := s.store.GetFileByPath(ctx, path)
@@ -122,25 +125,28 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	}
 
 	// 2.5 行数旁路：超行数文件跳过解析并标记 parse_skipped
-	if s.maxLineCount > 0 {
-		if lc := countLines(path); lc > s.maxLineCount {
-			s.logger.Debug("file skipped (line limit)", "path", path, "lines", lc, "limit", s.maxLineCount)
-			return s.markSkipped(ctx, path, statSize(path), lc)
-		}
+	if s.maxLineCount > 0 && lineCount > s.maxLineCount {
+		s.logger.Debug("file skipped (line limit)", "path", path, "lines", lineCount, "limit", s.maxLineCount)
+		return s.markSkipped(ctx, path, int64(len(data)), lineCount)
 	}
 
 	// 3. 检测语言并选择适配器
 	lang := detectLang(path)
 	plugin, err := s.registry.Select(lang)
 	if err != nil {
-		// 无适配器时标记为跳过，不返回错误
+		// 无适配器时标记为跳过，不记录内容哈希（R6-5：避免把「未解析」伪装成已索引，
+		// 后续补上适配器时同一文件会被哈希闸门挡住）。
 		metrics.IncCounter("scanner_processed_total", "no_adapter")
-		_, storeErr := s.store.UpsertFile(ctx, path, h, 0, 0)
-		return storeErr
+		return s.markSkipped(ctx, path, int64(len(data)), lineCount)
 	}
 
-	// 4. 解析
-	ir, err := plugin.Parse(ctx, path)
+	// 4. 解析：优先复用已读内容，避免适配器二次读盘（R6-5）。
+	var ir *parser.IRDocument
+	if sp, ok := plugin.(parser.SourceParser); ok {
+		ir, err = sp.ParseSource(ctx, path, data)
+	} else {
+		ir, err = plugin.Parse(ctx, path)
+	}
 	if err != nil {
 		metrics.IncCounter("scanner_errors_total", "parse")
 		metrics.IncCounter("scanner_processed_total", "error")
@@ -155,10 +161,10 @@ func (s *Scanner) ProcessFile(ctx context.Context, path string) error {
 	ir.FileHash = h
 	ir.FilePath = path
 	if ir.LineCount == 0 {
-		ir.LineCount = countLines(path)
+		ir.LineCount = lineCount
 	}
 	if ir.ByteSize == 0 {
-		ir.ByteSize = statSize(path)
+		ir.ByteSize = int64(len(data))
 	}
 	// 补齐跨文件接收者方法的归属类（Go 允许类型与方法分属同包不同文件；
 	// 缺失归属类会被三后端静默丢弃，方法对所有查询不可见）。
@@ -275,13 +281,8 @@ func detectLang(path string) string {
 	return adapter.ExtToLang(filepath.Ext(path))
 }
 
-// countLines 统计文件行数。
-// 末尾换行符不增加行数。
-func countLines(path string) int {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
+// countLinesBytes 统计已读入内容行数；末尾换行符不增加行数（R6-5 单次读盘）。
+func countLinesBytes(data []byte) int {
 	if len(data) == 0 {
 		return 0
 	}
@@ -298,39 +299,15 @@ func countLines(path string) int {
 	return count
 }
 
-// statSize 获取文件字节大小。
-func statSize(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
-}
-
 // listFiles 递归列出目录下所有文件，忽略常见非源码目录。
 func listFiles(root string) ([]string, error) {
 	var files []string
-	ignoreDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		"target":       true,
-		"build":        true,
-		"vendor":       true,
-		".idea":        true,
-		".vscode":      true,
-		"__pycache__":  true,
-		// 测试临时目录：adapterbench 为规避 Windows 8.3 短路径会把样例写到仓库根
-		// cs_ab_tmp/，与「扫描整仓」的测试（integration/agentbench）并行时若中途
-		// 被清理会读到消失的文件导致 ScanAll 失败。忽略后互不干扰。
-		"cs_ab_tmp": true,
-	}
-	// 数据文件：当 store 目录位于仓库根（默认 ./data）时，避免将 store.json /
-	// store.lock 等持久化文件当作源码收录（无语言识别，会污染文件清单与集成测试断言）。
-	ignoreFiles := map[string]bool{
-		"store.json": true,
-		"store.lock": true,
-		"store.db":   true,
-	}
+	// 与 fswatch 共用同一份默认忽略清单（R6-5），仅额外补充测试临时目录：
+	// adapterbench 为规避 Windows 8.3 短路径会把样例写到仓库根 cs_ab_tmp/，
+	// 与「扫描整仓」的测试（integration/agentbench）并行时若中途被清理会读到
+	// 消失的文件导致 ScanAll 失败。忽略后互不干扰。
+	ignoreDirs := ignore.DirSet("cs_ab_tmp")
+	ignoreFiles := ignore.FileSet()
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

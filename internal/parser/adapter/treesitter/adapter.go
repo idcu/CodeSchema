@@ -13,6 +13,7 @@ package treesitter
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -356,6 +357,21 @@ func (a *TreeSitterAdapter) parseLang(path string) string {
 }
 
 func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+	return a.parseSource(ctx, path, file)
+}
+
+// ParseSource 实现 parser.SourceParser：直接消费编排层已读入的内存内容，
+// 避免哈希/行数之后再读一次盘（R6-5）。
+func (a *TreeSitterAdapter) ParseSource(ctx context.Context, path string, data []byte) (*parser.IRDocument, error) {
+	return a.parseSource(ctx, path, bytes.NewReader(data))
+}
+
+func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.Reader) (*parser.IRDocument, error) {
 	lang := a.parseLang(path)
 	patterns, ok := a.patterns[lang]
 	if !ok {
@@ -363,19 +379,13 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		return &parser.IRDocument{Source: "treesitter", FilePath: path}, nil
 	}
 
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open file: %w", err)
-	}
-	defer file.Close()
-
 	doc := &parser.IRDocument{
 		Source:   "treesitter",
 		Language: lang,
 		FilePath: path,
 	}
 
-	scanner := bufio.NewReaderSize(file, 64*1024)
+	scanner := bufio.NewReaderSize(r, 64*1024)
 	lineNum := 0
 	var currentClass *parser.ClassIR
 	var currentMethod *parser.MethodIR // 通用路径：当前方法作用域（用于回填 CallerFQN）

@@ -62,6 +62,26 @@ func (f *FallbackParser) Init(ctx context.Context, config map[string]any) error 
 // Close 关闭当前生效的适配器。
 func (f *FallbackParser) Close() error { return f.primary.Close() }
 
+// ParseSource 实现 parser.SourceParser：把已读入内存的内容透传给支持该接口的
+// 主/兜底适配器，避免重复读盘；不支持时回退到 Parse（R6-5）。
+func (f *FallbackParser) ParseSource(ctx context.Context, path string, data []byte) (*IRDocument, error) {
+	parse := func(p ParserPlugin) (*IRDocument, error) {
+		if sp, ok := p.(SourceParser); ok {
+			return sp.ParseSource(ctx, path, data)
+		}
+		return p.Parse(ctx, path)
+	}
+	ir, err := parse(f.primary)
+	if err == nil {
+		return ir, nil
+	}
+	metrics.IncCounter("parser_fallback_total", f.primary.Name())
+	f.logger.Warn("primary parse failed, falling back",
+		"path", path, "primary", f.primary.Name(),
+		"fallback", f.fallback.Name(), "error", err.Error())
+	return parse(f.fallback)
+}
+
 // Parse 优先主适配器解析；失败（含 ErrSourceUnavailable）时自动回退兜底适配器，
 // 并在日志中暴露降级原因（不静默丢失信息）。
 func (f *FallbackParser) Parse(ctx context.Context, path string) (*IRDocument, error) {

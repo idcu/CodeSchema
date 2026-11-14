@@ -1,7 +1,7 @@
 {
-  "internal_packages": 35,
-  "total_packages": 39,
-  "non_vendor_loc": 62717,
+  "internal_packages": 36,
+  "total_packages": 40,
+  "non_vendor_loc": 62901,
   "mcp_tools": 12,
   "http_routes": 23
 }

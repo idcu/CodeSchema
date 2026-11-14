@@ -246,15 +246,23 @@ func (a *TreeSitterAdapter) parseLang(path string) string {
 }
 
 func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+	return a.parseSource(ctx, path, data)
+}
+
+// ParseSource 实现 parser.SourceParser：复用编排层已读入的内存内容（R6-5）。
+func (a *TreeSitterAdapter) ParseSource(ctx context.Context, path string, data []byte) (*parser.IRDocument, error) {
+	return a.parseSource(ctx, path, data)
+}
+
+func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data []byte) (*parser.IRDocument, error) {
 	lang := a.parseLang(path)
 	langPtr, ok := a.langs[lang]
 	if !ok {
 		return &parser.IRDocument{Source: "treesitter", FilePath: path}, nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
 	}
 
 	p := ts.NewParser()

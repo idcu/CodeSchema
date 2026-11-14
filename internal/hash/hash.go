@@ -10,6 +10,13 @@ import (
 	"os"
 )
 
+// Bytes 计算内存内容的 SHA-256（小写 hex），供编排层一次读盘后复用，
+// 避免「算哈希读一次、解析再读一次」（R6-5）。
+func Bytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // File 计算文件的 SHA-256 哈希值，返回小写 hex 编码字符串。
 // 采用流式读取（io.Copy），对大文件（如模型归档）友好。
 func File(path string) (string, error) {

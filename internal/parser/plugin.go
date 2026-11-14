@@ -25,6 +25,12 @@ type ParserPlugin interface {
 	Parse(ctx context.Context, path string) (*IRDocument, error)
 }
 
+// SourceParser 是可选接口：编排层已把文件内容读入内存时，适配器直接消费该
+// 字节切片，避免二次读盘（R6-5 单文件单次读）。
+type SourceParser interface {
+	ParseSource(ctx context.Context, path string, data []byte) (*IRDocument, error)
+}
+
 // BatchParser 是批量适配器的扩展接口。
 // 消费 SCIP index 文件、竞品 SQLite 数据库的适配器应实现此接口。
 type BatchParser interface {

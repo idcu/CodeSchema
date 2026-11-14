@@ -2,11 +2,14 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/idcu/codeschema/internal/fswatch"
+	"github.com/idcu/codeschema/internal/ignore"
 	"github.com/idcu/codeschema/internal/parser"
 	adapter "github.com/idcu/codeschema/internal/parser/adapter/treesitter"
 	"github.com/idcu/codeschema/internal/store"
@@ -42,13 +45,20 @@ func TestProcessFile_HashHit(t *testing.T) {
 
 	s := NewScanner(st, reg, 1)
 
-	// 第一次处理：无适配器，应标记为跳过
+	// 第一次处理：无适配器，只标记跳过、不记录内容哈希（R6-5）。
 	ctx := context.Background()
 	if err := s.ProcessFile(ctx, path); err != nil {
 		t.Fatalf("ProcessFile: %v", err)
 	}
+	rec, err := st.GetFileByPath(ctx, path)
+	if err != nil || rec == nil {
+		t.Fatalf("GetFileByPath: %v rec=%v", err, rec)
+	}
+	if rec.ContentHash != "" {
+		t.Fatalf("no-adapter must not record hash, got %q", rec.ContentHash)
+	}
 
-	// 第二次处理：哈希相同，应跳过（即使有适配器也不触发解析）
+	// 第二次处理：补上适配器后必须重新解析（哈希闸门不能挡住未解析文件）。
 	parseCalled := false
 	reg.Register(&mockParser{
 		name:     "test",
@@ -59,10 +69,10 @@ func TestProcessFile_HashHit(t *testing.T) {
 		},
 	})
 	if err := s.ProcessFile(ctx, path); err != nil {
-		t.Fatalf("ProcessFile (hash hit): %v", err)
+		t.Fatalf("ProcessFile (after adapter registered): %v", err)
 	}
-	if parseCalled {
-		t.Error("parse should not be called when hash matches")
+	if !parseCalled {
+		t.Error("parse should run when previous pass had no adapter")
 	}
 }
 
@@ -379,5 +389,126 @@ func TestProcessFile_UnderLimit_Parses(t *testing.T) {
 	}
 	if !parseCalled {
 		t.Error("parse should be called for file under limits")
+	}
+}
+
+// sourceMockParser 同时实现 ParserPlugin 与 SourceParser，用于验证编排层
+// 只读一次盘、解析器复用内存内容（R6-5）。
+type sourceMockParser struct {
+	mockParser
+	sourceCalls int
+	parseCalls  int
+	sourceData  []byte
+}
+
+func (m *sourceMockParser) ParseSource(ctx context.Context, path string, data []byte) (*parser.IRDocument, error) {
+	m.sourceCalls++
+	m.sourceData = append([]byte(nil), data...)
+	return &parser.IRDocument{Source: m.name, FilePath: path}, nil
+}
+
+func (m *sourceMockParser) Parse(ctx context.Context, path string) (*parser.IRDocument, error) {
+	m.parseCalls++
+	return nil, errors.New("Parse must not be called when SourceParser is implemented")
+}
+
+// TestProcessFile_ReusesSourceBytes 负控（R6-5）：适配器实现 SourceParser 时，
+// scanner 必须把已读内容直接传入，不得再调用 Parse 二次读盘。
+func TestProcessFile_ReusesSourceBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	content := []byte("package main\n\nfunc main() {}\n")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := parser.NewRegistry()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	mp := &sourceMockParser{mockParser: mockParser{name: "src", supports: map[string]bool{"go": true}}}
+	reg.Register(mp)
+
+	if err := NewScanner(st, reg, 1).ProcessFile(context.Background(), path); err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	if mp.parseCalls != 0 || mp.sourceCalls != 1 {
+		t.Fatalf("parse=%d source=%d, want parse=0 source=1", mp.parseCalls, mp.sourceCalls)
+	}
+	if string(mp.sourceData) != string(content) {
+		t.Fatalf("ParseSource data mismatch: %q", mp.sourceData)
+	}
+}
+
+// TestProcessFile_NoAdapterDoesNotRecordHash 负控（R6-5）：无适配器只记
+// parse_skipped，不写内容哈希，避免后续补适配器被哈希闸门挡住。
+func TestProcessFile_NoAdapterDoesNotRecordHash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.unknownext")
+	if err := os.WriteFile(path, []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := parser.NewRegistry()
+	st := store.NewStore("file")
+	if err := st.Open(context.Background(), filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	if err := NewScanner(st, reg, 1).ProcessFile(ctx, path); err != nil {
+		t.Fatalf("ProcessFile: %v", err)
+	}
+	rec, err := st.GetFileByPath(ctx, path)
+	if err != nil || rec == nil {
+		t.Fatalf("GetFileByPath: %v rec=%v", err, rec)
+	}
+	if rec.ContentHash != "" {
+		t.Errorf("ContentHash=%q, want empty", rec.ContentHash)
+	}
+	if rec.ParseStatus != "parse_skipped" {
+		t.Errorf("ParseStatus=%q, want parse_skipped", rec.ParseStatus)
+	}
+}
+
+// TestIgnoreListSharedWithWatcher 负控（R6-5）：scanner 的默认忽略目录必须与
+// fswatch 同源，且 listFiles 实际按该清单过滤。
+func TestIgnoreListSharedWithWatcher(t *testing.T) {
+	watcher := make(map[string]bool, len(fswatch.DefaultIgnoreDirs))
+	for _, d := range fswatch.DefaultIgnoreDirs {
+		watcher[d] = true
+	}
+	if len(watcher) != len(ignore.DefaultDirs) {
+		t.Fatalf("watcher dirs=%v, ignore.DefaultDirs=%v", watcher, ignore.DefaultDirs)
+	}
+	for _, d := range ignore.DefaultDirs {
+		if !watcher[d] {
+			t.Errorf("watcher missing %q", d)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keep.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ignore.DefaultDirs {
+		sub := filepath.Join(dir, d)
+		if err := os.MkdirAll(sub, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "ignored.go"), []byte("package x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := listFiles(dir)
+	if err != nil {
+		t.Fatalf("listFiles: %v", err)
+	}
+	if len(files) != 1 || filepath.Base(files[0]) != "keep.go" {
+		t.Fatalf("listFiles=%v, want only keep.go", files)
 	}
 }

@@ -75,12 +75,9 @@ func TestCountLines(t *testing.T) {
 		{"\n", 1},
 	}
 	for _, tt := range tests {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "test.txt")
-		os.WriteFile(path, []byte(tt.content), 0644)
-		got := countLines(path)
+		got := countLinesBytes([]byte(tt.content))
 		if got != tt.want {
-			t.Errorf("countLines(%q) = %d, want %d", tt.content, got, tt.want)
+			t.Errorf("countLinesBytes(%q) = %d, want %d", tt.content, got, tt.want)
 		}
 	}
 }

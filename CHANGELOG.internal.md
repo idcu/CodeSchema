@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 217: perf(scanner): 忽略清单同源 + 单文件单次读 + 无适配器不记 hash（R6-5 / P3-10）
+
+- 新增 `internal/ignore`：`DefaultDirs` / `DefaultFiles` / `DirSet` / `FileSet`；
+  `scanner.listFiles` 与 `fswatch.DefaultIgnoreDirs` 改为同一份来源。
+- `hash.Bytes` + `countLinesBytes`：`ProcessFile` 一次 `os.ReadFile` 后
+  哈希、行数、解析共用，删除重复 `countLines`/`statSize` 读盘。
+- 新增可选接口 `parser.SourceParser`（`ParseSource(ctx,path,data)`），
+  treesitter 正则/AST 两变体与 `FallbackParser` 实现；未实现时回退 `Parse`。
+- 无适配器分支改用 `markSkipped`，`ContentHash` 留空、状态 `parse_skipped`，
+  补上适配器后同一文件不会被哈希闸门挡住。
+- 负控（先红后绿）：修前 `countLinesBytes`/`SourceParser` 不存在（编译红）；
+  修后 `ParseSource` 1 次且 `Parse` 0 次、`listFiles` 仅返回 `keep.go`
+  （8 个默认目录全部忽略）、无适配器 `ContentHash=""` + `parse_skipped`；
+  `go test ./internal/scanner ./internal/fswatch ./internal/parser/...` 全绿。
+- 文档：`架构与模块.md` 更新包数 36/40、scanner 语义；`解析适配器.md` 增
+  SourceParser 契约；counts 62901（62.9k）。
+
 ### Commit 216: feat(api): 预算化上下文接口补全（R6-1 / S-3）
 
 - `ContextOptions` 增 `BudgetTokens`（`>0` 时覆盖 `MaxTokens`），HTTP query 与

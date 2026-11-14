@@ -51,7 +51,7 @@ R6-1,F,P1,预算化上下文接口,S-3,R1-3;R2-4;R5-4,5,budget_tokens生效；tr
 R6-2,F,P2,AI预算按请求重置+phase竞态,P2-19,R0-1,1.5,长驻服务按请求重置；race通过；预算不跨请求泄漏,done,按需
 R6-3,F,P2,向量模型校验/删除隔离/ONNX生命周期,P2-16;P2-17,R0-1,2,维度或标识不匹配拒绝加载；删除后不可检索；Close后安全,done,按需
 R6-4,F,P2,fsnotify错误上报与rename重建,P2-18,R0-1,2,错误可观测；目录rename后重建watch；增量仍正确,done,按需
-R6-5,F,P3,scanner ignore同源/单次读/无适配器不记hash,P3-10,R0-1,2,忽略清单与watcher同源；单文件单次读；无适配器文件不记hash,todo,按需
+R6-5,F,P3,scanner ignore同源/单次读/无适配器不记hash,P3-10,R0-1,2,忽略清单与watcher同源；单文件单次读；无适配器文件不记hash,done,按需
 R6-6,F,P3,gofmt一次性格式化+CI门禁,P3-13,R0-1,1,gofmt -l internal cmd为空；CI有门禁；不改变行为,todo,按需
 R6-7,F,P3,verify-tags真编译+agent-bench绝对下限,P3-13,R0-1,1.5,标签隔离包真正编译；agent-bench阈值变更单独评审,todo,按需
 R6-8,F,P2,coverage死代码直接删除,P2-7,R2-4,0.5,不再对外宣称coverage策略；代码与API删除;策略链收敛为五种,done,砍（清理）
