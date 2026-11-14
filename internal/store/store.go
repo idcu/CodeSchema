@@ -10,6 +10,8 @@ package store
 
 import (
 	"context"
+	"strings"
+
 	"github.com/idcu/codeschema/internal/parser"
 )
 
@@ -205,7 +207,31 @@ func NewStore(driver string) Store {
 
 // DeriveTagCategory 根据标签名推断其分类（layer/test/lang/risk/tech/biz）。
 // 三后端（FileStore/SQLiteStore/PGStore）共用同一分类口径，避免语义分叉。
+//
+// 兼容两类标签形态：
+//   - 裸标签（规则引擎产出）：精确匹配已知值（service→layer、cache→tech、unit→test 等）。
+//   - 前缀标签（AI 增强产出）：识别「分类:值」前缀（tech:缓存→tech、biz:订单→biz），
+//     前缀无效或缺失时回退精确匹配，仍未命中归为 biz。
 func DeriveTagCategory(tag string) string {
+	// 前缀标签：先按「分类:」前缀归类，值语义不参与。
+	if i := strings.IndexByte(tag, ':'); i > 0 {
+		switch tag[:i] {
+		case "layer":
+			return "layer"
+		case "test":
+			return "test"
+		case "lang":
+			return "lang"
+		case "risk":
+			return "risk"
+		case "tech":
+			return "tech"
+		case "biz":
+			return "biz"
+		}
+		// 未知前缀：回退精确匹配。
+	}
+	// 裸标签：精确匹配已知值。
 	switch tag {
 	case "controller", "service", "dao", "domain", "infra", "repository", "handler", "middleware", "config":
 		return "layer"
