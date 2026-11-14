@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-11-14T05:22:19Z",
+  "repo": "lytd",
+  "commit": "f5e66040adf0c24ef3938020f3b04545b9ddde80",
+  "language": "ts",
+  "build_variant": "treesitter",
+  "files": 116,
+  "prod_files": 109,
+  "test_files": 7,
+  "prod_methods": 75,
+  "test_methods": 0,
+  "ground_truth_pairs": 0,
+  "sampled_pairs": 0,
+  "sampled": false,
+  "prods_evaluated": 0,
+  "predicted_links": 0,
+  "test_link": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "precision": 0,
+    "recall": 0,
+    "f1": 0
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "treesitter",
+    "calls": 413,
+    "unique_callers": 39,
+    "unique_callees": 129,
+    "resolved_calls": 93,
+    "resolution_rate": 0.2252,
+    "repo_resolvable": 93,
+    "repo_resolvable_resolved": 93,
+    "repo_resolution_rate": 1
+  }
+}

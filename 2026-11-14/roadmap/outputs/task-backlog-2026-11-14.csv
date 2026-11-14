@@ -55,9 +55,9 @@ R6-5,F,P3,scanner ignore同源/单次读/无适配器不记hash,P3-10,R0-1,2,忽
 R6-6,F,P3,gofmt一次性格式化+CI门禁,P3-13,R0-1,1,gofmt -l internal cmd为空；CI有门禁；不改变行为,done,按需
 R6-7,F,P3,verify-tags真编译+agent-bench绝对下限,P3-13,R0-1,1.5,标签隔离包真正编译；agent-bench阈值变更单独评审,done,按需
 R6-8,F,P2,coverage死代码直接删除,P2-7,R2-4,0.5,不再对外宣称coverage策略；代码与API删除;策略链收敛为五种,done,砍（清理）
-X-1,延后,P2,GoResolver/SetModulePath接线,P2-8,-,0,等LSP/SCIP精度线完成后再评估,deferred,延后
+X-1,延后,P2,GoResolver/SetModulePath接线,P2-8,-,0,等LSP/SCIP精度线完成后再评估,cut,降cut：仓内可解析边已达0.9626–0.9989；剩余不可解析为仓外调用，需import/模块图而非再写启发式
 X-2,不投入,P3,viz转义/锁/死代码,P3-2;P3-3;P3-4,-,0,viz非产品面；仅P3-1必修,cut,砍
-X-3,延后,P3,检索融合排序/BM25分数,P3-11;P3-12,-,0,检索非本轮押注；有公开基准后再评估,deferred,延后
-X-4,不投入,-,SQLite大规模性能优化,审计§六,-,0,实测10万文件72s；本轮只保正确性并文档标注边界,deferred,延后
-X-5,延后,-,SSO/RBAC/审计/配额,S-5,-,0,另开产品线；本轮先证明租户隔离,deferred,延后
-X-6,延后,-,SCIP导出,竞品建议,-,0,仅可行性spike，不承诺交付,deferred,延后
+X-3,延后,P3,检索融合排序/BM25分数,P3-11;P3-12,-,0,检索非本轮押注；有公开基准后再评估,cut,降cut：无公开检索基准证明收益；BM25/融合排序不承诺
+X-4,不投入,-,SQLite大规模性能优化,审计§六,-,0,实测10万文件72s；本轮只保正确性并文档标注边界,cut,降cut：默认后端为file；SQLite只保正确性且边界已文档化
+X-5,延后,-,SSO/RBAC/审计/配额,S-5,-,0,另开产品线；本轮先证明租户隔离,cut,降cut：企业能力另开产品线；本轮仅token认证+租户隔离
+X-6,延后,-,SCIP导出,竞品建议,-,0,仅可行性spike，不承诺交付,cut,降cut：导出工作量大；LSP路线优先且已落地

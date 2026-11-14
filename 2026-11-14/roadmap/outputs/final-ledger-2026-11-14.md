@@ -5,9 +5,9 @@
 
 ## 0. 结论
 
-1. **审计中可执行的正确性缺陷已全部落地**：62 条中 55 条 `done`、5 条 `deferred`、1 条 `cut`、1 条 `blocked`（R0-1 旧账无法对账，见 §4）。
-2. **核心承诺已从「可用性」推进到「可度量」**：测试关联自动口径 F1 Go 0.9983 / Java 1.0000（regex），人工独立真值 46 对全部 1.0；agent-bench 5 个活跃任务 full/minimal 均 100%，token 节省 99.11%。
-3. **仍不能宣称的能力**：TS 的 Jest 回调测试关联（真值 0）、调用图分辨率（<0.22）、自动真值与 `call_graph` 同源、人工真值规模仍小。这些在 §4 明列，不静默删除。
+1. **审计中可执行的正确性缺陷已全部落地**：62 条中 55 条 `done`、6 条 `cut`、1 条 `blocked`（R0-1 旧账无法对账，见 §4）；deferred 复盘后 5 条延后项均给出了降 cut 的实测理由。
+2. **核心承诺已从「可用性」推进到「可度量」**：测试关联自动口径 F1 Go 0.9851–0.9889 / Java 0.9786–0.9801，人工独立真值 45 对全部 1.0；agent-bench 5 个活跃任务 full/minimal 均 100%，token 节省 99.11%。
+3. **仍不能宣称的能力**：TS 的 Jest 回调测试关联（真值 0）、调用图全量分辨率（<0.27）、自动真值与 `call_graph` 同源、人工真值规模仍小。这些在 §4 明列，不静默删除。
 
 ## 1. 终态快照
 
@@ -15,8 +15,8 @@
 |---|---|
 | 基线 HEAD | `78f00ee3`（审计对象） |
 | 终态 HEAD | 本文件所在提交（`git log -1 --oneline`） |
-| 提交数（基线后） | 72 笔（含本笔总账） |
-| 计数 | internal 36 / 全仓 40 包；非 vendor LoC 62976（63.0k）；MCP 12；HTTP 23 |
+| 提交数（基线后） | 86 笔（含本笔总账） |
+| 计数 | internal 36 / 全仓 40 包；非 vendor LoC 63756（63.8k）；MCP 12；HTTP 23 |
 | 门禁 | `go build` / `go vet` / `go vet -tags "pg redis treesitter"` / `make test`（40 包）/ `make fmt-check` / `make counts-check` 全绿 |
 | 清单状态 | 55 done / 5 deferred / 1 cut / 1 blocked |
 
@@ -109,9 +109,29 @@
 
 > 审计基线后、批次开工前的硬化：`60e405e`（AI 并发/429）、`39287bc`（非 Go 裸 callee 包限定）、`120abe9`（标签分类）、`4c33849`（文档与计数）。
 
+### 2.7 批次 G：人工真值修正、caller 归属与仓内口径
+
+| 项 | 问题 | 提交 |
+|---|---|---|
+| 人工真值 | `manual-truth.json` 失效引用 `TestFindTestLinks_Coverage`，28 → 27（只修数据有效性） | `f3b3801` |
+| 度量缺陷 | 方法索引 `count[fqn]==1` 过严，精确命中不构成歧义（不计引擎收益） | `ae10edb` |
+| TS 声明 | 顶层函数与无返回类型方法漏入索引（lytd calls 848 → 385） | `84a8479` |
+| 关键字假调用 | `if(`/`len(` 被限定后绕过过滤 | `49afeed` |
+| Go 局部变量 | `x := &T{}` / `var x *T` 的 selector 类型消歧 | `58e2e40` |
+| TS 模块限定 | 顶层函数按模块限定 FQN，拆开重复裸名 | `5858592` |
+| 仓内口径 | 新增「仓内可解析边」并排展示，旧口径分母不变 | `793d187` |
+| TS 构造器 | 声明式 `constructor();` 不再计为调用 | `f03f945` |
+| Java 注解 | `@Override` 等注解行不再计为调用 | `98d2a3e` |
+| Go 原始字符串 | 串内内容不再创建假方法 | `0ed6868` |
+| Go 接口签名 | 接口方法签名不再计为调用（caller 空 131 → 25） | `0aa9ce8` |
+| Go 指针转换 | AST 路径 `(*T)(nil)` 不再计为调用（空 36 → 30） | `c56e18a` |
+| TS 具名箭头 | `const f = () => {}` / `function(){}` 入索引（AST） | `4c5a08b` |
+| `.tsx` grammar | JSX 后声明不再丢（lytd 空 270 → 245） | `45dcfcd` |
+| C/C++ 方法名 | AST 沿 declarator 链取声明名；变体专属断言按构建跳过 | `a8fd6e7` |
+
 ## 3. 基准当前数字与口径
 
-> 原始数据：`docs/bench/2026-11-14/README.md` 与同目录 `final-*.json`、`manual-pre184-go.json`。以下数字均可在该 README 复核。
+> 原始数据：`docs/bench/2026-11-14/README.md` 与同目录 `final-*.json`、`post-*.json`、`manual-pre184-go.json`。以下数字均可在该 README 复核。
 
 ### 3.1 测试关联（自动真值，R5-9 口径）
 
@@ -119,11 +139,15 @@
 
 | 仓库 | 变体 | 预测链接 | TP | FP | Precision | Recall | F1 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 1624 | 1448 | 30 | 0.9797 | 0.9897 | 0.9847 |
-| code-schema (go) | treesitter | 1657 | 1497 | 16 | 0.9894 | 0.9881 | 0.9887 |
+| code-schema (go) | regex | 1666 | 1484 | 30 | 0.9802 | 0.9900 | 0.9851 |
+| code-schema (go) | treesitter | 1683 | 1516 | 16 | 0.9896 | 0.9883 | 0.9889 |
 | petclinic (java) | regex | 126 | 123 | 0 | 1.0000 | 0.9609 | 0.9801 |
 | petclinic (java) | treesitter | 164 | 160 | 0 | 1.0000 | 0.9581 | 0.9786 |
 | lytd (ts) | regex/treesitter | 0 | 0 | 0 | — | — | — |
+
+> 解析器补齐后 pair 规模上升（Go regex 2141 → treesitter 2265），新增方法中有 15–18 条
+> 关联未被策略命中，F1 由 0.9983 降至 0.9851/0.9889；这是覆盖面扩大暴露的真实 FN，
+> 既有链路上的 TP 未回退。
 
 **口径耦合（必须披露）**：自动真值与 `call_graph` 策略同为直接调用边，因此接近饱和的数字衡量的是「扫描 → 入库 → 反查」链路完整性与 FQN 归一，不是独立启发式的判别力。TS 的 `PredictedLinks=0` 是因为 Jest `it/test` 回调不是 IR 方法、真值也为 0，属解析缺口，不是「没有测试」。
 
@@ -143,29 +167,33 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 `ResolutionRate = 能落到方法索引的 callee 边 / 全部调用边`。
 
-| 仓库 | 变体 | calls | resolution |
-|---|---|---:|---:|
-| code-schema | regex | 15598 | 0.2654 |
-| code-schema | treesitter | 20031 | 0.2233 |
-| petclinic | regex | 1184 | 0.1824 |
-| petclinic | treesitter | 1609 | 0.1889 |
-| lytd | regex | 349 | 0.1748 |
-| lytd | treesitter | 407 | 0.2236 |
+| 仓库 | 变体 | calls | resolved | resolution |
+|---|---|---:|---:|---:|
+| code-schema | regex | 15532 | 4149 | 0.2671 |
+| code-schema | treesitter | 20210 | 4511 | 0.2232 |
+| petclinic | regex | 1184 | 216 | 0.1824 |
+| petclinic | treesitter | 1609 | 304 | 0.1889 |
+| lytd | regex | 349 | 61 | 0.1748 |
+| lytd | treesitter | 413 | 93 | 0.2252 |
 
 **并排口径「仓内可解析边」**（分母只算索引中确有候选的边，旧口径分母不变）：
 
 | 仓库 | 变体 | 仓内候选边 | 仓内已解析 | 仓内 resolution |
 |---|---|---:|---:|---:|
-| code-schema | regex | 4300 | 4139 | 0.9626 |
-| code-schema | treesitter | 4495 | 4490 | 0.9989 |
+| code-schema | regex | 4310 | 4149 | 0.9626 |
+| code-schema | treesitter | 4516 | 4511 | 0.9989 |
 | petclinic | regex | 219 | 216 | 0.9863 |
 | petclinic | treesitter | 307 | 304 | 0.9902 |
 | lytd | regex | 61 | 61 | 1.0000 |
-| lytd | treesitter | 91 | 91 | 1.0000 |
+| lytd | treesitter | 93 | 93 | 1.0000 |
 
-> lytd regex 的 calls 由 848 降至 385：旧 TS 模式把 555 条顶层函数声明误当调用边，
-> 修复后这些行成为方法、不再是调用。顶层函数再按模块限定 FQN 后，重复裸名被拆开，
-> 跨模块裸名调用无 import 信息时如实不可解析，可解析边 109 → 97（0.2831 → 0.2519）。
+> lytd regex 的 calls 由 848 降至 349：旧 TS 模式把 555 条顶层函数声明误当调用边，
+> 修复后这些行成为方法、不再是调用；关键字假调用（`if/for/while` 等）与声明式构造器
+> 再删除一批。顶层函数按模块限定 FQN 后重复裸名被拆开，跨模块裸名无 import 信息时
+> 如实不可解析（0.2831 → 0.2519 → caller 归属修正后 0.1748），仓内口径保持 1.0000。
+> caller 为空：Go regex 341 → 25（接口签名/原始字符串/关键字假调用）、Java regex 60 → 9、
+> lytd regex 241 → 205；treesitter 变体 Go 36 → 30、lytd 270 → 245（`.tsx` 25 → 0）。
+> 剩余空 caller 均为包级初始化、字段初始化与 `describe/it` 匿名回调，无可归属方法，不伪造归属。
 
 > `count[fqn]==1` 改为 `>0` 属**度量缺陷修正**（精确 FQN 命中不构成歧义），
 > 上面的提升不计入引擎收益；两套数字与旧口径均保留。
@@ -181,12 +209,12 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 | CodeGraph / JCodeIndexer 默认注册 | **砍默认接线**（`3bcb7c7`） | `Parse` 恒返回 `ErrSourceUnavailable`，生产只调 `Parse`；现仅显式 `enabled` 才注册，SCIP 优先 |
 | coverage 关联策略 | **已删除**（`85005a7`） | 生产未接线；即使接线也会把测试类全部方法按 90 分登记，放大假阳性 |
 | TS Jest `it/test` 回调 | **范围外，保留记录** | 回调不是 IR 方法，两变体测试方法均为 0、真值也为 0；覆盖需新增解析/策略条目，不能当「无测试」删除 |
-| SSO / RBAC / 审计 / 配额（X-5） | 延后，另开产品线 | 本轮先证明 token 认证 + 租户隔离；企业能力不在本轮 |
-| SCIP 导出（X-6） | 延后，仅可行性 spike | 工作量与维护成本大；LSP 路线优先 |
+| SSO / RBAC / 审计 / 配额（X-5） | **降 cut** | 企业能力另开产品线；本轮只证明 token 认证 + 租户隔离 |
+| SCIP 导出（X-6） | **降 cut** | 工作量与维护成本大；LSP 路线优先且已落地 |
 | viz 转义/锁/死代码（X-2） | 砍 | 调试页非产品面；只修 `P3-1` panic |
-| SQLite 大规模性能优化（X-4） | 延后，文档标注边界 | 实测 10 万文件 72s；默认后端是 file，SQLite 只保证正确性 |
-| 检索融合排序 / BM25（X-3） | 延后 | 非本轮押注；需公开基准证明有效后再做 |
-| GoResolver / `SetModulePath`（X-1） | 延后 | 依赖 LSP/SCIP 精度线；当前 heuristic 有假边但非主路径 |
+| SQLite 大规模性能优化（X-4） | **降 cut** | 默认后端是 file；SQLite 只保证正确性，10 万文件 72s 边界已文档化 |
+| 检索融合排序 / BM25（X-3） | **降 cut** | 无公开检索基准证明收益；非本轮押注 |
+| GoResolver / `SetModulePath`（X-1） | **降 cut** | 仓内可解析边已达 0.9626–0.9989；剩余不可解析为仓外调用，需 import/模块图而非再写启发式 |
 | 向量/ONNX 模型投入 | 冻结，仅修安全 | 向量检索商品化；默认 TF-IDF Recall@1=0.50，投入产出低 |
 | 旧 C-16 清单与 `check-deps` | **无法对账（R0-1 blocked）** | 见下 |
 
@@ -205,9 +233,9 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 1. **自动真值同源**：测试关联自动口径与 `call_graph` 策略共用直接调用边；IR 解析不到的合法调用会漏入真值，把正确预测误判为 FP。缓解：人工真值并排展示；扩充人工数据集。
 2. **人工真值规模小**：14 个生产方法 / 45 条 pair，只覆盖选定方法；当前 1.0 不等价于全仓 1.0。
-3. **调用图分辨率低**：最高 0.2130（Go regex），TS 仅 0.0425–0.1425；跨类 receiver 消歧与外部依赖解析仍是缺口。
+3. **调用图分辨率低**：全量口径最高 0.2671（Go regex），TS 0.1748–0.2252；跨类 receiver 消歧与外部依赖解析仍是缺口。仓内可解析边口径已达 0.9626–1.0000，说明剩余不可解析主要来自外部 API/框架与无 import 信息的跨模块裸名，而非索引失配。
 4. **TS 测试关联不可用**：Jest 回调未建模，`PredictedLinks=0`；调用图可报告，测试关联需新条目。
-5. **残余 FP**：Go regex 自动口径 4 条，treesitter 16 条，多为「IR 未解析到的真实调用被命名策略命中」，按人工语义并非误报；两套口径不可混用。
+5. **残余 FP**：Go regex 自动口径 30 条，treesitter 16 条，多为「IR 未解析到的真实调用被命名策略命中」，按人工语义并非误报；两套口径不可混用。
 6. **P0-1 的 FQN 变化**：历史索引可能需要重建；本轮未提供自动迁移命令，升级需重新扫描（文档已标注）。
 7. **PG/Redis 验证边界**：本轮 PG 侧以 `-tags pg` 编译 + 单测校验；真实实例集成在 CI `pg-redis`，本地需自行起服务。
 8. **死代码仍保留**：CodeGraph/JCodeIndexer 代码未删除，仅移出默认注册；文档与工具描述已收敛，但维护成本仍在。

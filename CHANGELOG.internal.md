@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 237: docs: 最终复测、caller 归属总账与 deferred 降 cut
+
+- 两变体 × 三仓全量复测，原始数据 `docs/bench/2026-11-14/post-*.json`。
+- 调用图（全量 / 仓内）：Go regex 15532/0.2671（4310/4149/0.9626）、
+  Go treesitter 20210/0.2232（4516/4511/0.9989）、Java regex 1184/0.1824、
+  Java treesitter 1609/0.1889、lytd regex 349/0.1748、lytd treesitter 413/0.2252。
+- 人工真值 45 对（Go 27 / Java 18）两变体均 P=R=F1=1.0000。
+- 自动口径 Go regex F1 0.9851 / treesitter 0.9889：pair 规模上升后新增 FN 15/18，
+  已说明为覆盖面扩大暴露，不是既有链路回退。
+- deferred 复盘：X-1/X-3/X-4/X-5/X-6 均降 cut 并给出实测理由，CSV 与总账对平。
+- 计数：非 vendor LoC 62976 → 63756（63.8k），基线同步；`make counts-check` 通过。
+
+### Commit 236: fix(parser): C/C++ 声明名取 declarator 链末端；变体专属断言按构建跳过
+
+- AST 路径对 C++ `function_definition` 回退取子树首个标识符，把函数体内的
+  `fuelPump.pump()` 误当方法名；改为沿 `declarator` 字段取末端声明名。
+- 3 个断言默认正则路径 FQN 口径的测试在 `-tags treesitter` 下跳过（AST 由
+  `adapter_ast_test.go` 覆盖），修复该构建下测试红。
+
 ### Commit 235: fix(parser): .tsx 改用 TSX grammar 解析（treesitter 变体）
 
 - `.tsx` 之前复用纯 TypeScript grammar，JSX 之后的声明被吞进 ERROR 节点：
