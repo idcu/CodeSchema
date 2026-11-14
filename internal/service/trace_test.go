@@ -512,3 +512,39 @@ func TestGetContextMode_ClassCacheMissFallsBack(t *testing.T) {
 		t.Fatalf("expected fallback to FileStore, got %+v", ctx)
 	}
 }
+
+// TestGetContextMode_StaleCacheMissingFile_NoPanic 负控（P1-9）：
+// Redis L2 缓存残留（method/class 键未过期）但主存储已无对应文件时，
+// GetFileByPath 返回 (nil, nil)，调用点不得直接解引用。
+func TestGetContextMode_StaleCacheMissingFile_NoPanic(t *testing.T) {
+	svc := newTestService(t)
+	stalePath := filepath.Join(t.TempDir(), "gone.go")
+
+	cached := &cacheReaderStore{
+		FileStore: svc.store.(*store.FileStore),
+		methods: map[string]*parser.MethodIR{
+			"com.example.Ghost.Run": {
+				Name: "Run", ClassFQN: "com.example.Ghost",
+				Signature: "Run()", StartLine: 2, EndLine: 4,
+			},
+		},
+		paths: map[string]string{
+			"com.example.Ghost.Run": stalePath,
+		},
+	}
+	svc2 := NewService(cached)
+
+	got, err := svc2.GetContextMode(context.Background(), "com.example.Ghost.Run", ContextOptions{
+		Mode:         ModeFull,
+		IncludeTrace: true,
+	})
+	if err != nil {
+		t.Fatalf("stale cache should degrade, got error: %v", err)
+	}
+	if got == nil || got.Symbol != "com.example.Ghost.Run" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if got.Trace == nil || got.Trace.TrimReason != "file_unreadable" {
+		t.Fatalf("expected file_unreadable fallback, got %+v", got.Trace)
+	}
+}

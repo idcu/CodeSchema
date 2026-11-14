@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 164: fix(service): 缓存残留但主存储无文件时不再 nil 解引用（P1-9）
+
+- 背景：`resolveSymbolLocation` 的 Redis 快路径只判断 `err == nil` 就访问 `f.LineCount`；`GetFileByPath` 契约允许未命中返回 `(nil, nil)`（FileStore/SQLite 均如此）。Redis 的 `methodpath/classpath` 键 TTL=0，文件删除/重建后残留键可稳定触发 panic。
+- 动作：方法/类两条快路径均改为 `err == nil && f != nil`；文件缺失时 `LineCount` 保持 0，`GetContextMode` 按既有 `file_unreadable` 逻辑降级为 minimal 形态。
+- 负控（先红后绿）：`internal/service/trace_test.go::TestGetContextMode_StaleCacheMissingFile_NoPanic`（缓存命中方法、主存储无文件）。修复前实测 `panic: nil pointer dereference`，栈顶 `service.go:781`；修复后返回 `file_unreadable` 降级结果。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 55681 ≈ 55.7k）。
+
 ### Commit 163: fix(server): 未知租户返回 404 而非 nil 解引用 500，panic 原文不再外泄（P1-11）
 
 - 背景：`serve` 以 `NewHTTPServer(nil, ...)` 启动并注入租户 resolver；`serviceForRequest` 在 resolver 失败后回退到 `h.service`（即 nil），所有 handler 直接方法调用触发 nil 解引用 panic，被 recovery 兜成 500，且响应体回传 `internal server error: <panic 原文>`（可能含 DSN/路径等敏感信息）。

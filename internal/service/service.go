@@ -777,7 +777,7 @@ func (s *Service) resolveSymbolLocation(ctx context.Context, symbol string) (*sy
 					Kind:      "method",
 					Doc:       m.Doc,
 				}
-				if f, err := s.store.GetFileByPath(ctx, path); err == nil {
+				if f, err := s.store.GetFileByPath(ctx, path); err == nil && f != nil {
 					loc.LineCount = f.LineCount
 				}
 				return loc, true
@@ -794,7 +794,7 @@ func (s *Service) resolveSymbolLocation(ctx context.Context, symbol string) (*sy
 					Doc:       cls.Doc,
 				}
 				// 补文件行数（读主存储一次；失败不阻断）。
-				if f, err := s.store.GetFileByPath(ctx, path); err == nil {
+				if f, err := s.store.GetFileByPath(ctx, path); err == nil && f != nil {
 					loc.LineCount = f.LineCount
 				}
 				return loc, true
