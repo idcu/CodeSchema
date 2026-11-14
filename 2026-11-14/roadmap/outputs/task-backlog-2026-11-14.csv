@@ -1,26 +1,26 @@
 id,batch,priority,title,audit_ref,deps,effort_pd,acceptance,status,decision
 R0-1,0,P0,基线冻结与旧账对账,审计基线,-,1,工作区状态有记录；旧C-16清单与53条对账完成；不修改任何快照,todo,必做
-R1-1,A,P0,顶层函数入库（file/sqlite/pg+IR+Redis）,P0-1,R0-1,6,三后端均可见TopLevelFunc/helper/Method；/context返回200与源码；负控不污染类搜索与/projects,todo,必做
-R1-2,A,P1,Go多行函数签名作用域,P1-14,R0-1,2.5,多行签名方法产生正确CallerFQN与调用边；单行签名行为不变,todo,必做
-R1-3,A,P1,方法EndLine回填,P1-1,R1-2,2.5,Svc.Method的end_line>start_line且覆盖方法体；嵌套闭包不越界,todo,必做
-R1-4,A,P1,超长行跳过而非整次失败,P1-15,R0-1,0.75,100KB单行文件扫描exit 0并标parse_skipped；其余文件正常入库,todo,必做
+R1-1,A,P0,顶层函数入库（file/sqlite/pg+IR+Redis）,P0-1,R0-1,6,三后端均可见TopLevelFunc/helper/Method；/context返回200与源码；负控不污染类搜索与/projects,done,必做
+R1-2,A,P1,Go多行函数签名作用域,P1-14,R0-1,2.5,多行签名方法产生正确CallerFQN与调用边；单行签名行为不变,done,必做
+R1-3,A,P1,方法EndLine回填,P1-1,R1-2,2.5,Svc.Method的end_line>start_line且覆盖方法体；嵌套闭包不越界,done,必做
+R1-4,A,P1,超长行跳过而非整次失败,P1-15,R0-1,0.75,100KB单行文件扫描exit 0并标parse_skipped；其余文件正常入库,done,必做
 R1-5,A,P3,viz负数参数校验,P3-1,R0-1,0.5,limit=-1与offset=-1返回400；无panic日志；limit=1正常,done,必做
-R1-6,A,P1,文档纠偏（性能方向/计数/语言数/fsperm/MCP声明）,审计§八/§九,R0-1,1,存储性能方向纠真；23路由/33 internal包/11 CI job/31语言/无fsperm与实测一致；counts-check绿且不改基线,todo,必做
-R1-7,A,P3,Go原始字符串/泛型/constBlock解析,P3-9,R1-2,1.75,反引号含大括号与泛型签名不破坏深度与EndLine；普通函数不变,todo,必做
-R2-1,B,P1,调用边口径只保留direct call,P1-7,R1-1,5,import/reference/implements/extends不产生调用边；/impact不含importer；direct call仍出现,todo,必做
+R1-6,A,P1,文档纠偏（性能方向/计数/语言数/fsperm/MCP声明）,审计§八/§九,R0-1,1,存储性能方向纠真；23路由/33 internal包/11 CI job/31语言/无fsperm与实测一致；counts-check绿且不改基线,done,必做
+R1-7,A,P3,Go原始字符串/泛型/constBlock解析,P3-9,R1-2,1.75,反引号含大括号与泛型签名不破坏深度与EndLine；普通函数不变,done,必做
+R2-1,B,P1,调用边口径只保留direct call,P1-7,R1-1,5,import/reference/implements/extends不产生调用边；/impact不含importer；direct call仍出现,done,必做
 R2-2,B,P1,影响面确定性与BFS/归一化,P1-8;P2-1;P2-3,R2-1,3.5,歧义裸名连续100次结果一致；BFS去重；GetAffected稳定排序,todo,必做
-R2-3,B,P1,explicit测试关联按methodFQN过滤,P1-12,R1-1,1.5,查A只回A的@TestFor；查B回B；查C为空；A的测试仍返回,todo,必做
-R2-4,B,P2,测试关联策略收紧+reason/confidence,P2-4,R2-1;R2-3,4,每条关联带reason与confidence；夹具无未标注假阳性；真实关联不丢,todo,必做
+R2-3,B,P1,explicit测试关联按methodFQN过滤,P1-12,R1-1,1.5,查A只回A的@TestFor；查B回B；查C为空；A的测试仍返回,done,必做
+R2-4,B,P2,测试关联策略收紧+reason/confidence,P2-4,R2-1;R2-3,4,每条关联带reason与confidence；夹具无未标注假阳性；真实关联不丢,done,必做
 R2-5,B,P1,请求内图复用+depth上限+ctx取消,P1-13,R2-1,3.5,一次/impact只构建一次图；depth有上限；ctx取消生效；结果不丢且P95不劣化,todo,必做
-R2-6,B,P1,Redis快路径nil判空,P1-9,R0-1,0.75,陈旧键+GetFileByPath未命中不panic；命中路径仍走缓存,todo,必做
-R2-7,B,P1,FTS并发读写加锁/拷贝,P1-10,R0-1,1.5,go test -race并发Index/Search无fatal；单线程结果不变,todo,必做
+R2-6,B,P1,Redis快路径nil判空,P1-9,R0-1,0.75,陈旧键+GetFileByPath未命中不panic；命中路径仍走缓存,done,必做
+R2-7,B,P1,FTS并发读写加锁/拷贝,P1-10,R0-1,1.5,go test -race并发Index/Search无fatal；单线程结果不变,done,必做
 R2-8,B,P1,未知租户404+错误脱敏,P1-11;P2-6,R0-1,1,未知租户404且响应体无panic/SQL/路径原文；已知租户正常,todo,必做
 R2-9,B,P1,exact模式真正精确,P1-2,R0-1,0.75,Sv不命中Svc/Svc.Method；Svc命中；java不命中javascript；fuzzy行为不变,done,必做
 R2-10,B,P2,查询缓存key含IncludeTrace并返回副本,P2-2,R0-1,1,include_trace不同取值结果不同；修改返回对象不影响缓存,done,必做
 R3-1,C,P1,重索引全量替换与孤儿清理,P1-6;P2-10,R1-1,3,方法数变少的文件重索引后无孤儿；三后端一致；未变更文件不受影响,todo,必做
-R3-2,C,P1,PG method.full_name列与读写,P1-5,R1-1,2.5,PG method.full_name非空；/tests在PG可用；迁移可重复执行,todo,必做
-R3-3,C,P1,租户DSN与检索/向量目录隔离,P1-3,R3-6,4,两租户无DSN时各自./data/<id>；fts/vector/idf隔离；跨租户查不到；单租户行为不变,todo,必做
-R3-4,C,P1,Redis租户前缀/TTL/Flush scoping,P1-4,R3-3,2.5,键带租户前缀；TTL>0；rebuild只清本租户；同名FQN不覆盖,todo,必做
+R3-2,C,P1,PG method.full_name列与读写,P1-5,R1-1,2.5,PG method.full_name非空；/tests在PG可用；迁移可重复执行,done,必做
+R3-3,C,P1,租户DSN与检索/向量目录隔离,P1-3,R3-6,4,两租户无DSN时各自./data/<id>；fts/vector/idf隔离；跨租户查不到；单租户行为不变,done,必做
+R3-4,C,P1,Redis租户前缀/TTL/Flush scoping,P1-4,R3-3,2.5,键带租户前缀；TTL>0；rebuild只清本租户；同名FQN不覆盖,done,必做
 R3-5,C,P1,cloneConfig补齐AI/Vector字段,P1-17,R0-1,0.5,租户继承AI key/base_url与Vector模型字段；基础配置不变,done,必做
 R3-6,C,P1,启动时调用Validate,P1-18,R3-5,1,非法配置启动失败并明确报错；合法配置仍启动,done,必做
 R3-7,C,P2,目录0700/文件0600/SQLite chmod,P2-13,R0-1,0.75,目录0700文件0600；功能不变,todo,必做
@@ -29,12 +29,12 @@ R3-9,C,P2,健康检查报告真实驱动与向量状态,P2-15,R0-1,1.5,/health/d
 R3-10,C,P2,PG/SQLite热点索引,P2-11,R3-2,2,call(file_id)/class_tag(tag_id)/method_tag(tag_id)索引存在；查询计划使用索引,todo,必做
 R3-11,C,P2,PG/SQLite连接池上限,P2-12,R3-2,1.5,连接池上限可配置；默认值有说明；压测无连接泄漏,todo,必做
 R3-12,C,P2,FileStore持久化可靠性,P2-9,R3-1,2.5,强杀后不丢已确认写入或明确恢复策略；损坏文件返回错误；无data race,todo,必做
-R4-1,D,P2,MCP stdio/SSE传输合规,P2-20,R0-1,5,逐行JSON跑通initialize/tools/list/tools/call；notification无响应；取消生效；SSE带sessionId且POST返回202,todo,必做
+R4-1,D,P2,MCP stdio/SSE传输合规,P2-20,R0-1,5,逐行JSON跑通initialize/tools/list/tools/call；notification无响应；取消生效；SSE带sessionId且POST返回202,done,必做
 R4-2,D,P3,OpenAPI补齐与参数名统一,P3-14,R4-1,1.5,仅用OpenAPI声明参数可调用每个端点；/affected参数名一致；批量参数统一；旧别名保留,done,必做
 R4-3,D,P2,search_config描述与实现对齐,P2-5,R0-1,1,描述与实现一致或改名降级；符号搜索不变,done,必做
 R4-4,D,P1,规范MCP客户端stdio+SSE e2e,S-1,R4-1,2,规范客户端跑通两种传输；transcript入库；不靠自写客户端自证,todo,必做
 R5-1,E,P1,SCIP优先+CodeGraph/JCodeIndexer去生产,P1-16,R0-1,1,同时配置时SCIP被选中；死适配器不再宣称生产可用；默认treesitter不变,todo,必做
-R5-2,E,P0,LSP路径方法/调用边/回退/生命周期,工作底稿P0-2;P3-7,R1-1;R2-1,6.5,LSP开启时Go/Java方法非空调用边非空；空结果回退treesitter；Close后无孤儿进程,todo,必做
+R5-2,E,P0,LSP路径方法/调用边/回退/生命周期,工作底稿P0-2;P3-7,R1-1;R2-1,6.5,LSP开启时Go/Java方法非空调用边非空；空结果回退treesitter；Close后无孤儿进程,done,必做
 R5-3,E,P1,边来源与精度分级,S-4,R2-1;R5-2,2,每条边带lsp/scip/treesitter/regex来源与置信度；结果数量不因标注丢失,todo,必做
 R5-4,E,P1,公开基准agent-bench+测试关联P/R+调用图精度,S-2,R1-3;R2-4;R5-3,6.5,3仓库200对可复现报告P/R/F1；删测试后affected能感知；首轮只报告不设阈值,done,必做
 R5-5,E,P3,非Go作用域/Elixir方法名,P3-8,R5-2,1.5,嵌套类与顶层函数不粘到上一个类；Elixir方法名正确,todo,必做

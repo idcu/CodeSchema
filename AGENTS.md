@@ -87,4 +87,4 @@ Agent 在参与 CodeSchema 开发时必须遵循以下流程。完整规范见 [
 - 默认 `:8080`（MCP）和 `:8081`（HTTP）全接口绑定，部署时需将监听地址改为 `127.0.0.1:<port>` 或经 Nginx 反代
 - 认证：`server.auth_token` 配置 Bearer token
 - 限流：`server.rate_limit` 配置每分钟请求上限（0 不限流）
-- 存储：`internal/fsperm` 统一目录 0700 / 文件 0600 权限
+- 存储：路径经 `gitee.com/idcu-go/pathsafe` 解析并限制在数据根内；**不做权限收紧**——`pathsafe.MkdirAll` 使用 `0o755`，文件权限随系统 umask。敏感环境需由部署侧另行收敛（仓库无 `internal/fsperm`）
