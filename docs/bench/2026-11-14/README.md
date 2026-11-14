@@ -154,6 +154,29 @@ rate 0.2831 → 0.2519）。原因是被合并的重复裸名被拆开——例�
 同一个 `add` 键上算作可解析，现在分属不同模块，跨模块的裸名调用在无 import 信息时
 如实判为不可解析。这是消歧后的真实数字，不回退、不用旧口径掩盖。
 
+### 新增「仓内可解析边」口径（与旧 resolution 并排）
+
+旧 `resolution_rate = resolved / 全部调用边` 把 `fmt.Println`、`expect(...)` 这类
+仓外 API 也算进分母，无法区分「引擎解析不出来」和「本来就没有仓内定义」。
+新增并排口径（字段 `repo_resolvable` / `repo_resolvable_resolved` / `repo_resolution_rate`）：
+
+- **分母**：callee 在索引中存在候选的边。候选判定：精确 FQN、逐段去前缀后的后缀
+  （`config.Watcher.Reload` → `Watcher.Reload`）、或全局唯一的短名回退。
+- **分子**：这些边中按旧严格 `resolve` 成功解析的数量。
+- **旧口径的 `calls` / `resolved_calls` / `resolution_rate` 定义与分母完全不变。**
+
+| 仓库 | 变体 | 全部 calls | 全部 resolution | 仓内候选边 | 仓内已解析 | 仓内 resolution |
+|---|---|---:|---:|---:|---:|---:|
+| code-schema (go) | regex | 15527 | 0.2653 | 4281 | 4120 | 0.9624 |
+| code-schema (go) | treesitter | 20119 | 0.2232 | 4495 | 4490 | 0.9989 |
+| petclinic (java) | regex | 1262 | 0.1712 | 219 | 216 | 0.9863 |
+| petclinic (java) | treesitter | 1609 | 0.1889 | 307 | 304 | 0.9902 |
+| lytd (ts) | regex | 385 | 0.2519 | 97 | 97 | 1.0000 |
+| lytd (ts) | treesitter | 407 | 0.2236 | 91 | 91 | 1.0000 |
+
+解读：Go regex 有 161 条「仓内确有定义但未解析」的边，是后续真正可攻的引擎缺口；
+其余 11246 条属仓外调用。treesitter 变体只剩 5 条仓内缺口。
+
 ### 残余漏召（23/24 条）根因更正与清零
 
 此前把 FN 归为「callee 短名多义 + 调用边未抽取」。**该归因错误**：两条调用边

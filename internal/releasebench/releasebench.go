@@ -5,6 +5,9 @@
 //     避免用命名约定评估命名约定（会自我实现）。
 //   - 固定输入 + 确定性采样：文件顺序、pair 排序、stride 采样均固定，报告可跨机器 diff。
 //   - 只报告不设阈值：首轮基线只描述现状，不进入 CI 门禁。
+//   - 调用图同时给两套口径：全量 resolution 与「仓内可解析边」resolution；
+//     后者分母只算 callee 在索引中有精确/后缀/唯一短名候选的边，用于区分
+//     「引擎解析失败」与「本就不可解析（外部 API/框架）」。
 package releasebench
 
 import (
@@ -59,6 +62,12 @@ type CallGraph struct {
 	UniqueCallees  int     `json:"unique_callees"`
 	ResolvedCalls  int     `json:"resolved_calls"`
 	ResolutionRate float64 `json:"resolution_rate"`
+	// RepoResolvable 是「仓内确有定义候选」的口径：分母只算 callee 能在索引中
+	// 按精确名或包/模块后缀命中的边，用于区分「引擎解析失败」与「本就不可解析」。
+	// 与上面的全量口径并排展示，旧的 Calls/ResolutionRate 定义不变。
+	RepoResolvable         int     `json:"repo_resolvable"`
+	RepoResolvableResolved int     `json:"repo_resolvable_resolved"`
+	RepoResolutionRate     float64 `json:"repo_resolution_rate"`
 }
 
 // Report 单仓基准报告。
@@ -185,14 +194,25 @@ func Run(ctx context.Context, repoPath string, opts Options) (*Report, error) {
 			continue
 		}
 		callees[c.CalleeFQN] = struct{}{}
+		resolved := false
 		if _, ok := idx.resolve(c.CalleeFQN); ok {
 			report.CallGraph.ResolvedCalls++
+			resolved = true
+		}
+		if len(idx.candidates(c.CalleeFQN)) > 0 {
+			report.CallGraph.RepoResolvable++
+			if resolved {
+				report.CallGraph.RepoResolvableResolved++
+			}
 		}
 	}
 	report.CallGraph.UniqueCallers = len(callers)
 	report.CallGraph.UniqueCallees = len(callees)
 	if report.CallGraph.Calls > 0 {
 		report.CallGraph.ResolutionRate = round4(float64(report.CallGraph.ResolvedCalls) / float64(report.CallGraph.Calls))
+	}
+	if report.CallGraph.RepoResolvable > 0 {
+		report.CallGraph.RepoResolutionRate = round4(float64(report.CallGraph.RepoResolvableResolved) / float64(report.CallGraph.RepoResolvable))
 	}
 
 	return report, nil
@@ -297,6 +317,26 @@ func (idx *methodIndex) resolve(name string) (string, bool) {
 		return cands[0], true
 	}
 	return "", false
+}
+
+// candidates 返回 callee 在索引中的定义候选（精确名或去掉包/模块前缀后的后缀）。
+// 只用于「仓内确有定义」判定，不改变 resolve 的严格口径。
+func (idx *methodIndex) candidates(callee string) []string {
+	if idx.count[callee] > 0 {
+		return []string{callee}
+	}
+	parts := strings.Split(callee, ".")
+	for i := 1; i < len(parts); i++ {
+		suffix := strings.Join(parts[i:], ".")
+		if idx.count[suffix] > 0 {
+			return []string{suffix}
+		}
+	}
+	// 与 resolve 的短名回退保持一致：短名全局唯一时才算仓内有候选。
+	if cands := idx.short[shortName(callee)]; len(cands) == 1 {
+		return cands
+	}
+	return nil
 }
 
 func shortName(fqn string) string {
@@ -506,11 +546,12 @@ func GenerateMarkdown(r *Report) string {
 	fmt.Fprintf(&b, "| 微平均 | %d | %d | %d | %.4f | %.4f | %.4f |\n\n",
 		r.TestLink.TP, r.TestLink.FP, r.TestLink.FN,
 		r.TestLink.Precision, r.TestLink.Recall, r.TestLink.F1)
-	fmt.Fprintf(&b, "| 调用图 | calls | callers | callees | resolved | resolution |\n")
-	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|\n")
-	fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %.4f |\n",
+	fmt.Fprintf(&b, "| 调用图 | calls | callers | callees | resolved | resolution | 仓内候选边 | 仓内已解析 | 仓内 resolution |\n")
+	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %.4f | %d | %d | %.4f |\n",
 		r.BuildVariant, r.CallGraph.Calls, r.CallGraph.UniqueCallers,
-		r.CallGraph.UniqueCallees, r.CallGraph.ResolvedCalls, r.CallGraph.ResolutionRate)
+		r.CallGraph.UniqueCallees, r.CallGraph.ResolvedCalls, r.CallGraph.ResolutionRate,
+		r.CallGraph.RepoResolvable, r.CallGraph.RepoResolvableResolved, r.CallGraph.RepoResolutionRate)
 	if r.Manual != nil {
 		fmt.Fprintf(&b, "\n%s", manualMarkdown(r.Manual))
 	}

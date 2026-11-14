@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 228: feat(bench): 新增「仓内可解析边」口径（与旧 resolution 并排）
+
+- `CallGraph` 增加 `repo_resolvable` / `repo_resolvable_resolved` /
+  `repo_resolution_rate`：分母只算 callee 在索引中有精确、后缀或唯一短名候选的边；
+  分子为其中严格 `resolve` 成功的数量。旧 `calls/resolved_calls/resolution_rate`
+  定义与分母完全不变。
+- 候选只认「无歧义」：短名多义时不算确有候选，避免把外部 API 误算成仓内缺口。
+- 测试：`TestMethodIndex_CandidatesBySuffix` 覆盖后缀命中、唯一短名、歧义拒绝。
+- 实测（旧全量口径 → 仓内口径）：Go regex 0.2653 → 0.9624（4281 条候选，161 条
+  仓内未解析）；Go ts 0.2232 → 0.9989；Java regex 0.1712 → 0.9863；
+  Java ts 0.1889 → 0.9902；lytd regex/ts 仓内均为 1.0000。
+- 文档：bench README、`final-ledger` 同步。
+
 ### Commit 227: fix(parser): TS 顶层函数按模块限定 FQN
 
 - 顶层函数 `ClassFQN` 改为文件名去扩展名，并合成 `MODULE` 容器保证入库；

@@ -103,6 +103,27 @@ func TestMethodIndex_ResolveDuplicateCount(t *testing.T) {
 	}
 }
 
+// TestMethodIndex_CandidatesBySuffix 覆盖「仓内确有定义候选」口径：
+// 包/模块限定的 callee 只要去掉前缀后能精确命中索引，就算仓内可解析边；
+// 不能只凭短名跨类误配。
+func TestMethodIndex_CandidatesBySuffix(t *testing.T) {
+	idx := newMethodIndex()
+	idx.add("Watcher.Reload")
+
+	if got := idx.candidates("config.Watcher.Reload"); len(got) != 1 || got[0] != "Watcher.Reload" {
+		t.Fatalf("candidates(pkg.Watcher.Reload) = %v, want [Watcher.Reload]", got)
+	}
+	// 短名全局唯一时，带其它前缀的 callee 也算仓内有候选（与 resolve 回退一致）。
+	if got := idx.candidates("config.Other.Reload"); len(got) != 1 || got[0] != "Watcher.Reload" {
+		t.Fatalf("candidates(config.Other.Reload) = %v, want [Watcher.Reload]", got)
+	}
+	// 短名多义时不算「确有无歧义候选」。
+	idx.add("Service.Reload")
+	if got := idx.candidates("config.Other.Reload"); len(got) != 0 {
+		t.Fatalf("ambiguous candidates = %v, want none", got)
+	}
+}
+
 // TestPrepareEvaluation_UsesAllPairsForSampledProds 负控：采样只收缩评估的
 // 生产方法集合，真值必须保留全部 pair；否则未被采样到的真实测试会被计为 FP。
 func TestPrepareEvaluation_UsesAllPairsForSampledProds(t *testing.T) {
