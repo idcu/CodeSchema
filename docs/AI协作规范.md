@@ -96,6 +96,10 @@
   - `fix(auth): 修复 token 刷新失效（含安全设计同步）`
 - Body 携带关键验证数据：如 `heapUsed +2.20MB / P95 <50ms / 31 包测试全绿`。
 - 禁止水 commit（如 `fix bug`、`update`、`optimize`）。
+- **人工真值/标注数据必须独立提交**：`internal/releasebench/testdata/manual-truth.json`
+  等标注文件的变更不得与解析/链接代码修复混在同一笔提交。代码修复只改变预测，
+  标注变更只改变真值，两者混提会让「修复」与「改判据」无法区分。标注提交的
+  Body 必须写明：新增/删除了哪些 pair、依据是什么、为何不是为通过测试而放宽标准。
 - 仅 `git commit`；**除非明确说 push，否则不 push**。
 
 ---
