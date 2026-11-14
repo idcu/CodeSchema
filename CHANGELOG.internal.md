@@ -22,7 +22,7 @@
   `method_tag` → `SEARCH method_tag USING INDEX idx_method_tag_tag (tag_id=?)`。
 - PG 侧新增 `-tags pg` 用例 `TestPGStore_HotIndexes`（`pg_indexes` 存在性 +
   `EXPLAIN`，`enable_seqscan=off` 保证计划体现索引）；门禁以 `go vet -tags` 编译校验。
-- 文档：`存储后端.md` 新增「热点索引」；counts 60154（60.0k）。
+- 文档：`存储后端.md` 新增「热点索引」；counts 60154（60.2k）。
 
 ### Commit 199: refactor(service): 删除未接线的 coverage 关联策略（R6-8 / P2-7）
 
