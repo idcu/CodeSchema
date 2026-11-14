@@ -209,6 +209,16 @@ func isGoTestFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(strings.ReplaceAll(path, "\\", "/")), "_test.go")
 }
 
+// isGoTestFuncName 判断是否为 Go 测试函数名（TestXxx/BenchmarkXxx/ExampleXxx）。
+func isGoTestFuncName(name string) bool {
+	for _, prefix := range []string{"Test", "Benchmark", "Example"} {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchTestClass 判断是否为测试类，并返回对应的源类全限定名。
 //
 // 规则（与 isTestClass 口径对齐）：
@@ -275,8 +285,18 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 			if cls.FullName != testClassFQN {
 				continue
 			}
+			// 生产文件的 PACKAGE 容器与测试容器同名（Go 包名），不能当测试类扫描。
+			if cls.Type == "PACKAGE" && !isGoTestFile(f.AbsolutePath) {
+				continue
+			}
 			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
+			// Go 包级容器的同包 helper（keysOfSets/newMockLSPAdapterMode）不是测试，
+			// 只让 Test/Benchmark/Example 前缀的函数参与命名匹配。
+			goPkg := cls.Type == "PACKAGE" && isGoTestFile(f.AbsolutePath)
 			for _, m := range methods {
+				if goPkg && !isGoTestFuncName(m.Name) {
+					continue
+				}
 				if matchesTestMethod(methodName, m.Name) {
 					add(m.FullName, methodName, "naming", 70)
 				}
@@ -287,40 +307,98 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 
 // matchesTestMethod 判断测试方法名是否匹配目标方法名（跨框架：Go/JUnit/pytest/Jest）。
 func matchesTestMethod(targetName, testName string) bool {
+	if targetName == "" || testName == "" {
+		return false
+	}
 	// 精确匹配
 	if testName == targetName {
 		return true
 	}
-	// Go: Test*/test* 前缀：TestGetOrder ↔ GetOrder
-	if strings.HasPrefix(testName, "Test") && strings.TrimPrefix(testName, "Test") == targetName {
+	// Go/pytest 前缀 + 精确余量：TestGetOrder / testGetOrder / test_get_order ↔ GetOrder
+	for _, prefix := range []string{"Test", "test", "test_"} {
+		if strings.HasPrefix(testName, prefix) && strings.TrimPrefix(testName, prefix) == targetName {
+			return true
+		}
+	}
+	// 描述型测试名：目标名必须落在词边界上，避免 Analyze 命中 Analyzer（P2-4）。
+	descriptive := false
+	for _, prefix := range []string{
+		"Test", "test", "test_", "Benchmark", "benchmark", "Example", "example",
+		"Should", "should_", "when_",
+	} {
+		if strings.HasPrefix(testName, prefix) {
+			descriptive = true
+			break
+		}
+	}
+	if descriptive && containsNameWords(testName, targetName) {
 		return true
 	}
-	if strings.HasPrefix(testName, "test") && strings.TrimPrefix(testName, "test") == targetName {
-		return true
-	}
-	// pytest: test_ 前缀（snake_case）：test_get_order ↔ get_order
-	if strings.HasPrefix(testName, "test_") && strings.TrimPrefix(testName, "test_") == targetName {
-		return true
-	}
-	// pytest/BDD snake_case：should_* / when_* 与目标包含关系
-	if (strings.HasPrefix(testName, "should_") || strings.HasPrefix(testName, "when_")) &&
-		strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
-		return true
-	}
-	// JUnit/BDD camelCase：Should 前缀（ShouldReturnOrder ↔ ReturnOrder）
-	if strings.HasPrefix(testName, "Should") && strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
-		return true
-	}
-	// 描述型测试名（Test*/test*/test_*/Benchmark*/Example* 前缀）允许目标名作为子串出现，
-	// 如 testGetOrderShouldReturn；不带测试前缀的名字（TargetGetter 之于 Get）
-	// 不参与匹配，避免 Contains 兜底过宽（P2-4）。
-	for _, prefix := range []string{"Test", "test", "test_", "Benchmark", "benchmark", "Example", "example"} {
-		if strings.HasPrefix(testName, prefix) &&
-			strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
+	// JUnit 描述型方法名（无测试前缀）：目标名是测试名前缀且下一字符为
+	// 大写或下划线，如 processCreationFormSuccess ↔ processCreationForm、
+	// addPetAddsPersistedPet ↔ addPet。目标名过短（<4）不做前缀匹配，
+	// 避免 get 命中 getById。
+	if len(targetName) >= 4 && strings.HasPrefix(testName, targetName) {
+		rest := testName[len(targetName):]
+		if rest == "" {
+			return true
+		}
+		if rest[0] == '_' || (rest[0] >= 'A' && rest[0] <= 'Z') {
 			return true
 		}
 	}
 	return false
+}
+
+// containsNameWords 判断 target 能否由 testName 按词边界切分后的连续词拼接而成。
+// 比较时忽略大小写与下划线，覆盖 getOrder / Get_Order / testGetOrderShouldReturn。
+func containsNameWords(testName, target string) bool {
+	words := splitNameWords(testName)
+	targetNorm := strings.ToLower(strings.ReplaceAll(target, "_", ""))
+	if targetNorm == "" {
+		return false
+	}
+	for i := range words {
+		var b strings.Builder
+		for j := i; j < len(words); j++ {
+			b.WriteString(strings.ToLower(words[j]))
+			cur := b.String()
+			if cur == targetNorm {
+				return true
+			}
+			if len(cur) >= len(targetNorm) {
+				break
+			}
+		}
+	}
+	return false
+}
+
+// splitNameWords 按下划线/分隔符与 camelCase 边界切词。
+func splitNameWords(s string) []string {
+	var words []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, string(cur))
+			cur = cur[:0]
+		}
+	}
+	for _, r := range s {
+		switch {
+		case r == '_' || r == '-' || r == '.' || r == ' ':
+			flush()
+		case r >= 'A' && r <= 'Z':
+			if len(cur) > 0 {
+				flush()
+			}
+			cur = append(cur, r)
+		default:
+			cur = append(cur, r)
+		}
+	}
+	flush()
+	return words
 }
 
 // linkBySameTag 通过同 Tag 聚类建立关联（置信度 60）。

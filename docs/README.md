@@ -27,7 +27,7 @@
 
 - Go 1.25.2；internal 包 **34** / 全仓库 **38**
 
-- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 59.1k
+- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 59.3k
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 

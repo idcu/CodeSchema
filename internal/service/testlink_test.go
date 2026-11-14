@@ -211,6 +211,45 @@ func TestFindTestLinks_GoPackageLevelTests(t *testing.T) {
 	}
 }
 
+// TestFindTestLinks_GoPackageHelpersNotNaming 负控：Go 包级容器里的同包 helper
+// （keysOfSets/newMockLSPAdapterMode）不是测试函数，不得以 naming 关联到生产方法；
+// 同时生产文件的 PACKAGE 容器不得被当作测试类扫描。
+func TestFindTestLinks_GoPackageHelpersNotNaming(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/redis/keys.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/redis/keys_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "redis", FullName: "redis", Type: "PACKAGE"}},
+			2: {{ID: 20, FileID: 2, Name: "redis", FullName: "redis", Type: "PACKAGE"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "keysOf", FullName: "redis.keysOf"}},
+			20: {
+				{ID: 200, ClassID: 20, Name: "TestKeysOf", FullName: "redis.TestKeysOf"},
+				{ID: 201, ClassID: 20, Name: "keysOfSets", FullName: "redis.keysOfSets"},
+				{ID: 202, ClassID: 20, Name: "keysOfStrs", FullName: "redis.keysOfStrs"},
+			},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "redis.keysOf", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Strategy != "naming" {
+			continue
+		}
+		if l.TestMethod == "redis.keysOfSets" || l.TestMethod == "redis.keysOfStrs" {
+			t.Fatalf("Go package helper leaked into naming links: %+v", l)
+		}
+	}
+}
+
 // TestFindTestLinks_JavaTestsSuffix 负控：JUnit/Spring 常见的 `*Tests` 后缀
 // （OwnerControllerTests）此前不被 matchTestClass 识别，而 isTestClass 已支持，
 // 两处口径不一致导致 Spring 仓测试关联零召回（公开基准 S-2 实测）。
@@ -489,6 +528,15 @@ func TestMatchesTestMethod(t *testing.T) {
 		// JUnit/BDD camelCase 兼容 snake 语义（包含兜底）
 		{"getOrder", "testGetOrderShouldReturn", true},
 		{"get_order", "create_order", false},
+		// 描述型测试名：目标方法名是测试名前缀（同一被测类内）。
+		{"processCreationForm", "processCreationFormSuccess", true},
+		{"addPet", "addPetAddsPersistedPet", true},
+		{"validate", "validateWithInvalidBirthDate", true},
+		// 子串必须落在词边界上：Analyzer 不是 Analyze。
+		{"Analyze", "TestAnalyzer_BuildAll", false},
+		{"Analyze", "TestAnalyzer_TagAll_WithEnhancer_AppendsAITags", false},
+		// 过短目标名不做前缀匹配（get 之于 getById）。
+		{"get", "getById", false},
 	}
 	for _, tt := range tests {
 		got := matchesTestMethod(tt.target, tt.test)

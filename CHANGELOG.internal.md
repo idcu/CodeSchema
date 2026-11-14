@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 182: fix(service): 命名匹配按词边界 + JUnit 描述型前缀（R5-10 / S-2d）
+
+- 背景：`matchesTestMethod` 对描述型测试名用 `strings.Contains` 兜底，`Analyze` 会命中 `TestAnalyzer_*`（benchmark 实测 `Analyzer.Analyze` 产生 20+ 条 FP）；反向缺口是 JUnit 描述型方法名 `processCreationFormSuccess`/`addPetAddsPersistedPet` 无法命中目标方法。另有 Go 包级容器里的同包 helper（`keysOfSets`/`newMockLSPAdapterMode`）被当作测试，且生产文件的 PACKAGE 容器与测试容器同名时也会被当作测试类扫描。
+- 动作：
+  - `matchesTestMethod` 改为**词边界**匹配：测试名按下划线/camelCase 切词，目标名须由连续词拼成（`testGetOrderShouldReturn` 仍命中，`Analyze` 不再命中 `Analyzer`）。
+  - 新增 JUnit 描述型前缀规则：目标名是测试名前缀且下一字符为大写/下划线（`processCreationFormSuccess` ↔ `processCreationForm`），目标名 <4 时禁用（`get` 不命中 `getById`）。
+  - `linkByNaming` 对 Go 测试文件的 PACKAGE 容器只接受 `Test`/`Benchmark`/`Example` 前缀；生产文件的 PACKAGE 容器不再作为测试类扫描。
+- 负控（先红后绿）：
+  - `TestMatchesTestMethod` 新增 5 例：3 个描述型前缀（红：`= false`）、2 个子串越界（红：`= true`）。
+  - `TestFindTestLinks_GoPackageHelpersNotNaming`：修复前 `redis.keysOfSets` 以 naming(70) 泄漏（红），修复后仅 `redis.TestKeysOf`。
+- 实测（同一 `release-bench`，regex 变体）：
+  - Go：TP 130→126、FP 46→20、P 0.7386→0.8630、R 0.1121→0.1091、F1 0.1947→0.1937。TP 减少 4 条为包级 helper 不再被当作测试（如 `benchmarkCollection_Query`），属精度修正；测试召回由下一笔 `R5-11` 补。
+  - Java：TP 1→3、FP 0、R 0.0081→0.0244、F1 0.0161→0.0476。
+- 验证：`go test ./internal/service/` 全绿；`make counts-check` 通过。
+
 ### Commit 181: fix(bench): 采样只收缩评估生产集合，真值保留全量（R5-9 / S-2c）
 
 - 背景：`release-bench` 先 `samplePairs` 再构造真值，同一生产方法未进入采样的真实测试不在真值集合里 → 策略正确预测却被计为 FP；被采样生产方法的其余真值也一并缺失，FN 被低估。这是**测量口径缺陷**，不是策略变差，会让 P/R 同时失真。
