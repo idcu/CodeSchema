@@ -42,6 +42,10 @@ type testLinkLatency struct {
 	P95MS  float64 `json:"p95_ms"`
 	P99MS  float64 `json:"p99_ms"`
 	MaxMS  float64 `json:"max_ms"`
+	// TotalAllocBytes 是采样窗口内 runtime.MemStats.TotalAlloc 的增量，
+	// 只统计 N 次采样（不含 warmup），用于衡量每符号的分配放大。
+	TotalAllocBytes uint64  `json:"total_alloc_bytes"`
+	AllocPerOpBytes float64 `json:"alloc_per_op_bytes"`
 }
 
 type testLinkScaleResult struct {
@@ -145,30 +149,37 @@ func measureTestLinkScale(t *testing.T, svc *service.Service, corpus, storeType,
 	})
 	res.AffectedLat.ColdMS = coldAffected
 
-	t.Logf("%s: files=%d target=%s links=%d affected=%d tests cold=%.0fms p50=%.1fms p95=%.1fms affected p50=%.1fms p95=%.1fms",
+	t.Logf("%s: files=%d target=%s links=%d affected=%d tests cold=%.0fms p50=%.1fms p95=%.1fms alloc=%.0fB/op affected p50=%.1fms p95=%.1fms alloc=%.0fB/op",
 		corpus, files, target, res.Links, res.Affected,
-		res.Tests.ColdMS, res.Tests.P50MS, res.Tests.P95MS, res.AffectedLat.P50MS, res.AffectedLat.P95MS)
+		res.Tests.ColdMS, res.Tests.P50MS, res.Tests.P95MS, res.Tests.AllocPerOpBytes,
+		res.AffectedLat.P50MS, res.AffectedLat.P95MS, res.AffectedLat.AllocPerOpBytes)
 	return res
 }
 
-// measureTestLinkLatency 做 warmup 后采样，返回 nearest-rank 分位。
+// measureTestLinkLatency 做 warmup 后采样，返回 nearest-rank 分位与采样期分配量。
 func measureTestLinkLatency(samples, warmup int, fn func()) testLinkLatency {
 	for i := 0; i < warmup; i++ {
 		fn()
 	}
+	var memBefore, memAfter runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
 	durs := make([]time.Duration, 0, samples)
 	for i := 0; i < samples; i++ {
 		start := time.Now()
 		fn()
 		durs = append(durs, time.Since(start))
 	}
+	runtime.ReadMemStats(&memAfter)
+	alloc := memAfter.TotalAlloc - memBefore.TotalAlloc
 	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
 	return testLinkLatency{
-		N:     samples,
-		P50MS: durationMS(durs[(len(durs)-1)*50/100]),
-		P95MS: durationMS(durs[(len(durs)-1)*95/100]),
-		P99MS: durationMS(durs[(len(durs)-1)*99/100]),
-		MaxMS: durationMS(durs[len(durs)-1]),
+		N:               samples,
+		P50MS:           durationMS(durs[(len(durs)-1)*50/100]),
+		P95MS:           durationMS(durs[(len(durs)-1)*95/100]),
+		P99MS:           durationMS(durs[(len(durs)-1)*99/100]),
+		MaxMS:           durationMS(durs[len(durs)-1]),
+		TotalAllocBytes: alloc,
+		AllocPerOpBytes: float64(alloc) / float64(samples),
 	}
 }
 
