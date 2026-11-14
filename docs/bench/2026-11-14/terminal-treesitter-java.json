@@ -1,0 +1,922 @@
+{
+  "timestamp": "2026-11-14T06:37:52Z",
+  "repo": "s2-petclinic",
+  "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+  "language": "java",
+  "build_variant": "treesitter",
+  "files": 50,
+  "prod_files": 31,
+  "test_files": 19,
+  "prod_methods": 91,
+  "test_methods": 104,
+  "ground_truth_pairs": 167,
+  "sampled_pairs": 167,
+  "sampled": false,
+  "prods_evaluated": 38,
+  "predicted_links": 162,
+  "test_link": {
+    "tp": 160,
+    "fp": 0,
+    "fn": 7,
+    "precision": 1,
+    "recall": 0.9581,
+    "f1": 0.9786
+  },
+  "call_graph": {
+    "adapter": "treesitter",
+    "build_variant": "treesitter",
+    "calls": 1609,
+    "unique_callers": 147,
+    "unique_callees": 498,
+    "resolved_calls": 304,
+    "resolution_rate": 0.1889,
+    "repo_resolvable": 307,
+    "repo_resolvable_resolved": 304,
+    "repo_resolution_rate": 0.9902
+  },
+  "manual_truth": {
+    "dataset": "/Volumes/Data/code-schema/internal/releasebench/testdata/manual-truth.json",
+    "repo": "s2-petclinic",
+    "commit": "500158f732419217507c7656904b8e6aa1bcc0d6",
+    "language": "java",
+    "build_variant": "treesitter",
+    "test_files": [
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java",
+      "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java",
+      "src/test/java/org/springframework/samples/petclinic/system/CrashControllerTests.java",
+      "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+    ],
+    "in_scope_tests": 75,
+    "truth_pairs": 152,
+    "predicted_in_scope": 145,
+    "entries": [
+      {
+        "production": "OwnerController.initCreationForm",
+        "truth": [
+          "OwnerControllerTests.initCreationForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initCreationForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.initFindForm",
+        "truth": [
+          "OwnerControllerTests.initFindForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initFindForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.initUpdateOwnerForm",
+        "truth": [
+          "OwnerControllerTests.initUpdateOwnerForm"
+        ],
+        "predicted": [
+          "OwnerControllerTests.initUpdateOwnerForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processCreationForm",
+        "truth": [
+          "OwnerControllerTests.processCreationFormHasErrors",
+          "OwnerControllerTests.processCreationFormRejectsAddressLongerThanColumn",
+          "OwnerControllerTests.processCreationFormRejectsCityLongerThanColumn",
+          "OwnerControllerTests.processCreationFormSuccess"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processCreationFormHasErrors",
+          "OwnerControllerTests.processCreationFormRejectsAddressLongerThanColumn",
+          "OwnerControllerTests.processCreationFormRejectsCityLongerThanColumn",
+          "OwnerControllerTests.processCreationFormSuccess"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processFindForm",
+        "truth": [
+          "OwnerControllerTests.processFindFormByLastName",
+          "OwnerControllerTests.processFindFormIgnoresSurroundingWhitespace",
+          "OwnerControllerTests.processFindFormNoOwnersFound",
+          "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
+          "OwnerControllerTests.processFindFormSuccess",
+          "OwnerControllerTests.processFindFormWithWhitespaceOnlyLastNameReturnsAllOwners"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processFindFormByLastName",
+          "OwnerControllerTests.processFindFormIgnoresSurroundingWhitespace",
+          "OwnerControllerTests.processFindFormNoOwnersFound",
+          "OwnerControllerTests.processFindFormRedirectsOutOfBoundsPageToFirstPage",
+          "OwnerControllerTests.processFindFormSuccess",
+          "OwnerControllerTests.processFindFormWithWhitespaceOnlyLastNameReturnsAllOwners"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.processUpdateOwnerForm",
+        "truth": [
+          "OwnerControllerTests.processUpdateOwnerFormHasErrors",
+          "OwnerControllerTests.processUpdateOwnerFormSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "predicted": [
+          "OwnerControllerTests.processUpdateOwnerFormHasErrors",
+          "OwnerControllerTests.processUpdateOwnerFormSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormUnchangedSuccess",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "OwnerController.showOwner",
+        "truth": [
+          "OwnerControllerTests.showOwner"
+        ],
+        "predicted": [
+          "OwnerControllerTests.showOwner"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetController.initCreationForm",
+        "truth": [
+          "PetControllerTests.initCreationForm"
+        ],
+        "predicted": [
+          "PetControllerTests.initCreationForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetController.initUpdateForm",
+        "truth": [
+          "PetControllerTests.initUpdateForm"
+        ],
+        "predicted": [
+          "PetControllerTests.initUpdateForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetController.processCreationForm",
+        "truth": [
+          "PetControllerTests.processCreationFormSuccess",
+          "PetControllerTests.processCreationFormWithBlankName",
+          "PetControllerTests.processCreationFormWithDataIntegrityViolation",
+          "PetControllerTests.processCreationFormWithDuplicateName",
+          "PetControllerTests.processCreationFormWithInvalidBirthDate",
+          "PetControllerTests.processCreationFormWithMissingPetType"
+        ],
+        "predicted": [
+          "PetControllerTests.processCreationFormSuccess",
+          "PetControllerTests.processCreationFormWithBlankName",
+          "PetControllerTests.processCreationFormWithDataIntegrityViolation",
+          "PetControllerTests.processCreationFormWithDuplicateName",
+          "PetControllerTests.processCreationFormWithInvalidBirthDate",
+          "PetControllerTests.processCreationFormWithMissingPetType"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetController.processUpdateForm",
+        "truth": [
+          "PetControllerTests.processUpdateFormSuccess",
+          "PetControllerTests.processUpdateFormWithBlankName",
+          "PetControllerTests.processUpdateFormWithDataIntegrityViolation",
+          "PetControllerTests.processUpdateFormWithDuplicateName",
+          "PetControllerTests.processUpdateFormWithInvalidBirthDate",
+          "PetControllerTests.processUpdateFormWithSameName"
+        ],
+        "predicted": [
+          "PetControllerTests.processUpdateFormSuccess",
+          "PetControllerTests.processUpdateFormWithBlankName",
+          "PetControllerTests.processUpdateFormWithDataIntegrityViolation",
+          "PetControllerTests.processUpdateFormWithDuplicateName",
+          "PetControllerTests.processUpdateFormWithInvalidBirthDate",
+          "PetControllerTests.processUpdateFormWithSameName"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "VetController.showResourcesVetList",
+        "truth": [
+          "VetControllerTests.showResourcesVetList"
+        ],
+        "predicted": [
+          "VetControllerTests.showResourcesVetList"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "VetController.showVetList",
+        "truth": [
+          "VetControllerTests.showVetListHtml",
+          "VetControllerTests.showVetListRedirectsOutOfBoundsPageToFirstPage"
+        ],
+        "predicted": [
+          "VetControllerTests.showVetListHtml",
+          "VetControllerTests.showVetListRedirectsOutOfBoundsPageToFirstPage"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "VisitController.initNewVisitForm",
+        "truth": [
+          "VisitControllerTests.initNewVisitForm"
+        ],
+        "predicted": [
+          "VisitControllerTests.initNewVisitForm"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "VisitController.processNewVisitForm",
+        "truth": [
+          "VisitControllerTests.processNewVisitFormHasErrors",
+          "VisitControllerTests.processNewVisitFormHasErrorsWhenDescriptionIsTooLong",
+          "VisitControllerTests.processNewVisitFormHasErrorsWhenVisitDateIsNotInFuture",
+          "VisitControllerTests.processNewVisitFormSuccess"
+        ],
+        "predicted": [
+          "VisitControllerTests.processNewVisitFormHasErrors",
+          "VisitControllerTests.processNewVisitFormHasErrorsWhenDescriptionIsTooLong",
+          "VisitControllerTests.processNewVisitFormHasErrorsWhenVisitDateIsNotInFuture",
+          "VisitControllerTests.processNewVisitFormSuccess"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetValidator.supports",
+        "truth": [
+          "PetValidatorTests.doesNotSupportNonPetClass",
+          "PetValidatorTests.supportsPetClass"
+        ],
+        "predicted": [
+          "PetValidatorTests.doesNotSupportNonPetClass",
+          "PetValidatorTests.supportsPetClass"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetValidator.validate",
+        "truth": [
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "predicted": [
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetTypeFormatter.print",
+        "truth": [
+          "PetTypeFormatterTests.testPrint"
+        ],
+        "predicted": [
+          "PetTypeFormatterTests.testPrint"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "PetTypeFormatter.parse",
+        "truth": [
+          "PetTypeFormatterTests.shouldParse",
+          "PetTypeFormatterTests.shouldThrowParseException"
+        ],
+        "predicted": [
+          "PetTypeFormatterTests.shouldParse",
+          "PetTypeFormatterTests.shouldThrowParseException"
+        ],
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "CrashController.triggerException",
+        "truth": [
+          "CrashControllerTests.triggerException"
+        ],
+        "predicted": [
+          "CrashControllerTests.triggerException"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Owner.addPet",
+        "truth": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "VisitControllerTests.init"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "VisitControllerTests.init"
+        ],
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Owner.getPet",
+        "truth": [
+          "ClinicServiceTests.shouldAddNewVisitForPet",
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFindVisitsByPetId",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "ClinicServiceTests.shouldUpdatePetName",
+          "OwnerControllerTests.setup"
+        ],
+        "predicted": null,
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      {
+        "production": "Owner.addVisit",
+        "truth": [
+          "ClinicServiceTests.shouldAddNewVisitForPet"
+        ],
+        "predicted": null,
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "precision": 0,
+        "recall": 0,
+        "f1": 0
+      },
+      {
+        "production": "Owner.getPets",
+        "truth": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet"
+        ],
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "NamedEntity.setName",
+        "truth": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "ClinicServiceTests.shouldUpdatePetName",
+          "OwnerControllerTests.george",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "PetTypeFormatterTests.makePetTypes",
+          "PetTypeFormatterTests.testPrint",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName",
+          "VetControllerTests.helen"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "ClinicServiceTests.shouldUpdatePetName",
+          "OwnerControllerTests.george",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "PetTypeFormatterTests.makePetTypes",
+          "PetTypeFormatterTests.testPrint",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName",
+          "VetControllerTests.helen"
+        ],
+        "tp": 16,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "NamedEntity.getName",
+        "truth": [
+          "ClinicServiceTests.shouldFindAllPetTypes",
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldFindVets",
+          "ClinicServiceTests.shouldUpdatePetName",
+          "PetTypeFormatterTests.shouldParse"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindAllPetTypes",
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldFindVets",
+          "ClinicServiceTests.shouldUpdatePetName",
+          "PetTypeFormatterTests.shouldParse"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "BaseEntity.getId",
+        "truth": [
+          "ClinicServiceTests.shouldAddNewVisitForPet",
+          "ClinicServiceTests.shouldInsertOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAddNewVisitForPet",
+          "ClinicServiceTests.shouldInsertOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "BaseEntity.setId",
+        "truth": [
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "VetControllerTests.helen",
+          "VetControllerTests.james",
+          "VisitControllerTests.init"
+        ],
+        "predicted": [
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "OwnerTests.addPetAddsPersistedPet",
+          "OwnerTests.addPetDoesNotAddDuplicatePet",
+          "PetControllerTests.setup",
+          "VetControllerTests.helen",
+          "VetControllerTests.james",
+          "VisitControllerTests.init"
+        ],
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Person.setFirstName",
+        "truth": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "VetControllerTests.helen",
+          "VetControllerTests.james"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "VetControllerTests.helen",
+          "VetControllerTests.james"
+        ],
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Person.setLastName",
+        "truth": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "ClinicServiceTests.shouldUpdateOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "VetControllerTests.helen",
+          "VetControllerTests.james"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "ClinicServiceTests.shouldUpdateOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+          "VetControllerTests.helen",
+          "VetControllerTests.james"
+        ],
+        "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Person.getLastName",
+        "truth": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldFindVets",
+          "ClinicServiceTests.shouldUpdateOwner"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+          "ClinicServiceTests.shouldFindVets",
+          "ClinicServiceTests.shouldUpdateOwner"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Owner.setAddress",
+        "truth": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Owner.setCity",
+        "truth": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Owner.setTelephone",
+        "truth": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldInsertOwner",
+          "OwnerControllerTests.george",
+          "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Pet.setType",
+        "truth": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "tp": 9,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Pet.setBirthDate",
+        "truth": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+          "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+          "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+          "OwnerControllerTests.george",
+          "PetValidatorTests.validate",
+          "PetValidatorTests.validateWithInvalidBirthDate",
+          "PetValidatorTests.validateWithInvalidPetName",
+          "PetValidatorTests.validateWithInvalidPetType",
+          "PetValidatorTests.validateWithLongPetName"
+        ],
+        "tp": 9,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Pet.getType",
+        "truth": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindSingleOwnerWithPet"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Pet.getVisits",
+        "truth": [
+          "ClinicServiceTests.shouldAddNewVisitForPet",
+          "ClinicServiceTests.shouldFindVisitsByPetId",
+          "OwnerControllerTests.setup"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAddNewVisitForPet",
+          "ClinicServiceTests.shouldFindVisitsByPetId",
+          "OwnerControllerTests.setup"
+        ],
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Visit.setDescription",
+        "truth": [
+          "ClinicServiceTests.shouldAddNewVisitForPet"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldAddNewVisitForPet"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Vet.getSpecialties",
+        "truth": [
+          "ClinicServiceTests.shouldFindVets"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindVets"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Vet.getNrOfSpecialties",
+        "truth": [
+          "ClinicServiceTests.shouldFindVets"
+        ],
+        "predicted": [
+          "ClinicServiceTests.shouldFindVets"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Visit.setDate",
+        "truth": [
+          "OwnerControllerTests.setup"
+        ],
+        "predicted": [
+          "OwnerControllerTests.setup"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      {
+        "production": "Vet.addSpecialty",
+        "truth": [
+          "VetControllerTests.helen"
+        ],
+        "predicted": [
+          "VetControllerTests.helen"
+        ],
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      }
+    ],
+    "micro": {
+      "tp": 145,
+      "fp": 0,
+      "fn": 7,
+      "precision": 1,
+      "recall": 0.9539,
+      "f1": 0.9764
+    }
+  }
+}

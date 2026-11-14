@@ -6,6 +6,50 @@
 
 ## 提交记录
 
+### Commit 247: 收尾（Java 真值扩至 152 对 + 实参内层调用修复 + PG 并发写）
+
+**测试关联（Java）**
+- 人工真值 40 → 152 对（4 → 9 个测试类）：新增 `PetValidatorTests`、
+  `PetTypeFormatterTests`、`OwnerTests`、`CrashControllerTests`、`ClinicServiceTests`，
+  覆盖 controller/validator/formatter 与实体/继承访问器的直接调用。
+- 口径不变（v2）：接收者类型静态可确定；Spring Data repository 接口、`@Mock` 字段、
+  测试 helper `EntityUtils` 与 JDK 调用不计入。与 Go 把 `*_test.go` 内 helper 计入一致，
+  补入 `george()`/`setup()`/`init()`/`helen()`/`james()`/`makePetTypes()` 的真实调用
+  （扩大真值，不是收窄标注）。
+- 闭合性审计：对 9 个文件按花括号截取全部方法体（含 helper），用 `receiver.Method(`
+  与链式 `.Method(` 抽候选逐条比对，未发现漏标/多标。
+- 缺陷修复：Java 实参内层调用被 `callPattern` 外层整段吞掉
+  （`assertThat(owner.getId())`），新增 `javaInnerCallPattern`（`(` 或 `,` 后紧跟的
+  `receiver.method(`）补齐，与 AST 按 invocation 节点遍历的口径对齐。
+- 负控：`TestTreeSitterAdapter_Parse_JavaNestedCalls`（正则旧实现红、AST 一直绿、
+  修复后两变体绿）。
+- 结果（152 对）：修复前 regex TP 132 / FP 0 / FN 20、R 0.8684、F1 0.9296；
+  修复后两变体均 TP 145 / FP 0 / FN 7、R 0.9539、F1 0.9764。
+  剩余 7 条 FN 为 `Owner.getPet` 3 重载（6 条）与 `Owner.addVisit`/`Pet.addVisit`
+  同名歧义（1 条），保留不规避。
+- 召回 Wilson 95% CI 半宽：40 对 ±9pp → 152 对 ±3.5pp。
+- 自动 test_link：regex 真值 pair 128→163，TP 123→156、FP 0、FN 5→7、
+  F1 0.9801→0.9781（覆盖扩大后的真实 FN）；treesitter 真值 167、160/0/7 不变
+  （F1 0.9786）。
+
+**存储（PG）**
+- 新增 `TestPGStore_ConcurrentWrites`（`-tags pg`）：8 worker × 6 个互不相交文件
+  并发 `UpsertIR`；4 worker 各 3 文件并发 `BulkUpsert`；6 worker × 5 轮并发重索引
+  同一文件。断言无错误/无死锁，每个文件最终恰为 1 类 / 3 方法 / 2 调用
+  （全量替换不残留重复行）。
+- 嵌入式 PostgreSQL 16.3 上 `go test -tags pg ./internal/store/pg/` 11 个用例全绿。
+- 边界不变：TLS/sslmode、HA/故障切换/PgBouncer、只读副本、亿级/VACUUM、版本矩阵
+  仍标注为未验证，不以单实例并发结果外推。
+
+**文档与门禁**
+- `docs/bench/2026-11-14/README.md`：真值规模 321 对（Go 169 / Java 152）、
+  收尾轮前后对比、终态 P/R/F1 与 Wilson 95% CI、`terminal-*.json` 归档。
+- `最终总账`与`任务清单`同步（R5-16/R5-17/R3-14）；LoC 基线 64492 → 65209。
+- 门禁：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... &&
+  make test`、`make fmt-check`、`make counts-check`、`make verify-tags` 全绿；
+  `-tags pg` 11 个集成用例全绿。
+
+
 ### Commit 246: fix(testlink): 命名策略让位给调用证据，清掉 Go 真值 9 条 FP
 
 - `naming` 只按名字词边界匹配：`TestSearchByTags_*` / `TestSearchConfig_*` /

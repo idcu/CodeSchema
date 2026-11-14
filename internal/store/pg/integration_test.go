@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1039,4 +1040,165 @@ func TestPGStore_MethodFullNameRoundTrip(t *testing.T) {
 	if methods[0].FullName != "p15.Svc.Run" {
 		t.Fatalf("full_name not persisted: got %q, want %q", methods[0].FullName, "p15.Svc.Run")
 	}
+}
+
+// TestPGStore_ConcurrentWrites 验证多 worker 并发写 PG（文档「并发写」缺口）。
+//
+// 两个子场景：
+//   - disjoint:  8 worker × 6 个互不相交的文件并发 UpsertIR，验证无死锁/无丢行；
+//   - same_path: 6 worker 各重索引同一文件 5 轮，验证 file 行锁串行化后，
+//     全量替换（DELETE + INSERT）不会留下重复的类/方法/调用。
+func TestPGStore_ConcurrentWrites(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	makeIR := func(path, hash, prefix string) *parser.IRDocument {
+		ir := &parser.IRDocument{
+			Source: "pg-concurrency", Language: "go",
+			FilePath: path, FileHash: hash, LineCount: 10, ByteSize: 128,
+		}
+		ir.Classes = []parser.ClassIR{{Name: "Svc", FullName: prefix + ".Svc", Type: "CLASS"}}
+		for i := 0; i < 3; i++ {
+			name := fmt.Sprintf("M%d", i)
+			ir.Methods = append(ir.Methods, parser.MethodIR{Name: name, ClassFQN: prefix + ".Svc"})
+			if i > 0 {
+				ir.Calls = append(ir.Calls, parser.CallIR{
+					CallerFQN: prefix + ".Svc." + name,
+					CalleeFQN: prefix + ".Svc.M0",
+					CallType:  "direct",
+				})
+			}
+		}
+		return ir
+	}
+
+	verify := func(t *testing.T, path string) {
+		t.Helper()
+		f, err := s.GetFileByPath(ctx, path)
+		if err != nil || f == nil {
+			t.Fatalf("GetFileByPath(%s): %v", path, err)
+		}
+		classes, err := s.GetClassesByFileID(ctx, f.ID)
+		if err != nil || len(classes) != 1 {
+			t.Fatalf("%s: classes=%d err=%v, want 1", path, len(classes), err)
+		}
+		methods, err := s.GetMethodsByClassID(ctx, classes[0].ID)
+		if err != nil || len(methods) != 3 {
+			t.Fatalf("%s: methods=%d err=%v, want 3", path, len(methods), err)
+		}
+		calls, err := s.GetCallsByFileID(ctx, f.ID)
+		if err != nil || len(calls) != 2 {
+			t.Fatalf("%s: calls=%d err=%v, want 2", path, len(calls), err)
+		}
+		_ = s.DeleteFile(ctx, f.ID)
+	}
+
+	t.Run("disjoint", func(t *testing.T) {
+		const workers, perWorker = 8, 6
+		stamp := time.Now().UnixNano()
+		paths := make([]string, 0, workers*perWorker)
+		var wg sync.WaitGroup
+		errCh := make(chan error, workers*perWorker)
+		start := make(chan struct{})
+		for w := 0; w < workers; w++ {
+			for i := 0; i < perWorker; i++ {
+				path := fmt.Sprintf("/tmp/pg-it/conc-disjoint-%d-%d-%d.go", stamp, w, i)
+				prefix := fmt.Sprintf("conc.d%d_%d", w, i)
+				paths = append(paths, path)
+				ir := makeIR(path, fmt.Sprintf("hash-%d-%d", w, i), prefix)
+				wg.Add(1)
+				go func(ir *parser.IRDocument) {
+					defer wg.Done()
+					<-start
+					if err := s.UpsertIR(ctx, ir); err != nil {
+						errCh <- fmt.Errorf("%s: %w", ir.FilePath, err)
+					}
+				}(ir)
+			}
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			t.Errorf("concurrent UpsertIR: %v", err)
+		}
+		for _, path := range paths {
+			verify(t, path)
+		}
+	})
+
+	t.Run("bulk_batches", func(t *testing.T) {
+		const workers, perBatch = 4, 3
+		stamp := time.Now().UnixNano()
+		paths := make([]string, 0, workers*perBatch)
+		var wg sync.WaitGroup
+		errCh := make(chan error, workers)
+		start := make(chan struct{})
+		for w := 0; w < workers; w++ {
+			batch := make([]*parser.IRDocument, 0, perBatch)
+			for i := 0; i < perBatch; i++ {
+				path := fmt.Sprintf("/tmp/pg-it/conc-bulk-%d-%d-%d.go", stamp, w, i)
+				paths = append(paths, path)
+				batch = append(batch, makeIR(path, fmt.Sprintf("bulk-%d-%d", w, i), fmt.Sprintf("conc.b%d_%d", w, i)))
+			}
+			wg.Add(1)
+			go func(batch []*parser.IRDocument) {
+				defer wg.Done()
+				<-start
+				if err := s.BulkUpsert(ctx, batch); err != nil {
+					errCh <- fmt.Errorf("bulk worker: %w", err)
+				}
+			}(batch)
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			t.Errorf("concurrent BulkUpsert: %v", err)
+		}
+		for _, path := range paths {
+			verify(t, path)
+		}
+	})
+
+	t.Run("same_path", func(t *testing.T) {
+		const workers, rounds = 6, 5
+		path := fmt.Sprintf("/tmp/pg-it/conc-same-%d.go", time.Now().UnixNano())
+		prefix := "conc.same"
+		var wg sync.WaitGroup
+		errCh := make(chan error, workers*rounds)
+		start := make(chan struct{})
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				<-start
+				for r := 0; r < rounds; r++ {
+					ir := makeIR(path, fmt.Sprintf("hash-%d-%d", w, r), prefix)
+					if err := s.UpsertIR(ctx, ir); err != nil {
+						errCh <- fmt.Errorf("worker %d round %d: %w", w, r, err)
+					}
+				}
+			}(w)
+		}
+		close(start)
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			t.Errorf("same-path concurrent UpsertIR: %v", err)
+		}
+		verify(t, path)
+	})
 }

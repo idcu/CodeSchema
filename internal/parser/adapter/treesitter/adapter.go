@@ -801,6 +801,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				curClass = currentClass.Name
 			}
 			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass, nil)
+			// Java 实参位置的内层调用会被外层整段吞掉（`assertThat(owner.getId())`），
+			// 与 AST 路径按 invocation 节点遍历的口径不一致，这里补齐。
+			if lang == "java" {
+				detectJavaNestedCalls(code, lineNum, &doc.Calls, caller, nonGoPkg, curClass)
+			}
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -1379,8 +1384,8 @@ func detectUnclosedCalls(line string, lineNum int, calls *[]parser.CallIR, calle
 	}
 }
 
-// goInnerCallPattern 匹配调用实参位置上的内层调用：`f(g(...))` → g。
-var goInnerCallPattern = regexp.MustCompile(`\(\s*(\w[\w.]*)\s*\(`)
+// innerCallPattern 匹配调用实参位置上的内层调用：`f(g(...))` → g。
+var innerCallPattern = regexp.MustCompile(`\(\s*(\w[\w.]*)\s*\(`)
 
 // goChainCallPattern 匹配构造式链式调用：`NewService(x).M(...)` → base=NewService, method=M。
 // 参数部分不含括号，跳过参数本身也是嵌套调用的链（不做不可靠的类型推断）。
@@ -1431,7 +1436,7 @@ func detectGoNestedCalls(line string, lineNum int, calls *[]parser.CallIR, calle
 		}
 	}
 	// 内层：仅补充本行尚未出现的 callee
-	for _, m := range goInnerCallPattern.FindAllStringSubmatch(line, -1) {
+	for _, m := range innerCallPattern.FindAllStringSubmatch(line, -1) {
 		name := m[1]
 		if isKeyword(name) || len(name) <= 1 {
 			continue
@@ -1447,6 +1452,53 @@ func detectGoNestedCalls(line string, lineNum int, calls *[]parser.CallIR, calle
 			continue
 		}
 		callee := qualifyCallee(name, pkg, recvVar, recvType, "", "", localTypes)
+		if isKeyword(callee) || len(callee) <= 1 {
+			continue
+		}
+		*calls = append(*calls, parser.CallIR{
+			CallerFQN:  caller,
+			CalleeFQN:  callee,
+			CallType:   "direct",
+			LineNumber: lineNum,
+			Source:     parser.CallSourceRegex,
+			Confidence: parser.ConfidenceRegex,
+		})
+	}
+}
+
+// javaInnerCallPattern 匹配 Java 实参位置上的内层调用：`f(g(...))` 与 `f(a, g(...))`。
+// 逗号分支覆盖 `assertEquals(1, owner.getPets().size())` 这类多实参表达式。
+var javaInnerCallPattern = regexp.MustCompile(`[(,]\s*(\w[\w.]*)\s*\(`)
+
+// detectJavaNestedCalls 补充抽取 Java 实参位置上的内层调用。
+//
+// 默认 callPattern 为非重叠匹配：`assertThat(owner.getId())` 会把内层
+// owner.getId 整段吞掉，导致「测试方法 → 生产方法」的调用边丢失。
+// AST 路径按 invocation 节点遍历，本就能看到内层调用；这里补齐正则路径口径。
+// 链式后续调用（`f().g()` 的 g）已由 callPattern 的后续匹配覆盖，无需重复。
+func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, currentClass string) {
+	short := func(fqn string) string {
+		if i := strings.LastIndex(fqn, "."); i >= 0 {
+			return fqn[i+1:]
+		}
+		return fqn
+	}
+	for _, m := range javaInnerCallPattern.FindAllStringSubmatch(line, -1) {
+		name := m[1]
+		if isKeyword(name) || len(name) <= 1 {
+			continue
+		}
+		seen := false
+		for _, c := range *calls {
+			if c.LineNumber == lineNum && c.CallerFQN == caller && short(c.CalleeFQN) == short(name) {
+				seen = true
+				break
+			}
+		}
+		if seen {
+			continue
+		}
+		callee := qualifyCallee(name, "", "", "", pkg, currentClass, nil)
 		if isKeyword(callee) || len(callee) <= 1 {
 			continue
 		}

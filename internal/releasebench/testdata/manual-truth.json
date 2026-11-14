@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "note": "人工标注真值（扩展版）：先以纯文本检索列出候选调用点，再逐条阅读测试方法体与接收者类型确认；不使用 IR 调用边或 FindTestLinks 输出。仅收录接收者可静态确定的直接调用；接口字段动态派发、mock 实现、反射/事件回调不计入。Go 闭合范围为 3 个测试文件，Java 为 4 个测试类。",
+  "note": "人工标注真值（扩展版）：先以纯文本检索列出候选调用点，再逐条阅读测试方法体与接收者类型确认；不使用 IR 调用边或 FindTestLinks 输出。仅收录接收者可静态确定的直接调用；接口字段动态派发、mock 实现、反射/事件回调不计入。Go 闭合范围为 3 个测试文件；Java 闭合范围为 9 个测试类，含 @Test 方法与被其调用的测试内 helper，覆盖 controller/validator/formatter 与实体/访问器直接调用，Spring Data repository 接口与 @Mock 字段按规则排除。",
   "repos": {
     "code-schema": {
       "language": "go",
@@ -722,6 +722,371 @@
             "VisitControllerTests.processNewVisitFormHasErrors",
             "VisitControllerTests.processNewVisitFormHasErrorsWhenVisitDateIsNotInFuture",
             "VisitControllerTests.processNewVisitFormHasErrorsWhenDescriptionIsTooLong"
+          ]
+        },
+        {
+          "production": "PetValidator.supports",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java"
+          ],
+          "tests": [
+            "PetValidatorTests.supportsPetClass",
+            "PetValidatorTests.doesNotSupportNonPetClass"
+          ]
+        },
+        {
+          "production": "PetValidator.validate",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java"
+          ],
+          "tests": [
+            "PetValidatorTests.validate",
+            "PetValidatorTests.validateWithInvalidPetName",
+            "PetValidatorTests.validateWithInvalidPetType",
+            "PetValidatorTests.validateWithInvalidBirthDate",
+            "PetValidatorTests.validateWithLongPetName"
+          ]
+        },
+        {
+          "production": "PetTypeFormatter.print",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java"
+          ],
+          "tests": [
+            "PetTypeFormatterTests.testPrint"
+          ]
+        },
+        {
+          "production": "PetTypeFormatter.parse",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java"
+          ],
+          "tests": [
+            "PetTypeFormatterTests.shouldParse",
+            "PetTypeFormatterTests.shouldThrowParseException"
+          ]
+        },
+        {
+          "production": "CrashController.triggerException",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/system/CrashControllerTests.java"
+          ],
+          "tests": [
+            "CrashControllerTests.triggerException"
+          ]
+        },
+        {
+          "production": "Owner.addPet",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+            "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "OwnerControllerTests.george",
+            "OwnerTests.addPetAddsPersistedPet",
+            "OwnerTests.addPetDoesNotAddDuplicatePet",
+            "PetControllerTests.setup",
+            "VisitControllerTests.init"
+          ]
+        },
+        {
+          "production": "Owner.getPet",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAddNewVisitForPet",
+            "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+            "ClinicServiceTests.shouldFindVisitsByPetId",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "ClinicServiceTests.shouldUpdatePetName",
+            "OwnerControllerTests.setup"
+          ]
+        },
+        {
+          "production": "Owner.addVisit",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAddNewVisitForPet"
+          ]
+        },
+        {
+          "production": "Owner.getPets",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "OwnerTests.addPetAddsPersistedPet",
+            "OwnerTests.addPetDoesNotAddDuplicatePet",
+            "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId"
+          ]
+        },
+        {
+          "production": "NamedEntity.setName",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java",
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+            "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "ClinicServiceTests.shouldUpdatePetName",
+            "OwnerControllerTests.george",
+            "OwnerTests.addPetAddsPersistedPet",
+            "OwnerTests.addPetDoesNotAddDuplicatePet",
+            "PetControllerTests.setup",
+            "PetTypeFormatterTests.makePetTypes",
+            "PetTypeFormatterTests.testPrint",
+            "PetValidatorTests.validate",
+            "PetValidatorTests.validateWithInvalidBirthDate",
+            "PetValidatorTests.validateWithInvalidPetName",
+            "PetValidatorTests.validateWithInvalidPetType",
+            "PetValidatorTests.validateWithLongPetName",
+            "VetControllerTests.helen"
+          ]
+        },
+        {
+          "production": "NamedEntity.getName",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/PetTypeFormatterTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "PetTypeFormatterTests.shouldParse",
+            "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+            "ClinicServiceTests.shouldUpdatePetName",
+            "ClinicServiceTests.shouldFindAllPetTypes",
+            "ClinicServiceTests.shouldFindVets"
+          ]
+        },
+        {
+          "production": "BaseEntity.getId",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "ClinicServiceTests.shouldAddNewVisitForPet"
+          ]
+        },
+        {
+          "production": "BaseEntity.setId",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/VisitControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+            "OwnerTests.addPetAddsPersistedPet",
+            "OwnerTests.addPetDoesNotAddDuplicatePet",
+            "PetControllerTests.setup",
+            "VetControllerTests.helen",
+            "VetControllerTests.james",
+            "VisitControllerTests.init"
+          ]
+        },
+        {
+          "production": "Person.setFirstName",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java",
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+            "VetControllerTests.helen",
+            "VetControllerTests.james"
+          ]
+        },
+        {
+          "production": "Person.setLastName",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java",
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "ClinicServiceTests.shouldUpdateOwner",
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch",
+            "VetControllerTests.helen",
+            "VetControllerTests.james"
+          ]
+        },
+        {
+          "production": "Person.getLastName",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldFindSingleOwnerWithPet",
+            "ClinicServiceTests.shouldUpdateOwner",
+            "ClinicServiceTests.shouldFindVets"
+          ]
+        },
+        {
+          "production": "Owner.setAddress",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+          ]
+        },
+        {
+          "production": "Owner.setCity",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+          ]
+        },
+        {
+          "production": "Owner.setTelephone",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldInsertOwner",
+            "OwnerControllerTests.george",
+            "OwnerControllerTests.processUpdateOwnerFormWithIdMismatch"
+          ]
+        },
+        {
+          "production": "Pet.setType",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+            "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "OwnerControllerTests.george",
+            "PetValidatorTests.validate",
+            "PetValidatorTests.validateWithInvalidBirthDate",
+            "PetValidatorTests.validateWithInvalidPetName",
+            "PetValidatorTests.validateWithInvalidPetType",
+            "PetValidatorTests.validateWithLongPetName"
+          ]
+        },
+        {
+          "production": "Pet.setBirthDate",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/owner/PetValidatorTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAllowSamePetNameForDifferentOwners",
+            "ClinicServiceTests.shouldFailToInsertDuplicatePetNameForSameOwner",
+            "ClinicServiceTests.shouldInsertPetIntoDatabaseAndGenerateId",
+            "OwnerControllerTests.george",
+            "PetValidatorTests.validate",
+            "PetValidatorTests.validateWithInvalidBirthDate",
+            "PetValidatorTests.validateWithInvalidPetName",
+            "PetValidatorTests.validateWithInvalidPetType",
+            "PetValidatorTests.validateWithLongPetName"
+          ]
+        },
+        {
+          "production": "Pet.getType",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldFindSingleOwnerWithPet"
+          ]
+        },
+        {
+          "production": "Pet.getVisits",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java",
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAddNewVisitForPet",
+            "ClinicServiceTests.shouldFindVisitsByPetId",
+            "OwnerControllerTests.setup"
+          ]
+        },
+        {
+          "production": "Visit.setDescription",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldAddNewVisitForPet"
+          ]
+        },
+        {
+          "production": "Vet.getSpecialties",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldFindVets"
+          ]
+        },
+        {
+          "production": "Vet.getNrOfSpecialties",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/service/ClinicServiceTests.java"
+          ],
+          "tests": [
+            "ClinicServiceTests.shouldFindVets"
+          ]
+        },
+        {
+          "production": "Visit.setDate",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/owner/OwnerControllerTests.java"
+          ],
+          "tests": [
+            "OwnerControllerTests.setup"
+          ]
+        },
+        {
+          "production": "Vet.addSpecialty",
+          "test_files": [
+            "src/test/java/org/springframework/samples/petclinic/vet/VetControllerTests.java"
+          ],
+          "tests": [
+            "VetControllerTests.helen"
           ]
         }
       ]

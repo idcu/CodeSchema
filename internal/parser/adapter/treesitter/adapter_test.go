@@ -685,6 +685,47 @@ public class OrderService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaNestedCalls 验证实参位置的内层调用不丢边。
+//
+// 正则 callPattern 为非重叠匹配：`assertThat(owner.getLastName())` 会被外层
+// assertThat 整段吞掉。基准（Java 人工真值扩容）中该形态覆盖 getLastName/getId/
+// getPets/getSpecialties/supports 等，全被计为漏召；AST 路径因按 invocation 节点
+// 遍历天然可见。此用例约束两条路径口径一致。
+func TestTreeSitterAdapter_Parse_JavaNestedCalls(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "OwnerControllerTests.java")
+	content := `package com.example;
+
+class OwnerControllerTests {
+    void check(Owner owner, PetValidator petValidator) {
+        assertThat(owner.getLastName()).startsWith("Franklin");
+        assertTrue(petValidator.supports(Pet.class));
+        assertThat(owner.getId()).isNotZero();
+        assertEquals(1, owner.getPets().size());
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"owner.getLastName", "petValidator.supports", "owner.getId", "owner.getPets"}
+	got := make(map[string]bool, len(doc.Calls))
+	for _, c := range doc.Calls {
+		got[c.CalleeFQN] = true
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("expected nested callee %q in calls, got %+v", w, doc.Calls)
+		}
+	}
+}
+
 // TestTreeSitterAdapter_Parse_Kotlin 验证 Kotlin 类/方法解析（T6-2：多语言扩展）。
 func TestTreeSitterAdapter_Parse_Kotlin(t *testing.T) {
 	a := NewTreeSitterAdapter()
