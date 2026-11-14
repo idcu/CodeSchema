@@ -282,6 +282,44 @@ export class UserService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaAnnotationsNotCalls 负控：类/字段注解
+//（@Table(name="x")）不是调用边，旧实现记为 caller 为空的 pkg.Class.Table。
+func TestTreeSitterAdapter_Parse_JavaAnnotationsNotCalls(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Owner.java")
+	content := `package demo;
+
+@Entity
+@Table(name = "owners")
+public class Owner {
+    @Column(name = "first_name")
+    private String firstName;
+
+    public void save() {
+        repo.save();
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for _, c := range doc.Calls {
+		base := c.CalleeFQN
+		if i := strings.LastIndex(base, "."); i >= 0 {
+			base = base[i+1:]
+		}
+		switch base {
+		case "Table", "Column", "Entity":
+			t.Errorf("annotation recorded as call: %+v", c)
+		}
+	}
+}
+
 // TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall 负控：.d.ts 等声明式
 // 构造器 `constructor();` 不是调用边；旧实现记为 callee=constructor、caller 为空。
 func TestTreeSitterAdapter_Parse_TSConstructorSignatureNotCall(t *testing.T) {

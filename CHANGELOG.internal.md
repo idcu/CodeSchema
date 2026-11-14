@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 230: fix(parser): Java 注解不再计为调用（caller 归属）
+
+- `@Table(name="owners")` / `@Column(...)` 被 `callPattern` 记为调用，caller 为空
+  （petclinic 60 条）。注解参数是编译期元数据，不应进入调用图。
+- 非 Go 语言以 `@` 开头的行跳过调用检测。
+- 负控：`TestTreeSitterAdapter_Parse_JavaAnnotationsNotCalls`（旧实现 2 条红，新实现绿）。
+- 实测 petclinic java regex：calls 1262 → 1184、caller 空 60 → 9、
+  resolution 216/0.1712 → 216/0.1824（分母缩小）、仓内口径 219/216 不变。
+- 文档：bench README、`final-ledger` 同步。
+
 ### Commit 229: fix(parser): TS 声明式构造器不再计为调用（caller 归属）
 
 - `.d.ts` 的 `constructor(port: number);` 无返回类型注解，漏过方法模式后被当成调用，

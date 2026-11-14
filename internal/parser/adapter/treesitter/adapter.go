@@ -727,6 +727,13 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			continue
 		}
 
+		// 注解/装饰器行不是调用（@Table(name="x") / @Component(...)）；
+		// 其参数是编译期元数据，不进入调用图。旧实现会产生 caller 为空的假边。
+		if lang != "go" && strings.HasPrefix(strings.TrimSpace(line), "@") {
+			docComment.Reset()
+			continue
+		}
+
 		// 解析函数调用（全部语言启用；Java/TS/Rust/C++/Kotlin 的调用检测
 		// 依赖 callPattern 与 isKeyword 过滤，精度见 docs/dev 02 的启发式说明）
 		// 先剔除字符串/注释内的伪调用（跨行状态机），再匹配
