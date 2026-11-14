@@ -216,6 +216,41 @@ func TestModelDownloader_Ensure_LocalSource(t *testing.T) {
 	}
 }
 
+// TestModelDownloader_Permissions R3-7 负控：模型目录与解包产物必须收敛到
+// 目录 0700 / 文件 0600，不能沿用归档里的 0755/0644。
+func TestModelDownloader_Permissions(t *testing.T) {
+	archive, sha := buildTarGz(t, map[string]string{
+		"onnx/model.onnx": "fake-model",
+		"tokenizer.json":  "{}",
+	})
+	archivePath := filepath.Join(t.TempDir(), "models-perm.tar.gz")
+	if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "models")
+	dl := NewModelDownloader(dest, archivePath, sha)
+	if ok, err := dl.Ensure(context.Background(), "perm-model"); err != nil || !ok {
+		t.Fatalf("ensure failed: ok=%v err=%v", ok, err)
+	}
+
+	assertPerm(t, dest, 0o700)
+	assertPerm(t, filepath.Join(dest, "onnx"), 0o700)
+	assertPerm(t, filepath.Join(dest, "onnx", "model.onnx"), 0o600)
+	assertPerm(t, filepath.Join(dest, "tokenizer.json"), 0o600)
+}
+
+func assertPerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s perm = %04o, want %04o", path, got, want)
+	}
+}
+
 // TestLocalSourcePath 验证本地源 URL 解析。
 func TestLocalSourcePath(t *testing.T) {
 	cases := []struct {

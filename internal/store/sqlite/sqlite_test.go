@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -20,6 +21,31 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+func TestSQLite_DBFileAndDirPerm(t *testing.T) {
+	dir := t.TempDir()
+	s := NewSQLiteStore()
+	if err := s.Open(context.Background(), dir); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	// R3-7：数据目录 0700、数据库文件 0600（旧库 0644 在打开时收敛）。
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := di.Mode().Perm(); got != 0o700 {
+		t.Fatalf("dir perm = %04o, want 0700", got)
+	}
+	fi, err := os.Stat(filepath.Join(dir, "codeschema.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Fatalf("db perm = %04o, want 0600", got)
+	}
 }
 
 func TestSQLite_UpsertFileAndGet(t *testing.T) {

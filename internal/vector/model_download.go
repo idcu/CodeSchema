@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/idcu/codeschema/internal/hash"
 	log "gitee.com/idcu-go/log"
+	"github.com/idcu/codeschema/internal/fsperm"
+	"github.com/idcu/codeschema/internal/hash"
 )
 
 // localSourcePath 判断 URL 是否为本地分发源并返回本地路径。
@@ -181,7 +182,7 @@ func (d *ModelDownloader) modelFilesPresent() bool {
 //   - 相对/绝对本地路径：直接作为 tar.gz 路径。
 func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName string) error {
 	url := strings.ReplaceAll(d.URL, "{model}", modelName)
-	if err := os.MkdirAll(d.ModelDir, 0o755); err != nil {
+	if err := fsperm.MkdirAll(d.ModelDir); err != nil {
 		return fmt.Errorf("mkdir %s: %w", d.ModelDir, err)
 	}
 	partPath := filepath.Join(d.ModelDir, ".download.part")
@@ -205,7 +206,7 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 			return fmt.Errorf("open local model archive %s: %w", localPath, err)
 		}
 		defer src.Close()
-		out, err := os.OpenFile(partPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		out, err := fsperm.OpenFile(partPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, fsperm.FileMode)
 		if err != nil {
 			return fmt.Errorf("create part file: %w", err)
 		}
@@ -249,7 +250,7 @@ func (d *ModelDownloader) downloadAndExtract(ctx context.Context, modelName stri
 		default:
 			return fmt.Errorf("http status %d for %s", resp.StatusCode, url)
 		}
-		out, err := os.OpenFile(partPath, flag, 0o644)
+		out, err := fsperm.OpenFile(partPath, flag, fsperm.FileMode)
 		if err != nil {
 			return fmt.Errorf("open part file: %w", err)
 		}
@@ -345,14 +346,14 @@ func extractTarGz(archivePath, destDir string) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := fsperm.MkdirAll(target); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := fsperm.MkdirAll(filepath.Dir(target)); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o777)
+			out, err := fsperm.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fsperm.FileMode)
 			if err != nil {
 				return err
 			}

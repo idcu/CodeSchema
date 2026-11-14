@@ -25,9 +25,9 @@
 
 ## 事实基线（以 `scripts/project_counts.py` 为准，禁止手填）
 
-- Go 1.25.2；internal 包 **34** / 全仓库 **38**
+- Go 1.25.2；internal 包 **35** / 全仓库 **39**
 
-- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 60.3k
+- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 60.5k
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 

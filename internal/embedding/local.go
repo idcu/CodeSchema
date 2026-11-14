@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode"
 
-	"gitee.com/idcu-go/pathsafe"
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // LocalEmbedder 基于统计特征的纯 Go Embedder。
@@ -163,7 +163,7 @@ func (l *LocalEmbedder) SaveIDF(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal idf: %w", err)
 	}
-	return pathsafe.WriteFile(path, raw)
+	return fsperm.WriteFile(path, raw)
 }
 
 // LoadIDF 从文件加载 IDF 词典。

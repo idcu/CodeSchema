@@ -6,6 +6,31 @@
 
 ## 提交记录
 
+### Commit 197: feat(fsperm): 统一落盘权限 0700/0600（R3-7 / P2-13）
+
+- 背景更正：Commit 196 依据 `pathsafe` 的 `EnsureDir`（0755）判断「不做权限收紧」，
+  但本地 replace 的 `pathsafe` 已提供 `MkdirAll`/`WriteFile`（0700/0600）。真正缺口
+  在未走该原语的路径：模型下载/解包（`os.MkdirAll 0755`、`os.OpenFile 0644`、
+  按归档 mode 0644）与 SQLite `.db`（驱动默认 0644）。
+- 新增 `internal/fsperm`：`DirMode=0700`/`FileMode=0600`，提供
+  `MkdirAll`/`WriteFile`/`OpenFile`/`Chmod`；对已存在的目录/文件强制执行 `chmod`
+  （旧数据迁移）。`OpenFile` 自动建父目录并收敛权限。
+- 替换 14 处生产调用：FileStore（2）、lock unix/windows（2）、SQLite 建目录（1）、
+  runtime（2）、embedding local/persistent（3）、search builder（2）、
+  retrieval persistent（2）；模型下载/解包 5 处改走 `fsperm`；SQLite 在 PRAGMA
+  建库后把 `.db` 收敛到 0600。
+- **迁移影响**：既有 index 目录/JSON 索引为 0755/0644 的，会在下次创建或重写时
+  收敛到 0700/0600；SQLite `.db` 在下次打开时即收敛。WAL/SHM 仍由 SQLite 按
+  umask 创建，依赖所在目录 0700 隔离。无数据格式变更，回滚无需转换。
+- 负控（先红后绿）：`TestModelDownloader_Permissions`——修复前 `models perm = 0755`
+  （红）；修复后模型目录/`onnx` 0700、产物 0600（绿）。
+  `TestSQLite_DBFileAndDirPerm`（目录 0700、db 0600）、`TestMkdirAllTightensExisting`
+  等 fsperm 迁移用例保持绿。
+- 文档：`AGENTS.md` 改为事实描述；`docs/01-开发者/存储后端.md` 新增「落盘权限」；
+  包数基线 34/38 → 35/39（`docs/README.md`、架构与模块、仓库结构）。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿（含 `internal/store/sqlite` 全组）；counts 60495（60.5k）。
+
 ### Commit 196: chore(docs): 纠正 fsperm 声明并对账陈旧清单（R1-6）
 
 - 文档纠偏：`AGENTS.md` 原写「`internal/fsperm` 统一目录 0700 / 文件 0600」，

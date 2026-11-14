@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gitee.com/idcu-go/pathsafe"
+	"github.com/idcu/codeschema/internal/fsperm"
 	"golang.org/x/sys/unix"
 )
 
@@ -20,7 +20,7 @@ type handle struct {
 // 同进程内多次 Acquire/Release 各持独立 fd；跨进程第二个 Acquire 会因
 // LOCK_NB 立即失败（写操作互斥）。
 func acquire(dir, name string) (handle, error) {
-	if err := pathsafe.MkdirAll(dir); err != nil {
+	if err := fsperm.MkdirAll(dir); err != nil {
 		return handle{}, fmt.Errorf("mkdir lock dir: %w", err)
 	}
 	path := filepath.Join(dir, name)

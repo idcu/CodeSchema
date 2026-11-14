@@ -16,7 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"gitee.com/idcu-go/pathsafe"
+	"github.com/idcu/codeschema/internal/fsperm"
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/store"
 )
@@ -133,6 +133,12 @@ func (s *SQLiteStore) Open(ctx context.Context, dsn string) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;"); err != nil {
 		_ = db.Close()
 		return fmt.Errorf("set pragma: %w", err)
+	}
+	// PRAGMA 会触发建库；旧版本创建的 .db 可能是 0644，此处收敛到 0600
+	// （WAL/SHM 由 SQLite 按 umask 创建，所在目录已收敛 0700，其他用户不可遍历）。
+	if err := fsperm.Chmod(path); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("chmod sqlite %s: %w", path, err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
@@ -854,7 +860,7 @@ func ensureDir(dir string) error {
 	if dir == "" {
 		return nil
 	}
-	return pathsafe.MkdirAll(dir)
+	return fsperm.MkdirAll(dir)
 }
 
 // BulkUpsert 批量入库多个文件的 IR（语义同逐文件 UpsertIR，但置于单事务 +

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gitee.com/idcu-go/pathsafe"
+	"github.com/idcu/codeschema/internal/fsperm"
 )
 
 // handle 平台特定的锁句柄（Windows：锁文件路径）。
@@ -19,7 +19,7 @@ type handle struct {
 // 用「独占创建锁文件」近似互斥：O_CREATE|O_EXCL 保证同一时刻只有一个进程创建成功；
 // 进程退出后锁文件残留，需手动删除（见文档说明）。
 func acquire(dir, name string) (handle, error) {
-	if err := pathsafe.MkdirAll(dir); err != nil {
+	if err := fsperm.MkdirAll(dir); err != nil {
 		return handle{}, fmt.Errorf("mkdir lock dir: %w", err)
 	}
 	path := filepath.Join(dir, name)
