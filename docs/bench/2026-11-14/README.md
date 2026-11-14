@@ -189,6 +189,16 @@ resolution 97/0.2519 → 61/0.1748：这 36 条假边此前恰好命中索引里
 剩余 205 条空 caller 是 Jest `describe/it` 回调（`expect/toBe` 等）与模块级语句，
 本身没有可归属的方法，不做伪造归属。
 
+### Caller 归属：Go 接口方法签名不再计为调用
+
+`type Store interface { Open(ctx context.Context) error; ... }` 的每个签名行被
+`callPattern` 记为调用边，caller 恒为空（本仓 106 条，集中在 `store.go` 等接口文件）。
+接口体是类型契约而非可执行代码，按花括号深度跟踪接口体并跳过调用检测。
+
+同语料（同一诊断命令）Go regex：calls 15597 → 15497，caller 为空 131 → 25。
+剩余 25 条为包级 `var` 初始化（`errors.New` / `regexp.MustCompile` / `template.Must`）
+与 Go 类型转换，无可归属方法，不做伪造归属。
+
 ### 新增「仓内可解析边」口径（与旧 resolution 并排）
 
 旧 `resolution_rate = resolved / 全部调用边` 把 `fmt.Println`、`expect(...)` 这类

@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 232: fix(parser): Go 接口方法签名不再计为调用（caller 归属）
+
+- `type X interface { M() }` 的方法签名被 `callPattern` 登记为调用边，caller 恒为空
+  （本仓 106 条，集中在 `store.go` / `plugin.go` / `viz.go` 等接口文件）。
+- Go 分支按花括号深度跟踪接口体，接口体内跳过调用检测（接口体只有签名，无可执行调用）。
+- 负控：`TestGoInterfaceSignaturesNotCalls`（旧实现 2 条空 caller 假边，红；新实现绿）。
+- 同语料（同一诊断命令）：calls 15597 → 15497、caller 空 131 → 25。
+- 剩余 25 条为包级 `var` 初始化与类型转换，无可归属方法，不伪造 `<pkg init>`。
+- 文档：bench README 同步。
+
 ### Commit 231: fix(parser): Go 原始字符串内容不再创建假方法（caller 归属）
 
 - 方法解析用未清洗行、调用检测用 `clean` 后行：串内 `func Ghost()` 会建成方法，

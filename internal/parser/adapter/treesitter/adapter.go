@@ -426,6 +426,10 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	curStructName := ""      // 当前 struct 名（field 的 ClassFQN 归属）
 	constBlock := false      // 是否处于 const ( ... ) 块内
 	hasTopLevelFunc := false // 是否存在包级函数（决定是否合成包级容器）
+	// Go 接口体跟踪：`type X interface { ... }` 内只有方法签名，不是调用。
+	// 旧实现按 callPattern 把签名登记为调用边，CallerFQN 恒为空、污染调用图归属。
+	curIfaceOpenDepth := 0
+	inIfaceBody := false
 
 	for {
 		raw, readErr := scanner.ReadString('\n')
@@ -502,7 +506,13 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 					curStructName = className
 					curStructOpenDepth = goDepth // 该行 `{` 计入前的深度
 				}
+				// 接口体：后续行是方法签名，不得产调用边。
+				inIfaceBody = classType == "INTERFACE"
+				curIfaceOpenDepth = goDepth
 				goDepth += braceNet(code)
+				if inIfaceBody && goDepth <= curIfaceOpenDepth {
+					inIfaceBody = false // 单行接口 `type X interface { M() }`
+				}
 				docComment.Reset()
 				continue
 			}
@@ -538,6 +548,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				}
 				doc.Methods = append(doc.Methods, method)
 				curMethodIdx = len(doc.Methods) - 1
+				inIfaceBody = false
 				// 合法 Go 中 func 不可能出现在 const 块内；若出现说明上游闭合行丢失，
 				// 在此复位，避免 constBlock 继续吞掉方法体（P3-9）。
 				constBlock = false
@@ -636,10 +647,13 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
 				trackGoLocalTypes(code, goLocalTypes)
 			}
-			if strings.Contains(code, "(") {
+			if !(inIfaceBody && curMethodIdx < 0 && goDepth > curIfaceOpenDepth) && strings.Contains(code, "(") {
 				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes)
 			}
 			goDepth += braceNet(code)
+			if inIfaceBody && goDepth <= curIfaceOpenDepth {
+				inIfaceBody = false
+			}
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
 				// 方法体闭合：EndLine 回填到闭合行（P1-1），支撑 /context 语义块裁剪。
 				doc.Methods[curMethodIdx].EndLine = lineNum

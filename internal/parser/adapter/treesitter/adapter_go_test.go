@@ -185,6 +185,37 @@ func Run() {
 	}
 }
 
+// TestGoInterfaceSignaturesNotCalls 负控：接口方法声明（type X interface { M() }）
+// 是类型契约而非调用。旧实现按 callPattern 把每个签名行登记为调用边，
+// 这些边的 CallerFQN 恒为空（接口体不属于任何方法），污染调用图归属统计。
+func TestGoInterfaceSignaturesNotCalls(t *testing.T) {
+	src := `package demo
+
+type Store interface {
+	Open(ctx context.Context) error
+	Close() error
+}
+
+type impl struct{ s Store }
+
+func (i *impl) Run() {
+	i.s.Close()
+}
+`
+	doc := parseGoSource(t, src)
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "" {
+			t.Errorf("接口签名产生了空 caller 调用: %+v", c)
+		}
+	}
+	if len(doc.Calls) != 1 {
+		t.Fatalf("接口体不应产生调用边：want 1 (impl.Run 内), got %d: %+v", len(doc.Calls), doc.Calls)
+	}
+	if doc.Calls[0].CallerFQN != "demo.impl.Run" {
+		t.Errorf("caller = %q, want demo.impl.Run", doc.Calls[0].CallerFQN)
+	}
+}
+
 // TestGoMultiLineSignature_CallAttribution 是 P1-14 负控：Go 多行函数签名
 // （签名行无 `{`）此前会在首个参数续行处被误判为方法体闭合，导致方法体内
 // 调用的 CallerFQN 为空、analyzer 不建边。修复后签名续行累积进 Signature，
