@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 215: fix(parser): 非 Go 缩进作用域与 Elixir/C++ 方法名（R5-5 / P3-8）
+
+- 根因：通用路径只有一个 `currentClass` 指针，类结束后不复位——
+  嵌套类方法挂到外层、后续顶层函数继续粘到上一个类；方法名统一取
+  `matches[len-1]`，Elixir 末组是 `(`/`do`、C++ 末组是 `const|override|final`。
+- 修复：引入 `nonGoScope` 缩进栈（类定义/方法定义按行首缩进弹栈），
+  `langPatterns.methodNameIndex` 为 Elixir/C++ 指定第 2 捕获组。
+- 负控（先红后绿）：修前 `inner_method=Outer`、`top_level=Outer`、
+  Elixir 方法名 `map[(:true do:true]`、C++ 名 `const`；修后分别
+  `Inner`、`""`、`run/priv`、`start`；`go test ./internal/parser/adapter/treesitter` 全绿。
+- 文档：`解析适配器.md` 新增「非 Go 作用域与方法名」；counts 62545（62.5k）。
+
 ### Commit 214: feat(parser): 调用边来源与置信度分级（R5-3 / S-4）
 
 - 根因：`CallIR` 只有 caller/callee/type/line 四字段，三后端 `call` 表虽已有 `source`

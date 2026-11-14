@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-func TestTreeSitterAdapter_Name(t *testing.T) {	a := NewTreeSitterAdapter()
+func TestTreeSitterAdapter_Name(t *testing.T) {
+	a := NewTreeSitterAdapter()
 	if a.Name() != "treesitter" {
 		t.Errorf("expected treesitter, got %s", a.Name())
 	}
@@ -1472,5 +1473,127 @@ func Run() {
 		if c.Confidence < 70 {
 			t.Errorf("call %s -> %s confidence=%d, want >=70", c.CallerFQN, c.CalleeFQN, c.Confidence)
 		}
+	}
+}
+
+// TestTreeSitterAdapter_NonGoScopeAttribution 负控（R5-5）：嵌套类结束后
+// 外层方法应回到外层类，顶层函数不得粘到上一个类。
+func TestTreeSitterAdapter_NonGoScopeAttribution(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "scope.rb")
+	content := `module Outer
+  class Inner
+    def inner_method()
+      helper()
+    end
+  end
+
+  def outer_method()
+    helper()
+  end
+end
+
+def top_level()
+  helper()
+end
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	want := map[string]string{
+		"inner_method": "Inner",
+		"outer_method": "Outer",
+		"top_level":    "",
+	}
+	got := make(map[string]string, len(doc.Methods))
+	for _, m := range doc.Methods {
+		got[m.Name] = m.ClassFQN
+	}
+	for name, wantFQN := range want {
+		if got[name] != wantFQN {
+			t.Errorf("method %s ClassFQN = %q, want %q (all=%v)", name, got[name], wantFQN, got)
+		}
+	}
+}
+
+// TestTreeSitterAdapter_ElixirMethodNames 负控（R5-5）：Elixir 方法名在
+// 正则第 2 捕获组，取末组会把 `(`/`do` 当成方法名。
+func TestTreeSitterAdapter_ElixirMethodNames(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "demo.ex")
+	content := `defmodule Demo do
+  def run(x) do
+    helper(x)
+  end
+
+  defp priv do
+    :ok
+  end
+end
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	names := make(map[string]bool, len(doc.Methods))
+	for _, m := range doc.Methods {
+		names[m.Name] = true
+	}
+	for _, want := range []string{"run", "priv"} {
+		if !names[want] {
+			t.Errorf("missing method %q, got %v", want, names)
+		}
+	}
+	if names["("] || names["do"] {
+		t.Errorf("method name captured punctuation/keyword: %v", names)
+	}
+}
+
+// TestTreeSitterAdapter_CppMethodName 负控（R5-5）：C++ 方法名在第 2 捕获组，
+// 取末组会把 `const`/`override` 当成方法名。
+func TestTreeSitterAdapter_CppMethodName(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "engine.cpp")
+	content := `class Engine {
+public:
+    void start() const {
+        fuelPump.pump();
+    }
+};
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	found := false
+	for _, m := range doc.Methods {
+		if m.Name == "start" {
+			found = true
+			if m.ClassFQN != "Engine" {
+				t.Errorf("start ClassFQN = %q, want Engine", m.ClassFQN)
+			}
+		}
+		if m.Name == "const" || m.Name == "override" {
+			t.Errorf("method name captured qualifier: %q", m.Name)
+		}
+	}
+	if !found {
+		t.Errorf("method start not found, got %+v", doc.Methods)
 	}
 }

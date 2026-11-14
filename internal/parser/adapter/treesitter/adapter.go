@@ -29,13 +29,38 @@ import (
 // 避免生成代码/压缩产物的超长单行中断整次扫描（P1-15）。
 const maxParseLineBytes = 4 << 20
 
+// nonGoScope 非 Go 语言的缩进作用域（类/结构体）。
+type nonGoScope struct {
+	class  *parser.ClassIR
+	indent int
+}
+
+// indentWidth 计算行首缩进宽度（Tab 记 4 列），用于非 Go 作用域归属。
+func indentWidth(line string) int {
+	w := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			w++
+		case '\t':
+			w += 4
+		default:
+			return w
+		}
+	}
+	return w
+}
+
 // langPatterns 每种语言的解析模式。
 type langPatterns struct {
 	classPattern   *regexp.Regexp // 匹配类/结构体/接口定义
 	classNameIndex int            // 类名在 classPattern 匹配结果中的索引
 	methodPattern  *regexp.Regexp // 匹配方法/函数定义
-	callPattern    *regexp.Regexp // 匹配函数调用
-	commentTrim    string         // 注释前缀，用于提取文档
+	// methodNameIndex 方法名在 methodPattern 匹配结果中的索引；
+	// 0 表示取最后一个捕获组（默认），用于末组是修饰符/关键字的语言（Elixir/C++）。
+	methodNameIndex int
+	callPattern     *regexp.Regexp // 匹配函数调用
+	commentTrim     string         // 注释前缀，用于提取文档
 }
 
 // TreeSitterAdapter 基于文本模式匹配的解析适配器。
@@ -97,11 +122,12 @@ func initPatterns() map[string]langPatterns {
 			commentTrim: "//",
 		},
 		"cpp": {
-			classPattern:   regexp.MustCompile(`^(class|struct|enum)\s+(\w+)\s*[:\{]`),
-			classNameIndex: 2,
-			methodPattern:  regexp.MustCompile(`(\w[\w<>*&:\s]+)\s+(\w[\w]*)\s*\([^)]*\)\s*(const|override|final|\s)*\s*\{`),
-			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
-			commentTrim:    "//",
+			classPattern:    regexp.MustCompile(`^(class|struct|enum)\s+(\w+)\s*[:\{]`),
+			classNameIndex:  2,
+			methodPattern:   regexp.MustCompile(`(\w[\w<>*&:\s]+)\s+(\w[\w]*)\s*\([^)]*\)\s*(const|override|final|\s)*\s*\{`),
+			methodNameIndex: 2,
+			callPattern:     regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim:     "//",
 		},
 		"c": {
 			classPattern:   regexp.MustCompile(`^(typedef\s+(struct|enum|union)\s+)?(struct|enum|union)\s+(\w+)\s*\{`),
@@ -172,11 +198,12 @@ func initPatterns() map[string]langPatterns {
 		},
 		"elixir": {
 			// defmodule 作为模块（MODULE），def/defp 为方法；elixir 无 class 概念
-			classPattern:   regexp.MustCompile(`^\s*defmodule\s+([\w.]+)`),
-			classNameIndex: 1,
-			methodPattern:  regexp.MustCompile(`^\s*def(p)?\s+([\w!?]+)\s*(\(|do)`),
-			callPattern:    regexp.MustCompile(`([\w.]+)\s*\([^)]*\)`),
-			commentTrim:    "#",
+			classPattern:    regexp.MustCompile(`^\s*defmodule\s+([\w.]+)`),
+			classNameIndex:  1,
+			methodPattern:   regexp.MustCompile(`^\s*def(p)?\s+([\w!?]+)\s*(\(|do)`),
+			methodNameIndex: 2,
+			callPattern:     regexp.MustCompile(`([\w.]+)\s*\([^)]*\)`),
+			commentTrim:     "#",
 		},
 		"ocaml": {
 			// module / class 声明；let ... = 为方法（OCaml 无 class 概念时 module 作模块）
@@ -352,6 +379,8 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	lineNum := 0
 	var currentClass *parser.ClassIR
 	var currentMethod *parser.MethodIR // 通用路径：当前方法作用域（用于回填 CallerFQN）
+	// 非 Go 缩进作用域栈：嵌套类/顶层函数按行首缩进归属，避免「粘到上一个类」（R5-5）。
+	var nonGoScopes []nonGoScope
 	var docComment strings.Builder
 	var sanitizer codeSanitizer // 跨行状态（块注释 / 三引号字符串）
 
@@ -598,6 +627,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		if matches := patterns.classPattern.FindStringSubmatch(line); len(matches) > patterns.classNameIndex {
 			className := matches[patterns.classNameIndex]
 			classType := detectClassType(matches, lang)
+			classIndent := indentWidth(line)
+			// 关闭缩进不浅于本类的旧作用域：同级新类替换、更深嵌套类结束（R5-5）。
+			for len(nonGoScopes) > 0 && nonGoScopes[len(nonGoScopes)-1].indent >= classIndent {
+				nonGoScopes = nonGoScopes[:len(nonGoScopes)-1]
+			}
 			class := parser.ClassIR{
 				Name:      className,
 				FullName:  className,
@@ -608,6 +642,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			}
 			doc.Classes = append(doc.Classes, class)
 			currentClass = &doc.Classes[len(doc.Classes)-1]
+			nonGoScopes = append(nonGoScopes, nonGoScope{class: currentClass, indent: classIndent})
 			currentMethod = nil
 			docComment.Reset()
 			continue
@@ -619,7 +654,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		// 读成「返回类型 return + 方法名 helper」，既虚增方法数又让整行被 continue
 		// 吞掉、丢失方法体内的调用边（S-2 基准真值为 0 的根因）。
 		if matches := patterns.methodPattern.FindStringSubmatch(line); len(matches) >= 2 && !isStatementLine(trimmed) {
-			methodName := matches[len(matches)-1]
+			nameIdx := patterns.methodNameIndex
+			if nameIdx <= 0 || nameIdx >= len(matches) {
+				nameIdx = len(matches) - 1
+			}
+			methodName := matches[nameIdx]
 			method := parser.MethodIR{
 				Name:      methodName,
 				Signature: strings.TrimSpace(trimmed),
@@ -627,7 +666,17 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				EndLine:   lineNum,
 				Doc:       strings.TrimSpace(docComment.String()),
 			}
-			// 设置 ClassFQN
+			// 设置 ClassFQN：按行首缩进弹出已结束的类作用域，
+			// 顶层函数（缩进不深于任何类）不再粘到上一个类（R5-5）。
+			methodIndent := indentWidth(line)
+			for len(nonGoScopes) > 0 && nonGoScopes[len(nonGoScopes)-1].indent >= methodIndent {
+				nonGoScopes = nonGoScopes[:len(nonGoScopes)-1]
+			}
+			if len(nonGoScopes) > 0 {
+				currentClass = nonGoScopes[len(nonGoScopes)-1].class
+			} else {
+				currentClass = nil
+			}
 			if currentClass != nil {
 				method.ClassFQN = currentClass.FullName
 			}
