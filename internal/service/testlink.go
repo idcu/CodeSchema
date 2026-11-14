@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gitee.com/idcu-go/metrics"
@@ -92,28 +93,22 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 	}
 
 	// 0. explicit 策略：@TestFor(...) 显式注解（置信度 100）
-	s.linkByExplicit(ctx, files, allClasses, addResult)
+	s.linkByExplicit(ctx, files, allClasses, methodFQN, addResult)
 
 	// 1. coverage 策略：覆盖率数据反查（置信度 90）
 	s.linkByCoverage(methodFQN, addResult)
 
 	// 2. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
-	for classFQN, testClassFQN := range allTestClasses {
-		if classFQN == targetClass {
-			// 找到该类下的所有方法，关联到对应测试类下的方法
-			s.linkByNaming(ctx, files, classFQN, testClassFQN, methodFQN, addResult)
-		}
+	//    同一源类可能有多个测试类（OrderServiceTest / TestOrderService），全部参与。
+	for _, testClassFQN := range allTestClasses[targetClass] {
+		s.linkByNaming(ctx, files, targetClass, testClassFQN, methodFQN, addResult)
 	}
 
 	// 3. same_tag 策略：同 Tag 聚类
-	if len(results) < 20 {
-		s.linkBySameTag(ctx, files, methodFQN, addResult)
-	}
+	s.linkBySameTag(ctx, files, methodFQN, addResult)
 
 	// 4. dependency 策略：依赖递归
-	if len(results) < 10 {
-		s.linkByDependency(ctx, files, methodFQN, addResult)
-	}
+	s.linkByDependency(ctx, files, methodFQN, addResult)
 
 	// 按置信度降序排序
 	sortByConfidenceDesc(results)
@@ -145,8 +140,8 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 // discoverTestClasses 发现所有测试类及其对应的源类映射。
 //
 // 命名约定：OrderServiceTest ↔ OrderService（去掉 Test 后缀/前缀）
-func (s *Service) discoverTestClasses(ctx context.Context, files []*store.FileRecord) map[string]string {
-	result := make(map[string]string) // classFQN -> testClassFQN
+func (s *Service) discoverTestClasses(ctx context.Context, files []*store.FileRecord) map[string][]string {
+	result := make(map[string][]string) // classFQN -> []testClassFQN
 
 	for _, f := range files {
 		classes, err := s.store.GetClassesByFileID(ctx, f.ID)
@@ -156,7 +151,7 @@ func (s *Service) discoverTestClasses(ctx context.Context, files []*store.FileRe
 		for _, cls := range classes {
 			testClass := s.matchTestClass(cls)
 			if testClass != "" {
-				result[testClass] = cls.FullName
+				result[testClass] = append(result[testClass], cls.FullName)
 			}
 		}
 	}
@@ -263,18 +258,26 @@ func matchesTestMethod(targetName, testName string) bool {
 	if strings.HasPrefix(testName, "Should") && strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
 		return true
 	}
-	// Jest test("..."), it("should ...") 等以描述串命名：目标方法名包含在测试名中
-	if strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
-		return true
+	// 描述型测试名（Test*/test*/test_* 前缀）允许目标名作为子串出现，
+	// 如 testGetOrderShouldReturn；不带测试前缀的名字（TargetGetter 之于 Get）
+	// 不参与匹配，避免 Contains 兜底过宽（P2-4）。
+	for _, prefix := range []string{"Test", "test", "test_"} {
+		if strings.HasPrefix(testName, prefix) &&
+			strings.Contains(strings.ToLower(testName), strings.ToLower(targetName)) {
+			return true
+		}
 	}
 	return false
 }
 
-// linkBySameTag 通过同 Tag 聚类建立关联。
+// linkBySameTag 通过同 Tag 聚类建立关联（置信度 60）。
+//
+// 目标方法所在类与测试类共享标签是类级信号；为避免把同 tag 测试类的所有
+// 方法都算作关联，方法名仍须符合命名约定（P2-4）。
 func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, methodFQN string, add func(string, string, string, int)) {
 	// 获取目标方法的标签
 	var targetClassID int64
-	var targetMethodID int64
+	var targetMethodName string
 
 	for _, f := range files {
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
@@ -282,7 +285,7 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
 			for _, m := range methods {
 				if m.FullName == methodFQN {
-					targetMethodID = m.ID
+					targetMethodName = m.Name
 					targetClassID = cls.ID
 					break
 				}
@@ -290,7 +293,7 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 		}
 	}
 
-	if targetMethodID == 0 && targetClassID == 0 {
+	if targetClassID == 0 || targetMethodName == "" {
 		return
 	}
 
@@ -317,6 +320,9 @@ func (s *Service) linkBySameTag(ctx context.Context, files []*store.FileRecord, 
 			if hasCommonTag(targetTags, clsTags) {
 				methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
 				for _, m := range methods {
+					if !matchesTestMethod(targetMethodName, m.Name) {
+						continue
+					}
 					add(m.FullName, m.Name, "same_tag", 60)
 				}
 			}
@@ -415,27 +421,44 @@ func resolveExplicitClass(token string, allClasses map[string]store.ClassRecord)
 		return token
 	}
 
-	// 2/3. 后缀 + 简单名匹配
-	var simpleMatch string
+	// 1. 全限定名后缀匹配
+	var suffixMatches []string
+	// 2. 简单类名匹配
+	var simpleMatches []string
 	for fqn := range allClasses {
-		if strings.HasSuffix(fqn, "."+token) || fqn == token {
-			return fqn
+		if strings.HasSuffix(fqn, "."+token) {
+			suffixMatches = append(suffixMatches, fqn)
+			continue
 		}
-		if simpleMatch == "" {
-			parts := strings.Split(fqn, ".")
-			if parts[len(parts)-1] == token {
-				simpleMatch = fqn
-			}
+		parts := strings.Split(fqn, ".")
+		if parts[len(parts)-1] == token {
+			simpleMatches = append(simpleMatches, fqn)
 		}
 	}
-	return simpleMatch
+	// 多命中时按 FQN 字典序取首个，保证跨请求确定。
+	if len(suffixMatches) > 0 {
+		sort.Strings(suffixMatches)
+		return suffixMatches[0]
+	}
+	if len(simpleMatches) > 0 {
+		sort.Strings(simpleMatches)
+		return simpleMatches[0]
+	}
+	return ""
 }
 
 // linkByExplicit 通过显式 @TestFor 注解建立关联（置信度 100）。
 //
-// 遍历所有测试类/测试方法，解析其 Doc 中的 @TestFor(<目标类>) 注解，
-// 将测试方法关联到目标类的全部生产方法。
-func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord, allClasses map[string]store.ClassRecord, add func(string, string, string, int)) {
+// 遍历所有测试类/测试方法，解析其 Doc 中的 @TestFor(<目标类>) 注解；
+// 仅当注解指向被查询方法所属的类时才建立关联，且只关联被查询的那个方法
+// （P1-12：此前会把任意 @TestFor 的测试塞给所有生产方法）。
+func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord, allClasses map[string]store.ClassRecord, methodFQN string, add func(string, string, string, int)) {
+	targetClassFQN := extractClassFQN(methodFQN)
+	targetMethodName := methodFQN
+	if idx := strings.LastIndex(methodFQN, "."); idx >= 0 {
+		targetMethodName = methodFQN[idx+1:]
+	}
+
 	for _, f := range files {
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
 		for _, cls := range classes {
@@ -454,18 +477,10 @@ func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord,
 					targets = classTargets
 				}
 				for _, tok := range targets {
-					targetClassFQN := resolveExplicitClass(tok, allClasses)
-					if targetClassFQN == "" {
+					if resolveExplicitClass(tok, allClasses) != targetClassFQN {
 						continue
 					}
-					targetCls, ok := allClasses[targetClassFQN]
-					if !ok {
-						continue
-					}
-					prodMethods, _ := s.store.GetMethodsByClassID(ctx, targetCls.ID)
-					for _, pm := range prodMethods {
-						add(m.FullName, pm.Name, "explicit", 100)
-					}
+					add(m.FullName, targetMethodName, "explicit", 100)
 				}
 			}
 		}
@@ -530,10 +545,13 @@ func (s *Service) linkByDependency(ctx context.Context, files []*store.FileRecor
 		fileToClasses[f.ID] = classes
 	}
 
-	// 策略1: 同一目录下的测试文件
+	// 策略1: 同一目录下的测试文件（仅 Go：同目录 *_test.go 属于同一包，构成覆盖证据）
 	targetDir := dirFromPath(targetFile.AbsolutePath)
 	for _, f := range files {
 		if f.ID == targetFile.ID {
+			continue
+		}
+		if !strings.EqualFold(f.Language, "go") {
 			continue
 		}
 		if dirFromPath(f.AbsolutePath) != targetDir {
@@ -562,24 +580,23 @@ func (s *Service) linkByDependency(ctx context.Context, files []*store.FileRecor
 		referencesTarget := false
 		targetPath := strings.ReplaceAll(targetFile.AbsolutePath, "\\", "/")
 		targetParts := strings.Split(targetPath, "/")
+		// 目标文件所在目录名 = 目标包路径的最后一段，用于 import 精确匹配。
+		dirName := ""
+		if len(targetParts) > 1 {
+			dirName = targetParts[len(targetParts)-2]
+		}
 
 		for _, imp := range f.Imports {
 			imp = strings.TrimSpace(imp)
 			if imp == "" {
 				continue
 			}
-			// 检查 import 路径是否包含在目标文件路径中
-			if strings.Contains(targetPath, imp) || strings.Contains(imp, targetPath) {
+			imp = strings.ReplaceAll(imp, "\\", "/")
+			// 仅认「包路径等于目标目录名」或「以 /目标目录名 结尾」的 import，
+			// 避免 strings.Contains 把 payment 误配到 mypaymentutil 之类（P2-4）。
+			if dirName != "" && (imp == dirName || strings.HasSuffix(imp, "/"+dirName)) {
 				referencesTarget = true
 				break
-			}
-			// 检查 import 的最后一个路径段是否匹配目标目录名
-			if len(targetParts) > 1 {
-				dirName := targetParts[len(targetParts)-2]
-				if strings.Contains(imp, dirName) {
-					referencesTarget = true
-					break
-				}
 			}
 		}
 

@@ -610,3 +610,203 @@ func TestResolveExplicitClass(t *testing.T) {
 		}
 	}
 }
+
+// TestFindTestLinks_ExplicitScopedToQueriedMethod 负控（P1-12）：
+// explicit 策略必须按被查询方法过滤，不得把任意 @TestFor 的测试以 100 置信度
+// 关联给所有生产方法。
+func TestFindTestLinks_ExplicitScopedToQueriedMethod(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/a.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/atest.go", Language: "go"},
+			{ID: 3, AbsolutePath: "/proj/b.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "A", FullName: "com.example.A"}},
+			2: {{ID: 20, FileID: 2, Name: "ATest", FullName: "com.example.ATest"}},
+			3: {{ID: 30, FileID: 3, Name: "B", FullName: "com.example.B"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				{ID: 100, ClassID: 10, Name: "M1", FullName: "com.example.A.M1"},
+				{ID: 101, ClassID: 10, Name: "M2", FullName: "com.example.A.M2"},
+			},
+			20: {{ID: 200, ClassID: 20, Name: "TestA", FullName: "com.example.ATest.TestA", Doc: "@TestFor(com.example.A)"}},
+			30: {{ID: 300, ClassID: 30, Name: "N", FullName: "com.example.B.N"}},
+		},
+	}
+	svc := NewService(st)
+
+	// 查询 A.M1：只应返回 M1 的 explicit 关联（不得把 M2 也塞进来）。
+	links, err := svc.FindTestLinks(ctx, "com.example.A.M1", 100)
+	if err != nil {
+		t.Fatalf("FindTestLinks(M1): %v", err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("expected exactly 1 explicit link for M1, got %d: %+v", len(links), links)
+	}
+	if links[0].TestMethod != "com.example.ATest.TestA" || links[0].MethodName != "M1" || links[0].Confidence != 100 {
+		t.Fatalf("unexpected explicit link: %+v", links[0])
+	}
+
+	// 查询 B.N：@TestFor(A) 与该类无关，不得产生 explicit 关联。
+	links, err = svc.FindTestLinks(ctx, "com.example.B.N", 100)
+	if err != nil {
+		t.Fatalf("FindTestLinks(N): %v", err)
+	}
+	if len(links) != 0 {
+		t.Fatalf("expected no explicit link for unrelated class, got %+v", links)
+	}
+}
+
+// TestFindTestLinks_MultipleTestClassesPerSource 负控（P2-4）：
+// 同一源类存在多个测试类时，全部都要参与命名关联，不能让后者覆盖前者。
+func TestFindTestLinks_MultipleTestClassesPerSource(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/order/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/tests/order_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "proj/order.OrderService"}},
+			2: {
+				{ID: 20, FileID: 2, Name: "OrderServiceTest", FullName: "proj/order.OrderServiceTest"},
+				{ID: 21, FileID: 2, Name: "TestOrderService", FullName: "proj/order.TestOrderService"},
+			},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "GetOrder", FullName: "proj/order.OrderService.GetOrder"}},
+			20: {{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "proj/order.OrderServiceTest.TestGetOrder"}},
+			21: {{ID: 210, ClassID: 21, Name: "TestGetOrder", FullName: "proj/order.TestOrderService.TestGetOrder"}},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "proj/order.OrderService.GetOrder", 70)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	got := map[string]bool{}
+	for _, l := range links {
+		if l.Strategy == "naming" {
+			got[l.TestMethod] = true
+		}
+	}
+	for _, want := range []string{
+		"proj/order.OrderServiceTest.TestGetOrder",
+		"proj/order.TestOrderService.TestGetOrder",
+	} {
+		if !got[want] {
+			t.Errorf("missing naming link for %s; got %+v", want, got)
+		}
+	}
+}
+
+// TestFindTestLinks_NoSubstringNamingFalsePositive 负控（P2-4）：
+// 命名策略的 Contains 兜底过宽（目标 Get 命中测试名 TargetGetter），必须收敛。
+func TestFindTestLinks_NoSubstringNamingFalsePositive(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/svc/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/tests/service_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "Svc", FullName: "proj/svc.Svc"}},
+			2: {{ID: 20, FileID: 2, Name: "SvcTest", FullName: "proj/svc.SvcTest"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "Get", FullName: "proj/svc.Svc.Get"}},
+			20: {{ID: 200, ClassID: 20, Name: "TargetGetter", FullName: "proj/tests.SvcTest.TargetGetter"}},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "proj/svc.Svc.Get", 70)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Strategy == "naming" {
+			t.Fatalf("substring false positive leaked: %+v", l)
+		}
+	}
+}
+
+// TestFindTestLinks_SameDirNonGoNotDependency 负控（P2-4）：
+// 同目录只对 Go（同包测试）构成 dependency 证据，其它语言同目录不得给 80。
+func TestFindTestLinks_SameDirNonGoNotDependency(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/payment/service.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/proj/payment/PaymentServiceTest.java", Language: "java"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "PaymentService", FullName: "com.proj.PaymentService"}},
+			2: {{ID: 20, FileID: 2, Name: "PaymentServiceTest", FullName: "com.proj.PaymentServiceTest"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "pay", FullName: "com.proj.PaymentService.pay"}},
+			20: {{ID: 200, ClassID: 20, Name: "TestPay", FullName: "com.proj.PaymentServiceTest.TestPay"}},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "com.proj.PaymentService.pay", 80)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	for _, l := range links {
+		if l.Strategy == "dependency" {
+			t.Fatalf("non-go same-dir must not be dependency evidence: %+v", l)
+		}
+	}
+}
+
+// TestFindTestLinks_SameTagRequiresMethodNameMatch 负控（P2-4）：
+// same_tag 不得把同 tag 测试类的所有方法都关联给目标方法。
+func TestFindTestLinks_SameTagRequiresMethodNameMatch(t *testing.T) {
+	ctx := context.Background()
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/order/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/other/order_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "OrderService", FullName: "proj/order.OrderService"}},
+			2: {{ID: 20, FileID: 2, Name: "OrderChecks", FullName: "proj/other.OrderChecks"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {{ID: 100, ClassID: 10, Name: "GetOrder", FullName: "proj/order.OrderService.GetOrder"}},
+			20: {
+				{ID: 200, ClassID: 20, Name: "TestGetOrder", FullName: "proj/other.OrderChecks.TestGetOrder"},
+				{ID: 201, ClassID: 20, Name: "TestUnrelated", FullName: "proj/other.OrderChecks.TestUnrelated"},
+			},
+		},
+		classTags: map[int64][]string{
+			10: {"order", "service"},
+			20: {"order", "service"},
+		},
+	}
+	svc := NewService(st)
+
+	links, err := svc.FindTestLinks(ctx, "proj/order.OrderService.GetOrder", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	gotSameTag := map[string]bool{}
+	for _, l := range links {
+		if l.Strategy == "same_tag" {
+			gotSameTag[l.TestMethod] = true
+		}
+	}
+	if !gotSameTag["proj/other.OrderChecks.TestGetOrder"] {
+		t.Errorf("expected same_tag link for name-matching test; got %+v", gotSameTag)
+	}
+	if gotSameTag["proj/other.OrderChecks.TestUnrelated"] {
+		t.Errorf("same_tag must not link unrelated test method: %+v", gotSameTag)
+	}
+}

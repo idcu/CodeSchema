@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 168: fix(service): 测试关联按被查询方法收敛，命名/同目录/同 tag 去假阳性（P1-12 + P2-4）
+
+- 背景（共享根因：策略都在「类/目录/标签」粒度上与查询方法脱钩）：
+  - **P1-12** `linkByExplicit` 不接收被查询方法，遍历全仓测试类，把任意 `@TestFor(X)` 的测试以置信度 100 关联给所有生产方法；结果 ≥20 后还会跳过 same_tag/dependency。
+  - **P2-4** 命名策略以无条件 `Contains` 兜底（目标 `Get` 命中 `TargetGetter`）；同目录策略对所有语言给 80，且 import 用 `Contains` 子串匹配；same_tag 把同 tag 测试类的所有方法都关联；`discoverTestClasses` 用 `map[string]string`，同源类多个测试类互相覆盖。
+- 动作：
+  - explicit：新增 `methodFQN` 参数，仅当 `@TestFor` 解析出的类 == 被查询方法所属类时建立关联，且只关联被查询方法本身。
+  - naming：`discoverTestClasses` 改为 `map[string][]string`，同源类所有测试类都参与；`Contains` 兜底收敛为「测试名前缀属于 Test/test/test_」时才允许包含匹配。
+  - same_tag：先定位目标方法名，测试方法名须通过 `matchesTestMethod` 才关联；移除基于结果数的策略跳过。
+  - dependency：同目录证据仅限 Go（同包 `*_test.go`）；import 匹配改为「等于目标目录名或以 `/目标目录名` 结尾」，去掉双向 `Contains`。
+  - `resolveExplicitClass` 多命中时按 FQN 字典序取首个，消除 map 遍历不确定性。
+- 负控（先红后绿，5 条，均以 `git stash` 回退修复验证过红）：
+  - `TestFindTestLinks_ExplicitScopedToQueriedMethod`：修复前无关类 `B.N` 仍拿到 explicit/100。
+  - `TestFindTestLinks_MultipleTestClassesPerSource`：修复前只保留 `TestOrderService`（后者覆盖前者）。
+  - `TestFindTestLinks_NoSubstringNamingFalsePositive`：修复前 `Get` ↔ `TargetGetter` 命中 naming/70。
+  - `TestFindTestLinks_SameDirNonGoNotDependency`：修复前 Java 同目录给 dependency/80。
+  - `TestFindTestLinks_SameTagRequiresMethodNameMatch`：修复前同 tag 的 `TestUnrelated` 被关联。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 56084 ≈ 56.1k）。
+
 ### Commit 167: fix(analyzer): 影响面后缀匹配结果确定化，消除 map 遍历顺序跳变（P1-8）
 
 - 背景：`resolveImpactNode` 的后缀匹配直接 `for nodeFQN := range cg.Nodes` 命中即返回；多包同名符号（`a.pkg.B.Foo` / `z.pkg.A.Foo`）时结果随 map 遍历顺序变化，同一 `/impact` 查询多次调用返回不同 FQN 与影响面。
