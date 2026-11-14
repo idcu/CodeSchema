@@ -325,12 +325,21 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 
 	// 设置增量索引回调（异步，非阻塞）
 	s.SetOnIndex(func(ctx context.Context, filePath string) error {
-		return builder.BuildAndIndex(ctx, st, filePath)
+		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
+			return err
+		}
+		// 索引变了：查询缓存与调用图缓存立即失效，避免返回上一代结果。
+		svc.InvalidateDerivedCaches()
+		return nil
 	})
 
 	// 设置删除回调，文件被删除时自动清理索引
 	s.SetOnDelete(func(ctx context.Context, filePath string) error {
-		return builder.BuildAndRemove(ctx, st, filePath)
+		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
+			return err
+		}
+		svc.InvalidateDerivedCaches()
+		return nil
 	})
 
 	// 创建监听器

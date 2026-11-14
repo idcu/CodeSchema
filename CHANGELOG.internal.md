@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### 结构性问题 1（2026-11-14）：调用图按索引代次缓存
+
+- fix(analyzer)：`BuildCallGraph` 由「每次请求全量重建」改为按索引代次缓存。
+  `Analyzer` 新增 `callGraphGen`（原子代次）、`callGraphCache`（`atomic.Pointer` 发布
+  完整图快照）与 `callGraphBuildMu`（串行化建图 + 双检）：并发请求共享一次全量读盘，
+  图完整构建后才发布，不会观察到半成品；建图期间代次变化则重试一次，仍不稳定时不写缓存。
+- 失效接线：`Service.BuildIndex`（全量重索引）与 `Service.InvalidateDerivedCaches`
+  （watcher `OnIndex`/`OnDelete`，覆盖 `runtime.StartWatchBackground` 与 `cmd watch`）。
+- 先红后绿：`TestBuildCallGraph_CachesByGeneration`（修前第二次仍 3 次读盘，构建失败）、
+  `TestBuildCallGraph_ConcurrentRequestsBuildOnce`（修前 8 并发各自建图，24 次读盘）、
+  `TestService_ImpactSeesNewGraphAfterReindex`（改代码→重索引→立即查询须见新图）。
+- GOROOT `src`（2.28M LoC / 466,505 调用边，n=200）：`/impact` P50 378.5 → 3.6 ms、
+  P95 397.8 → 4.5 ms、P99 404.6 → 5.0 ms；索引期堆峰值 1,935.4 → 1,921.3 MiB（波动内），
+  GC 后 live 363.7 → 363.8 MiB，查询期常驻 423.4 MiB（含缓存图与检索索引懒加载）。
+- 报告：`docs/bench/2026-11-14/perf-baseline.md` §6.1；原始数据 `perf-*.json` 同批复跑。
+
 ### 性能基线（2026-11-14，S-3）
 
 - perf(embedding)：构建期文档原文改批量落盘（`BatchSetContents`），消除

@@ -344,7 +344,8 @@ func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Run
 	searcher, builder, vecStore := NewSearcherWithStore(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	WithImpactAnalyzer(svc, st)
+	an := analyzer.NewAnalyzer(st)
+	svc.WithImpactAnalyzer(an)
 	WithAIEnhancer(svc, cfg)
 	ApplyContextConfig(svc, cfg)
 	if _, err := svc.BuildIndex(ctx); err != nil {
@@ -356,7 +357,7 @@ func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Run
 		Searcher: searcher,
 		Builder:  builder,
 		VecStore: vecStore,
-		Analyzer: analyzer.NewAnalyzer(st),
+		Analyzer: an,
 		Enhancer: NewAIEnhancer(cfg),
 	}, nil
 }
@@ -410,15 +411,16 @@ func StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Confi
 		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
 			return err
 		}
-		// 索引变了，查询缓存必须立即失效（B4）：否则会短暂返回裁剪过的旧内容。
-		svc.InvalidateQueryCache()
+		// 索引变了，查询缓存与调用图缓存必须立即失效（B4 / 结构性问题 1）：
+		// 否则会短暂返回裁剪过的旧内容或上一代调用图。
+		svc.InvalidateDerivedCaches()
 		return nil
 	})
 	s.SetOnDelete(func(ctx context.Context, filePath string) error {
 		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
 			return err
 		}
-		svc.InvalidateQueryCache()
+		svc.InvalidateDerivedCaches()
 		return nil
 	})
 

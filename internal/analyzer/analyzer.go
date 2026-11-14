@@ -21,6 +21,7 @@ import (
 // init 注册分析器模块的监控指标。
 func init() {
 	metrics.RegisterCounter("analyzer_build_total", "Total analyzer build operations", "operation")
+	metrics.RegisterCounter("analyzer_cache_hits_total", "Analyzer cache hits", "cache")
 	metrics.RegisterGauge("analyzer_files_total", "Total files indexed by analyzer")
 	metrics.RegisterGauge("analyzer_nodes_total", "Total graph nodes", "graph_type")
 	metrics.RegisterCounter("analyzer_errors_total", "Total analyzer errors", "operation")
@@ -41,6 +42,20 @@ type Analyzer struct {
 	gradleResolver *GradleResolver    // Gradle 多模块路径解析器
 	logger         *log.Logger
 	enhancer       *ai.Enhancer // AI 增强层（可选，TagAll 时叠加 AI 标签/文档补全）
+
+	// 调用图按索引代次缓存（结构性问题 1）：
+	//   - callGraphGen 在重索引 / 增量更新后递增，旧代次条目立即不可见；
+	//   - callGraphCache 原子发布"已完整构建"的图，读者永远看不到半成品；
+	//   - callGraphBuildMu 串行化建图，并发请求共享同一次全量读盘。
+	callGraphGen     atomic.Uint64
+	callGraphCache   atomic.Pointer[callGraphEntry]
+	callGraphBuildMu sync.Mutex
+}
+
+// callGraphEntry 一代索引对应的不可变调用图快照。
+type callGraphEntry struct {
+	gen   uint64
+	graph *CallGraph
 }
 
 // NewAnalyzer 创建分析器实例。
@@ -422,10 +437,6 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 	return callGraph, classHierarchy, reverseIndex, fileGraph, nil
 }
 
-// BuildCallGraph 构建调用图。
-//
-// 从 Store 中读取所有调用记录，构建方法间的调用关系图。
-// 每个调用记录生成一条边（caller -> callee）。
 // callGraphCtxKey 请求级调用图缓存键：同一请求链路上避免重复建图。
 type callGraphCtxKey struct{}
 
@@ -440,10 +451,71 @@ func CallGraphFromContext(ctx context.Context) *CallGraph {
 	return cg
 }
 
+// InvalidateCallGraph 让调用图缓存失效（重索引 / 增量更新后调用）。
+//
+// 先递增代次再清空指针：递增让并发读者立刻判定缓存条目过期，
+// 清空则立即释放旧图内存（读者持有时由 GC 兜底）。
+func (a *Analyzer) InvalidateCallGraph() {
+	a.callGraphGen.Add(1)
+	a.callGraphCache.Store(nil)
+}
+
+// cachedCallGraph 返回当前代次已完整发布的调用图；无缓存或代次过期时返回 nil。
+//
+// 先读条目再读代次：若失效发生在两次读取之间，代次已递增，判定为不命中；
+// 若失效发生在读取代次之后，本次查询视为"失效前开始"，返回旧图仍是线性化一致的。
+func (a *Analyzer) cachedCallGraph() *CallGraph {
+	e := a.callGraphCache.Load()
+	if e == nil || e.gen != a.callGraphGen.Load() {
+		return nil
+	}
+	return e.graph
+}
+
+// BuildCallGraph 构建调用图。
+//
+// 从 Store 中读取所有调用记录，构建方法间的调用关系图。
+// 每个调用记录生成一条边（caller -> callee）。
+//
+// 结果按索引代次缓存（见 InvalidateCallGraph）：同代次内重复请求直接复用，
+// 并发请求由 callGraphBuildMu 串行化后共享同一次构建结果，不会观察到半成品。
 func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 	if cg := CallGraphFromContext(ctx); cg != nil {
 		return cg, nil
 	}
+	if cg := a.cachedCallGraph(); cg != nil {
+		metrics.IncCounter("analyzer_cache_hits_total", "callgraph")
+		return cg, nil
+	}
+
+	a.callGraphBuildMu.Lock()
+	defer a.callGraphBuildMu.Unlock()
+	// 双检：等待建图锁期间，前一个请求可能已经发布了当前代次的完整图。
+	if cg := a.cachedCallGraph(); cg != nil {
+		metrics.IncCounter("analyzer_cache_hits_total", "callgraph")
+		return cg, nil
+	}
+
+	// 建图期间若发生失效，本次结果可能混合两代数据：重试一次以拿到稳定快照；
+	// 持续写入下不再无限重试，直接返回本次结果且不写缓存（宁可不缓存，不发布脏图）。
+	for attempt := 0; ; attempt++ {
+		gen := a.callGraphGen.Load()
+		cg, err := a.buildCallGraph(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if a.callGraphGen.Load() == gen {
+			a.callGraphCache.Store(&callGraphEntry{gen: gen, graph: cg})
+			return cg, nil
+		}
+		if attempt >= 1 {
+			return cg, nil
+		}
+	}
+}
+
+// buildCallGraph 执行一次全量建图（不做缓存判断），供 BuildCallGraph 调用。
+func (a *Analyzer) buildCallGraph(ctx context.Context) (*CallGraph, error) {
 	span := trace.Start("build_call_graph")
 	defer span.End()
 

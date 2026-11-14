@@ -143,6 +143,17 @@ func (s *Service) InvalidateQueryCache() {
 	s.queryCache.Invalidate()
 }
 
+// InvalidateDerivedCaches 失效所有由索引派生的缓存：查询级缓存 + 调用图缓存。
+//
+// 重索引、增量更新（watcher 的 OnIndex/OnDelete）后必须调用，否则 /impact 与
+// /call-graph 会命中上一代索引的调用图。
+func (s *Service) InvalidateDerivedCaches() {
+	if s.analyzer != nil {
+		s.analyzer.InvalidateCallGraph()
+	}
+	s.InvalidateQueryCache()
+}
+
 // QueryCacheStats 返回查询缓存的命中统计（未启用时返回零值）。
 func (s *Service) QueryCacheStats() ttlcache.Stats {
 	if s.queryCache == nil {
@@ -214,7 +225,13 @@ func (s *Service) BuildIndex(ctx context.Context) (*search.BuildResult, error) {
 	if s.indexBuilder == nil {
 		return &search.BuildResult{}, nil
 	}
-	return s.indexBuilder.BuildFromStore(ctx, s.store)
+	res, err := s.indexBuilder.BuildFromStore(ctx, s.store)
+	if err != nil {
+		return res, err
+	}
+	// 全量重索引成功即视为进入新索引代次：此前缓存的调用图必须作废。
+	s.InvalidateDerivedCaches()
+	return res, nil
 }
 
 // HealthStatus 健康检查响应。

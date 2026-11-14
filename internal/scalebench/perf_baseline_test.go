@@ -115,21 +115,22 @@ type endpointResult struct {
 }
 
 type corpusResult struct {
-	Corpus         string                    `json:"corpus"`
-	Root           string                    `json:"root"`
-	Commit         string                    `json:"commit,omitempty"`
-	Language       string                    `json:"language"`
-	SupportedFiles int                       `json:"supported_files"`
-	CodeFiles      int                       `json:"code_files"`
-	LoC            int                       `json:"loc"`
-	ByLang         map[string]int            `json:"by_lang"`
-	Scan           phaseResult               `json:"scan"`
-	Index          phaseResult               `json:"index"`
-	Memory         memSample                 `json:"memory"`
-	MemoryNote     string                    `json:"memory_note"`
-	Endpoints      map[string]endpointResult `json:"endpoints"`
-	Symbols        map[string]string         `json:"symbols_used"`
-	Notes          []string                  `json:"notes,omitempty"`
+	Corpus                 string                    `json:"corpus"`
+	Root                   string                    `json:"root"`
+	Commit                 string                    `json:"commit,omitempty"`
+	Language               string                    `json:"language"`
+	SupportedFiles         int                       `json:"supported_files"`
+	CodeFiles              int                       `json:"code_files"`
+	LoC                    int                       `json:"loc"`
+	ByLang                 map[string]int            `json:"by_lang"`
+	Scan                   phaseResult               `json:"scan"`
+	Index                  phaseResult               `json:"index"`
+	Memory                 memSample                 `json:"memory"`
+	MemoryNote             string                    `json:"memory_note"`
+	LiveHeapAfterEndpoints uint64                    `json:"live_heap_after_endpoints_bytes"`
+	Endpoints              map[string]endpointResult `json:"endpoints"`
+	Symbols                map[string]string         `json:"symbols_used"`
+	Notes                  []string                  `json:"notes,omitempty"`
 }
 
 // TestPerfBaseline_IndexAndQuery 单租户逐语料测索引吞吐、内存峰值与三端点延迟。
@@ -242,6 +243,10 @@ func runPerfCorpus(t *testing.T, c perfCorpus) (corpusResult, bool) {
 		res.Endpoints["impact"] = benchEndpoint(client, base+"/impact?method="+url.QueryEscape(impactSym)+"&depth=2")
 		res.Endpoints["search"] = benchEndpoint(client, base+"/search?q="+url.QueryEscape(query)+"&mode=exact&limit=20")
 	}
+
+	// 端点测量结束后（调用图缓存已驻留），GC 后记录 live heap，
+	// 用于区分「索引期峰值」与「查询期常驻内存」。
+	res.LiveHeapAfterEndpoints = liveHeapBytes()
 
 	t.Logf("%s: files=%d loc=%d scan=%.0fms (%.1f files/s) index=%.0fms heapPeak=%.1fMB",
 		c.Key, files, loc, res.Scan.DurationMS, res.Scan.FilesPerSec,
@@ -419,6 +424,14 @@ func startMemSampler(interval time.Duration) func() memSample {
 		<-done
 		return sample
 	}
+}
+
+// liveHeapBytes 强制 GC 后读取 live heap（HeapAlloc），用于测量查询期常驻内存。
+func liveHeapBytes() uint64 {
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
 }
 
 // pickPerfSymbols 从入库数据选取 context/impact 符号：检索结果里混有 Markdown
