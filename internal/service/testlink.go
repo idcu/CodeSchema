@@ -1,9 +1,8 @@
 // Package service 提供测试关联策略实现。
 //
-// 六种策略（按置信度降序）：
+// 五种策略（按置信度降序）：
 //   - explicit  (100): 显式注解匹配（@TestFor(...) 解析目标类）
 //   - call_graph(95):  测试方法直接调用目标方法（与候选类命名无关）
-//   - coverage  (90):  覆盖率数据反查（注入 coverage 报告）
 //   - dependency(80):  导入依赖递归
 //   - naming    (70):  命名约定（OrderServiceTest ↔ OrderService）
 //   - same_tag  (60):  同 Tag 聚类
@@ -96,10 +95,7 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 	// 0. explicit 策略：@TestFor(...) 显式注解（置信度 100）
 	s.linkByExplicit(ctx, files, allClasses, methodFQN, addResult)
 
-	// 1. coverage 策略：覆盖率数据反查（置信度 90）
-	s.linkByCoverage(methodFQN, addResult)
-
-	// 2. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
+	// 1. naming 策略：类名匹配（OrderService ↔ OrderServiceTest）
 	//    同一源类可能有多个测试类（OrderServiceTest / TestOrderService），全部参与。
 	for _, testClassFQN := range allTestClasses[targetClass] {
 		s.linkByNaming(ctx, files, targetClass, testClassFQN, methodFQN, addResult)
@@ -718,28 +714,6 @@ func (s *Service) linkByExplicit(ctx context.Context, files []*store.FileRecord,
 					}
 					add(m.FullName, targetMethodName, "explicit", 100)
 				}
-			}
-		}
-	}
-}
-
-// linkByCoverage 通过覆盖率数据反查建立关联（置信度 90）。
-//
-// 使用注入的 coverage 报告（testMethodFQN -> 被覆盖的生产方法 FQN 列表），
-// 找到覆盖目标方法的测试方法并关联。
-func (s *Service) linkByCoverage(methodFQN string, add func(string, string, string, int)) {
-	if len(s.coverage) == 0 {
-		return
-	}
-	for testMethod, covered := range s.coverage {
-		for _, prodFQN := range covered {
-			if prodFQN == methodFQN {
-				// MethodName 取 FQN 最后一段
-				name := prodFQN
-				if idx := strings.LastIndex(prodFQN, "."); idx >= 0 {
-					name = prodFQN[idx+1:]
-				}
-				add(testMethod, name, "coverage", 90)
 			}
 		}
 	}

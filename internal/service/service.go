@@ -6,9 +6,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"sort"
 	"strings"
@@ -51,10 +49,6 @@ type Service struct {
 	// enhancer 供查询期同名方法消歧（Disambiguate）使用；
 	// 未注入或 LLM 不可用时搜索不消歧（结果原样返回，向后兼容）。
 	enhancer *ai.Enhancer
-
-	// coverage 保存「测试方法 FQN → 其覆盖的生产方法 FQN 列表」的映射，
-	// 由 SetCoverage / LoadCoverageJSON 注入，供 coverage 测试关联策略反查。
-	coverage map[string][]string
 
 	// pathRoot 可选虚拟根（B9 路径虚拟化）。未注入或 path_style=absolute 时
 	// 输出宿主真实绝对路径（默认，向后兼容）。
@@ -208,27 +202,6 @@ func (s *Service) renderPath(real string, style PathStyle) string {
 		return real
 	}
 	return virtual
-}
-
-// SetCoverage 注入覆盖率报告，供 coverage 测试关联策略反查。
-//
-// 入参映射：测试方法 FQN → 其覆盖的生产方法 FQN 列表。
-// 例如：{"com.x.OrderServiceTest.testGetOrder": ["com.x.OrderService.getOrder"]}。
-func (s *Service) SetCoverage(report map[string][]string) {
-	s.coverage = report
-}
-
-// LoadCoverageJSON 从 JSON 读取器解析覆盖率报告并注入。
-//
-// JSON 格式：对象，键为测试方法 FQN，值为被覆盖的生产方法 FQN 数组。
-// 解析失败返回错误（不污染已注入的 coverage）。
-func (s *Service) LoadCoverageJSON(r io.Reader) error {
-	var report map[string][]string
-	if err := json.NewDecoder(r).Decode(&report); err != nil {
-		return fmt.Errorf("decode coverage json: %w", err)
-	}
-	s.coverage = report
-	return nil
 }
 
 // BuildIndex 从 Store 全量构建搜索索引。

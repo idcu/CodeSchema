@@ -54,7 +54,7 @@ R6-4,F,P2,fsnotify错误上报与rename重建,P2-18,R0-1,2,错误可观测；目
 R6-5,F,P3,scanner ignore同源/单次读/无适配器不记hash,P3-10,R0-1,2,忽略清单与watcher同源；单文件单次读；无适配器文件不记hash,todo,按需
 R6-6,F,P3,gofmt一次性格式化+CI门禁,P3-13,R0-1,1,gofmt -l internal cmd为空；CI有门禁；不改变行为,todo,按需
 R6-7,F,P3,verify-tags真编译+agent-bench绝对下限,P3-13,R0-1,1.5,标签隔离包真正编译；agent-bench阈值变更单独评审,todo,按需
-R6-8,F,P2,coverage死代码删除或标experimental,P2-7,R2-4,0.5,不再对外宣称coverage策略；死代码删除或标experimental,todo,砍（清理）
+R6-8,F,P2,coverage死代码直接删除,P2-7,R2-4,0.5,不再对外宣称coverage策略；代码与API删除;策略链收敛为五种,done,砍（清理）
 X-1,延后,P2,GoResolver/SetModulePath接线,P2-8,-,0,等LSP/SCIP精度线完成后再评估,deferred,延后
 X-2,不投入,P3,viz转义/锁/死代码,P3-2;P3-3;P3-4,-,0,viz非产品面；仅P3-1必修,cut,砍
 X-3,延后,P3,检索融合排序/BM25分数,P3-11;P3-12,-,0,检索非本轮押注；有公开基准后再评估,deferred,延后

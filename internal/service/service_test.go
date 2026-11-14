@@ -735,10 +735,23 @@ func TestGetImpact_WithAnalyzer_IncludesRelatedTests(t *testing.T) {
 		t.Fatalf("upsert service: %v", err)
 	}
 
-	// 注入 coverage：HandlerTest.testHandle 覆盖 Handle → 应出现在 caller 的 related_tests 中
-	svc.SetCoverage(map[string][]string{
-		"com.example.HandlerTest.testHandle": {"com.example.Handler.Handle"},
-	})
+	// 关联单测由 naming 策略建立（HandlerTest.testHandle ↔ Handler.Handle）：
+	// coverage 注入能力已按 R6-8 删除（生产从未接线）。
+	ir3 := &parser.IRDocument{
+		Source:    "test",
+		Language:  "go",
+		FilePath:  "/proj/handler_test.go",
+		FileHash:  "h3",
+		LineCount: 20,
+		ByteSize:  512,
+		Classes:   []parser.ClassIR{{Name: "HandlerTest", FullName: "com.example.HandlerTest", Type: "CLASS"}},
+		Methods: []parser.MethodIR{
+			{Name: "testHandle", ClassFQN: "com.example.HandlerTest"},
+		},
+	}
+	if err := st.UpsertIR(context.Background(), ir3); err != nil {
+		t.Fatalf("upsert handler test: %v", err)
+	}
 
 	result, err := svc.GetImpact(context.Background(), "com.example.Service.GetUser", 1)
 	if err != nil {
@@ -753,7 +766,7 @@ func TestGetImpact_WithAnalyzer_IncludesRelatedTests(t *testing.T) {
 	if result.Callers[0].Method != "com.example.Handler.Handle" {
 		t.Errorf("expected caller Handler.Handle, got %s", result.Callers[0].Method)
 	}
-	// 关联单测应通过 coverage 策略出现在 caller 节点上（改动一处能列出受影响单测）
+	// 关联单测应通过 naming 策略出现在 caller 节点上（改动一处能列出受影响单测）
 	found := false
 	for _, tm := range result.Callers[0].RelatedTests {
 		if tm == "com.example.HandlerTest.testHandle" {

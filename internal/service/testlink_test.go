@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/parser"
@@ -735,58 +735,16 @@ func TestFindTestLinks_Explicit_MethodLevel(t *testing.T) {
 	}
 }
 
-func TestFindTestLinks_Coverage(t *testing.T) {
-	ctx := context.Background()
-	st := &mockStoreWithTestData{
-		files: []*store.FileRecord{
-			{ID: 1, AbsolutePath: "/project/internal/payment/service.go", Language: "go"},
-		},
-		classes: map[int64][]store.ClassRecord{
-			1: {{ID: 10, FileID: 1, Name: "PaymentService", FullName: "com.example.PaymentService"}},
-		},
-		methods: map[int64][]store.MethodRecord{
-			10: {
-				{ID: 100, ClassID: 10, Name: "charge", FullName: "com.example.PaymentService.charge"},
-			},
-		},
-	}
-
-	svc := NewService(st)
-	svc.SetCoverage(map[string][]string{
-		"com.example.PaymentServiceTest.testCharge": {"com.example.PaymentService.charge"},
-	})
-
-	links, err := svc.FindTestLinks(ctx, "com.example.PaymentService.charge", 60)
-	if err != nil {
-		t.Fatalf("FindTestLinks: %v", err)
-	}
-
-	found := false
-	for _, link := range links {
-		if link.Strategy == "coverage" && link.TestMethod == "com.example.PaymentServiceTest.testCharge" {
-			found = true
-			if link.Confidence != 90 {
-				t.Errorf("expected coverage confidence 90, got %d", link.Confidence)
-			}
+// TestCoverageStrategyRemoved 负控（R6-8）：coverage 关联策略在生产从未接线
+// ——`SetCoverage`/`LoadCoverageJSON`/`LoadGoCoverProfile` 全仓零调用点，
+// `s.coverage` 恒 nil，`linkByCoverage` 永远直接返回。按裁决直接删除，
+// 不保留 experimental 名义能力。本用例守住「对外 API 不得重新出现而不接线」。
+func TestCoverageStrategyRemoved(t *testing.T) {
+	typ := reflect.TypeOf(NewService(&mockStoreWithTestData{}))
+	for _, name := range []string{"SetCoverage", "LoadCoverageJSON", "LoadGoCoverProfile", "ParseGoCoverProfile"} {
+		if _, ok := typ.MethodByName(name); ok {
+			t.Errorf("coverage 能力应已删除，但 Service 仍暴露 %s", name)
 		}
-	}
-	if !found {
-		t.Errorf("expected coverage link, got %+v", links)
-	}
-}
-
-func TestLoadCoverageJSON(t *testing.T) {
-	svc := NewService(&mockStoreWithTestData{})
-	jsonStr := `{"com.example.FooTest.testBar": ["com.example.Foo.bar", "com.example.Foo.baz"]}`
-	if err := svc.LoadCoverageJSON(strings.NewReader(jsonStr)); err != nil {
-		t.Fatalf("LoadCoverageJSON: %v", err)
-	}
-	if len(svc.coverage) != 1 {
-		t.Fatalf("expected 1 coverage entry, got %d", len(svc.coverage))
-	}
-	covered := svc.coverage["com.example.FooTest.testBar"]
-	if len(covered) != 2 || covered[0] != "com.example.Foo.bar" || covered[1] != "com.example.Foo.baz" {
-		t.Errorf("unexpected coverage mapping: %+v", covered)
 	}
 }
 

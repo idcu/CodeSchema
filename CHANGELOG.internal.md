@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 199: refactor(service): 删除未接线的 coverage 关联策略（R6-8 / P2-7）
+
+- 根因：`SetCoverage` / `LoadCoverageJSON` / `LoadGoCoverProfile` / `ParseGoCoverProfile`
+  全仓（非测试）零调用点，`Service.coverage` 恒 nil，`linkByCoverage` 永远首行返回。
+  对外文档却宣称 90 分覆盖率关联可用——「文档有、运行无」的名义能力；即便接线，
+  也会把一个测试类的全部方法按 90 分登记，假阳性高于 naming。
+- 删除：`internal/service/coverprofile.go`（219 行）+ 对应测试（`coverprofile_test.go`）、
+  `Service.coverage` 字段、两个注入 API、`linkByCoverage` 及其调用点；包注释策略
+  由六种收敛为五种（explicit 100 / call_graph 95 / dependency 80 / naming 70 / same_tag 60）。
+- 测试调整：删除 `TestFindTestLinks_Coverage` / `TestLoadCoverageJSON`；
+  `TestGetImpact_WithAnalyzer_IncludesRelatedTests` 改由 naming 策略建立关联
+  （新增 `*_test.go` 的 `HandlerTest.testHandle` 夹具），断言口径不变。
+- 负控（先红后绿）：新增 `TestCoverageStrategyRemoved`，用反射断言 Service 不再暴露
+  四个 coverage API——修复前 4 项全部报红，修复后通过（防止「名义能力」被重新加回）。
+- 文档：`接口层.md` 策略链去 coverage 并注明删除；`001_init.sql` 的 `strategy` 注释同步。
+- 验证：串行门禁全绿；counts 60560 → 60046（60.0k，-514 行）。
+
 ### Commit 198: fix(parser): CodeGraph/JCodeIndexer 移出默认注册表 + SCIP 优先级前置（R5-1 / P1-16）
 
 - 根因：两个适配器 `Parse` 恒返回 `ErrSourceUnavailable`（只实现批量 `ParseAll`），

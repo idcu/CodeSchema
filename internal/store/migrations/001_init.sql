@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS method_test_link (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
   test_method_id INTEGER REFERENCES method(id) ON DELETE CASCADE,
-  strategy TEXT,                         -- explicit / naming / coverage / same_tag / dependency
+  strategy TEXT,                         -- explicit / naming / same_tag / dependency / call_graph
   confidence INTEGER DEFAULT 70,
   UNIQUE(method_id, test_method_id)
 );
