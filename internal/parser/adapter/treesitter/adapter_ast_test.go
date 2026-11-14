@@ -227,6 +227,54 @@ var _ Embedder = (*impl)(nil)
 	}
 }
 
+// TestASTAdapter_TSNamedArrowFunctionCaller 负控：`const f = () => {...}` 是具名函数，
+// 体内的调用应有 caller=f。旧实现只识别 function_declaration / method_definition，
+// 箭头函数体调用全部落入空 caller。
+func TestASTAdapter_TSNamedArrowFunctionCaller(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "util.ts")
+	content := `export const add = (a: number, b: number): number => {
+  return helper(a, b);
+};
+
+export const mul = function (a: number, b: number): number {
+  return helper(a, b);
+};
+
+function helper(a: number, b: number): number {
+  return a + b;
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	callers := map[string]bool{}
+	for _, m := range doc.Methods {
+		callers[m.Name] = true
+	}
+	for _, want := range []string{"add", "mul"} {
+		if !callers[want] {
+			t.Errorf("具名箭头/函数表达式 %s 未登记为方法；methods=%+v", want, doc.Methods)
+		}
+	}
+	got := map[string]bool{}
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "helper" {
+			got[c.CallerFQN] = true
+		}
+	}
+	for _, want := range []string{"add", "mul"} {
+		if !got[want] {
+			t.Errorf("helper 调用缺少 caller=%s；current=%v", want, got)
+		}
+	}
+}
+
 // TestASTAdapter_Parse_Java 验证 Java 语法级解析（类/方法/调用，含字符串陷阱）。
 func TestASTAdapter_Parse_Java(t *testing.T) {
 	a := NewTreeSitterAdapter()

@@ -424,6 +424,30 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			curMethod = &doc.Methods[len(doc.Methods)-1]
 			scopeChanged = true
 
+		case (lang == "ts" || lang == "js") && typ == "variable_declarator":
+			// 具名箭头函数 / 函数表达式（`const f = () => {...}`）等价于具名函数：
+			// 体内的调用应归属 f。旧实现只认声明节点，调用全部落入空 caller。
+			val := n.ChildByFieldName("value")
+			if val == nil || val.IsNull() || !isFuncValueType(val.Type()) {
+				break
+			}
+			name := astNodeName(n, lang, data)
+			if !isPlainIdent(name) {
+				break
+			}
+			m := parser.MethodIR{
+				Name:      name,
+				Signature: string(n.Content(data)),
+				StartLine: int(start.Row) + 1,
+				EndLine:   endLine,
+			}
+			if curClass != nil {
+				m.ClassFQN = curClass.FullName
+			}
+			doc.Methods = append(doc.Methods, m)
+			curMethod = &doc.Methods[len(doc.Methods)-1]
+			scopeChanged = true
+
 		case lang == "go" && typ == "field_declaration":
 			// 成员变量：struct 体字段（局部变量是 short_var_declaration/var_declaration，
 			// 不会命中）；方法体内不产出成员变量。
@@ -967,6 +991,33 @@ func isCppCtorCall(fn *ts.Node, src []byte) bool {
 		return false
 	}
 	return cppCtorTypes[text[idx+2:]]
+}
+
+// isFuncValueType 判断变量初始化值是否为函数表达式（供具名箭头函数登记为方法）。
+func isFuncValueType(t string) bool {
+	switch t {
+	case "arrow_function", "function_expression", "function":
+		return true
+	}
+	return false
+}
+
+// isPlainIdent 判断名称是否为普通标识符（排除解构模式等）。
+func isPlainIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_' || r == '$',
+			r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			i > 0 && r >= '0' && r <= '9':
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // astGoTypeConversion 判断 Go 调用节点是否为类型转换 `(*T)(x)`：

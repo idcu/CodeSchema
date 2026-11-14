@@ -199,6 +199,16 @@ resolution 97/0.2519 → 61/0.1748：这 36 条假边此前恰好命中索引里
 剩余 25 条为包级 `var` 初始化（`errors.New` / `regexp.MustCompile` / `template.Must`）
 与 Go 类型转换，无可归属方法，不做伪造归属。
 
+### Caller 归属：TS/JS 具名箭头函数入索引（treesitter 变体）
+
+AST 路径只识别 `function_declaration` / `method_definition`，`const f = () => {...}` 与
+`const f = function () {...}` 体内的调用没有 caller。现在把初始化为函数表达式的
+`variable_declarator` 登记为方法，子树遍历结束恢复外层作用域。
+
+lytd 语料同命令前后均为 calls 376、caller 为空 270 —— 该仓的具名箭头集中在 `.tsx`，
+而当前只 vendored 非 TSX 的 TypeScript grammar，解析失败先于本修复暴露。
+修复对 `.ts/.js` 生效，由合成用例 `TestASTAdapter_TSNamedArrowFunctionCaller` 守护。
+
 ### Caller 归属：Go 指针类型转换不再计为调用（treesitter 变体）
 
 AST 路径把 `var _ Embedder = (*ONNXEmbedder)(nil)` 的 `(*ONNXEmbedder)` 当作

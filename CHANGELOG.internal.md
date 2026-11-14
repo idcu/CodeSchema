@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 234: fix(parser): TS/JS 具名箭头函数与函数表达式入索引（treesitter 变体）
+
+- AST 路径只识别 `function_declaration` / `method_definition`，`const f = () => {...}`
+  与 `const f = function () {...}` 体内的调用全部落入空 caller。
+- `variable_declarator` 的值为 arrow_function/function_expression 且名称为普通标识符时
+  登记为方法，作用域在子树遍历结束后恢复。
+- 负控：`TestASTAdapter_TSNamedArrowFunctionCaller`（旧实现 add/mul 均未登记、caller 为空，红；新实现绿）。
+- 同语料 lytd ts（同一诊断命令）：calls 376、caller 空 270 → 270。
+  lytd 的具名箭头集中在 `.tsx`，而当前仅 vendored 非 TSX 的 TypeScript grammar，
+  该文件类型的解析失败会先于本修复暴露，故本轮语料无净变化；修复对 `.ts/.js` 生效。
+- 文档：bench README 同步。
+
 ### Commit 233: fix(parser): Go 指针类型转换不再计为调用（treesitter 变体）
 
 - AST 路径把 `var _ I = (*T)(nil)` 的 `(*T)` 当作 function 节点，产出
