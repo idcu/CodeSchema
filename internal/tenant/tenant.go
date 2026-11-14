@@ -81,6 +81,9 @@ type Manager struct {
 //     完全向后兼容单项目模式。
 //   - 否则：为每个租户解析独立 Config、打开独立 store、装配运行期组件；
 //     配置了 auto_scan 的租户在启动时全量扫描，配置了 watch 的租户后台增量监听。
+//
+// 调用方须先执行 config.Validate：多租户条目缺少 storage.dsn 会在校验层被拒绝，
+// resolveTargets 不再为缺省值派生路径。
 func NewManager(ctx context.Context, base *config.Config, openStore OpenStoreFunc) (*Manager, error) {
 	m := &Manager{
 		tenants:   map[string]*Tenant{},
@@ -124,11 +127,8 @@ func resolveTargets(base *config.Config) []tenantTarget {
 	out := make([]tenantTarget, 0, len(base.Tenants))
 	for _, tc := range base.Tenants {
 		tcfg := tc.ToConfig(base)
-		// 用租户原始配置判断是否省略 DSN：ToConfig 已从 base 预填默认 "./data"，
-		// 合并后的值永远非空，不能作为「未设置」的依据（P1-3）。
-		if tc.Storage.DSN == "" {
-			tcfg.Storage.DSN = filepath.Join("./data", tc.ID)
-		}
+		// storage.dsn 由 config.Validate 强制要求（缺省即启动失败），这里不再维护
+		// 不可达的 ./data/<id> 回退；校验层是唯一契约来源。
 		// 检索/向量索引目录需与 store 隔离，否则多租户会共享同一份索引
 		// （后写入者覆盖前者）。仅当租户未显式配置时，按 store 目录派生隔离子目录。
 		// 注意：需用租户原始配置 tc.Storage.Search 判断是否显式设置，因为 base

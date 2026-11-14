@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/idcu/codeschema/internal/config"
@@ -407,29 +408,36 @@ func slicesEqual(a, b []string) bool {
 	return true
 }
 
-// TestResolveTargets_DerivesIsolatedDSNWhenOmitted 负控（P1-3）：
-// 租户省略 storage.dsn 时必须回退 ./data/<id>，不能继承全局默认 ./data
-// （cloneConfig 会预填默认 DSN，导致此前的空值判断永不成立）。
-func TestResolveTargets_DerivesIsolatedDSNWhenOmitted(t *testing.T) {
+// TestResolveTargets_DoesNotInventDSNWhenOmitted 判据修正：租户 DSN 由
+// config.Validate 强制要求（缺省即启动失败），resolveTargets 不应再维护
+// 一条不可达的 ./data/<id> 回退。省略 DSN 时保持合并后的全局值，由校验层拒绝。
+func TestResolveTargets_DoesNotInventDSNWhenOmitted(t *testing.T) {
 	base := config.DefaultConfig()
-	base.Tenants = []config.TenantConfig{
-		{ID: "alpha", Name: "Alpha"},
-		{ID: "beta", Name: "Beta"},
-	}
+	base.Storage.DSN = "root.db"
+	base.Tenants = []config.TenantConfig{{ID: "alpha", Name: "Alpha"}}
+
 	targets := resolveTargets(base)
-	if len(targets) != 2 {
-		t.Fatalf("targets = %d, want 2", len(targets))
+	if len(targets) != 1 {
+		t.Fatalf("targets = %d, want 1", len(targets))
 	}
-	for _, tgt := range targets {
-		want := filepath.Join("./data", tgt.id)
-		if tgt.cfg.Storage.DSN != want {
-			t.Errorf("tenant %s DSN = %q, want %q", tgt.id, tgt.cfg.Storage.DSN, want)
-		}
-		if tgt.cfg.Storage.Search.FTSDir != filepath.Join(want, "fts") {
-			t.Errorf("tenant %s FTSDir = %q, want %q", tgt.id, tgt.cfg.Storage.Search.FTSDir, filepath.Join(want, "fts"))
+	if got, want := targets[0].cfg.Storage.DSN, "root.db"; got != want {
+		t.Errorf("省略 DSN 时不应派生 %q，应保持全局值 %q", got, want)
+	}
+}
+
+// TestValidate_TenantRequiresExplicitDSN 与上一条配套：真实启动路径在
+// Validate 处拒绝缺省 DSN，因此 resolveTargets 的回退分支不可达。
+func TestValidate_TenantRequiresExplicitDSN(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Tenants = []config.TenantConfig{{ID: "alpha", Name: "Alpha"}}
+	errs := config.Validate(cfg)
+	found := false
+	for _, err := range errs {
+		if strings.Contains(err.Error(), "requires storage.dsn") {
+			found = true
 		}
 	}
-	if targets[0].cfg.Storage.DSN == targets[1].cfg.Storage.DSN {
-		t.Errorf("tenants must not share DSN: %q", targets[0].cfg.Storage.DSN)
+	if !found {
+		t.Fatalf("Validate 应对缺省 tenant DSN 报错，实际: %v", errs)
 	}
 }
