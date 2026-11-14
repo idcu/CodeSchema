@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -463,6 +463,7 @@ func TestGroupByExt(t *testing.T) {
 		t.Errorf("expected 1 .ts file, got %d", len(groups[".ts"]))
 	}
 }
+
 // TestCodeGraphAdapter_ParseAll_KindVariants 验证 CodeGraph kind 变体的类型映射
 // （P3_5 未做项：图 Schema 变体兼容覆盖）：interface/enum/trait/module/record
 // 应映射为对应 ClassIR.Type，constructor 应映射为方法。

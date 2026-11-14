@@ -172,7 +172,7 @@ func TestGoLongLine_DoesNotFailFile(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "long.go")
 	longComment := "// " + strings.Repeat("x", 70*1024) // 70KB，超过旧 64KB 限制
-	hugeLine := strings.Repeat("y", 5*1024*1024)     // 5MiB，超过解析上限，应跳过
+	hugeLine := strings.Repeat("y", 5*1024*1024)        // 5MiB，超过解析上限，应跳过
 	src := "package sample\n\n" + longComment + "\n\nfunc AfterLong() {}\n\n// " + hugeLine + "\n\nfunc AfterHuge() {}\n"
 	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
 		t.Fatal(err)

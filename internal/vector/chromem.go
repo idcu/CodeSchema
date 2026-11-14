@@ -19,10 +19,10 @@ import (
 //   - 支持负样本过滤（排除不相关结果）
 //   - 适合生产环境使用
 type ChromemStore struct {
-	db     *chromem.DB
-	col    *chromem.Collection
-	mu     sync.RWMutex
-	dim    int
+	db  *chromem.DB
+	col *chromem.Collection
+	mu  sync.RWMutex
+	dim int
 }
 
 // NewEmbeddingFunc 将 vector.Embedder 适配为 chromem.EmbeddingFunc，
@@ -81,8 +81,8 @@ func (s *ChromemStore) Add(ctx context.Context, id string, vector []float32) err
 	defer s.mu.Unlock()
 
 	doc := chromem.Document{
-		ID:         id,
-		Embedding:  vector,
+		ID:        id,
+		Embedding: vector,
 		Metadata: map[string]string{
 			"source": "codeschema",
 		},

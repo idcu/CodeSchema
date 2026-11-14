@@ -47,8 +47,8 @@ type BatchParser interface {
 
 // IRDocument 是一次解析的归一化产出（对外发布版，与 internal/parser.IRDocument 字段对齐）。
 type IRDocument struct {
-	Source       string   // 数据来源标识，如 "treesitter" / "scip-java" / "codegraph"
-	Language     string   // "go" / "java" / "cpp" / "ts" / "py" / "rust"
+	Source       string // 数据来源标识，如 "treesitter" / "scip-java" / "codegraph"
+	Language     string // "go" / "java" / "cpp" / "ts" / "py" / "rust"
 	FilePath     string
 	FileHash     string   // SHA-256，由编排层填充
 	CommitHash   string   // git commit，由编排层填充
@@ -63,28 +63,28 @@ type IRDocument struct {
 
 // ClassIR 表示类/接口/枚举/抽象类解析结果。
 type ClassIR struct {
-	Name                         string
-	FullName                     string
-	Type                         string // CLASS / INTERFACE / ABSTRACT / ENUM
-	ParentFQNs                   []string
+	Name                                 string
+	FullName                             string
+	Type                                 string // CLASS / INTERFACE / ABSTRACT / ENUM
+	ParentFQNs                           []string
 	StartLine, StartCol, EndLine, EndCol int
-	Modifier                     string
-	Doc                          string
-	Annotations                  []string
-	Extra                        map[string]any // 语言差异兜底（JSONB）
+	Modifier                             string
+	Doc                                  string
+	Annotations                          []string
+	Extra                                map[string]any // 语言差异兜底（JSONB）
 }
 
 // MethodIR 表示方法/函数解析结果。
 type MethodIR struct {
-	Name, Signature, ReturnType string
-	ClassFQN                    string
+	Name, Signature, ReturnType          string
+	ClassFQN                             string
 	StartLine, StartCol, EndLine, EndCol int
-	Modifier                    string
-	Doc                         string
-	Annotations                 []string
-	IsStatic, IsAbstract, IsConstructor bool
-	Params                      []ParamIR
-	Extra                       map[string]any
+	Modifier                             string
+	Doc                                  string
+	Annotations                          []string
+	IsStatic, IsAbstract, IsConstructor  bool
+	Params                               []ParamIR
+	Extra                                map[string]any
 }
 
 // ParamIR 表示方法参数。

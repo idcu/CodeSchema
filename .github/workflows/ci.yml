@@ -59,6 +59,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Format check
+        run: make fmt-check
+
       - name: Test (non-Windows)
         if: runner.os != 'Windows'
         run: go test -count=1 -timeout 180s ./...

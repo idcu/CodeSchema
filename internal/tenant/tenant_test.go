@@ -56,7 +56,7 @@ func TestDeriveIndexDirs_DefaultsFromDSN(t *testing.T) {
 // 真实流程中 explicit 值已由 ToConfig 预填进 s.Search.*，deriveIndexDirs 仅在其为空时派生。
 func TestDeriveIndexDirs_ExplicitOverride(t *testing.T) {
 	s := &config.StorageConfig{Driver: "file", DSN: "/var/lib/cs/mt-a"}
-	s.Search.FTSDir = "/custom/fts"   // 模拟 ToConfig 已叠加的显式值
+	s.Search.FTSDir = "/custom/fts" // 模拟 ToConfig 已叠加的显式值
 	s.Search.IDFDir = "/custom/idf"
 	deriveIndexDirs(s, "a", s.DSN, "/custom/fts", "", "/custom/idf")
 	if s.Search.FTSDir != "/custom/fts" {

@@ -22,16 +22,16 @@ type TagFreq struct {
 
 // TagCoverageStats 标签覆盖率统计结果。
 type TagCoverageStats struct {
-	TotalEntities  int              // 类 + 方法实体总数
-	TaggedEntities int              // 至少携带一个标签的实体数
-	ClassTotal     int              // 类总数
-	ClassTagged    int              // 已打标签的类数
-	MethodTotal    int              // 方法总数
-	MethodTagged   int              // 已打标签的方法数
-	CoverageRate   float64          // TaggedEntities / TotalEntities（0-1）
-	CategoryCounts map[string]int   // 每分类标签总出现次数（含同一实体多标签）
-	CategoryTagged map[string]int   // 每分类至少命中一个标签的实体数
-	TopTags        []TagFreq        // 最常见的标签（按 Freq 降序）
+	TotalEntities  int            // 类 + 方法实体总数
+	TaggedEntities int            // 至少携带一个标签的实体数
+	ClassTotal     int            // 类总数
+	ClassTagged    int            // 已打标签的类数
+	MethodTotal    int            // 方法总数
+	MethodTagged   int            // 已打标签的方法数
+	CoverageRate   float64        // TaggedEntities / TotalEntities（0-1）
+	CategoryCounts map[string]int // 每分类标签总出现次数（含同一实体多标签）
+	CategoryTagged map[string]int // 每分类至少命中一个标签的实体数
+	TopTags        []TagFreq      // 最常见的标签（按 Freq 降序）
 }
 
 // ComputeTagCoverage 遍历 store 中全部文件/类/方法，计算标签覆盖率与分类分布。

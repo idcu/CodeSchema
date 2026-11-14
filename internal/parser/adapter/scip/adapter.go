@@ -313,6 +313,7 @@ done:
 //     引用行落在哪个方法体内，caller 即该方法；
 //   - 仅方法级符号（descriptor 含方法签名）的引用计入调用，类/字段/参数
 //     引用、类型注解、import 不计（避免把引用误当调用）。
+//
 // caller/callee 用完整 SCIP symbol（跨包唯一可溯源）；方法→类归属可由上层
 // 按 symbol 前缀与 ClassIR.FullName 关联（MethodIR.ClassFQN 不重复冗余存储）。
 func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
@@ -328,9 +329,9 @@ func (a *SCIPAdapter) convertDocument(doc *SCIPDocument) *parser.IRDocument {
 		switch {
 		case isClass:
 			ir.Classes = append(ir.Classes, parser.ClassIR{
-				Name:      name,
-				FullName:  sym.ID,
-				Type:      "CLASS",
+				Name:     name,
+				FullName: sym.ID,
+				Type:     "CLASS",
 			})
 		case isMethod:
 			ir.Methods = append(ir.Methods, parser.MethodIR{

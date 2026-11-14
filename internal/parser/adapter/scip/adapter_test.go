@@ -104,7 +104,7 @@ func TestSCIPAdapter_ConcurrentFirstParse(t *testing.T) {
 	idx := encIndex(encDocument("src/main/Foo.java", []string{
 		"scip-typescript npm . . src/main/Foo.java/Foo#",
 	}, &SCIPOccurrence{
-		Symbol: "scip-typescript npm . . src/main/Foo.java/Foo#",
+		Symbol:     "scip-typescript npm . . src/main/Foo.java/Foo#",
 		SymbolRole: 1, Range: []int{1, 0, 5},
 	}))
 	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {
@@ -140,7 +140,7 @@ func TestSCIPAdapter_LoadIndex_ValidFile(t *testing.T) {
 	idx := encIndex(encDocument("src/main/Foo.java", []string{
 		"scip-typescript npm . . src/main/Foo.java/Foo#",
 	}, &SCIPOccurrence{
-		Symbol: "scip-typescript npm . . src/main/Foo.java/Foo#",
+		Symbol:     "scip-typescript npm . . src/main/Foo.java/Foo#",
 		SymbolRole: 1, Range: []int{1, 0, 5},
 	}))
 	if err := os.WriteFile(filepath.Join(dir, "index.scip"), idx, 0644); err != nil {

@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 218: chore: gofmt 一次性格式化 + CI 格式门禁（R6-6 / P3-13）
+
+- 新增 `make fmt-check`：对 `git ls-files '*.go'` 排除 `vendor/`、`down/` 后跑
+  `gofmt -l`，非空即退出 1；`.github/workflows/ci.yml` 的 `test` job 在 Vet 后执行。
+- 对 28 个非 vendor 未格式化文件执行 `gofmt -w`（纯空白/对齐变更，无行为改动）：
+  `internal/ai/{tagger,tagstats}.go`、`internal/config/{config,parse}.go`、
+  `internal/integration/*`、`internal/parser/adapter/{codegraph,scip}/*`、
+  `internal/vector/chromem.go` 等。
+- 负控（先红后绿）：加目标后首次 `make fmt-check` 退出码 2 并列出 28 个文件；
+  `gofmt -w` 后退出码 0、`gofmt -l internal cmd` 输出为空。
+- 串行门禁：`go build ./...` / `go vet ./...` / `go vet -tags "pg redis treesitter" ./...`
+  / `make test` 全部通过（40 个包）。
+- 文档：`测试与CI.md` 增 `make fmt-check` 与 test job 说明；counts 62922（62.9k）。
+
 ### Commit 217: perf(scanner): 忽略清单同源 + 单文件单次读 + 无适配器不记 hash（R6-5 / P3-10）
 
 - 新增 `internal/ignore`：`DefaultDirs` / `DefaultFiles` / `DirSet` / `FileSet`；

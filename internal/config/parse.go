@@ -1,9 +1,8 @@
 package config
 
 import (
-	cfgconv "gitee.com/idcu-go/config"
 	"encoding/json"
-
+	cfgconv "gitee.com/idcu-go/config"
 )
 
 // applyToConfig 将解析后的 map 数据合并到默认配置中。

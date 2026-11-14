@@ -18,57 +18,57 @@ func TestDeriveClassTags_Layer(t *testing.T) {
 		expected string // 期望的 layer 标签
 	}{
 		{
-			name: "controller from directory",
-			cls:  store.ClassRecord{Name: "OrderController"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/controller/OrderController.java", Language: "java"},
+			name:     "controller from directory",
+			cls:      store.ClassRecord{Name: "OrderController"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/controller/OrderController.java", Language: "java"},
 			expected: "controller",
 		},
 		{
-			name: "service from directory",
-			cls:  store.ClassRecord{Name: "UserService"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/service/UserService.java", Language: "java"},
+			name:     "service from directory",
+			cls:      store.ClassRecord{Name: "UserService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/service/UserService.java", Language: "java"},
 			expected: "service",
 		},
 		{
-			name: "dao from class suffix",
-			cls:  store.ClassRecord{Name: "ProductRepository"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/repo/ProductRepository.java", Language: "java"},
+			name:     "dao from class suffix",
+			cls:      store.ClassRecord{Name: "ProductRepository"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/repo/ProductRepository.java", Language: "java"},
 			expected: "dao",
 		},
 		{
-			name: "domain from directory",
-			cls:  store.ClassRecord{Name: "Order"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/domain/Order.java", Language: "java"},
+			name:     "domain from directory",
+			cls:      store.ClassRecord{Name: "Order"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/domain/Order.java", Language: "java"},
 			expected: "domain",
 		},
 		{
-			name: "infra from directory",
-			cls:  store.ClassRecord{Name: "DatabaseConfig"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/infra/DatabaseConfig.java", Language: "java"},
+			name:     "infra from directory",
+			cls:      store.ClassRecord{Name: "DatabaseConfig"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/infra/DatabaseConfig.java", Language: "java"},
 			expected: "infra",
 		},
 		{
-			name: "middleware from class suffix",
-			cls:  store.ClassRecord{Name: "AuthMiddleware"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/middleware/AuthMiddleware.java", Language: "java"},
+			name:     "middleware from class suffix",
+			cls:      store.ClassRecord{Name: "AuthMiddleware"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/middleware/AuthMiddleware.java", Language: "java"},
 			expected: "middleware",
 		},
 		{
-			name: "handler from directory",
-			cls:  store.ClassRecord{Name: "EventHandler"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/handler/event.go", Language: "go"},
+			name:     "handler from directory",
+			cls:      store.ClassRecord{Name: "EventHandler"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/handler/event.go", Language: "go"},
 			expected: "handler",
 		},
 		{
-			name: "no layer match",
-			cls:  store.ClassRecord{Name: "Utils"},
-			file: &store.FileRecord{AbsolutePath: "/project/pkg/util/helper.go", Language: "go"},
+			name:     "no layer match",
+			cls:      store.ClassRecord{Name: "Utils"},
+			file:     &store.FileRecord{AbsolutePath: "/project/pkg/util/helper.go", Language: "go"},
 			expected: "",
 		},
 		{
-			name: "nil file",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: nil,
+			name:     "nil file",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     nil,
 			expected: "",
 		},
 	}
@@ -107,39 +107,39 @@ func TestDeriveClassTags_Biz(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "order business domain",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			name:     "order business domain",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 			expected: "order",
 		},
 		{
-			name: "user business domain",
-			cls:  store.ClassRecord{Name: "UserController"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/user/UserController.java", Language: "java"},
+			name:     "user business domain",
+			cls:      store.ClassRecord{Name: "UserController"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/user/UserController.java", Language: "java"},
 			expected: "user",
 		},
 		{
-			name: "payment business domain",
-			cls:  store.ClassRecord{Name: "PaymentService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/payment/service.go", Language: "go"},
+			name:     "payment business domain",
+			cls:      store.ClassRecord{Name: "PaymentService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/payment/service.go", Language: "go"},
 			expected: "payment",
 		},
 		{
-			name: "notification business domain",
-			cls:  store.ClassRecord{Name: "NotificationHandler"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/notification/handler.go", Language: "go"},
+			name:     "notification business domain",
+			cls:      store.ClassRecord{Name: "NotificationHandler"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/notification/handler.go", Language: "go"},
 			expected: "notification",
 		},
 		{
-			name: "no business domain (common path)",
-			cls:  store.ClassRecord{Name: "StringUtils"},
-			file: &store.FileRecord{AbsolutePath: "/project/pkg/util/string.go", Language: "go"},
+			name:     "no business domain (common path)",
+			cls:      store.ClassRecord{Name: "StringUtils"},
+			file:     &store.FileRecord{AbsolutePath: "/project/pkg/util/string.go", Language: "go"},
 			expected: "",
 		},
 		{
-			name: "nil file",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: nil,
+			name:     "nil file",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     nil,
 			expected: "",
 		},
 	}
@@ -169,51 +169,51 @@ func TestDeriveClassTags_Tech(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "cache class",
-			cls:  store.ClassRecord{Name: "RedisCache"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/cache/redis.go", Language: "go"},
+			name:     "cache class",
+			cls:      store.ClassRecord{Name: "RedisCache"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/cache/redis.go", Language: "go"},
 			expected: "cache",
 		},
 		{
-			name: "mq class",
-			cls:  store.ClassRecord{Name: "MessageQueue"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/mq/producer.go", Language: "go"},
+			name:     "mq class",
+			cls:      store.ClassRecord{Name: "MessageQueue"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/mq/producer.go", Language: "go"},
 			expected: "mq",
 		},
 		{
-			name: "retry class",
-			cls:  store.ClassRecord{Name: "RetryHandler"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/retry/handler.go", Language: "go"},
+			name:     "retry class",
+			cls:      store.ClassRecord{Name: "RetryHandler"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/retry/handler.go", Language: "go"},
 			expected: "retry",
 		},
 		{
-			name: "transactional class",
-			cls:  store.ClassRecord{Name: "TransactionManager"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/tx/manager.go", Language: "go"},
+			name:     "transactional class",
+			cls:      store.ClassRecord{Name: "TransactionManager"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/tx/manager.go", Language: "go"},
 			expected: "transactional",
 		},
 		{
-			name: "async class",
-			cls:  store.ClassRecord{Name: "AsyncProcessor"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/async/processor.go", Language: "go"},
+			name:     "async class",
+			cls:      store.ClassRecord{Name: "AsyncProcessor"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/async/processor.go", Language: "go"},
 			expected: "async",
 		},
 		{
-			name: "schedule class",
-			cls:  store.ClassRecord{Name: "TaskScheduler"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/schedule/task.go", Language: "go"},
+			name:     "schedule class",
+			cls:      store.ClassRecord{Name: "TaskScheduler"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/schedule/task.go", Language: "go"},
 			expected: "schedule",
 		},
 		{
-			name: "batch class",
-			cls:  store.ClassRecord{Name: "BatchProcessor"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/batch/processor.go", Language: "go"},
+			name:     "batch class",
+			cls:      store.ClassRecord{Name: "BatchProcessor"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/batch/processor.go", Language: "go"},
 			expected: "batch",
 		},
 		{
-			name: "no tech tag",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			name:     "no tech tag",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 			expected: "",
 		},
 	}
@@ -252,51 +252,51 @@ func TestDeriveClassTags_Risk(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "legacy class name",
-			cls:  store.ClassRecord{Name: "LegacyOrderSystem"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/legacy/order.go", Language: "go"},
+			name:     "legacy class name",
+			cls:      store.ClassRecord{Name: "LegacyOrderSystem"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/legacy/order.go", Language: "go"},
 			expected: "legacy",
 		},
 		{
-			name: "deprecated class name",
-			cls:  store.ClassRecord{Name: "DeprecatedApi"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/deprecated/api.go", Language: "go"},
+			name:     "deprecated class name",
+			cls:      store.ClassRecord{Name: "DeprecatedApi"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/deprecated/api.go", Language: "go"},
 			expected: "deprecated",
 		},
 		{
-			name: "performance class name",
-			cls:  store.ClassRecord{Name: "PerformanceMonitor"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/monitor/perf.go", Language: "go"},
+			name:     "performance class name",
+			cls:      store.ClassRecord{Name: "PerformanceMonitor"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/monitor/perf.go", Language: "go"},
 			expected: "performance",
 		},
 		{
-			name: "security class name",
-			cls:  store.ClassRecord{Name: "SecurityManager"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/security/manager.go", Language: "go"},
+			name:     "security class name",
+			cls:      store.ClassRecord{Name: "SecurityManager"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/security/manager.go", Language: "go"},
 			expected: "security",
 		},
 		{
-			name: "todo in doc",
-			cls:  store.ClassRecord{Name: "OldService", Doc: "// TODO: refactor this service"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/old/service.go", Language: "go"},
+			name:     "todo in doc",
+			cls:      store.ClassRecord{Name: "OldService", Doc: "// TODO: refactor this service"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/old/service.go", Language: "go"},
 			expected: "todo",
 		},
 		{
-			name: "fixme in doc",
-			cls:  store.ClassRecord{Name: "BuggyClass", Doc: "// FIXME: race condition here"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/buggy/class.go", Language: "go"},
+			name:     "fixme in doc",
+			cls:      store.ClassRecord{Name: "BuggyClass", Doc: "// FIXME: race condition here"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/buggy/class.go", Language: "go"},
 			expected: "todo",
 		},
 		{
-			name: "deprecated in doc",
-			cls:  store.ClassRecord{Name: "OldApi", Doc: "/** @deprecated use NewApi instead */"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/old/OldApi.java", Language: "java"},
+			name:     "deprecated in doc",
+			cls:      store.ClassRecord{Name: "OldApi", Doc: "/** @deprecated use NewApi instead */"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/old/OldApi.java", Language: "java"},
 			expected: "deprecated",
 		},
 		{
-			name: "no risk tag",
-			cls:  store.ClassRecord{Name: "OrderService", Doc: "// Handles order operations"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			name:     "no risk tag",
+			cls:      store.ClassRecord{Name: "OrderService", Doc: "// Handles order operations"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 			expected: "",
 		},
 	}
@@ -326,39 +326,39 @@ func TestDeriveClassTags_Test(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "go test file",
-			cls:  store.ClassRecord{Name: "OrderServiceTest"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
+			name:     "go test file",
+			cls:      store.ClassRecord{Name: "OrderServiceTest"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service_test.go", Language: "go"},
 			expected: "unit",
 		},
 		{
-			name: "python test file",
-			cls:  store.ClassRecord{Name: "TestOrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/tests/test_order_service.py", Language: "python"},
+			name:     "python test file",
+			cls:      store.ClassRecord{Name: "TestOrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/tests/test_order_service.py", Language: "python"},
 			expected: "unit",
 		},
 		{
-			name: "test directory",
-			cls:  store.ClassRecord{Name: "TestHelper"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/test/helper.go", Language: "go"},
+			name:     "test directory",
+			cls:      store.ClassRecord{Name: "TestHelper"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/test/helper.go", Language: "go"},
 			expected: "unit",
 		},
 		{
-			name: "integration test directory",
-			cls:  store.ClassRecord{Name: "OrderIntegrationTest"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/integration/java/com/example/OrderIntegrationTest.java", Language: "java"},
+			name:     "integration test directory",
+			cls:      store.ClassRecord{Name: "OrderIntegrationTest"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/integration/java/com/example/OrderIntegrationTest.java", Language: "java"},
 			expected: "integration",
 		},
 		{
-			name: "mock class name",
-			cls:  store.ClassRecord{Name: "MockUserService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/mock/user_service.go", Language: "go"},
+			name:     "mock class name",
+			cls:      store.ClassRecord{Name: "MockUserService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/mock/user_service.go", Language: "go"},
 			expected: "mock",
 		},
 		{
-			name: "no test tag",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			name:     "no test tag",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 			expected: "",
 		},
 	}
@@ -388,27 +388,27 @@ func TestDeriveClassTags_Lang(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "go language",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
+			name:     "go language",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: "go"},
 			expected: "go",
 		},
 		{
-			name: "java language",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/OrderService.java", Language: "java"},
+			name:     "java language",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/src/main/java/com/example/OrderService.java", Language: "java"},
 			expected: "java",
 		},
 		{
-			name: "python language",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.py", Language: "python"},
+			name:     "python language",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.py", Language: "python"},
 			expected: "python",
 		},
 		{
-			name: "empty language",
-			cls:  store.ClassRecord{Name: "OrderService"},
-			file: &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: ""},
+			name:     "empty language",
+			cls:      store.ClassRecord{Name: "OrderService"},
+			file:     &store.FileRecord{AbsolutePath: "/project/internal/order/service.go", Language: ""},
 			expected: "",
 		},
 	}
@@ -558,18 +558,30 @@ type mockStoreWithTags struct {
 	methodTags map[int64][]string
 }
 
-func (m *mockStoreWithTags) Open(_ context.Context, _ string) error    { return nil }
-func (m *mockStoreWithTags) Close() error                               { return nil }
-func (m *mockStoreWithTags) HealthCheck(_ context.Context) error        { return nil }
-func (m *mockStoreWithTags) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) { return 0, nil }
-func (m *mockStoreWithTags) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) { return nil, nil }
-func (m *mockStoreWithTags) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error)    { return nil, nil }
-func (m *mockStoreWithTags) DeleteFile(_ context.Context, _ int64) error                          { return nil }
-func (m *mockStoreWithTags) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error   { return nil }
-func (m *mockStoreWithTags) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error  { return nil }
-func (m *mockStoreWithTags) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error      { return nil }
-func (m *mockStoreWithTags) UpsertIR(_ context.Context, _ *parser.IRDocument) error               { return nil }
-func (m *mockStoreWithTags) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error           { return nil }
+func (m *mockStoreWithTags) Open(_ context.Context, _ string) error { return nil }
+func (m *mockStoreWithTags) Close() error                           { return nil }
+func (m *mockStoreWithTags) HealthCheck(_ context.Context) error    { return nil }
+func (m *mockStoreWithTags) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockStoreWithTags) GetFileByPath(_ context.Context, _ string) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStoreWithTags) GetFileByID(_ context.Context, _ int64) (*store.FileRecord, error) {
+	return nil, nil
+}
+func (m *mockStoreWithTags) DeleteFile(_ context.Context, _ int64) error { return nil }
+func (m *mockStoreWithTags) UpsertClasses(_ context.Context, _ int64, _ []parser.ClassIR) error {
+	return nil
+}
+func (m *mockStoreWithTags) UpsertMethods(_ context.Context, _ int64, _ []parser.MethodIR) error {
+	return nil
+}
+func (m *mockStoreWithTags) UpsertCalls(_ context.Context, _ int64, _ []parser.CallIR) error {
+	return nil
+}
+func (m *mockStoreWithTags) UpsertIR(_ context.Context, _ *parser.IRDocument) error     { return nil }
+func (m *mockStoreWithTags) BulkUpsert(_ context.Context, _ []*parser.IRDocument) error { return nil }
 
 func (m *mockStoreWithTags) UpsertTags(_ context.Context, classID int64, tags []string) error {
 	if m.classTags == nil {
@@ -601,9 +613,15 @@ func (m *mockStoreWithTags) GetTagsByMethodID(_ context.Context, methodID int64)
 	return m.methodTags[methodID], nil
 }
 
-func (m *mockStoreWithTags) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) { return nil, nil, nil }
-func (m *mockStoreWithTags) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) { return nil, nil, nil }
-func (m *mockStoreWithTags) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) { return nil, nil }
+func (m *mockStoreWithTags) SearchByTag(_ context.Context, _ string) ([]int64, []int64, error) {
+	return nil, nil, nil
+}
+func (m *mockStoreWithTags) SearchByTags(_ context.Context, _ []string) ([]int64, []int64, error) {
+	return nil, nil, nil
+}
+func (m *mockStoreWithTags) GetAllTagsWithCategories(_ context.Context) (map[string]string, error) {
+	return nil, nil
+}
 
 func (m *mockStoreWithTags) GetAllFiles(_ context.Context) ([]*store.FileRecord, error) {
 	return m.files, nil
@@ -707,4 +725,3 @@ func assertContainsTag(t *testing.T, tags []string, expected string, msg string)
 	}
 	t.Errorf("%s: 期望包含 %q, 实际 %v", msg, expected, tags)
 }
-

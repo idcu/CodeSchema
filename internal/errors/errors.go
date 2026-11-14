@@ -19,9 +19,9 @@ var (
 
 // AI 增强错误
 var (
-	ErrBudgetExceeded   = errors.New("AI budget exceeded")
-	ErrLLMUnavailable   = errors.New("LLM unavailable")
-	ErrEnhanceFailed    = errors.New("enhance failed")
+	ErrBudgetExceeded = errors.New("AI budget exceeded")
+	ErrLLMUnavailable = errors.New("LLM unavailable")
+	ErrEnhanceFailed  = errors.New("enhance failed")
 )
 
 // 存储错误

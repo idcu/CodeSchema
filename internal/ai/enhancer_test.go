@@ -14,13 +14,13 @@ import (
 
 // mockLLMClient 可配置的 LLM 桩：按方法返回预设结果或错误。
 type mockLLMClient struct {
-	completeTags   []string
-	completeText   []string
-	chooseIdx      int
-	completeErr    error
-	chooseErr      error
-	completeCalls  int
-	chooseCalls    int
+	completeTags  []string
+	completeText  []string
+	chooseIdx     int
+	completeErr   error
+	chooseErr     error
+	completeCalls int
+	chooseCalls   int
 }
 
 func (m *mockLLMClient) Complete(_ context.Context, _ string) ([]string, error) {
@@ -44,10 +44,10 @@ func (m *mockLLMClient) Choose(_ context.Context, _ string) (int, error) {
 
 // fakeEntity 测试用 IRable 桩。
 type fakeEntity struct {
-	name  string
-	fqn   string
-	doc   string
-	kind  string
+	name string
+	fqn  string
+	doc  string
+	kind string
 }
 
 func (f fakeEntity) Name() string          { return f.name }

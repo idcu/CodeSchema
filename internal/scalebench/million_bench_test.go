@@ -5,7 +5,8 @@
 // 本基准显式验证 100 万文件单事务落库成本，支撑「亿级走 PG」的规模决策边界。
 //
 // 运行（本地，受内存约束建议 >=16GB）：
-//   CODESCHEMA_SCALE_BENCH=1 go test -bench=BenchmarkScaleBulkMillion -benchtime=1x -timeout 900s ./internal/scalebench
+//
+//	CODESCHEMA_SCALE_BENCH=1 go test -bench=BenchmarkScaleBulkMillion -benchtime=1x -timeout 900s ./internal/scalebench
 package scalebench
 
 import (

@@ -26,7 +26,7 @@ func ToAdapterX(doc *IRDocument) *adapterx.IRDocument {
 		out.Classes = append(out.Classes, adapterx.ClassIR{
 			Name: c.Name, FullName: c.FullName, Type: c.Type,
 			ParentFQNs: append([]string(nil), c.ParentFQNs...),
-			StartLine: c.StartLine, StartCol: c.StartCol, EndLine: c.EndLine, EndCol: c.EndCol,
+			StartLine:  c.StartLine, StartCol: c.StartCol, EndLine: c.EndLine, EndCol: c.EndCol,
 			Modifier: c.Modifier, Doc: c.Doc,
 			Annotations: append([]string(nil), c.Annotations...),
 			Extra:       c.Extra,
@@ -35,11 +35,11 @@ func ToAdapterX(doc *IRDocument) *adapterx.IRDocument {
 	for _, m := range doc.Methods {
 		out.Methods = append(out.Methods, adapterx.MethodIR{
 			Name: m.Name, Signature: m.Signature, ReturnType: m.ReturnType,
-			ClassFQN: m.ClassFQN,
+			ClassFQN:  m.ClassFQN,
 			StartLine: m.StartLine, StartCol: m.StartCol, EndLine: m.EndLine, EndCol: m.EndCol,
 			Modifier: m.Modifier, Doc: m.Doc,
 			Annotations: append([]string(nil), m.Annotations...),
-			IsStatic: m.IsStatic, IsAbstract: m.IsAbstract, IsConstructor: m.IsConstructor,
+			IsStatic:    m.IsStatic, IsAbstract: m.IsAbstract, IsConstructor: m.IsConstructor,
 			Extra: m.Extra,
 		})
 		if len(m.Params) > 0 {
@@ -81,7 +81,7 @@ func FromAdapterX(doc *adapterx.IRDocument) *IRDocument {
 		out.Classes = append(out.Classes, ClassIR{
 			Name: c.Name, FullName: c.FullName, Type: c.Type,
 			ParentFQNs: append([]string(nil), c.ParentFQNs...),
-			StartLine: c.StartLine, StartCol: c.StartCol, EndLine: c.EndLine, EndCol: c.EndCol,
+			StartLine:  c.StartLine, StartCol: c.StartCol, EndLine: c.EndLine, EndCol: c.EndCol,
 			Modifier: c.Modifier, Doc: c.Doc,
 			Annotations: append([]string(nil), c.Annotations...),
 			Extra:       c.Extra,
@@ -90,11 +90,11 @@ func FromAdapterX(doc *adapterx.IRDocument) *IRDocument {
 	for _, m := range doc.Methods {
 		out.Methods = append(out.Methods, MethodIR{
 			Name: m.Name, Signature: m.Signature, ReturnType: m.ReturnType,
-			ClassFQN: m.ClassFQN,
+			ClassFQN:  m.ClassFQN,
 			StartLine: m.StartLine, StartCol: m.StartCol, EndLine: m.EndLine, EndCol: m.EndCol,
 			Modifier: m.Modifier, Doc: m.Doc,
 			Annotations: append([]string(nil), m.Annotations...),
-			IsStatic: m.IsStatic, IsAbstract: m.IsAbstract, IsConstructor: m.IsConstructor,
+			IsStatic:    m.IsStatic, IsAbstract: m.IsAbstract, IsConstructor: m.IsConstructor,
 			Extra: m.Extra,
 		})
 		if len(m.Params) > 0 {

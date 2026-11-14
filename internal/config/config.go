@@ -359,7 +359,7 @@ func DefaultConfig() *Config {
 			DSN:          "./data",
 			KV:           "",
 			MaxOpenConns: 16, // SQL 后端连接池上限（R3-11）；file 后端忽略
-			MaxIdleConns: 8,			Vector: VectorConfig{
+			MaxIdleConns: 8, Vector: VectorConfig{
 				// 默认文件持久化后端（PersistentStore）；仅显式配置 driver=chromem 时启用 chromem。
 				// （历史：曾默认 chromem，但 runtime 未接线；现改为显式启用以保持既有行为不变）
 				Driver:         "",

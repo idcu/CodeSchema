@@ -4,8 +4,9 @@
 // 正则适配器在真实仓库上的解析覆盖（不依赖外部网络/CI 无这些仓库）。
 //
 // 运行（本地）：
-//   CODESCHEMA_MULTILANG_REPOS="/Volumes/Data/lytd;/Volumes/Data/deepseek-harness-master;/Volumes/Data/code-schema" \
-//     go test -run TestMultiLangRealRepos -v -timeout 600s ./internal/integration/
+//
+//	CODESCHEMA_MULTILANG_REPOS="/Volumes/Data/lytd;/Volumes/Data/deepseek-harness-master;/Volumes/Data/code-schema" \
+//	  go test -run TestMultiLangRealRepos -v -timeout 600s ./internal/integration/
 package integration
 
 import (

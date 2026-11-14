@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/idcu/codeschema/internal/config"
 	"gitee.com/idcu-go/metrics"
+	"github.com/idcu/codeschema/internal/config"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
@@ -44,8 +44,8 @@ type Tenant struct {
 	Cfg       *config.Config
 	Store     store.Store
 	Runtime   *rt.Runtime
-	AutoScan  bool // 构建时是否执行启动全量扫描
-	Watch     bool // 构建时是否启动后台增量监听
+	AutoScan  bool  // 构建时是否执行启动全量扫描
+	Watch     bool  // 构建时是否启动后台增量监听
 	ScanErr   error // auto-scan 失败原因（非 nil 表示该租户以空数据提供服务，供运维可见）
 	stopWatch func()
 }

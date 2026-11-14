@@ -25,7 +25,7 @@ func (m *mockPlugin) Supports(lang string) bool {
 	return false
 }
 func (m *mockPlugin) Init(ctx context.Context, cfg map[string]any) error { return m.initErr }
-func (m *mockPlugin) Close() error                                        { return nil }
+func (m *mockPlugin) Close() error                                       { return nil }
 func (m *mockPlugin) Parse(ctx context.Context, path string) (*IRDocument, error) {
 	m.parsed = append(m.parsed, path)
 	if m.parseErr != nil {

@@ -10,10 +10,10 @@ type stubPlugin struct {
 	name string
 }
 
-func (s *stubPlugin) Name() string                                  { return s.name }
-func (s *stubPlugin) Supports(lang string) bool                     { return lang == "go" }
+func (s *stubPlugin) Name() string                                     { return s.name }
+func (s *stubPlugin) Supports(lang string) bool                        { return lang == "go" }
 func (s *stubPlugin) Init(ctx context.Context, c map[string]any) error { return nil }
-func (s *stubPlugin) Close() error                                  { return nil }
+func (s *stubPlugin) Close() error                                     { return nil }
 func (s *stubPlugin) Parse(ctx context.Context, path string) (*IRDocument, error) {
 	return &IRDocument{Source: s.name, FilePath: path}, nil
 }

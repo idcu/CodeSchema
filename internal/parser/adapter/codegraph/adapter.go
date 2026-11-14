@@ -4,15 +4,16 @@
 // 按文件路径分组组装 IRDocument。
 //
 // 数据源契约（2026-08-15 校准）：
-//   真实 CodeGraph（主流实现，如 optave/codegraph 等）SQLite schema 为：
-//     nodes: id INTEGER PK, name TEXT, kind TEXT, file TEXT, line INTEGER,
-//            end_line INTEGER, role TEXT
-//     edges: id INTEGER PK, source_id INTEGER, target_id INTEGER, kind TEXT,
-//            confidence REAL
-//   edges 通过 source_id/target_id 外键引用 nodes.id，kind 为
-//   calls/imports/extends/implements/references 等。
-//   历史假设契约（symbols: name/qualified_name/kind/file_path/language；
-//   edges: caller/callee/type）仍作为兼容路径支持。
+//
+//	真实 CodeGraph（主流实现，如 optave/codegraph 等）SQLite schema 为：
+//	  nodes: id INTEGER PK, name TEXT, kind TEXT, file TEXT, line INTEGER,
+//	         end_line INTEGER, role TEXT
+//	  edges: id INTEGER PK, source_id INTEGER, target_id INTEGER, kind TEXT,
+//	         confidence REAL
+//	edges 通过 source_id/target_id 外键引用 nodes.id，kind 为
+//	calls/imports/extends/implements/references 等。
+//	历史假设契约（symbols: name/qualified_name/kind/file_path/language；
+//	edges: caller/callee/type）仍作为兼容路径支持。
 //
 // 降级策略（绝不静默返回空 IR）：
 //   - 数据库文件不存在 / 非 SQLite / nodes+edges 与 symbols+edges 均缺失

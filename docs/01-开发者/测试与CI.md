@@ -2,13 +2,14 @@
 
 > 写给：要跑测试、加测试、理解 CI 门禁的开发者
 
-> 最后更新：2026-09-03
+> 最后更新：2026-11-14
 ## 本地测试
 
 ```bash
 make test          # 单元测试
 make test-race     # 竞态检测（-race）
 make test-cover    # 覆盖率
+make fmt-check     # gofmt 门禁（受版本管理、非 vendor/down 的 Go 文件）
 go test ./internal/... -run TestX -v   # 单测聚焦
 ```
 
@@ -24,7 +25,7 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 
 | job | 作用 |
 |---|---|
-| `test` | 单元测试（OS 矩阵 ubuntu / macos / windows），核心合并门禁 |
+| `test` | 单元测试（OS 矩阵 ubuntu / macos / windows），核心合并门禁；含 `go build` / `go vet` / `make fmt-check`（gofmt 格式门禁） |
 | `race` | Race Detector 专项（`-race`） |
 | `treesitter` | TreeSitter AST 变体（`-tags treesitter` CGO 真语法树） |
 | `tag-guard` | `go list -tags 'onnx pg redis' ./...` 解析+类型检查（不链接运行时），防止 build-tag 变体编译断裂 |

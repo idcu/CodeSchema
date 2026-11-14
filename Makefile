@@ -178,6 +178,18 @@ lint:
 	@echo "==> Running go vet ..."
 	$(GO) vet ./...
 
+# 格式门禁（R6-6）：全仓受版本管理的 Go 文件必须与 gofmt 输出一致。
+# 排除 vendor/ 与 down/（第三方源码，不由本项目维护）。CI 见 ci.yml 的 fmt-check step。
+.PHONY: fmt-check
+fmt-check:
+	@unformatted="$$(gofmt -l $$(git ls-files '*.go' | grep -v -E '^(vendor|down)/'))"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "以下文件未 gofmt，请执行 gofmt -w："; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+	@echo "==> gofmt OK"
+
 # 标签隔离代码看护：解析并类型检查 onnx/pg/redis 标签隔离包（不链接运行时，轻量）
 # 防止默认构建外的 ONNX 嵌入 / PG / Redis 存储代码长期无人编译而腐化。
 # 等价于「该变体至少能编译」；CI 见 .github/workflows/ci.yml 的 tag-guard job。
