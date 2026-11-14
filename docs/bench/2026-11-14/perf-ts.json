@@ -1,0 +1,80 @@
+{
+  "corpus": "ts",
+  "root": "/Volumes/Data/lytd",
+  "commit": "f5e6604",
+  "language": "ts",
+  "supported_files": 360,
+  "code_files": 119,
+  "loc": 11407,
+  "by_lang": {
+    "css": 15,
+    "html": 6,
+    "js": 8,
+    "markdown": 205,
+    "svelte": 2,
+    "ts": 111,
+    "yaml": 13
+  },
+  "scan": {
+    "duration_ms": 197.856,
+    "files": 360,
+    "classes": 522,
+    "methods": 100,
+    "calls": 372,
+    "symbols": 622,
+    "files_per_sec": 1819.502,
+    "symbols_per_sec": 3143.694
+  },
+  "index": {
+    "duration_ms": 366.798,
+    "files": 360,
+    "classes": 522,
+    "methods": 100,
+    "calls": 372,
+    "symbols": 622,
+    "files_per_sec": 981.466,
+    "symbols_per_sec": 1695.755
+  },
+  "memory": {
+    "peak_heap_alloc_bytes": 94616208,
+    "peak_heap_inuse_bytes": 100499456,
+    "peak_heap_sys_bytes": 154075136,
+    "total_alloc_bytes": 6089845944,
+    "live_heap_alloc_bytes": 21126104
+  },
+  "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
+  "endpoints": {
+    "context": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 9.977,
+      "p95_ms": 11.448,
+      "p99_ms": 12.314,
+      "max_ms": 13.201,
+      "mean_ms": 9.852
+    },
+    "impact": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 0.293,
+      "p95_ms": 0.47,
+      "p99_ms": 0.96,
+      "max_ms": 1.082,
+      "mean_ms": 0.328
+    },
+    "search": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 7.012,
+      "p95_ms": 8.233,
+      "p99_ms": 9.287,
+      "max_ms": 10.994,
+      "mean_ms": 7.193
+    }
+  },
+  "symbols_used": {
+    "context": "lazy",
+    "impact": "lazy.greet",
+    "search_query": "greet"
+  }
+}

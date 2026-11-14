@@ -17,7 +17,7 @@
 | ├ 想加解析器           | [01-开发者/解析适配器.md](./01-开发者/解析适配器.md)                 | 适配器总览、CallerFQN 行为、新增步骤       |
 | ├ 想换存储            | [01-开发者/存储后端.md](./01-开发者/存储后端.md)                   | 4 种后端、BulkUpsert 性能、标签        |
 | ├ 想跑测试/CI         | [01-开发者/测试与CI.md](./01-开发者/测试与CI.md)                 | 本地测试、CI 门禁、计数守护               |
-| └ 想看公开基准        | [bench/2026-11-14/README.md](./bench/2026-11-14/README.md)     | 3 仓库测试关联 P/R/F1、调用图正则/AST 对照 |
+| └ 想看公开基准        | [bench/2026-11-14/README.md](./bench/2026-11-14/README.md)     | 3 仓库测试关联 P/R/F1、调用图正则/AST 对照；[性能基线](./bench/2026-11-14/perf-baseline.md) |
 | **架构师（决策/边界）**    | [02-架构师/README.md](./02-架构师/README.md)               | 设计要点、成熟度双轴、约束边界               |
 | **运维 / 部署**       | [03-部署运维/README.md](./03-部署运维/README.md)             | Docker、配置、安全收敛、多租户、可观测        |
 | **贡献者 / AI 工具**   | [04-贡献者/README.md](./04-贡献者/README.md)               | 提交规范、改码必改档、计数守护、CI            |
@@ -27,7 +27,7 @@
 
 - Go 1.25.2；internal 包 **36** / 全仓库 **40**
 
-- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 67.6k
+- MCP 工具 **12** · HTTP 路由 **23** · 非 vendor LoC ≈ 68.7k
 
 - 存储后端：file（默认）/ sqlite / pg(`-tags pg`) / redis(`-tags redis`)
 

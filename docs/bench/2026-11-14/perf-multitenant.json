@@ -1,0 +1,74 @@
+{
+  "timestamp": "2026-11-14T12:17:49Z",
+  "storage": "sqlite",
+  "vector_dim": 256,
+  "sequential_total_ms": 6474.872,
+  "concurrent_wall_ms": 4751.283,
+  "contention_ratio": 0.734,
+  "peak_goroutines": 28,
+  "queries": 7294,
+  "query_errors": 0,
+  "query_loop_interval_ms": 1,
+  "tenants": [
+    {
+      "id": "java",
+      "root": "/tmp/codeschema-perf-corpus/spring-petclinic",
+      "scan_ms": 1047.74,
+      "index_ms": 305.514,
+      "files": 132,
+      "classes": 45,
+      "methods": 195,
+      "pool_max_open": 6,
+      "pool_expected": 6,
+      "fts_dir": "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/TestPerfBaseline_MultiTenantConcurrency4108390655/003/java/fts",
+      "fts_file_exists": true,
+      "redis_namespace": "codeschema-847f00f30128"
+    },
+    {
+      "id": "go",
+      "root": "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/TestPerfBaseline_MultiTenantConcurrency4108390655/001",
+      "scan_ms": 1944.583,
+      "index_ms": 413.151,
+      "files": 361,
+      "classes": 592,
+      "methods": 2695,
+      "pool_max_open": 4,
+      "pool_expected": 4,
+      "fts_dir": "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/TestPerfBaseline_MultiTenantConcurrency4108390655/003/go/fts",
+      "fts_file_exists": true,
+      "redis_namespace": "codeschema-a96612cbe87f"
+    },
+    {
+      "id": "ts",
+      "root": "/Volumes/Data/lytd",
+      "scan_ms": 4045.179,
+      "index_ms": 672.882,
+      "files": 2038,
+      "classes": 522,
+      "methods": 100,
+      "pool_max_open": 8,
+      "pool_expected": 8,
+      "fts_dir": "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/TestPerfBaseline_MultiTenantConcurrency4108390655/003/ts/fts",
+      "fts_file_exists": true,
+      "redis_namespace": "codeschema-2f5c87f67ee8"
+    }
+  ],
+  "isolation": {
+    "pass": true,
+    "store_files": {
+      "go": 361,
+      "java": 132,
+      "ts": 2038
+    },
+    "cross_tenant_paths": 0,
+    "fts_dirs_distinct": true,
+    "pool_limits_ok": true,
+    "redis_namespace_distinct": true,
+    "redis_live_verified": false,
+    "redis_live_reason": "未设置 CODESCHEMA_REDIS_ADDR；仅校验命名空间派生（go test ./internal/store/redis -run Namespace 已覆盖读写隔离）"
+  },
+  "notes": [
+    "连接池/缓存前缀/FTS 目录均按租户配置断言；Redis 活实例未启用时只做命名空间派生一致性校验",
+    "sequential_total_ms 为同一语料顺序执行 scan+BuildIndex 的总和；contention_ratio = concurrent_wall / sequential_total"
+  ]
+}

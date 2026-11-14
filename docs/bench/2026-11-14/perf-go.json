@@ -1,0 +1,84 @@
+{
+  "corpus": "go",
+  "root": "/Volumes/Data/code-schema",
+  "language": "go",
+  "supported_files": 290,
+  "code_files": 237,
+  "loc": 73380,
+  "by_lang": {
+    "bash": 5,
+    "c": 1,
+    "cpp": 4,
+    "go": 237,
+    "html": 1,
+    "markdown": 32,
+    "py": 3,
+    "sql": 1,
+    "yaml": 6
+  },
+  "scan": {
+    "duration_ms": 319.274,
+    "files": 290,
+    "classes": 592,
+    "methods": 2695,
+    "calls": 18259,
+    "symbols": 3287,
+    "files_per_sec": 908.309,
+    "symbols_per_sec": 10295.212
+  },
+  "index": {
+    "duration_ms": 300.227,
+    "files": 290,
+    "classes": 592,
+    "methods": 2695,
+    "calls": 18259,
+    "symbols": 3287,
+    "files_per_sec": 965.934,
+    "symbols_per_sec": 10948.367
+  },
+  "memory": {
+    "peak_heap_alloc_bytes": 67135704,
+    "peak_heap_inuse_bytes": 74285056,
+    "peak_heap_sys_bytes": 104005632,
+    "total_alloc_bytes": 694926448,
+    "live_heap_alloc_bytes": 21664880
+  },
+  "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
+  "endpoints": {
+    "context": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 6.075,
+      "p95_ms": 7.809,
+      "p99_ms": 8.568,
+      "max_ms": 9.172,
+      "mean_ms": 6.213
+    },
+    "impact": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 16.235,
+      "p95_ms": 17.94,
+      "p99_ms": 20.53,
+      "max_ms": 21.3,
+      "mean_ms": 16.237
+    },
+    "search": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 10.135,
+      "p95_ms": 11.684,
+      "p99_ms": 12.851,
+      "max_ms": 14.462,
+      "mean_ms": 10.376
+    }
+  },
+  "symbols_used": {
+    "context": "adapterbench",
+    "impact": "adapterbench.benchASTPath",
+    "search_query": "benchASTPath"
+  },
+  "notes": [
+    "本仓语料以 git archive HEAD 导出到临时目录后扫描，排除未跟踪输入目录"
+  ]
+}

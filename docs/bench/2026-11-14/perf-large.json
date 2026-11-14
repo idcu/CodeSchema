@@ -1,0 +1,82 @@
+{
+  "corpus": "large",
+  "root": "/usr/local/Cellar/go/1.26.5/libexec/src",
+  "language": "go",
+  "supported_files": 7008,
+  "code_files": 6786,
+  "loc": 2276611,
+  "by_lang": {
+    "bash": 19,
+    "c": 121,
+    "cpp": 28,
+    "css": 1,
+    "go": 6786,
+    "html": 2,
+    "js": 1,
+    "markdown": 17,
+    "py": 1,
+    "yaml": 32
+  },
+  "scan": {
+    "duration_ms": 5623.404,
+    "files": 7008,
+    "classes": 16584,
+    "methods": 74667,
+    "calls": 466505,
+    "symbols": 91251,
+    "files_per_sec": 1246.22,
+    "symbols_per_sec": 16227.002
+  },
+  "index": {
+    "duration_ms": 6589.681,
+    "files": 7008,
+    "classes": 16584,
+    "methods": 74667,
+    "calls": 466505,
+    "symbols": 91251,
+    "files_per_sec": 1063.481,
+    "symbols_per_sec": 13847.558
+  },
+  "memory": {
+    "peak_heap_alloc_bytes": 2029439160,
+    "peak_heap_inuse_bytes": 2093285376,
+    "peak_heap_sys_bytes": 2750152704,
+    "total_alloc_bytes": 25264145592,
+    "live_heap_alloc_bytes": 381410416
+  },
+  "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
+  "endpoints": {
+    "context": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 142.584,
+      "p95_ms": 159.407,
+      "p99_ms": 161.704,
+      "max_ms": 179.236,
+      "mean_ms": 146.068
+    },
+    "impact": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 378.494,
+      "p95_ms": 397.768,
+      "p99_ms": 404.634,
+      "max_ms": 413.079,
+      "mean_ms": 380.361
+    },
+    "search": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 243.876,
+      "p95_ms": 251.536,
+      "p99_ms": 257.763,
+      "max_ms": 269.37,
+      "mean_ms": 244.135
+    }
+  },
+  "symbols_used": {
+    "context": "main",
+    "impact": "main.Main",
+    "search_query": "Main"
+  }
+}

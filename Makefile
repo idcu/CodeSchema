@@ -111,6 +111,13 @@ bench:
 	@echo "==> Running scalebench (BulkUpsert 回归看护) ..."
 	$(GO) test -run '^$$' -bench=BenchmarkScaleBulk -benchmem -count=1 -timeout 300s ./internal/scalebench/...
 
+# 真实仓库性能基线（S-3）：索引吞吐/内存峰值/HTTP P50-P95 + 多租户并发隔离。
+# 结果写入 docs/bench/2026-11-14/perf-*.json；语料路径可用 PERF_REPO_* 覆盖。
+.PHONY: bench-perf
+bench-perf:
+	@echo "==> Running real-repo performance baseline (gated) ..."
+	CODESCHEMA_PERF_BASELINE=1 $(GO) test -run '^TestPerfBaseline' -count=1 -timeout 1800s -v ./internal/scalebench
+
 # 调用图精度基准（正则 + 真语法树两路径；产出 build/treesitter-callgraph-bench.json 与历史 JSONL）
 .PHONY: bench-callgraph
 bench-callgraph:

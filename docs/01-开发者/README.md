@@ -32,6 +32,7 @@ make verify-tags    # 真正编译 -tags 'pg redis' 变体 + onnx/pg/redis 全�
 make counts         # 打印项目计数（包数/工具数/路由数/LoC）
 make counts-check   # CI 用：与基线比对，数字漂移则失败
 make bench-agent    # agent-bench 端到端评测
+make bench-perf     # 真实仓库性能基线（门控：索引吞吐/内存/端点延迟 + 多租户隔离）
 ```
 
 ## 3. 本地开发红线

@@ -1,0 +1,79 @@
+{
+  "corpus": "java",
+  "root": "/tmp/codeschema-perf-corpus/spring-petclinic",
+  "commit": "500158f",
+  "language": "java",
+  "supported_files": 79,
+  "code_files": 50,
+  "loc": 4297,
+  "by_lang": {
+    "css": 1,
+    "html": 12,
+    "java": 50,
+    "markdown": 1,
+    "sql": 7,
+    "yaml": 8
+  },
+  "scan": {
+    "duration_ms": 39.972,
+    "files": 79,
+    "classes": 45,
+    "methods": 195,
+    "calls": 1544,
+    "symbols": 240,
+    "files_per_sec": 1976.347,
+    "symbols_per_sec": 6004.091
+  },
+  "index": {
+    "duration_ms": 148.513,
+    "files": 79,
+    "classes": 45,
+    "methods": 195,
+    "calls": 1544,
+    "symbols": 240,
+    "files_per_sec": 531.94,
+    "symbols_per_sec": 1616.019
+  },
+  "memory": {
+    "peak_heap_alloc_bytes": 82125000,
+    "peak_heap_inuse_bytes": 87015424,
+    "peak_heap_sys_bytes": 103841792,
+    "total_alloc_bytes": 4589212408,
+    "live_heap_alloc_bytes": 10738712
+  },
+  "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
+  "endpoints": {
+    "context": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 3.88,
+      "p95_ms": 5.103,
+      "p99_ms": 5.337,
+      "max_ms": 5.564,
+      "mean_ms": 4.05
+    },
+    "impact": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 0.734,
+      "p95_ms": 1.3,
+      "p99_ms": 1.734,
+      "max_ms": 2.171,
+      "mean_ms": 0.809
+    },
+    "search": {
+      "n": 200,
+      "errors": 0,
+      "p50_ms": 2.024,
+      "p95_ms": 2.41,
+      "p99_ms": 2.695,
+      "max_ms": 3.075,
+      "mean_ms": 2.058
+    }
+  },
+  "symbols_used": {
+    "context": "WelcomeController",
+    "impact": "WelcomeController.welcome",
+    "search_query": "welcome"
+  }
+}

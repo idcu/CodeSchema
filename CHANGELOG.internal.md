@@ -13,6 +13,15 @@
   先红后绿：`TestIndexBuilder_BuildFromStore_BatchesDocContent` 修复前 `SetContent=4 / batch=0`，
   修复后 `SetContent=0 / batch=1`。实测 GOROOT `src` 96,732 文档：修复前 40+ 分钟未完成（中止），
   修复后 6.47s（file 后端，向量维度 256）。
+- 新增门控基准 `TestPerfBaseline_IndexAndQuery` / `TestPerfBaseline_MultiTenantConcurrency`
+  （`internal/scalebench/perf_baseline_test.go`，`make bench-perf`）：四个语料
+  （本仓 / petclinic / lytd / Go 标准库 `src`）的 scan/index 吞吐、堆内存、三端点延迟，
+  以及三租户并发索引+查询的连接池/缓存前缀/FTS 目录隔离断言。
+  基线报告：`docs/bench/2026-11-14/perf-baseline.md`；原始数据同目录 `perf-*.json`。
+- 关键基线（i9-9980HK / 32GiB / Go 1.26.5）：large（2,276,611 行）scan 1,246.2 files/s、
+  index 1,063.5 files/s，堆峰值 1,935.4 MiB；`/context` P95 159.4ms、`/impact` 397.8ms、
+  `/search` 251.5ms；多租户争用比 0.734、7,294 次查询 0 错误、隔离全通过。
+  明确标注为**基线而非优化结论**，未做无依据优化。
 
 ### 独立复审批次（2026-11-14，P1=3 / P2=7 / P3=5 / 判据=3）
 

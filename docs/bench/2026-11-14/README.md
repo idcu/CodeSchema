@@ -10,6 +10,11 @@
 `terminal-*.json`（S-2i 收尾：人工真值 321 对，Go 错例清零 + Java 扩至 152 对后）、
 `precision-*.json`（S-2k：TS 方法过匹配收敛 + Go 命名 FP 清零，人工真值 358 对）。
 
+性能维度单独成文：[perf-baseline.md](./perf-baseline.md)（S-3 基线，非优化结论）——
+四个语料（本仓 / petclinic / lytd / Go 标准库 `src`）的索引吞吐、内存峰值、
+`/context` `/impact` `/search` P50/P95，以及多租户并发索引+查询的隔离矩阵与错误率。
+原始数据为同目录 `perf-*.json`，复跑命令 `make bench-perf`。
+
 ## 口径
 
 - **真值独立于被测启发式**：以 IR 中「测试方法 → 生产方法」的**直接调用边**作为真值，
