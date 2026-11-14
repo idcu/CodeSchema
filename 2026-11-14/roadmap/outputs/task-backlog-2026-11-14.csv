@@ -8,7 +8,7 @@ R1-5,A,P3,viz负数参数校验,P3-1,R0-1,0.5,limit=-1与offset=-1返回400；�
 R1-6,A,P1,文档纠偏（性能方向/计数/语言数/fsperm/MCP声明）,审计§八/§九,R0-1,1,存储性能方向纠真；23路由/33 internal包/11 CI job/31语言/无fsperm与实测一致；counts-check绿且不改基线,done,必做
 R1-7,A,P3,Go原始字符串/泛型/constBlock解析,P3-9,R1-2,1.75,反引号含大括号与泛型签名不破坏深度与EndLine；普通函数不变,done,必做
 R2-1,B,P1,调用边口径只保留direct call,P1-7,R1-1,5,import/reference/implements/extends不产生调用边；/impact不含importer；direct call仍出现,done,必做
-R2-2,B,P1,影响面确定性与BFS/归一化,P1-8;P2-1;P2-3,R2-1,3.5,歧义裸名连续100次结果一致；BFS去重；GetAffected稳定排序,todo,必做
+R2-2,B,P1,影响面确定性与BFS/归一化,P1-8;P2-1;P2-3,R2-1,3.5,歧义裸名连续100次结果一致；BFS去重；GetAffected稳定排序,done,必做
 R2-3,B,P1,explicit测试关联按methodFQN过滤,P1-12,R1-1,1.5,查A只回A的@TestFor；查B回B；查C为空；A的测试仍返回,done,必做
 R2-4,B,P2,测试关联策略收紧+reason/confidence,P2-4,R2-1;R2-3,4,每条关联带reason与confidence；夹具无未标注假阳性；真实关联不丢,done,必做
 R2-5,B,P1,请求内图复用+depth上限+ctx取消,P1-13,R2-1,3.5,一次/impact只构建一次图；depth有上限；ctx取消生效；结果不丢且P95不劣化,todo,必做

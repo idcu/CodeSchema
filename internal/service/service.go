@@ -1708,18 +1708,27 @@ func (s *Service) GetAffected(ctx context.Context, symbol string, recursive bool
 	}
 
 	// 1. 受影响符号集：symbol 本身 + 其传递调用者。
+	//    裸名查询先用双向归一化解析出的 FQN 作为种子，否则 FindTestLinks 拿不到目标类。
 	affected := map[string]bool{symbol: true}
+	seed := symbol
 	if s.analyzer != nil {
+		if resolved, ok, err := s.analyzer.ResolveImpactSymbol(ctx, symbol); err != nil {
+			return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("resolve impact symbol: %v", err)}
+		} else if ok {
+			seed = resolved
+			affected[resolved] = true
+		}
 		depth := 1
 		if recursive {
 			depth = 10 // 传递追溯上限
 		}
-		callers, _, err := s.analyzer.FindImpactNodes(ctx, symbol, depth)
-		if err == nil {
-			for _, c := range callers {
-				if c != "" {
-					affected[c] = true
-				}
+		callers, _, err := s.analyzer.FindImpactNodes(ctx, seed, depth)
+		if err != nil {
+			return nil, &ServiceError{Code: "ERR_INTERNAL", Message: fmt.Sprintf("find impact nodes: %v", err)}
+		}
+		for _, c := range callers {
+			if c != "" {
+				affected[c] = true
 			}
 		}
 	}
@@ -1740,6 +1749,8 @@ func (s *Service) GetAffected(ctx context.Context, symbol string, recursive bool
 			result = append(result, l.TestMethod)
 		}
 	}
+	// map 遍历顺序随机，输出必须稳定排序。
+	sort.Strings(result)
 	return result, nil
 }
 

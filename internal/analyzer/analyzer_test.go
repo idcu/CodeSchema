@@ -1938,3 +1938,48 @@ func TestResolveImpactNode_SuffixMatchDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestCallGraph_BFSNoDuplicate 负控（P2-1）：
+// 菱形调用图里同一祖先会被多个同层节点发现，BFS 必须先标记再入队，
+// 否则 callers/callees 出现重复项。
+func TestCallGraph_BFSNoDuplicate(t *testing.T) {
+	cg := NewCallGraph()
+	// A -> B, A -> C, B -> E, C -> E（查询 E 的 callers）
+	cg.AddEdge("A", "B")
+	cg.AddEdge("A", "C")
+	cg.AddEdge("B", "E")
+	cg.AddEdge("C", "E")
+
+	for _, tc := range []struct {
+		name string
+		got  []string
+	}{
+		{"GetCallers", cg.GetCallers("E", 3)},
+		{"GetCallees", cg.GetCallees("A", 3)},
+	} {
+		seen := make(map[string]bool, len(tc.got))
+		for _, n := range tc.got {
+			if seen[n] {
+				t.Fatalf("%s: duplicate node %q in %v", tc.name, n, tc.got)
+			}
+			seen[n] = true
+		}
+	}
+
+	withDepth := cg.GetCallersWithDepth("E", 3)
+	seen := make(map[string]bool, len(withDepth))
+	for _, n := range withDepth {
+		if seen[n.Method] {
+			t.Fatalf("GetCallersWithDepth: duplicate node %q in %v", n.Method, withDepth)
+		}
+		seen[n.Method] = true
+	}
+	if len(withDepth) != 3 {
+		t.Fatalf("expected 3 unique callers (B,C,A), got %d: %v", len(withDepth), withDepth)
+	}
+	if withDepth[0].Method != "B" || withDepth[0].Depth != 1 ||
+		withDepth[1].Method != "C" || withDepth[1].Depth != 1 ||
+		withDepth[2].Method != "A" || withDepth[2].Depth != 2 {
+		t.Fatalf("unexpected BFS order/depth: %+v", withDepth)
+	}
+}

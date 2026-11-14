@@ -6,6 +6,24 @@
 
 ## 提交记录
 
+### Commit 211: fix(analyzer): 影响面 BFS 去重与 GetAffected 归一化/稳定排序（R2-2 / P1-8、P2-1、P2-3）
+
+- 根因：`GetCallersWithDepth/GetCalleesWithDepth` 出队才标记 visited，同一祖先被多个
+  同层节点发现时重复入结果（菱形图 `[B A C A]`）；`collectCallers/collectCallees`
+  递归前不判 visited，DFS 同样重复。`GetAffected` 只用原始 symbol 作种子，裸名查询
+  `FindTestLinks` 拿不到目标类（实测受影响测试 `[]`）；`FindImpactNodes` 错误被吞；
+  受影响集合来自 map，遍历顺序随机（连跑第 13 次顺序跳变）。
+- 修复：BFS「发现即标记」并保持发现顺序；DFS 在 append 前判 visited；
+  新增 `Analyzer.ResolveImpactSymbol`（显式返回建图错误），`GetAffected` 以解析后的
+  FQN 为种子、错误转为 `ERR_INTERNAL`、结果 `sort.Strings`。
+- 负控（先红后绿）：`TestCallGraph_BFSNoDuplicate` 修前 `GetCallers` 报
+  `duplicate node "A" in [B A C A]`（红）→ 修后唯一且深度为 `B/C=1、A=2`（绿）；
+  `TestGetAffected_NormalizesBareName` 修前 `got []`（红）→ 修后命中
+  `OrderServiceTest.TestRun`（绿）；`TestGetAffected_StableOrder` 修前第 13 次顺序跳变
+  （红）→ 修后 20 次 `reflect.DeepEqual` 且 `sort.StringsAreSorted`（绿）。
+  既有 `TestCallGraph_GetCallers/GetCallees` 在原实现下即期望唯一节点，复跑通过。
+- 文档：`架构与模块.md` 影响面条目补充去重/消歧/稳定排序；counts 61530（61.5k）。
+
 ### Commit 210: fix(server): stdio 的 stdout 仅承载 JSON-RPC，并用官方 MCP 客户端做双传输 e2e（R4-4 / S-1）
 
 - 根因：`search.IndexBuilder` 用 `fmt.Print*` 把索引进度（`scanning files` / `collected N docs`

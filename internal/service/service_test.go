@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1072,5 +1074,103 @@ func TestGetAffected_ReturnsLinkedTests(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected affected test TestGetOrder, got %v", got)
+	}
+}
+
+// TestGetAffected_NormalizesBareName 负控（P2-3）：
+// 查询裸名时先用解析后的 FQN 作为种子，否则 FindTestLinks 拿不到目标类，
+// 真实受影响的单测会被漏掉。
+func TestGetAffected_NormalizesBareName(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewStore("file")
+	if err := st.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	prod := &parser.IRDocument{
+		Source: "treesitter", Language: "go", FilePath: "/repo/order/service.go", FileHash: "h1",
+		Classes: []parser.ClassIR{{Name: "OrderService", FullName: "pkg.order.OrderService", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.order.OrderService"}},
+	}
+	testDoc := &parser.IRDocument{
+		Source: "treesitter", Language: "go", FilePath: "/repo/order/service_test.go", FileHash: "h2",
+		Classes: []parser.ClassIR{{Name: "OrderServiceTest", FullName: "pkg.order.OrderServiceTest", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "TestRun", ClassFQN: "pkg.order.OrderServiceTest"}},
+		Calls:   []parser.CallIR{{CallerFQN: "pkg.order.OrderServiceTest.TestRun", CalleeFQN: "pkg.order.OrderService.Run"}},
+	}
+	if err := st.UpsertIR(ctx, prod); err != nil {
+		t.Fatalf("upsert prod: %v", err)
+	}
+	if err := st.UpsertIR(ctx, testDoc); err != nil {
+		t.Fatalf("upsert test: %v", err)
+	}
+
+	svc := NewService(st).WithImpactAnalyzer(analyzer.NewAnalyzer(st))
+	got, err := svc.GetAffected(ctx, "Run", false)
+	if err != nil {
+		t.Fatalf("GetAffected: %v", err)
+	}
+	found := false
+	for _, m := range got {
+		if strings.HasSuffix(m, "OrderServiceTest.TestRun") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected affected test for bare query, got %v", got)
+	}
+}
+
+// TestGetAffected_StableOrder 负控（P2-3）：受影响集合来自 map，输出必须排序稳定。
+func TestGetAffected_StableOrder(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewStore("file")
+	if err := st.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	docs := []*parser.IRDocument{
+		{
+			Source: "treesitter", Language: "go", FilePath: "/repo/order/service.go", FileHash: "h1",
+			Classes: []parser.ClassIR{{Name: "OrderService", FullName: "pkg.order.OrderService", Type: "CLASS"}},
+			Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.order.OrderService"}},
+		},
+		{
+			Source: "treesitter", Language: "go", FilePath: "/repo/order/a_test.go", FileHash: "h2",
+			Classes: []parser.ClassIR{{Name: "OrderServiceTest", FullName: "pkg.order.OrderServiceTest", Type: "CLASS"}},
+			Methods: []parser.MethodIR{{Name: "TestA", ClassFQN: "pkg.order.OrderServiceTest"}},
+			Calls:   []parser.CallIR{{CallerFQN: "pkg.order.OrderServiceTest.TestA", CalleeFQN: "pkg.order.OrderService.Run"}},
+		},
+		{
+			Source: "treesitter", Language: "go", FilePath: "/repo/order/b_test.go", FileHash: "h3",
+			Classes: []parser.ClassIR{{Name: "OrderServiceTestB", FullName: "pkg.order.OrderServiceTestB", Type: "CLASS"}},
+			Methods: []parser.MethodIR{{Name: "TestB", ClassFQN: "pkg.order.OrderServiceTestB"}},
+			Calls:   []parser.CallIR{{CallerFQN: "pkg.order.OrderServiceTestB.TestB", CalleeFQN: "pkg.order.OrderService.Run"}},
+		},
+	}
+	for _, d := range docs {
+		if err := st.UpsertIR(ctx, d); err != nil {
+			t.Fatalf("upsert %s: %v", d.FilePath, err)
+		}
+	}
+
+	svc := NewService(st).WithImpactAnalyzer(analyzer.NewAnalyzer(st))
+	first, err := svc.GetAffected(ctx, "pkg.order.OrderService.Run", true)
+	if err != nil {
+		t.Fatalf("GetAffected: %v", err)
+	}
+	for i := 0; i < 20; i++ {
+		got, err := svc.GetAffected(ctx, "pkg.order.OrderService.Run", true)
+		if err != nil {
+			t.Fatalf("GetAffected #%d: %v", i, err)
+		}
+		if !reflect.DeepEqual(got, first) {
+			t.Fatalf("unstable order at iteration %d: %v vs %v", i, got, first)
+		}
+	}
+	if !sort.StringsAreSorted(first) {
+		t.Fatalf("expected sorted result, got %v", first)
 	}
 }

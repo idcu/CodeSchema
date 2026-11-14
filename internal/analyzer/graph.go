@@ -91,26 +91,25 @@ func (cg *CallGraph) GetCallersWithDepth(methodFQN string, depth int) []ImpactNo
 		fqn   string
 		depth int
 	}
-	visited := make(map[string]bool)
+	// 发现即标记：同一祖先可能被多个同层节点发现，出队才标记会产生重复项。
+	visited := map[string]bool{methodFQN: true}
 	result := make([]ImpactNode, 0)
 	queue := []qItem{{fqn: methodFQN, depth: depth}}
 
 	for len(queue) > 0 {
 		item := queue[0]
 		queue = queue[1:]
-		if visited[item.fqn] {
-			continue
-		}
-		visited[item.fqn] = true
 		node, ok := cg.Nodes[item.fqn]
 		if !ok || item.depth <= 0 {
 			continue
 		}
 		curDepth := depth - item.depth + 1 // 距目标的层级（1 = 直接调用者）
 		for _, caller := range node.Callers {
-			if !visited[caller] {
-				result = append(result, ImpactNode{Method: caller, Depth: curDepth})
+			if visited[caller] {
+				continue
 			}
+			visited[caller] = true
+			result = append(result, ImpactNode{Method: caller, Depth: curDepth})
 			queue = append(queue, qItem{fqn: caller, depth: item.depth - 1})
 		}
 	}
@@ -128,26 +127,25 @@ func (cg *CallGraph) GetCalleesWithDepth(methodFQN string, depth int) []ImpactNo
 		fqn   string
 		depth int
 	}
-	visited := make(map[string]bool)
+	// 发现即标记，避免多父节点重复入队产生的重复项。
+	visited := map[string]bool{methodFQN: true}
 	result := make([]ImpactNode, 0)
 	queue := []qItem{{fqn: methodFQN, depth: depth}}
 
 	for len(queue) > 0 {
 		item := queue[0]
 		queue = queue[1:]
-		if visited[item.fqn] {
-			continue
-		}
-		visited[item.fqn] = true
 		node, ok := cg.Nodes[item.fqn]
 		if !ok || item.depth <= 0 {
 			continue
 		}
 		curDepth := depth - item.depth + 1
 		for _, callee := range node.Callees {
-			if !visited[callee] {
-				result = append(result, ImpactNode{Method: callee, Depth: curDepth})
+			if visited[callee] {
+				continue
 			}
+			visited[callee] = true
+			result = append(result, ImpactNode{Method: callee, Depth: curDepth})
 			queue = append(queue, qItem{fqn: callee, depth: item.depth - 1})
 		}
 	}
@@ -164,6 +162,9 @@ func (cg *CallGraph) collectCallers(fqn string, depth int, visited map[string]bo
 		return
 	}
 	for _, caller := range node.Callers {
+		if visited[caller] {
+			continue
+		}
 		*result = append(*result, caller)
 		cg.collectCallers(caller, depth-1, visited, result)
 	}
@@ -179,6 +180,9 @@ func (cg *CallGraph) collectCallees(fqn string, depth int, visited map[string]bo
 		return
 	}
 	for _, callee := range node.Callees {
+		if visited[callee] {
+			continue
+		}
 		*result = append(*result, callee)
 		cg.collectCallees(callee, depth-1, visited, result)
 	}

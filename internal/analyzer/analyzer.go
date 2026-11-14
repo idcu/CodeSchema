@@ -712,6 +712,17 @@ func (a *Analyzer) ResolveImpactNode(ctx context.Context, symbol string) (string
 	return resolveImpactNode(cg, symbol)
 }
 
+// ResolveImpactSymbol 与 ResolveImpactNode 同义，但把建图错误显式暴露给调用方，
+// 供「需要区分未命中与建图失败」的场景（如 GetAffected 的种子归一化）使用。
+func (a *Analyzer) ResolveImpactSymbol(ctx context.Context, symbol string) (string, bool, error) {
+	cg, err := a.BuildCallGraph(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("build call graph: %w", err)
+	}
+	resolved, ok := resolveImpactNode(cg, symbol)
+	return resolved, ok, nil
+}
+
 // resolveImpactNode 在调用图中定位查询符号命中的节点 FQN，返回命中的 FQN。
 //
 // 双向归一化，覆盖调用图节点与查询符号命名空间不一致的所有情况：
