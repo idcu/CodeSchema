@@ -128,7 +128,7 @@ public class Outer {
 	}
 	found := false
 	for _, c := range doc.Calls {
-		if c.CallerFQN == "com.example.Outer.last" && c.CalleeFQN == "svc.after" {
+		if c.CallerFQN == "com.example.Outer.last" && c.CalleeFQN == "Service.after" {
 			found = true
 		}
 	}

@@ -691,6 +691,9 @@ public class OrderService {
 // assertThat 整段吞掉。基准（Java 人工真值扩容）中该形态覆盖 getLastName/getId/
 // getPets/getSpecialties/supports 等，全被计为漏召；AST 路径因按 invocation 节点
 // 遍历天然可见。此用例约束两条路径口径一致。
+//
+// 接收者按方法参数的可见类型限定：`owner`/`petValidator` 的声明类型分别是
+// Owner/PetValidator，故期望 `Owner.getLastName` 等而非裸 `owner.getLastName`。
 func TestTreeSitterAdapter_Parse_JavaNestedCalls(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()
@@ -714,7 +717,7 @@ class OwnerControllerTests {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	want := []string{"owner.getLastName", "petValidator.supports", "owner.getId", "owner.getPets"}
+	want := []string{"Owner.getLastName", "PetValidator.supports", "Owner.getId", "Owner.getPets"}
 	got := make(map[string]bool, len(doc.Calls))
 	for _, c := range doc.Calls {
 		got[c.CalleeFQN] = true
@@ -1868,5 +1871,83 @@ public:
 	}
 	if !found {
 		t.Errorf("method start not found, got %+v", doc.Methods)
+	}
+}
+
+// TestTreeSitterAdapter_JavaReceiverType 是 Java 同名方法歧义的负控：
+// `owner6.addVisit(...)` 的接收者是可见类型 Owner，应限定为 `Owner.addVisit`；
+// `pet.addVisit(...)` 应限定为 `Pet.addVisit`。同时方法参数要进 IR（Params），
+// 供按实参个数消歧使用。
+func TestTreeSitterAdapter_JavaReceiverType(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	path := filepath.Join(t.TempDir(), "OwnerControllerTests.java")
+	content := `package org.demo;
+
+class Owner {
+    public void addVisit(Integer petId, Visit visit) {}
+}
+
+class Pet {
+    public void addVisit(Visit visit) {}
+}
+
+class Visit {}
+
+class OwnerControllerTests {
+    void shouldAddNewVisitForPet() {
+        Owner owner6 = new Owner();
+        Pet pet7 = new Pet();
+        Visit visit = new Visit();
+        owner6.addVisit(pet7.getId(), visit);
+    }
+
+    void shouldAddVisitForPet() {
+        Pet pet = new Pet();
+        pet.addVisit(null);
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	want := map[string]string{
+		"Owner.addVisit": "shouldAddNewVisitForPet",
+		"Pet.addVisit":   "shouldAddVisitForPet",
+	}
+	got := map[string]string{}
+	for _, c := range doc.Calls {
+		for callee, caller := range want {
+			if strings.HasSuffix(c.CalleeFQN, callee) && strings.HasSuffix(c.CallerFQN, caller) {
+				got[callee] = c.CalleeFQN
+			}
+		}
+	}
+	for callee := range want {
+		if got[callee] == "" {
+			var pairs []string
+			for _, c := range doc.Calls {
+				pairs = append(pairs, c.CallerFQN+" -> "+c.CalleeFQN)
+			}
+			t.Errorf("missing qualified callee %s, calls=%v", callee, pairs)
+		}
+	}
+
+	// 参数信息进 IR：Owner.addVisit(Integer, Visit) 两个参数。
+	for _, m := range doc.Methods {
+		if m.Name != "addVisit" || !strings.HasSuffix(m.ClassFQN, "Owner") {
+			continue
+		}
+		if len(m.Params) != 2 {
+			t.Fatalf("Owner.addVisit params = %+v, want 2", m.Params)
+		}
+		if m.Params[0].Type != "Integer" || m.Params[1].Type != "Visit" {
+			t.Errorf("Owner.addVisit param types = %q,%q, want Integer,Visit", m.Params[0].Type, m.Params[1].Type)
+		}
 	}
 }

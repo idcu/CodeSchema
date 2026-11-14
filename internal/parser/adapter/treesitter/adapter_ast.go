@@ -316,6 +316,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 	// goLocalTypes：Go 方法体内 `x := &T{}` / `x := T{}` / `var x *T` 的变量类型，
 	// 用于把 `x.Method()` 限定为 `pkg.T.Method`（与正则路径 goLocalTypes 同口径）。
 	goLocalTypes := map[string]string{}
+	// javaLocalTypes：Java 方法体内局部变量/参数名 → 类型，
+	// 用于 `owner6.addVisit` → `Owner.addVisit`（同名方法消歧）。
+	javaLocalTypes := map[string]string{}
 	// skipChild：Elixir def 的 arguments（函数签名）子节点，避免签名中的
 	// `create(order)` 被误判为调用
 	var skipChild *ts.Node
@@ -332,6 +335,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		// 否则后续兄弟声明会被错挂到刚遍历过的类/方法（P0-1 遗留项）。
 		prevClass, prevMethod := curClass, curMethod
 		prevLocalTypes := goLocalTypes
+		prevJavaLocalTypes := javaLocalTypes
 		scopeChanged := false
 
 		switch {
@@ -449,10 +453,17 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			case curClass != nil:
 				m.ClassFQN = curClass.FullName
 			}
+			if lang == "java" {
+				// 参数进 IR，并作为方法体内的可见类型种子。
+				m.Params = astJavaParams(n, data)
+			}
 			doc.Methods = append(doc.Methods, m)
 			curMethod = &doc.Methods[len(doc.Methods)-1]
 			if lang == "go" {
 				goLocalTypes = map[string]string{}
+			}
+			if lang == "java" {
+				javaLocalTypes = javaLocalsFromParams(m.Params)
 			}
 			scopeChanged = true
 
@@ -460,6 +471,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			if name, t := astGoLocalDecl(n, data, goFuncReturns); name != "" && t != "" {
 				goLocalTypes[name] = t
 			}
+
+		case lang == "java" && (typ == "local_variable_declaration" || typ == "enhanced_for_statement"):
+			trackASTJavaLocals(n, data, javaLocalTypes)
 
 		case (lang == "ts" || lang == "js") && typ == "variable_declarator":
 			// 具名箭头函数 / 函数表达式（`const f = () => {...}`）等价于具名函数：
@@ -529,8 +543,14 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 					raw = qualifyGoLocalCallee(raw, goPkg, goLocalTypes)
 				}
 			}
+			if lang == "java" {
+				raw = qualifyJavaLocalCallee(raw, javaLocalTypes)
+			}
 			callee := astQualifyCallee(raw, goPkg, astPkg, astCurClassName(curClass))
-			if callee == "" || isKeyword(callee) {
+			// AST 路径的 call_expression 本身就是调用节点，控制流不会进来；
+			// Java/TS 跳过限定后的关键字检查，避免误伤 `String.length` /
+			// `Map.get` 这类其他语言标准库关键字同名的合法方法。
+			if callee == "" || ((lang != "java" && lang != "ts" && lang != "js") && isKeyword(callee)) {
 				break
 			}
 			doc.Calls = append(doc.Calls, parser.CallIR{
@@ -555,6 +575,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			curClass, curMethod = prevClass, prevMethod
 			if lang == "go" {
 				goLocalTypes = prevLocalTypes
+			}
+			if lang == "java" {
+				javaLocalTypes = prevJavaLocalTypes
 			}
 		}
 	}
@@ -1311,4 +1334,113 @@ func isKeyword(name string) bool {
 		"Printf.printf": true, "failwith": true,
 	}
 	return keywords[name]
+}
+
+// —— Java 参数与可见类型（2026-11-14 新增，同名方法消歧用） ——
+
+// astJavaParams 从方法/构造器声明的 parameters 字段解析参数。
+func astJavaParams(n *ts.Node, src []byte) []parser.ParamIR {
+	pn := n.ChildByFieldName("parameters")
+	if pn == nil || pn.IsNull() {
+		return nil
+	}
+	var out []parser.ParamIR
+	for i := 0; i < int(pn.NamedChildCount()); i++ {
+		p := pn.NamedChild(i)
+		switch p.Type() {
+		case "formal_parameter", "spread_parameter", "receiver_parameter":
+		default:
+			continue
+		}
+		typ, name := astJavaTypeName(p, src)
+		if typ == "" || name == "" {
+			if ps := parseJavaParams("(" + string(p.Content(src)) + ")"); len(ps) == 1 {
+				typ, name = ps[0].Type, ps[0].Name
+			}
+		}
+		if typ == "" || name == "" {
+			continue
+		}
+		out = append(out, parser.ParamIR{Name: name, Type: normalizeJavaType(typ), Index: len(out)})
+	}
+	return out
+}
+
+// astJavaTypeName 取节点的类型与变量名（formal_parameter / variable_declarator 等）。
+func astJavaTypeName(n *ts.Node, src []byte) (typ, name string) {
+	if tn := n.ChildByFieldName("type"); tn != nil && !tn.IsNull() {
+		typ = strings.TrimSpace(string(tn.Content(src)))
+	}
+	if nn := n.ChildByFieldName("name"); nn != nil && !nn.IsNull() {
+		name = strings.TrimSpace(string(nn.Content(src)))
+	}
+	if (typ == "" || name == "") && n.Type() != "variable_declarator" {
+		// 回退：按 `Type name` 文本解析（增强 for、receiver 等节点字段名可能不同）。
+		if ps := parseJavaParams("(" + strings.TrimSpace(string(n.Content(src))) + ")"); len(ps) == 1 {
+			if typ == "" {
+				typ = ps[0].Type
+			}
+			if name == "" {
+				name = ps[0].Name
+			}
+		}
+	}
+	return typ, name
+}
+
+// trackASTJavaLocals 收集方法体内的局部变量与增强 for 变量类型。
+func trackASTJavaLocals(n *ts.Node, src []byte, out map[string]string) {
+	if out == nil {
+		return
+	}
+	if n.Type() == "enhanced_for_statement" {
+		if typ, name := astJavaTypeName(n, src); typ != "" && name != "" {
+			out[name] = normalizeJavaType(typ)
+		}
+		return
+	}
+	typ := ""
+	if tn := n.ChildByFieldName("type"); tn != nil && !tn.IsNull() {
+		typ = strings.TrimSpace(string(tn.Content(src)))
+	}
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		c := n.NamedChild(i)
+		if c.Type() != "variable_declarator" {
+			continue
+		}
+		name := ""
+		if nn := c.ChildByFieldName("name"); nn != nil && !nn.IsNull() {
+			name = strings.TrimSpace(string(nn.Content(src)))
+		}
+		if name == "" {
+			continue
+		}
+		t := typ
+		if t == "" {
+			t, _ = astJavaTypeName(c, src)
+		}
+		if t != "" {
+			out[name] = normalizeJavaType(t)
+		}
+	}
+}
+
+func javaLocalsFromParams(params []parser.ParamIR) map[string]string {
+	out := make(map[string]string, len(params))
+	for _, p := range params {
+		if p.Name != "" && p.Type != "" {
+			out[p.Name] = p.Type
+		}
+	}
+	return out
+}
+
+// qualifyJavaLocalCallee 用可见类型替换 receiver：`owner6.addVisit` → `Owner.addVisit`。
+func qualifyJavaLocalCallee(raw string, locals map[string]string) string {
+	if i := strings.Index(raw, "."); i > 0 {
+		if typ, ok := locals[raw[:i]]; ok && typ != "" {
+			return typ + raw[i:]
+		}
+	}
+	return raw
 }

@@ -435,6 +435,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		tsModule = strings.TrimSuffix(base, filepath.Ext(base))
 	}
 	nonGoPkg := "" // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
+	// Java 方法体内的可见类型：局部变量/参数名 → 类型，供 `owner.addVisit` 消歧。
+	// 每个方法声明时重置并按参数播种，方法体内按声明行累积。
+	javaLocalTypes := map[string]string{}
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
 	curStructIdx := -1       // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
 	curStructOpenDepth := 0  // struct 体起始深度（type X struct { 的 `{` 计入前）
@@ -663,7 +666,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				trackGoLocalTypes(code, goLocalTypes, goFuncReturns)
 			}
 			if !(inIfaceBody && curMethodIdx < 0 && goDepth > curIfaceOpenDepth) && strings.Contains(code, "(") {
-				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes)
+				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes, lang)
 				// callPattern 要求 `(` 与 `)` 同行；参数换行时起始行整条丢失
 				// （`fs.BulkUpsert(ctx, []*parser.IRDocument{{`），测试关联与调用图同时漏召回。
 				detectUnclosedCalls(code, lineNum, &doc.Calls, caller, goPkg, curRecvVar, curRecvType, goLocalTypes)
@@ -762,6 +765,16 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				// TS 顶层函数按模块（文件名）限定，避免不同文件同名函数在索引中互相歧义。
 				method.ClassFQN = tsModule
 			}
+			if lang == "java" {
+				// 参数进 IR：既供同名方法按实参个数消歧，也作为方法体内的可见类型。
+				method.Params = parseJavaParams(method.Signature)
+				javaLocalTypes = make(map[string]string, len(method.Params))
+				for _, p := range method.Params {
+					if p.Name != "" && p.Type != "" {
+						javaLocalTypes[p.Name] = p.Type
+					}
+				}
+			}
 			doc.Methods = append(doc.Methods, method)
 			currentMethod = &doc.Methods[len(doc.Methods)-1]
 			docComment.Reset()
@@ -780,6 +793,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		// 先剔除字符串/注释内的伪调用（跨行状态机），再匹配
 		// bash/ocaml 调用可无括号（命令名 / 无括号应用），其余语言调用需含 "("
 		code := sanitizer.clean(trimmed, lang)
+		if lang == "java" && currentMethod != nil {
+			// 先收集本行可见类型，再解析调用，保证同一行
+			// `Owner owner = new Owner(); owner.addVisit(...)` 也能限定。
+			trackJavaLocalTypes(code, javaLocalTypes)
+		}
 		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
 			caller := ""
 			if currentMethod != nil {
@@ -800,11 +818,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			if currentClass != nil {
 				curClass = currentClass.Name
 			}
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass, nil)
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass, javaLocalTypes, lang)
 			// Java 实参位置的内层调用会被外层整段吞掉（`assertThat(owner.getId())`），
 			// 与 AST 路径按 invocation 节点遍历的口径不一致，这里补齐。
 			if lang == "java" {
-				detectJavaNestedCalls(code, lineNum, &doc.Calls, caller, nonGoPkg, curClass)
+				detectJavaNestedCalls(code, lineNum, &doc.Calls, caller, nonGoPkg, curClass, javaLocalTypes)
 			}
 		}
 
@@ -894,6 +912,29 @@ func hasClassFullName(classes []parser.ClassIR, fullName string) bool {
 		}
 	}
 	return false
+}
+
+// —— Java 可见类型（2026-11-14 新增，同名方法消歧用） ——
+
+var (
+	javaLocalDeclPattern = regexp.MustCompile(`^\s*(?:final\s+)?([A-Z][\w$.]*(?:\s*<[^;=(){}]*>)?(?:\[\])*)\s+([a-z_$][\w$]*)\s*(?:=|;|,|:)`)
+	javaForEachPattern   = regexp.MustCompile(`\bfor\s*\(\s*(?:final\s+)?([A-Z][\w$.]*(?:\s*<[^;=(){}]*>)?(?:\[\])*)\s+([a-z_$][\w$]*)\s*:`)
+)
+
+// trackJavaLocalTypes 收集方法体内可见的「变量名 → 类型」。
+//
+// 覆盖局部变量声明与 for-each；不追踪字段/方法返回值（无类型信息时保持裸 receiver，
+// 由调用侧的短名唯一性兜底）。
+func trackJavaLocalTypes(code string, out map[string]string) {
+	if out == nil {
+		return
+	}
+	if m := javaLocalDeclPattern.FindStringSubmatch(code); len(m) == 3 {
+		out[m[2]] = normalizeJavaType(m[1])
+	}
+	if m := javaForEachPattern.FindStringSubmatch(code); len(m) == 3 {
+		out[m[2]] = normalizeJavaType(m[1])
+	}
 }
 
 // —— Go 变量/常量提取辅助（2026-09-03 新增，仅 Go 精确路径） ——
@@ -1293,7 +1334,7 @@ func (c *codeSanitizer) clean(line, lang string) string {
 // caller 为当前方法的 FQN；pkg/recvVar/recvType 供 Go 精确路径的 callee 限定；
 // nonGoPkg/currentClass 供 Java/Kotlin/C# 显式包声明语言的裸 callee 限定
 // （把当前类内无点前缀的方法调用限定为 nonGoPkg.Class.Method）。
-func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType, nonGoPkg, currentClass string, localTypes map[string]string) {
+func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType, nonGoPkg, currentClass string, localTypes map[string]string, lang string) {
 	matches := pattern.FindAllStringSubmatch(line, -1)
 	for _, m := range matches {
 		if len(m) >= 2 {
@@ -1303,8 +1344,13 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 				continue
 			}
 			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass, localTypes)
-			// 跳过关键字和常见误匹配
-			if isKeyword(callee) || len(callee) <= 1 {
+			// 跳过关键字和常见误匹配。限定后的检查对 Java/TS 会误伤真实调用
+			// （`Map.get` / `List.map` 是 Java/TS 的合法方法名，却是其他语言的
+			// 标准库关键字）；这些语言的裸名检查已在上面完成。
+			if (lang != "java" && lang != "ts" && lang != "js") && isKeyword(callee) {
+				continue
+			}
+			if len(callee) <= 1 {
 				continue
 			}
 			*calls = append(*calls, parser.CallIR{
@@ -1333,11 +1379,16 @@ func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string
 		if recvVar != "" && recvType != "" && strings.HasPrefix(callee, recvVar+".") {
 			return pkg + "." + recvType + strings.TrimPrefix(callee, recvVar)
 		}
-		// 局部变量 selector：`x := &T{}` / `var x *T` → pkg.T.Method
+		// 局部变量 selector：`x := &T{}` / `var x *T` → pkg.T.Method；
+		// Java 等无包限定语言 → 裸 `T.Method`，与 AST 路径同形（索引键也是
+		// `T.Method`，包限定反而要靠后缀回退，会与 treesitter 变体不一致）。
 		if localTypes != nil {
 			if i := strings.Index(callee, "."); i > 0 {
 				if typ, ok := localTypes[callee[:i]]; ok && typ != "" {
-					return pkg + "." + typ + callee[i:]
+					if pkg != "" {
+						return pkg + "." + typ + callee[i:]
+					}
+					return typ + callee[i:]
 				}
 			}
 		}
@@ -1476,7 +1527,7 @@ var javaInnerCallPattern = regexp.MustCompile(`[(,]\s*(\w[\w.]*)\s*\(`)
 // owner.getId 整段吞掉，导致「测试方法 → 生产方法」的调用边丢失。
 // AST 路径按 invocation 节点遍历，本就能看到内层调用；这里补齐正则路径口径。
 // 链式后续调用（`f().g()` 的 g）已由 callPattern 的后续匹配覆盖，无需重复。
-func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, currentClass string) {
+func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, currentClass string, localTypes map[string]string) {
 	short := func(fqn string) string {
 		if i := strings.LastIndex(fqn, "."); i >= 0 {
 			return fqn[i+1:]
@@ -1498,8 +1549,10 @@ func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, cal
 		if seen {
 			continue
 		}
-		callee := qualifyCallee(name, "", "", "", pkg, currentClass, nil)
-		if isKeyword(callee) || len(callee) <= 1 {
+		callee := qualifyCallee(name, "", "", "", pkg, currentClass, localTypes)
+		// 只按裸名过滤：限定后的名字可能是 `String.length` 这类
+		// 「其他语言标准库关键字 + 合法 Java 方法」，不能据此丢弃真实调用。
+		if len(callee) <= 1 {
 			continue
 		}
 		*calls = append(*calls, parser.CallIR{
