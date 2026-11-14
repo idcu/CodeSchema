@@ -96,7 +96,9 @@ func helper(x int) int { return x }
 
 type Svc struct{}
 
-func (s *Svc) Method() int { return TopLevelFunc(1) }
+func (s *Svc) Method() int {
+	return TopLevelFunc(1)
+}
 `
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -165,6 +167,18 @@ func (s *Svc) Method() int { return TopLevelFunc(1) }
 		if !found {
 			t.Errorf("package container methods missing %q; got %v", want, names)
 		}
+	}
+
+	// P1-1 负控：方法 EndLine 必须回填到方法体闭合行，否则 /context 只回签名一行。
+	mctx, err := svc.GetContext(context.Background(), "Svc.Method", 0)
+	if err != nil {
+		t.Fatalf("GetContext(Svc.Method): %v", err)
+	}
+	if mctx.EndLine <= mctx.StartLine {
+		t.Fatalf("方法 EndLine 未回填：start=%d end=%d（应覆盖方法体）", mctx.StartLine, mctx.EndLine)
+	}
+	if !strings.Contains(mctx.Source, "return TopLevelFunc(1)") {
+		t.Errorf("expected full method body, got %q", mctx.Source)
 	}
 }
 

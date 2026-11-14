@@ -455,6 +455,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				// 方法体是否在本行开启：多行签名（`func F(` 后续参数行）尚未出现 `{`，
 				// 需要把后续续行视为签名而非方法体，否则首个续行就会被误判为方法闭合（P1-14）。
 				methodBodyOpen = strings.Contains(code, "{")
+				// 单行方法体（`func F() { ... }`）：本行即闭合，EndLine 回填到本行（P1-1）。
+				if methodBodyOpen && goDepth <= methodOpenDepth {
+					doc.Methods[curMethodIdx].EndLine = lineNum
+					curMethodIdx = -1
+					methodBodyOpen = false
+					curRecvVar = ""
+					curRecvType = ""
+				}
 				docComment.Reset()
 				continue
 			}
@@ -468,6 +476,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				goDepth += braceNet(code)
 				if strings.Contains(code, "{") {
 					methodBodyOpen = true
+					// 签名与完整方法体同处一行：本行即闭合。
+					if goDepth <= methodOpenDepth {
+						doc.Methods[curMethodIdx].EndLine = lineNum
+						curMethodIdx = -1
+						methodBodyOpen = false
+						curRecvVar = ""
+						curRecvType = ""
+					}
 				}
 				docComment.Reset()
 				continue
@@ -526,7 +542,9 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			}
 			goDepth += braceNet(code)
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
-				curMethodIdx = -1 // 方法体已闭合
+				// 方法体闭合：EndLine 回填到闭合行（P1-1），支撑 /context 语义块裁剪。
+				doc.Methods[curMethodIdx].EndLine = lineNum
+				curMethodIdx = -1
 				methodBodyOpen = false
 				curRecvVar = "" // 重置 receiver 跟踪
 				curRecvType = ""

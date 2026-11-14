@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 159: fix(parser): Go 方法 EndLine 回填到闭合行（P1-1）
+
+- 背景：treesitter Go 路径创建 `MethodIR` 时 `EndLine=StartLine`，全文件无任何回填；`/context` 的语义块只取 1 行（仅签名），「精准裁剪」退化为「只回签名」。
+- 动作：`adapter.go` 在三个闭合点回填 `EndLine=lineNum`——单行方法体定义行、多行签名与完整方法体同处一行、以及方法体 `}` 闭合行。
+- 负控（先红后绿）：`TestGetContext_TopLevelFunc_RealParse`（service 包，真实解析→FileStore→`GetContext("Svc.Method", 0)`）。修复前实测 `start=11 end=11`，源码仅签名；修复后 `end=13`，源码含完整方法体 `return TopLevelFunc(1)`。
+- 验证：`make test` 全绿；`make counts-check` 通过（LoC 55270 ≈ 55.3k）。
+
 ### Commit 158: fix(parser): Go 多行函数签名不再提前闭合方法（P1-14）
 
 - 背景：`func F(` 签名行未出现 `{` 时，`methodOpenDepth == goDepth`；下一行参数续行在「进入本行前深度」判定中即满足 `goDepth <= methodOpenDepth`，方法被误判闭合，方法体调用的 `CallerFQN` 为空 → analyzer 不建边，影响面/调用图丢边。
