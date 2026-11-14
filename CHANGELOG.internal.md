@@ -6,6 +6,26 @@
 
 ## 提交记录
 
+### Commit 246: fix(testlink): 命名策略让位给调用证据，清掉 Go 真值 9 条 FP
+
+- `naming` 只按名字词边界匹配：`TestSearchByTags_*` / `TestSearchConfig_*` /
+  `TestSearch_Disambiguate*` 因含公共词 `Search` 被链到 `Service.Search`，
+  而测试体实际调用 `SearchByTags` / `SearchConfig` / `disambiguateMethodResults`。
+- 现规则：测试方法已显式调用目标类的另一个方法时，跳过 naming 关联；无调用证据
+  （解析不到调用或纯命名兜底）时 naming 仍生效。真实调用边由 `call_graph`(95) 保留，
+  不依赖 naming 召回。
+- 负控：`TestFindTestLinks_NamingYieldsToCallEvidence`（旧实现红：naming 误链两条；
+  现绿：Success 保留 call_graph 边、Disambiguate/Tags 无 naming 边、无调用测试保留兜底）。
+- 真值同步：新增负控测试自身调用 `NewService` / `Service.FindTestLinks`，补入
+  `manual-truth.json`（Go 167 → 169 对；闭合世界口径不变，未删减任何难例）。
+- 同语料（Go 169 对）前→后：TP 167/FP 2/FN 0 → 169/0/0，
+  P 0.9882 → 1.0000、R 1.0000、F1 0.9941 → 1.0000（两变体一致）。
+  本轮起点（真值 167 对）regex 160 TP/9 FP/7 FN、F1 0.9524；三个提交后在原 167 对上
+  为 167/0/0，补入新增负控测试的 2 条真实调用对后为 169/0/0。
+  自动 test_link：regex TP 1768/FP 21/FN 13、P 0.9883/R 0.9927/F1 0.9905；
+  treesitter 1742/22/14、0.9875/0.9920/0.9897（起点 0.9873 / 0.9883）。
+
+
 ### Commit 245: fix(parser): Go 内层与链式调用抽取，链式接收者按返回类型限定
 
 - 默认 `callPattern` 为非重叠匹配：`wrap(NewService(...))` 的内层调用被外层整段

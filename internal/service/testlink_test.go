@@ -253,6 +253,70 @@ func TestFindTestLinks_GoPackageHelpersNotNaming(t *testing.T) {
 // TestFindTestLinks_CallGraphBehavioralName 负控：测试方法名是行为描述、不含目标
 // 方法名时（TestCollection_Delete → DB.CreateCollection），命名策略必然漏召；
 // 直接调用边必须补上关联。Java 侧同时覆盖包名前缀 caller 与接收者变量 callee 的 FQN 归一。
+// TestFindTestLinks_NamingYieldsToCallEvidence 负控：命名策略按词匹配会把
+// TestSearchByTags_* / TestSearch_Disambiguate* 一类测试误链到 Search（人工真值
+// 9 条 FP 全部来自这里）。当测试方法已直接调用同类另一个方法时，命名关联属于
+// 过匹配，应让位给调用证据；无调用证据时命名仍是兜底。
+func TestFindTestLinks_NamingYieldsToCallEvidence(t *testing.T) {
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/proj/service/service.go", Language: "go"},
+			{ID: 2, AbsolutePath: "/proj/service/service_test.go", Language: "go"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "Service", FullName: "Service", Type: "CLASS"}},
+			2: {{ID: 20, FileID: 2, Name: "service", FullName: "service", Type: "PACKAGE"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				{ID: 100, ClassID: 10, Name: "Search", FullName: "Service.Search"},
+				{ID: 101, ClassID: 10, Name: "SearchByTags", FullName: "Service.SearchByTags"},
+				{ID: 102, ClassID: 10, Name: "disambiguateMethodResults", FullName: "Service.disambiguateMethodResults"},
+			},
+			20: {
+				{ID: 200, ClassID: 20, Name: "TestSearch_Success", FullName: "service.TestSearch_Success"},
+				{ID: 201, ClassID: 20, Name: "TestSearchByTags_MultiTagAND", FullName: "service.TestSearchByTags_MultiTagAND"},
+				{ID: 202, ClassID: 20, Name: "TestSearch_Disambiguate", FullName: "service.TestSearch_Disambiguate"},
+				{ID: 203, ClassID: 20, Name: "TestSearch_NoCalls", FullName: "service.TestSearch_NoCalls"},
+			},
+		},
+		calls: map[int64][]store.CallRecord{
+			2: {
+				{CallerFQN: "service.TestSearch_Success", CalleeFQN: "svc.Search", CallType: "direct"},
+				{CallerFQN: "service.TestSearchByTags_MultiTagAND", CalleeFQN: "svc.SearchByTags", CallType: "direct"},
+				{CallerFQN: "service.TestSearch_Disambiguate", CalleeFQN: "svc.disambiguateMethodResults", CallType: "direct"},
+			},
+		},
+	}
+
+	links, err := NewService(st).FindTestLinks(context.Background(), "Service.Search", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	strategies := map[string]map[string]bool{}
+	for _, l := range links {
+		if strategies[l.TestMethod] == nil {
+			strategies[l.TestMethod] = map[string]bool{}
+		}
+		strategies[l.TestMethod][l.Strategy] = true
+	}
+	if !strategies["service.TestSearch_Success"]["call_graph"] {
+		t.Errorf("missing call-graph link service.TestSearch_Success; links=%+v", links)
+	}
+	for _, bad := range []string{
+		"service.TestSearchByTags_MultiTagAND",
+		"service.TestSearch_Disambiguate",
+	} {
+		if strategies[bad]["naming"] {
+			t.Errorf("naming overmatch kept: %s; links=%+v", bad, links)
+		}
+	}
+	// 无调用边的测试（命名兜底场景）仍应保留。
+	if !strategies["service.TestSearch_NoCalls"]["naming"] {
+		t.Errorf("naming fallback lost: service.TestSearch_NoCalls; links=%+v", links)
+	}
+}
+
 func TestFindTestLinks_CallGraphBehavioralName(t *testing.T) {
 	ctx := context.Background()
 

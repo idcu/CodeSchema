@@ -256,9 +256,12 @@ func (s *Service) matchTestClass(cls store.ClassRecord) string {
 
 // linkByNaming 通过命名约定建立方法级关联。
 func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, classFQN, testClassFQN string, methodFQN string, add func(string, string, string, int)) {
-	// 找到目标类中的方法
+	// 找到目标类及其全部方法
 	var targetMethod store.MethodRecord
 	found := false
+	// 目标类全部方法名：用于判断测试方法是否已显式调用「同类另一个方法」，
+	// 从而让命名关联让位给调用证据（见 hasCompetingCall）。
+	classMethodNames := make(map[string]bool)
 	for _, f := range files {
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
 		for _, cls := range classes {
@@ -267,17 +270,15 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 			}
 			methods, _ := s.store.GetMethodsByClassID(ctx, cls.ID)
 			for _, m := range methods {
+				classMethodNames[m.Name] = true
 				if m.FullName == methodFQN {
 					targetMethod = m
 					found = true
-					break
 				}
 			}
-			if found {
-				break
-			}
+			break
 		}
-		if found {
+		if len(classMethodNames) > 0 {
 			break
 		}
 	}
@@ -290,6 +291,7 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 	methodName := targetMethod.Name
 	for _, f := range files {
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
+		calls, _ := s.store.GetCallsByFileID(ctx, f.ID)
 		for _, cls := range classes {
 			if cls.FullName != testClassFQN {
 				continue
@@ -306,12 +308,36 @@ func (s *Service) linkByNaming(ctx context.Context, files []*store.FileRecord, c
 				if goPkg && !isGoTestFuncName(m.Name) {
 					continue
 				}
-				if matchesTestMethod(methodName, m.Name) {
-					add(m.FullName, methodName, "naming", 70)
+				if !matchesTestMethod(methodName, m.Name) {
+					continue
 				}
+				// 测试已显式调用同类另一个方法时，仅凭名字里的公共词关联属于过匹配。
+				if hasCompetingCall(calls, m, classMethodNames, methodName) {
+					continue
+				}
+				add(m.FullName, methodName, "naming", 70)
 			}
 		}
 	}
+}
+
+// hasCompetingCall 判断测试方法是否已显式调用目标类中的其它方法。
+//
+// 命名策略只能看到「测试名里的公共词」：TestSearchByTags_* /
+// TestSearch_Disambiguate* 都会命中 Search，而测试体实际调用的是
+// SearchByTags / disambiguateMethodResults。这类关联属于过匹配，应让位给调用证据
+// （真实调用边仍由 call_graph 策略保留）。
+func hasCompetingCall(calls []store.CallRecord, testMethod store.MethodRecord, classMethodNames map[string]bool, targetName string) bool {
+	for _, c := range calls {
+		if c.CallerFQN != testMethod.FullName && shortMethodName(c.CallerFQN) != testMethod.Name {
+			continue
+		}
+		callee := shortMethodName(c.CalleeFQN)
+		if callee != targetName && classMethodNames[callee] {
+			return true
+		}
+	}
+	return false
 }
 
 // linkByCallGraph 通过「测试方法 → 生产方法」的直接调用边建立关联（置信度 95）。
