@@ -348,7 +348,7 @@ async function loadConfig() {
 }
 
 function plain() {
-    return 1;
+    return buildIndex([]);
 }
 
 export class Server {
@@ -375,9 +375,9 @@ export class Server {
 		got[m.Name] = m.ClassFQN
 	}
 	for name, class := range map[string]string{
-		"buildIndex": "",
-		"loadConfig": "",
-		"plain":      "",
+		"buildIndex": "handlers",
+		"loadConfig": "handlers",
+		"plain":      "handlers",
 	} {
 		fqn, ok := got[name]
 		if !ok {
@@ -393,6 +393,23 @@ export class Server {
 	}
 	if fqn, ok := got["stop"]; !ok || fqn != "Server" {
 		t.Errorf("method with return annotation: got (%q, %v), want (\"Server\", true)", fqn, ok)
+	}
+
+	// 同模块裸名调用应限定为 module.func；导入函数保持裸名。
+	var localCall, importedCall bool
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "handlers.plain" && c.CalleeFQN == "handlers.buildIndex" {
+			localCall = true
+		}
+		if c.CallerFQN == "handlers.loadConfig" && c.CalleeFQN == "readConfig" {
+			importedCall = true
+		}
+	}
+	if !localCall {
+		t.Errorf("同模块调用未限定为 handlers.buildIndex; calls=%+v", doc.Calls)
+	}
+	if !importedCall {
+		t.Errorf("导入函数裸名调用被错误限定; calls=%+v", doc.Calls)
 	}
 }
 

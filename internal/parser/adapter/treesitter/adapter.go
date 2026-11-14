@@ -413,6 +413,12 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	curRecvType := ""       // 当前方法 receiver 类型名
 	// 当前方法体内局部变量 → 类型（`x := &T{}` / `var x *T`），供 selector 消歧。
 	goLocalTypes := map[string]string{}
+	// TS/JS 顶层函数的模块名（文件名去扩展名）：同名跨文件函数的 FQN 消歧用。
+	tsModule := ""
+	if lang == "ts" {
+		base := filepath.Base(path)
+		tsModule = strings.TrimSuffix(base, filepath.Ext(base))
+	}
 	nonGoPkg := "" // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// 成员变量/常量提取状态（2026-09-03 新增）：struct 体跟踪 + const 块状态
 	curStructIdx := -1       // 当前所在 struct 在 doc.Classes 的索引（-1 = 不在 struct 体内）
@@ -711,6 +717,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			}
 			if currentClass != nil {
 				method.ClassFQN = currentClass.FullName
+			} else if tsModule != "" {
+				// TS 顶层函数按模块（文件名）限定，避免不同文件同名函数在索引中互相歧义。
+				method.ClassFQN = tsModule
 			}
 			doc.Methods = append(doc.Methods, method)
 			currentMethod = &doc.Methods[len(doc.Methods)-1]
@@ -771,7 +780,57 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		})
 	}
 
+	// 合成 TS 模块容器：顶层函数带模块 ClassFQN 后，需同名容器才能被存储后端入库。
+	if tsModule != "" && hasMethodInClass(doc.Methods, tsModule) && !hasClassFullName(doc.Classes, tsModule) {
+		doc.Classes = append(doc.Classes, parser.ClassIR{
+			Name:      tsModule,
+			FullName:  tsModule,
+			Type:      "MODULE",
+			StartLine: 1,
+			EndLine:   lineNum,
+			Doc:       "module " + tsModule,
+		})
+	}
+	if tsModule != "" {
+		qualifyTSLocalCalls(doc, tsModule)
+	}
+
 	return doc, nil
+}
+
+// hasMethodInClass 报告是否存在归属指定 ClassFQN 的方法。
+func hasMethodInClass(methods []parser.MethodIR, classFQN string) bool {
+	for _, m := range methods {
+		if m.ClassFQN == classFQN {
+			return true
+		}
+	}
+	return false
+}
+
+// qualifyTSLocalCalls 把同模块内的裸名调用限定为 module.func。
+//
+// 只处理「本文件顶层函数」：导入函数仍保持裸名（无 import 解析，避免错误归属）。
+func qualifyTSLocalCalls(doc *parser.IRDocument, module string) {
+	local := make(map[string]struct{})
+	for _, m := range doc.Methods {
+		if m.ClassFQN == module {
+			local[m.Name] = struct{}{}
+		}
+	}
+	if len(local) == 0 {
+		return
+	}
+	prefix := module + "."
+	for i := range doc.Calls {
+		c := &doc.Calls[i]
+		if !strings.HasPrefix(c.CallerFQN, prefix) || strings.Contains(c.CalleeFQN, ".") {
+			continue
+		}
+		if _, ok := local[c.CalleeFQN]; ok {
+			c.CalleeFQN = prefix + c.CalleeFQN
+		}
+	}
 }
 
 // hasClassFullName 报告类列表中是否已存在指定 FullName 的类。

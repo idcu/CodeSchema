@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 227: fix(parser): TS 顶层函数按模块限定 FQN
+
+- 顶层函数 `ClassFQN` 改为文件名去扩展名，并合成 `MODULE` 容器保证入库；
+  同模块裸名调用改写为 `模块.foo`，导入函数保持裸名（不做 import 解析）。
+- 目的：消除同名跨文件函数在索引中互相覆盖（lytd 32 条同名 + 3 条漏抽）。
+- 实测 lytd ts regex：calls 385 不变，resolved 109 → 97，rate 0.2831 → 0.2519。
+  下降是消歧后的真实值：原先 5 条 `add` 等重复裸名被合并到一个键上算作可解析，
+  拆分后跨模块裸名调用在无 import 信息时如实判不可解析。旧口径不回退。
+- 测试：`TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions` 扩展断言模块限定与
+  导入裸名保留；`go test ./internal/parser/...` 通过。
+- 文档：`解析适配器.md`、bench README、`final-ledger` 同步。
+
 ### Commit 226: feat(parser): Go 局部变量 selector 类型消歧
 
 - 方法体内 `x := &T{}` / `x := T{}` / `var x *T` 记入局部类型表，`x.Method()` 限定为
