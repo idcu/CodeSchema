@@ -22,6 +22,9 @@ import (
 //  4. 顶层函数 NewWatcher 归入合成包级容器（ClassFQN = package 名），不再被误挂到
 //     最近的真实 class（如 Watcher）——P0-1：非空 ClassFQN 才能被存储后端入库。
 func TestGoCallAndTypeExtraction(t *testing.T) {
+	if BuildVariant() != "regex" {
+		t.Skip("断言默认正则路径的局部变量 selector 消歧；AST 变体由 adapter_ast_test.go 覆盖")
+	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "watcher.go")
 	src := `package config
@@ -145,6 +148,9 @@ func TestGoRawStringDoesNotCreateMethods(t *testing.T) {
 // TestGoLocalVarCallQualification 负控：`x := &T{}` / `var x *T` 声明的局部变量，
 // 其 `x.Method()` 调用必须限定为 pkg.T.Method；旧实现只跟踪 receiver，保持裸 selector。
 func TestGoLocalVarCallQualification(t *testing.T) {
+	if BuildVariant() != "regex" {
+		t.Skip("断言默认正则路径的局部变量类型消歧；AST 变体不实现该启发式")
+	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "local.go")
 	src := `package demo

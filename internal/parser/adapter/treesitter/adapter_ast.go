@@ -616,6 +616,14 @@ func astNodeName(n *ts.Node, lang string, src []byte) string {
 			}
 		}
 	}
+	// C/C++ function_definition 没有 name 字段，方法名在 declarator 链的末端
+	// （field_identifier/identifier/qualified_identifier）。直接取子树首个标识符
+	// 会误取函数体里的调用名（`void start() { fuelPump.pump(); }` → fuelPump）。
+	if lang == "cpp" || lang == "c" {
+		if name := cppDeclaratorName(n, src); name != "" {
+			return name
+		}
+	}
 	if name := n.ChildByFieldName("name"); name != nil && !name.IsNull() {
 		if s := string(name.Content(src)); s != "" {
 			return s
@@ -1000,6 +1008,22 @@ func isCppCtorCall(fn *ts.Node, src []byte) bool {
 		return false
 	}
 	return cppCtorTypes[text[idx+2:]]
+}
+
+// cppDeclaratorName 沿 declarator 字段向下取 C/C++ 声明名。
+func cppDeclaratorName(n *ts.Node, src []byte) string {
+	for cur := n; cur != nil && !cur.IsNull(); {
+		switch cur.Type() {
+		case "field_identifier", "identifier", "qualified_identifier", "destructor_name", "operator_name":
+			return string(cur.Content(src))
+		}
+		next := cur.ChildByFieldName("declarator")
+		if next == nil || next.IsNull() {
+			return ""
+		}
+		cur = next
+	}
+	return ""
 }
 
 // isFuncValueType 判断变量初始化值是否为函数表达式（供具名箭头函数登记为方法）。

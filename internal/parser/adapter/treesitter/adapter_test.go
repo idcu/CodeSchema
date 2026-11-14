@@ -399,6 +399,9 @@ public class Foo {
 // TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions 负控：顶层 function 与
 // 无返回类型注解的方法都必须入索引（旧 TS 模式强制 `):`，这两类全部漏解析）。
 func TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions(t *testing.T) {
+	if BuildVariant() != "regex" {
+		t.Skip("断言默认正则路径的 TS 模块限定 FQN；AST 变体由 adapter_ast_test.go 覆盖")
+	}
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "handlers.ts")
