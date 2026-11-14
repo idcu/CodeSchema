@@ -383,6 +383,51 @@ public class OrderService {
 	}
 }
 
+// TestASTAdapter_JavaNestedClassFlatten 负控：Java 嵌套测试类在 AST 路径下曾保留
+// 内层类名（ProcessCreationFormHasErrors.initUpdateForm），而正则路径归到外层类
+// （PetControllerTests.initUpdateForm）。同一方法两变体 FQN 不一致，人工真值与
+// 影响面查询在 treesitter 构建下失效；现统一归到最外层类，且不单独登记嵌套类。
+func TestASTAdapter_JavaNestedClassFlatten(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "PetControllerTests.java")
+	content := `package demo;
+
+public class PetControllerTests {
+    @Test
+    void outer() {}
+
+    static class ProcessCreationFormHasErrors {
+        @Test
+        void initUpdateForm() {}
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.Classes) != 1 || doc.Classes[0].FullName != "PetControllerTests" {
+		t.Fatalf("nested class should not be registered separately: %+v", doc.Classes)
+	}
+	found := false
+	for _, m := range doc.Methods {
+		if m.Name != "initUpdateForm" {
+			continue
+		}
+		found = true
+		if m.ClassFQN != "PetControllerTests" {
+			t.Fatalf("initUpdateForm ClassFQN = %q, want PetControllerTests", m.ClassFQN)
+		}
+	}
+	if !found {
+		t.Fatalf("initUpdateForm not parsed: %+v", doc.Methods)
+	}
+}
+
 // TestASTAdapter_Parse_Kotlin 验证 Kotlin 语法级解析。
 func TestASTAdapter_Parse_Kotlin(t *testing.T) {
 	a := NewTreeSitterAdapter()

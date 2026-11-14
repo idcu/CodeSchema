@@ -388,6 +388,15 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			if name == "" {
 				break
 			}
+			// Java 嵌套类：与正则路径一致（正则的 classPattern 带行首锚点且不含
+			// static 修饰，缩进嵌套类本就不登记），方法统一归到最外层类。
+			// 否则同一方法在 regex 下是 Outer.method、AST 下是 Inner.method，
+			// 人工真值与影响面查询跨构建变体不一致。
+			if lang == "java" && prevClass != nil {
+				curMethod = nil
+				scopeChanged = true
+				break
+			}
 			cls := parser.ClassIR{
 				Name:      name,
 				FullName:  name,

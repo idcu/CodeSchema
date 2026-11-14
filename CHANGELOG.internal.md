@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 241: fix(parser): Java 嵌套类方法统一归最外层类（跨变体 FQN 一致）
+
+- 正则路径 `classPattern` 带行首锚点且不含 `static`，缩进嵌套类不登记，方法归外层类；
+  AST 路径把 `static class ProcessCreationFormHasErrors` 单独登记，同一方法出现
+  `PetControllerTests.initUpdateForm`（regex）与 `ProcessCreationFormHasErrors.initUpdateForm`
+  （AST）两种 FQN，人工真值在 treesitter 构建下自检直接失败。
+- AST 对 Java 嵌套类同样不登记，`curClass` 保持最外层类；离开嵌套类作用域恢复。
+- 负控：`TestASTAdapter_JavaNestedClassFlatten`（旧实现 2 个类、内层 FQN，红；新实现绿）。
+- 同语料（petclinic java treesitter）前→后：prod_methods 91、test_methods 104、
+  calls 1609、resolved 304/0.1889、仓内 307/304 均不变（只改 FQN 字符串）；
+  人工真值从「自检失败」转为 40/40，P/R/F1 全 1.0000，与 regex 变体一致。
+
 ### Commit 240: fix(parser): Go 跨行调用起始行计入调用边
 
 - `callPattern` 要求 `(` 与 `)` 同行；参数换行的调用
