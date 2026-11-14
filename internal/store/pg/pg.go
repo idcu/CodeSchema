@@ -117,14 +117,13 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 	if err != nil {
 		return err
 	}
-	if len(ir.Classes) > 0 {
-		if err := upsertClassesTx(ctx, tx, fileID, ir.Classes, ir.Source); err != nil {
-			return err
-		}
-		// 方法随类写入（骨架历史缺陷：method 从未落库，GetMethodsByClassID 恒空）
-		if err := upsertMethodsTx(ctx, tx, fileID, ir.Classes, ir.Methods, ir.Source); err != nil {
-			return err
-		}
+	// 全量替换：类集合为空时也必须执行，否则旧类/旧方法残留（重索引孤儿）。
+	if err := upsertClassesTx(ctx, tx, fileID, ir.Classes, ir.Source); err != nil {
+		return err
+	}
+	// 方法随类写入（骨架历史缺陷：method 从未落库，GetMethodsByClassID 恒空）
+	if err := upsertMethodsTx(ctx, tx, fileID, ir.Classes, ir.Methods, ir.Source); err != nil {
+		return err
 	}
 	// 变量/常量随类与方法写入（2026-09-03 新增；须在 upsertClassesTx/upsertMethodsTx 之后，
 	// 因为 class 被全量重插、method 需按 class_id+name 回查 id）。
@@ -138,10 +137,9 @@ func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
 			return err
 		}
 	}
-	if len(ir.Calls) > 0 {
-		if err := upsertCallsTx(ctx, tx, fileID, ir.Calls, ir.Source); err != nil {
-			return err
-		}
+	// 全量替换：无调用时也要清空旧边，避免悬空调用。
+	if err := upsertCallsTx(ctx, tx, fileID, ir.Calls, ir.Source); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

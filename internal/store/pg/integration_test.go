@@ -142,6 +142,70 @@ func TestPGStore_EndToEnd(t *testing.T) {
 	_ = s.DeleteFile(ctx, file.ID)
 }
 
+// TestPGStore_ReindexClearsWhenEmpty 负控（P1-6）：
+// 重索引后类/方法/调用集合为空时，PG 必须清掉旧行（旧实现仅在 len>0 时执行 upsert）。
+func TestPGStore_ReindexClearsWhenEmpty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	dsn, cleanup := withPG(t, ctx)
+	defer cleanup()
+
+	s := NewPGStore()
+	if err := s.Open(ctx, dsn); err != nil {
+		t.Fatalf("PG open: %v", err)
+	}
+	defer s.Close()
+	if err := s.InitSchema(ctx); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	path := fmt.Sprintf("/tmp/pg-it/reindex-%d.go", time.Now().UnixNano())
+	withData := &parser.IRDocument{
+		Source: "pg-integration", Language: "go", FilePath: path, FileHash: "h1",
+	}
+	withData.Classes = []parser.ClassIR{{Name: "Reindex", FullName: "pkg.Reindex", Type: "CLASS"}}
+	withData.Methods = []parser.MethodIR{{Name: "Gone", ClassFQN: "pkg.Reindex"}}
+	withData.Calls = []parser.CallIR{{CallerFQN: "pkg.Reindex.Gone", CalleeFQN: "pkg.Other.Run"}}
+	if err := s.UpsertIR(ctx, withData); err != nil {
+		t.Fatalf("UpsertIR(with data): %v", err)
+	}
+	file, err := s.GetFileByPath(ctx, path)
+	if err != nil || file == nil {
+		t.Fatalf("GetFileByPath: %v (file=%v)", err, file)
+	}
+
+	empty := &parser.IRDocument{
+		Source: "pg-integration", Language: "go", FilePath: path, FileHash: "h2",
+	}
+	if err := s.UpsertIR(ctx, empty); err != nil {
+		t.Fatalf("UpsertIR(empty): %v", err)
+	}
+
+	classes, err := s.GetClassesByFileID(ctx, file.ID)
+	if err != nil {
+		t.Fatalf("GetClassesByFileID: %v", err)
+	}
+	if len(classes) != 0 {
+		t.Fatalf("stale classes after reindex: %v", classes)
+	}
+	calls, err := s.GetCallsByFileID(ctx, file.ID)
+	if err != nil {
+		t.Fatalf("GetCallsByFileID: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("stale calls after reindex: %v", calls)
+	}
+	var methodCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM method WHERE full_name LIKE 'pkg.Reindex.%'`).Scan(&methodCount); err != nil {
+		t.Fatalf("count method: %v", err)
+	}
+	if methodCount != 0 {
+		t.Fatalf("stale methods after reindex: %d", methodCount)
+	}
+	_ = s.DeleteFile(ctx, file.ID)
+}
+
 // TestPGStore_FKConstraints 验证 FK 约束与 ON DELETE CASCADE（2026-09-03 新增）：
 //  1. 引用不存在父记录的写入被 PG 拒绝（FK 生效）；
 //  2. 正常写入后 DeleteFile → class/method/call 级联清空（CASCADE 生效）。

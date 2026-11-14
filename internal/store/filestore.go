@@ -216,10 +216,12 @@ func (fs *FileStore) DeleteFile(ctx context.Context, fileID int64) error {
 			delete(fs.files, path)
 			delete(fs.classes, fileID)
 			delete(fs.calls, fileID)
-			// 清理关联的 methods 与其标签
+			// 清理关联的 methods 与其标签（methodTags 以 method ID 为键，不能拿 class ID 删）
 			for _, c := range classes {
+				for _, m := range fs.methods[c.ID] {
+					delete(fs.methodTags, m.ID)
+				}
 				delete(fs.methods, c.ID)
-				delete(fs.methodTags, c.ID)
 				delete(fs.classTags, c.ID)
 			}
 			return nil
@@ -367,7 +369,7 @@ func (fs *FileStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error 
 
 	// 保存文件级 imports 元数据
 	fs.mu.Lock()
-	if f, ok := fs.files[ir.FilePath]; ok && len(ir.Imports) > 0 {
+	if f, ok := fs.files[ir.FilePath]; ok {
 		f.Imports = ir.Imports
 	}
 	fs.mu.Unlock()
@@ -780,17 +782,16 @@ func (fs *FileStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) e
 			}
 		}
 
-		if len(ir.Calls) > 0 {
-			var callRecords []CallRecord
-			for _, c := range ir.Calls {
-				callRecords = append(callRecords, CallRecord{
-					CallerFQN: c.CallerFQN, CalleeFQN: c.CalleeFQN, CallType: c.CallType, LineNumber: c.LineNumber,
-				})
-			}
-			fs.calls[fileID] = callRecords
+		// 全量替换：新 IR 无调用时也要清空旧边，避免重索引留下悬空调用。
+		callRecords := make([]CallRecord, 0, len(ir.Calls))
+		for _, c := range ir.Calls {
+			callRecords = append(callRecords, CallRecord{
+				CallerFQN: c.CallerFQN, CalleeFQN: c.CalleeFQN, CallType: c.CallType, LineNumber: c.LineNumber,
+			})
 		}
+		fs.calls[fileID] = callRecords
 
-		if f, ok := fs.files[ir.FilePath]; ok && len(ir.Imports) > 0 {
+		if f, ok := fs.files[ir.FilePath]; ok {
 			f.Imports = ir.Imports
 		}
 	}

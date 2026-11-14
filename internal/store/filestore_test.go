@@ -139,6 +139,96 @@ func TestFileStore_DeleteFile(t *testing.T) {
 	}
 }
 
+// TestFileStore_DeleteFileClearsMethodTags 负控（P2-10）：
+// DeleteFile 过去用 class ID 删 methodTags，真实键是 method ID，标签会残留。
+func TestFileStore_DeleteFileClearsMethodTags(t *testing.T) {
+	ctx := context.Background()
+	fs := &FileStore{}
+	if err := fs.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer fs.Close()
+
+	fileID, err := fs.UpsertFile(ctx, "/repo/svc.go", "h1", 20, 200)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	if err := fs.UpsertClasses(ctx, fileID, []parser.ClassIR{{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS"}}); err != nil {
+		t.Fatalf("UpsertClasses: %v", err)
+	}
+	classes, _ := fs.GetClassesByFileID(ctx, fileID)
+	if len(classes) != 1 {
+		t.Fatalf("expected 1 class, got %d", len(classes))
+	}
+	classID := classes[0].ID
+	if err := fs.UpsertMethods(ctx, classID, []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.Svc"}}); err != nil {
+		t.Fatalf("UpsertMethods: %v", err)
+	}
+	methods, _ := fs.GetMethodsByClassID(ctx, classID)
+	if len(methods) != 1 {
+		t.Fatalf("expected 1 method, got %d", len(methods))
+	}
+	methodID := methods[0].ID
+	if err := fs.UpsertMethodTags(ctx, methodID, []string{"hot"}); err != nil {
+		t.Fatalf("UpsertMethodTags: %v", err)
+	}
+
+	if err := fs.DeleteFile(ctx, fileID); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+	tags, err := fs.GetTagsByMethodID(ctx, methodID)
+	if err != nil {
+		t.Fatalf("GetTagsByMethodID: %v", err)
+	}
+	if len(tags) != 0 {
+		t.Fatalf("expected method tags cleared, got %v", tags)
+	}
+}
+
+// TestFileStore_BulkUpsertClearsCallsWhenEmpty 负控（P1-6）：
+// 新 IR 无调用时应清空旧调用边，否则重索引留下悬空边。
+func TestFileStore_BulkUpsertClearsCallsWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+	fs := &FileStore{}
+	if err := fs.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer fs.Close()
+
+	withCalls := &parser.IRDocument{
+		Source: "treesitter", Language: "go", FilePath: "/repo/a.go", FileHash: "h1",
+		Classes: []parser.ClassIR{{Name: "A", FullName: "pkg.A", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.A"}},
+		Calls:   []parser.CallIR{{CallerFQN: "pkg.A.Run", CalleeFQN: "pkg.B.Helper"}},
+	}
+	if err := fs.BulkUpsert(ctx, []*parser.IRDocument{withCalls}); err != nil {
+		t.Fatalf("BulkUpsert(with calls): %v", err)
+	}
+	f, _ := fs.GetFileByPath(ctx, "/repo/a.go")
+	if f == nil {
+		t.Fatal("file not found")
+	}
+	noCalls := &parser.IRDocument{
+		Source: "treesitter", Language: "go", FilePath: "/repo/a.go", FileHash: "h2",
+		Classes: []parser.ClassIR{{Name: "A", FullName: "pkg.A", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.A"}},
+	}
+	if err := fs.BulkUpsert(ctx, []*parser.IRDocument{noCalls}); err != nil {
+		t.Fatalf("BulkUpsert(no calls): %v", err)
+	}
+	f, _ = fs.GetFileByPath(ctx, "/repo/a.go")
+	if f == nil {
+		t.Fatal("file not found after reindex")
+	}
+	calls, err := fs.GetCallsByFileID(ctx, f.ID)
+	if err != nil {
+		t.Fatalf("GetCallsByFileID: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected stale calls cleared, got %v", calls)
+	}
+}
+
 func TestFileStore_UpsertIR(t *testing.T) {
 	dir := t.TempDir()
 	fs := &FileStore{}

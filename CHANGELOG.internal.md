@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 213: fix(store): 重索引孤儿清理补齐三后端（R3-1 / P1-6、P2-10）
+
+- 根因：file/sqlite 的 `UpsertIR` 主路径前序已修复，但仍有四个缺口：
+  ① `FileStore.DeleteFile` 用 class ID 删 `methodTags`（真实键是 method ID）→ 标签残留；
+  ② `FileStore.BulkUpsert` 仅在 `len(ir.Calls)>0` 时替换 calls → 新 IR 无调用时旧边残留；
+  ③ `SQLiteStore.UpsertClasses` 公开路径只删 class，不先删 method/method_tag → 方法孤儿；
+  ④ PG `UpsertIR` 仅在类/调用非空时执行清理 → 类或调用清空时旧行残留。
+- 修复：DeleteFile 按方法逐条清标签；file 的 calls/imports 无条件全量替换；
+  sqlite 公开 UpsertClasses 固定「method_tag → method → class_tag → class」顺序；
+  PG 的 `upsertClassesTx`/`upsertMethodsTx`/`upsertCallsTx` 改为无条件执行（空集合也清旧行）。
+- 负控（先红后绿）：
+  `TestFileStore_DeleteFileClearsMethodTags` 修前 `got [hot]`（红）→ 修后空（绿）；
+  `TestFileStore_BulkUpsertClearsCallsWhenEmpty` 修前残留 `{pkg.A.Run pkg.B.Helper}`（红）→ 修后 0（绿）；
+  `TestSQLite_UpsertClassesPublicClearsMethods` 修前孤儿 `[Gone pkg.Old.Gone]`（红）→ 修后 0（绿）；
+  新增 `TestPGStore_ReindexClearsWhenEmpty`（`-tags pg`，类/方法/调用清空后均为 0）。
+- 文档：`存储后端.md` 新增「重索引语义（R3-1）」；counts 61935（61.9k）。
+
 ### Commit 212: perf(service): 请求内调用图复用 + depth 上限 + ctx 取消（R2-5 / P1-13）
 
 - 根因：`GetImpact` 先 `ResolveImpactNode` 再 `FindImpactNodesWithDepth`，`GetCallGraph`

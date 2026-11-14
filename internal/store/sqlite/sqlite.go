@@ -324,6 +324,22 @@ func (s *SQLiteStore) UpsertClasses(ctx context.Context, fileID int64, classes [
 	}
 	defer tx.Rollback()
 
+	// 先清方法标签/方法，再删类：SQLite 无 FK CASCADE，
+	// 反过来先删 class 会让后续按 class_id 子查询删不到任何行，留下方法孤儿。
+	if _, err := tx.Exec(`
+		DELETE FROM method_tag WHERE method_id IN (
+			SELECT id FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)
+		)`, fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)`, fileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM class_tag WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)`, fileID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec("DELETE FROM class WHERE file_id = ?", fileID); err != nil {
 		return err
 	}

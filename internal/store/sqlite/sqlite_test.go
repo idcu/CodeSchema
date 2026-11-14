@@ -591,6 +591,38 @@ func TestSQLite_ConcurrentReadWrite(t *testing.T) {
 // TestSQLite_ReindexRemovesStaleMethods 负控（P1-6）：
 // 重索引同一文件时，旧 class 下的 method 必须先于 class 删除（无 FK CASCADE），
 // 否则每次文件变更都留下孤儿方法。
+// TestSQLite_UpsertClassesPublicClearsMethods 负控（P1-6）：
+// 公开 UpsertClasses 过去只删 class，直接调用会留下方法孤儿。
+func TestSQLite_UpsertClassesPublicClearsMethods(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	fileID, err := st.UpsertFile(ctx, "/repo/old.go", "h1", 10, 100)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	if err := st.UpsertClasses(ctx, fileID, []parser.ClassIR{{Name: "Old", FullName: "pkg.Old", Type: "CLASS"}}); err != nil {
+		t.Fatalf("UpsertClasses: %v", err)
+	}
+	classes, _ := st.GetClassesByFileID(ctx, fileID)
+	if len(classes) != 1 {
+		t.Fatalf("expected 1 class, got %d", len(classes))
+	}
+	oldClassID := classes[0].ID
+	if err := st.UpsertMethods(ctx, oldClassID, []parser.MethodIR{{Name: "Gone", ClassFQN: "pkg.Old"}}); err != nil {
+		t.Fatalf("UpsertMethods: %v", err)
+	}
+	if err := st.UpsertClasses(ctx, fileID, []parser.ClassIR{{Name: "New", FullName: "pkg.New", Type: "CLASS"}}); err != nil {
+		t.Fatalf("UpsertClasses(new): %v", err)
+	}
+	orphans, err := st.GetMethodsByClassID(ctx, oldClassID)
+	if err != nil {
+		t.Fatalf("GetMethodsByClassID: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("expected orphan methods cleared, got %v", orphans)
+	}
+}
+
 func TestSQLite_ReindexRemovesStaleMethods(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
