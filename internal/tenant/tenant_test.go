@@ -311,6 +311,55 @@ func TestManager_Apply_ChangeTriggersRebuild(t *testing.T) {
 	}
 }
 
+// TestManager_Apply_ParserAndStorageChangeTriggersRebuild 负控（P2-5）：
+// parser / storage 变化必须触发租户重建，否则热重载看似生效实则无效。
+func TestManager_Apply_ParserAndStorageChangeTriggersRebuild(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name   string
+		mutate func(*config.Config)
+	}{
+		{"parser.codegraph.enabled", func(c *config.Config) {
+			c.Tenants[0].Parser.CodeGraph.Enabled = true
+		}},
+		{"storage.max_open_conns", func(c *config.Config) {
+			c.Tenants[0].Storage.MaxOpenConns = 8
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			// 每次打开独立数据目录：重建时旧实例仍持锁，不能复用同一 DSN。
+			openUnique := func(_ context.Context, _ *config.Config, _ string) (store.Store, error) {
+				st := store.NewStore("file")
+				if err := st.Open(context.Background(), t.TempDir()); err != nil {
+					return nil, err
+				}
+				return st, nil
+			}
+			cfg1 := multiTenantCfg(t, "a")
+			dsn := cfg1.Tenants[0].Storage.DSN
+			m, err := NewManager(ctx, cfg1, openUnique)
+			if err != nil {
+				t.Fatalf("NewManager: %v", err)
+			}
+			defer m.Close()
+			oldRT, _ := m.Runtime("a")
+
+			cfg2 := multiTenantCfg(t, "a")
+			cfg2.Tenants[0].Storage.DSN = dsn // 仅目标配置变化，避免 DSN 差异掩盖问题
+			tc.mutate(cfg2)
+			if err := m.Apply(ctx, cfg2); err != nil {
+				t.Fatalf("Apply(%s changed): %v", tc.name, err)
+			}
+			newRT, _ := m.Runtime("a")
+			if oldRT == newRT {
+				t.Errorf("%s 变化未触发租户重建", tc.name)
+			}
+		})
+	}
+}
+
 // TestManager_Apply_ScannerWorkersTriggersRebuild 验证热重载：scanner.workers /
 // 旁路限额变化同样触发实例重建（服务级配置热重载补齐，Commit 121）。
 func TestManager_Apply_ScannerWorkersTriggersRebuild(t *testing.T) {

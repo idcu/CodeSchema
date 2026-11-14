@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"reflect"
 	"sync"
 
 	"gitee.com/idcu-go/metrics"
@@ -394,17 +395,18 @@ func (m *Manager) Apply(ctx context.Context, base *config.Config) error {
 }
 
 // tenantDirty 判断租户关键配置是否发生变化，需要重建实例。
-// 仅比较影响运行期行为的字段，避免日志级别等无关差异触发无谓重建。
+//
+// 按子结构整体比较 project/storage/parser/scanner：适配器注册、连接池、向量
+// 索引等运行期行为都由这些配置决定，逐字段枚举容易在新增字段时漏判（P2-5）。
+// Server/AI/Tenants 等不影响单租户实例的字段不参与比较，避免无谓重建。
 func tenantDirty(old *Tenant, tgt tenantTarget) bool {
-	return old.Name != tgt.name ||
-		old.AutoScan != tgt.autoScan ||
-		old.Watch != tgt.watch ||
-		old.Cfg.Project.Name != tgt.cfg.Project.Name ||
-		old.Cfg.Project.Root != tgt.cfg.Project.Root ||
-		old.Cfg.Storage.DSN != tgt.cfg.Storage.DSN ||
-		old.Cfg.Scanner.Workers != tgt.cfg.Scanner.Workers ||
-		old.Cfg.Scanner.FileSizeLimitMB != tgt.cfg.Scanner.FileSizeLimitMB ||
-		old.Cfg.Scanner.LineCountLimit != tgt.cfg.Scanner.LineCountLimit
+	if old.Name != tgt.name || old.AutoScan != tgt.autoScan || old.Watch != tgt.watch {
+		return true
+	}
+	return !reflect.DeepEqual(old.Cfg.Project, tgt.cfg.Project) ||
+		!reflect.DeepEqual(old.Cfg.Storage, tgt.cfg.Storage) ||
+		!reflect.DeepEqual(old.Cfg.Parser, tgt.cfg.Parser) ||
+		!reflect.DeepEqual(old.Cfg.Scanner, tgt.cfg.Scanner)
 }
 
 func sliceContains(s []string, v string) bool {
