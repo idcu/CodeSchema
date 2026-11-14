@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 191: fix(server): 健康检查如实上报存储驱动与向量状态（R3-9 / P2-15）
+
+- 问题一：`/health/db` 恒返回 `"type":"file"`，与实际后端（sqlite/pg）无关。
+  修复：`HTTPServer` 增加 `storageType` 与 `SetStorageType`，cmd 层注入
+  `cfg.Storage.Driver`（空值归一为 `file`）。
+- 问题二：向量健康检查 `_ = vs.Size(); return nil` 恒为 ok——`Size` 只是内存计数，
+  后端不可用也显示健康。修复：改注入 `vs.ListIDs(ctx)`，真实读操作会返回后端错误并
+  尊重 ctx 取消。
+- 负控（先红后绿）：`TestHealthDBEndpointReportsDriver`——注入 `pg` 后断言
+  `type=="pg"`；修复前实测 `type = file`（红），修复后绿；`TestHealthDBEndpoint` 保持绿。
+- 文档：`docs/03-部署运维/README.md` 健康检查段补充驱动上报与向量探测口径。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60.1k 不变。
+
 ### Commit 190: fix(service): 查询缓存 key 含 IncludeTrace，命中返回深拷贝（R2-10 / P2-2）
 
 - 问题：`queryCacheKey` 未包含 `IncludeTrace`。先请求 `include_trace=false` 并写入缓存后，

@@ -419,6 +419,8 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 	httpSrv := server.NewHTTPServer(nil, *addr)
 	httpSrv.SetTenantManager(mgr)
 	httpSrv.SetContextDefaults(rt.ContextOptionsFromConfig(cfg))
+	// 健康端点如实上报实际存储驱动（空值 = 默认 file）。
+	httpSrv.SetStorageType(cfg.Storage.Driver)
 	if *authToken != "" {
 		httpSrv.SetAuthToken(*authToken)
 	}
@@ -469,12 +471,12 @@ func serveCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.Config
 			httpSrv.SetVizHandler(vizHandler)
 			fmt.Println("vector index visualization enabled at /viz")
 
-			// 向量索引健康检查：真实探测当前向量存储（Size 返回文档数，
-			// 用其探活；后端不可用视为 degraded）。
+			// 向量索引健康检查：ListIDs 是真实后端读操作（会返回后端错误并
+			// 尊重 ctx 取消）；Size 只在内存计数，无法发现后端不可用。
 			vs := rt0.VecStore
 			httpSrv.SetVectorHealthCheck(func(ctx context.Context) error {
-				_ = vs.Size()
-				return nil
+				_, err := vs.ListIDs(ctx)
+				return err
 			})
 		}
 	}

@@ -25,7 +25,7 @@ R3-5,C,P1,cloneConfig补齐AI/Vector字段,P1-17,R0-1,0.5,租户继承AI key/bas
 R3-6,C,P1,启动时调用Validate,P1-18,R3-5,1,非法配置启动失败并明确报错；合法配置仍启动,todo,必做
 R3-7,C,P2,目录0700/文件0600/SQLite chmod,P2-13,R0-1,0.75,目录0700文件0600；功能不变,todo,必做
 R3-8,C,P2,CORS默认收敛,P2-14,R0-1,0.5,启用认证时不返回通配CORS；文档说明,todo,必做
-R3-9,C,P2,健康检查报告真实驱动与向量状态,P2-15,R0-1,1.5,/health/db报告实际驱动；向量不可用时非ok；健康时仍ok,todo,必做
+R3-9,C,P2,健康检查报告真实驱动与向量状态,P2-15,R0-1,1.5,/health/db报告实际驱动；向量不可用时非ok；健康时仍ok,done,必做
 R3-10,C,P2,PG/SQLite热点索引,P2-11,R3-2,2,call(file_id)/class_tag(tag_id)/method_tag(tag_id)索引存在；查询计划使用索引,todo,必做
 R3-11,C,P2,PG/SQLite连接池上限,P2-12,R3-2,1.5,连接池上限可配置；默认值有说明；压测无连接泄漏,todo,必做
 R3-12,C,P2,FileStore持久化可靠性,P2-9,R3-1,2.5,强杀后不丢已确认写入或明确恢复策略；损坏文件返回错误；无data race,todo,必做

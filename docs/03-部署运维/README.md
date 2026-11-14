@@ -64,6 +64,8 @@ watcher:
 ## 健康与可观测
 
 - 健康检查：`/health` `/health/db` `/health/kv` `/health/vector`。
+  `/health/db` 的 `type` 如实返回实际驱动（`file`/`sqlite`/`pg`）；`/health/vector`
+  以 `ListIDs` 真实读探测，后端不可用返回 `degraded`。
 - 指标：`/metrics`（Prometheus）。
 - 可视化：`/viz`（向量索引状态，默认栈可用）。
 - 日志：结构化（log/slog）；支持链路追踪。

@@ -59,6 +59,9 @@ type HTTPServer struct {
 	// 未注入时健康端点返回 not_configured/默认描述，行为向后兼容）。
 	kvHealth     func(ctx context.Context) error
 	vectorHealth func(ctx context.Context) error
+	// storageType 实际存储驱动（file/sqlite/pg），由 cmd 层注入；
+	// 未设置时按默认 file 输出，避免健康端点谎报后端类型。
+	storageType string
 	// ctxDefaults 上下文裁剪的服务端默认值（来自 config.context）；
 	// 请求显式传参时以请求为准，未传时取这里的值。
 	ctxDefaults service.ContextOptions
@@ -231,6 +234,15 @@ func (h *HTTPServer) SetVectorHealthCheck(fn func(ctx context.Context) error) {
 	h.vectorHealth = fn
 }
 
+// SetStorageType 注入实际存储驱动标识（file/sqlite/pg），供 /health/db 如实上报。
+// 空值视为 file（默认后端）。
+func (h *HTTPServer) SetStorageType(driver string) {
+	if driver == "" {
+		driver = "file"
+	}
+	h.storageType = driver
+}
+
 // serviceForRequest 从请求中解析租户 ID 并返回对应 Service。
 // 单项目模式下忽略租户标识，始终返回唯一实例。
 //
@@ -392,10 +404,14 @@ func (h *HTTPServer) handleHealthDB(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status = "degraded"
 	}
+	driver := h.storageType
+	if driver == "" {
+		driver = "file"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     status,
 		"latency_ms": latency,
-		"type":       "file",
+		"type":       driver,
 	})
 }
 

@@ -222,6 +222,24 @@ func TestHealthDBEndpoint(t *testing.T) {
 	}
 }
 
+// TestHealthDBEndpointReportsDriver P2-15 负控：/health/db 的 type 必须是实际存储驱动，
+// 不能恒为 "file"。
+func TestHealthDBEndpointReportsDriver(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	srv.SetStorageType("pg")
+	req := httptest.NewRequest(http.MethodGet, "/health/db", nil)
+	w := httptest.NewRecorder()
+	srv.handleHealthDB(w, req)
+
+	var body map[string]any
+	if err := json.NewDecoder(w.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["type"] != "pg" {
+		t.Fatalf("health/db type = %v, want pg（不能谎报为 file）", body["type"])
+	}
+}
+
 func TestHealthKVEndpoint(t *testing.T) {
 	srv := newTestHTTPServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/health/kv", nil)
