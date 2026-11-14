@@ -122,6 +122,13 @@ func TestMethodIndex_CandidatesBySuffix(t *testing.T) {
 	if got := idx.candidates("config.Other.Reload"); len(got) != 0 {
 		t.Fatalf("ambiguous candidates = %v, want none", got)
 	}
+	// suffixCandidate 只认「去掉前缀后精确命中」，用于区分前缀差异与真实短名歧义。
+	if got, ok := idx.suffixCandidate("config.Watcher.Reload"); !ok || got != "Watcher.Reload" {
+		t.Fatalf("suffixCandidate(pkg.Watcher.Reload) = (%q, %v), want (Watcher.Reload, true)", got, ok)
+	}
+	if got, ok := idx.suffixCandidate("config.Other.Reload"); ok {
+		t.Fatalf("suffixCandidate(ambiguous) = (%q, true), want not found", got)
+	}
 }
 
 // TestPrepareEvaluation_UsesAllPairsForSampledProds 负控：采样只收缩评估的

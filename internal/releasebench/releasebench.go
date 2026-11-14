@@ -68,6 +68,11 @@ type CallGraph struct {
 	RepoResolvable         int     `json:"repo_resolvable"`
 	RepoResolvableResolved int     `json:"repo_resolvable_resolved"`
 	RepoResolutionRate     float64 `json:"repo_resolution_rate"`
+	// RepoUnresolvedPrefixed 是仓内候选但严格口径未解析、且去前缀后能精确命中的边
+	// （如 callee `pkg.Type.Method` vs 索引 `Type.Method`）。生产 resolveCallee 的
+	// 逐级后缀规则能链接，属 FQN 形态差异，不是解析缺口；剩余未解析（候选减已解析
+	// 再减本字段）才是短名多义。按当前候选定义后者恒为 0，报告里仅作推导展示。
+	RepoUnresolvedPrefixed int `json:"repo_unresolved_prefixed"`
 }
 
 // Report 单仓基准报告。
@@ -203,6 +208,8 @@ func Run(ctx context.Context, repoPath string, opts Options) (*Report, error) {
 			report.CallGraph.RepoResolvable++
 			if resolved {
 				report.CallGraph.RepoResolvableResolved++
+			} else if _, ok := idx.suffixCandidate(c.CalleeFQN); ok {
+				report.CallGraph.RepoUnresolvedPrefixed++
 			}
 		}
 	}
@@ -307,6 +314,9 @@ func (idx *methodIndex) add(fqn string) {
 	idx.count[fqn]++
 }
 
+// resolve 是严格口径：精确 FQN 或全局唯一短名，刻意不做前缀后缀匹配，
+// 与生产 resolveCallee（支持逐级去前缀）保持区分；仅前缀差异的未解析边
+// 由 RepoUnresolvedPrefixed 单独计数，避免把它误读为解析能力退化。
 func (idx *methodIndex) resolve(name string) (string, bool) {
 	// 同一 FQN 可能被多次登记（Java 重载、同名多声明）；精确命中即唯一，
 	// 不能用 count==1 判歧义，否则会把真实方法误判为不可解析。
@@ -325,18 +335,27 @@ func (idx *methodIndex) candidates(callee string) []string {
 	if idx.count[callee] > 0 {
 		return []string{callee}
 	}
-	parts := strings.Split(callee, ".")
-	for i := 1; i < len(parts); i++ {
-		suffix := strings.Join(parts[i:], ".")
-		if idx.count[suffix] > 0 {
-			return []string{suffix}
-		}
+	if suffix, ok := idx.suffixCandidate(callee); ok {
+		return []string{suffix}
 	}
 	// 与 resolve 的短名回退保持一致：短名全局唯一时才算仓内有候选。
 	if cands := idx.short[shortName(callee)]; len(cands) == 1 {
 		return cands
 	}
 	return nil
+}
+
+// suffixCandidate 返回去掉前导包/类型段后能精确命中的索引键。
+// 用于区分「只是 FQN 前缀不一致」（生产 resolveCallee 可后缀链接）与短名多义。
+func (idx *methodIndex) suffixCandidate(callee string) (string, bool) {
+	parts := strings.Split(callee, ".")
+	for i := 1; i < len(parts); i++ {
+		suffix := strings.Join(parts[i:], ".")
+		if idx.count[suffix] > 0 {
+			return suffix, true
+		}
+	}
+	return "", false
 }
 
 func shortName(fqn string) string {
@@ -461,11 +480,14 @@ func evaluate(ctx context.Context, svc *service.Service, truth map[string]map[st
 		if err != nil {
 			continue
 		}
-		predicted += len(links)
 		pred := make(map[string]struct{}, len(links))
 		for _, l := range links {
 			pred[l.TestMethod] = struct{}{}
 		}
+		// 按测试方法去重后计数：同一测试经由多个策略命中只算一条链接。
+		// 直接用 len(links) 会随策略聚合顺序波动（跨策略重复条数不稳定），
+		// 导致报告字段不可复现，而 TP/FP/FN 不受影响。
+		predicted += len(pred)
 		for t := range pred {
 			if _, ok := truth[prod][t]; ok {
 				out.TP++
@@ -556,6 +578,10 @@ func GenerateMarkdown(r *Report) string {
 		r.BuildVariant, r.CallGraph.Calls, r.CallGraph.UniqueCallers,
 		r.CallGraph.UniqueCallees, r.CallGraph.ResolvedCalls, r.CallGraph.ResolutionRate,
 		r.CallGraph.RepoResolvable, r.CallGraph.RepoResolvableResolved, r.CallGraph.RepoResolutionRate)
+	if n := r.CallGraph.RepoResolvable - r.CallGraph.RepoResolvableResolved; n > 0 {
+		fmt.Fprintf(&b, "\n> 仓内未解析 %d 条：其中 FQN 仅前缀不一致（生产 `resolveCallee` 可后缀链接）%d 条，短名多义 %d 条。\n",
+			n, r.CallGraph.RepoUnresolvedPrefixed, n-r.CallGraph.RepoUnresolvedPrefixed)
+	}
 	if r.Manual != nil {
 		fmt.Fprintf(&b, "\n%s", manualMarkdown(r.Manual))
 	}
