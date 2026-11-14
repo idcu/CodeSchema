@@ -1,6 +1,6 @@
 # 公开基准（S-2）· 2026-11-14
 
-> 最后更新：2026-11-14
+> 最后更新：2026-11-15
 
 首轮公开基准：在 3 个真实仓库上测「测试关联 P/R/F1」与「调用图结构指标」。
 **只报告、不设 CI 阈值**（roadmap R5-4）；原始数据见同目录 `before-*.json`（S-2 首轮）、
@@ -8,7 +8,8 @@
 `final-*.json`（R5-12/R5-13 后的历史归档，人工真值仍为 45 对）、`post-*.json`（S-2h 终态，
 人工真值 207 对 + 解析/链接修复后）、`manual-pre184-go.json`（人工真值的修复前对照）、
 `terminal-*.json`（S-2i 收尾：人工真值 321 对，Go 错例清零 + Java 扩至 152 对后）、
-`precision-*.json`（S-2k：TS 方法过匹配收敛 + Go 命名 FP 清零，人工真值 358 对）。
+`precision-*.json`（S-2k：TS 方法过匹配收敛 + Go 命名 FP 清零，人工真值 358 对）、
+`manual-truth-go-179.json`（2026-11-15 人工真值补录后 Go 179/0/0 的原始报告）。
 
 性能维度单独成文：[perf-baseline.md](./perf-baseline.md)（S-3 基线，非优化结论）——
 四个语料（本仓 / petclinic / lytd / Go 标准库 `src`）的索引吞吐、内存峰值、
@@ -279,7 +280,7 @@ caller 为空 36 → 30，净移除 6 条假边。剩余 30 条为包级 `var` �
 策略结果来自「扫描 → 入库 → 反查」链路。因此接近饱和的数字衡量的是**链路完整性
 与 FQN 归一**，不再证明某种独立启发式的判别力。这正是下面引入人工真值的原因。
 
-## 人工真值（独立来源，S-2h/S-2i/S-2k；2026-11-14 扩至 358 对）
+## 人工真值（独立来源，S-2h/S-2i/S-2k；2026-11-14 扩至 358 对，2026-11-15 补录至 364 对）
 
 数据集：`internal/releasebench/testdata/manual-truth.json`（`version: 2`）。
 真值由**逐个阅读测试方法体**手工标注，**不来自 IR 调用边**，也不使用
@@ -307,12 +308,12 @@ caller 为空 36 → 30，净移除 6 条假边。剩余 30 条为包级 `var` �
 6. **规模守护**：`TestManualDatasetValid` 要求 `version == 2` 且 `pairs >= 200`，
    防止数据集回退到不足统计意义的规模。
 7. **置信说明**：比例指标给出 **Wilson 95% 置信区间**（二项分布，不对称近似）；
-   358 对样本下 Go recall（173 对）的区间半宽约 ±2.2pp，Java 152 对约 ±3.5pp。
+   364 对样本下 Go recall（179 对）的区间半宽约 ±2.1pp，Java 152 对约 ±3.5pp。
 8. **提交隔离**：标注文件（`manual-truth.json`）的变更必须与解析/链接代码修复分开提交，
    Body 说明新增/删除的 pair 与依据；禁止为让测试通过而删难例或放宽纳入标准。
    判据本身也要分层：负控单测证明行为，人工真值衡量召回，两者不得互相替代。
 
-规模：3 个仓库、**358 条人工 pair（Go 173 / Java 152 / TS 33）**；Go 标注
+规模：3 个仓库、**364 条人工 pair（Go 179 / Java 152 / TS 33）**；Go 标注
 `internal/store/filestore_test.go`、`internal/service/testlink_test.go`、
 `internal/service/service_test.go`，Java 标注 9 个测试类，TS 标注 lytd 的 7 个 Jest
 测试文件。命令：
@@ -453,7 +454,7 @@ Java 方法 FQN 不含参数，`Owner.getPet` 的三重载在方法表中是**�
 | 维度 | 自动真值（`test_link`） | 人工真值（`manual_truth`） |
 |---|---|---|
 | 来源 | IR 直接调用边 | 人工阅读测试体（纯文本候选 + 人工确认） |
-| 覆盖 | 全仓全部可解析 pair（采样评估 200 个生产方法） | 173（Go）+ 152（Java）+ 33（TS）条 pair、19 个标注测试文件/类 |
+| 覆盖 | 全仓全部可解析 pair（采样评估 200 个生产方法） | 179（Go）+ 152（Java）+ 33（TS）条 pair、19 个标注测试文件/类 |
 | 范围外预测 | 计 FP | 忽略（未标注文件不参与） |
 | 主要用途 | 发现链路/FQN 断裂（如 R5-12），衡量规模与吞吐 | 验证判别语义是否正确，防止「自己印证自己」 |
 | 已知盲区 | 与 `call_graph` 同源；IR 解析不到的合法调用会**漏入真值**，把正确预测误判为 FP | 只覆盖选定方法；接口派发类调用按规则不计入 |
@@ -542,6 +543,45 @@ AST 的 75 = 真实源码 67 + `.tsx` 具名箭头属性 3 + `.jsx` 文件方法
 
 > 方法精度收敛后，调用图与测试关联的**召回没有下降**：TS 真值/预测仍是 33/33，
 > Go 召回保持 1.0（FN 0），人工真值三仓合计 358 对（Go 173 / Java 152 / TS 33）。
+> 2026-11-15 补录一个测试文件后为 364 对（Go 179），原因见下节。
+
+### 人工真值补录：Go 173 → 179（2026-11-15，数据集闭合缺口）
+
+**现象**：`perf-baseline.md` §8.7 的真值回归写 Go `173/6/0`，与 S-2k 终态
+（`fe4dd1d` 之后）的 `173/0/0` 不一致，6 条 FP 全部指向同一个测试方法。
+
+**结论：不是快照/指纹改动引入的误关联，是标注文件新增测试后真值集未同步补录。**
+`manual-truth.json` 在 `fe4dd1d` 之后零改动，pairs 仍为 173。
+
+| 时间（2026-11-14） | 事件 |
+|---|---|
+| 16:46:43 | `fe4dd1d` Go 命名 FP 清零，人工真值 Go 侧 `173/0/0` |
+| 16:46 → 17:26 | `git log fe4dd1d..HEAD -- internal/releasebench/testdata/manual-truth.json` 为空，真值未改 |
+| 17:26:48 | `abf8021`（`fix(store): 跳过解析时清空上一轮 IR`）向**标注文件** `internal/store/filestore_test.go` 新增 `TestFileStore_MarkParseSkippedClearsStaleIR`（49 行），真值未同步补录 |
+| 2026-11-15 | 规模基准复跑，该测试的 6 条真实调用落在闭合世界内、真值缺失 → 计 FP |
+
+6 条明细（均为测试体内的真实静态直接调用，命中策略 `call_graph`）：
+
+| 测试方法 | 被关联的生产方法 | 测试体调用点 |
+|---|---|---|
+| `store.TestFileStore_MarkParseSkippedClearsStaleIR` | `FileStore.Open` | `fs.Open(ctx, dir)` |
+| 同 | `FileStore.Close` | `defer fs.Close()` |
+| 同 | `FileStore.UpsertIR` | `fs.UpsertIR(ctx, ir)` |
+| 同 | `FileStore.GetFileByPath` | `fs.GetFileByPath(ctx, ...)`（两处断言） |
+| 同 | `FileStore.GetClassesByFileID` | `fs.GetClassesByFileID(ctx, f.ID)` |
+| 同 | `FileStore.GetCallsByFileID` | `fs.GetCallsByFileID(ctx, f.ID)` |
+
+- 与本次关联实现无关：改动前（251 文件）与改动后（255 文件）的 `release-bench`
+  报告都是 `173/6/0`。
+- 按「扩大真值、不删例」补录进 6 个生产方法条目：Go pairs `173 → 179`，三仓
+  `358 → 364`；复跑 `179/0/0`、P/R/F1 全 1.0，原始报告
+  [`manual-truth-go-179.json`](./manual-truth-go-179.json)。
+- 测试体内还调用了 `FileStore.MarkParseSkipped`，但该生产方法不在真值条目中，
+  不产生 pair，也未借本次补录扩张条目。
+- 自动口径（`test_link`）不受真值变更影响：补录前后均为
+  `1823 预测 / tp=1813 / fp=10 / fn=0`（采样 194 对、评估 153 个生产方法）。
+- 教训：标注文件（`*_test.go`）新增测试后，必须在同一批次补录真值；否则下一次
+  基准复跑会稳定甩出这组 FP，且看起来像是引擎回归。
 
 ## 调用图
 
@@ -674,12 +714,14 @@ Java 两变体均 TP 145 / FP 0 / FN 7、F1 0.9764。Go 侧的后续变化（169
 8. **Go `Test*` 生产类型误判（已修，R5-13 / S-2g）。** 名称前缀判定让
    `TestLink`/`TestResult` 所在的生产文件整体被当作测试文件；现 Go 仅在 `*_test.go`
    内做名称判定，生产方法的调用不再出现在「测试方法」结果里。
-9. **人工真值（S-2h/S-2i/S-2k，v2 已扩展）。** 与 `call_graph` 不同源的 **358 条 pair**
-   （Go 173 / Java 152 / TS 33），独立给出 P/R/F1 与 Wilson 95% CI：Go 两变体均
-   TP 173 / FP 0 / FN 0、F1 1.0000（CI 0.9783–1.0000）；Java 两变体均
+9. **人工真值（S-2h/S-2i/S-2k，v2 已扩展）。** 与 `call_graph` 不同源的 **364 条 pair**
+   （Go 179 / Java 152 / TS 33），独立给出 P/R/F1 与 Wilson 95% CI：Go 两变体均
+   TP 179 / FP 0 / FN 0、F1 1.0000（CI 0.9790–1.0000）；Java 两变体均
    TP 152 / FP 0 / FN 0、F1 1.0000（Recall CI 0.9760–1.0000）。
    数据集已被证明能捕获 R5-12 这类「自动真值一起消失」的回归，并在本轮
-   暴露出 Java 实参内层调用抽取缺口。
+   暴露出 Java 实参内层调用抽取缺口。2026-11-15 由 `173 → 179` 的 6 对来自
+   `abf8021` 新增测试未入真值（闭合缺口），已逐条核对为真实直接调用，见
+   「人工真值补录」一节。
 10. **Java 的 7 条 FN（S-2j 已清零）。** `Owner.getPet` 三重载与
     `Owner.addVisit`/`Pet.addVisit` 同名导致短名歧义。修复分两笔：短名索引按 FQN 去重
     （重载不是不同目标）；接收者按参数/局部变量/增强 for 的可见类型限定，并回填
@@ -687,7 +729,7 @@ Java 两变体均 TP 145 / FP 0 / FN 7、F1 0.9764。Go 侧的后续变化（169
     没有删例或改写标注。
 11. **仍偏低/未覆盖（不静默删除）**：调用图全量分辨率 < 0.28，跨类 receiver 消歧不足；
     自动口径 FP 已在三仓清零（Go S-2k、Java S-2j、TS S-2j），剩余偏差转为召回与覆盖面；
-    人工真值覆盖已扩到 code-schema、petclinic、lytd 三仓（358 对），但 TS 仅覆盖
+    人工真值覆盖已扩到 code-schema、petclinic、lytd 三仓（364 对），但 TS 仅覆盖
     一个仓库且非 Jest 测试框架（Mocha/Vitest 扩展语法）尚未建模。TS 正则与 AST
     仍差 8 条真实方法（`.jsx` 与 `.tsx` 箭头函数），未强行对齐。
 12. **仓内 resolution 下滑已归因（口径变化，非缺陷）。** `0.9626/0.9989 → 0.8259/0.8331`
@@ -712,4 +754,4 @@ Java 两变体均 TP 145 / FP 0 / FN 7、F1 0.9764。Go 侧的后续变化（169
 
 基准数字不变：自动口径 Go regex 1838/1838/0、treesitter 1860/1860/0，Java 164/164/0、
 168/168/0，TS 33/33/0（两变体）；人工真值 358 对（Go 173 / Java 152 / TS 33）全部 TP、
-FP/FN=0。计数：非 vendor LoC 67638（67.6k），internal 36 / 全仓 40 包。
+FP/FN=0（2026-11-15 补录后为 364 对，Go 179/0/0，见「人工真值补录」）。计数：非 vendor LoC 67638（67.6k），internal 36 / 全仓 40 包。

@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### 人工真值闭合缺口（2026-11-15）：Go 173 → 179，6 条 FP 归因
+
+- fix(bench)：`abf8021`（2026-11-14 17:26）向标注文件 `internal/store/filestore_test.go`
+  新增 `TestFileStore_MarkParseSkippedClearsStaleIR`，但 `manual-truth.json` 未同步补录，
+  导致规模基准复跑时 Go 人工真值稳定出现 6 条 FP（`173/6/0`）。
+- 归因：`manual-truth.json` 在 `fe4dd1d` 后零改动（pairs 仍 173）；改动前 251 文件与
+  改动后 255 文件的报告均为 `173/6/0`，排除快照/指纹改动引入误关联。
+- 6 条均为测试体内真实静态直接调用（`call_graph`）：`Open` / `Close` / `UpsertIR` /
+  `GetFileByPath` / `GetClassesByFileID` / `GetCallsByFileID`。
+- 按「扩大真值、不删例」补录 6 条：Go `173 → 179`（三仓 `358 → 364`），复跑
+  `179/0/0`、P/R/F1 1.0；自动口径不变（`1823` 预测 / `1813 / 10 / 0`）。
+- 附带记录（未优化）：GOROOT `/affected` P50 3.6 s（10,927 符号 × 0.3 ms）；
+  CPU profile 显示 `linkBySameTag` 36.3% cum、`matchesTestMethod` 33.5%，
+  `mallocgc`+`growslice` 32%；跨进程 3.1–10.4 s 波动来自 GC 时机与机器负载。
+- 文档：`docs/bench/2026-11-14/README.md`「人工真值补录」、`perf-baseline.md` §8.7；
+  原始报告 `manual-truth-go-179.json`。
+
 ### 测试关联规模（2026-11-14 晚）：单次快照 + 代次/指纹缓存 + 反向索引
 
 - perf(testlink)：`FindTestLinksWithStats` 由每次调用 6~8 轮「文件 → 类 → 方法」全量扫描

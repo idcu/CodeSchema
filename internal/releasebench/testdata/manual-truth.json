@@ -26,6 +26,7 @@
             "store.TestFileStore_DeleteFile",
             "store.TestFileStore_DeleteFileClearsMethodTags",
             "store.TestFileStore_HealthCheck",
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR",
             "store.TestFileStore_OpenClose",
             "store.TestFileStore_Persistence",
             "store.TestFileStore_ReindexRemovesStaleMethods",
@@ -53,7 +54,8 @@
           ],
           "tests": [
             "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
-            "store.TestFileStore_CallMetaRoundTrip"
+            "store.TestFileStore_CallMetaRoundTrip",
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR"
           ]
         },
         {
@@ -63,6 +65,7 @@
           ],
           "tests": [
             "store.TestFileStore_DeleteFileClearsMethodTags",
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR",
             "store.TestFileStore_SearchByTags_MethodTags",
             "store.TestFileStore_SearchByTags_MultiTagAND"
           ]
@@ -75,6 +78,7 @@
           "tests": [
             "store.TestFileStore_BulkUpsertClearsCallsWhenEmpty",
             "store.TestFileStore_DeleteFile",
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR",
             "store.TestFileStore_Persistence",
             "store.TestFileStore_UpsertAndGetFile",
             "store.TestFileStore_UpsertIR"
@@ -119,6 +123,7 @@
             "store.TestFileStore_DeleteFile",
             "store.TestFileStore_DeleteFileClearsMethodTags",
             "store.TestFileStore_HealthCheck",
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR",
             "store.TestFileStore_OpenClose",
             "store.TestFileStore_OpenRejectsCorruptStore",
             "store.TestFileStore_Persistence",
@@ -182,6 +187,7 @@
             "internal/store/filestore_test.go"
           ],
           "tests": [
+            "store.TestFileStore_MarkParseSkippedClearsStaleIR",
             "store.TestFileStore_ReindexRemovesStaleMethods",
             "store.TestFileStore_UpsertIR"
           ]

@@ -1,7 +1,8 @@
 # 性能基线：索引吞吐、查询延迟与多租户隔离（S-3）
 
-> 最后更新：2026-11-14（追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5；
-> `/tests` `/affected` 规模修复前后对比见 §8.7）
+> 最后更新：2026-11-15（2026-11-14：追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5；
+> `/tests` `/affected` 规模修复前后对比见 §8.7；2026-11-15 补记人工真值闭合缺口与
+> GOROOT `/affected` 未优化瓶颈，见 §8.7 末）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -404,8 +405,14 @@ file 后端是 O(文件数) 的内存遍历；PG 后端每轮是独立 SQL（1,0
   GOROOT 按内容规范化后哈希完全相同（`82302955…` / `43d656b4…`）。file 后端的
   `GetAllFiles` 按 map 遍历返回文件，等置信度项的先后顺序跨进程本就不稳定，
   故基准哈希先按（置信度、测试方法、策略、方法名）排序再计算。
-- 真值回归（`release-bench --manual-truth`）：Go 173 TP / 6 FP / 0 FN（Recall 1.0）、
+- 真值回归（`release-bench --manual-truth`）：该轮 Go 173 TP / 6 FP / 0 FN（Recall 1.0）、
   Java 152 / 0 / 0、TS 33 / 0 / 0，`manual_truth` 块（含逐条 predicted 列表）改前后字节一致。
+  6 条 FP 已定位为真值集闭合缺口：`abf8021`（2026-11-14 17:26）向标注文件
+  `internal/store/filestore_test.go` 新增 `TestFileStore_MarkParseSkippedClearsStaleIR`，
+  但 `manual-truth.json` 未同步补录；该测试的 6 条直接调用落在闭合世界内被判 FP。
+  补录后 Go `179/0/0`（三仓 364 对），自动口径不变（`1823 / 1813 / 10 / 0`）。
+  逐条明细与提交归因见 [README.md](./README.md#人工真值补录go-173--1792026-11-15数据集闭合缺口)，
+  原始报告 `manual-truth-go-179.json`。
 - 负控：`TestFindTestLinksNegativeControl` 覆盖「删测试 / 加测试」×「显式失效 / 仅靠指纹」
   四种组合；删掉测试后 `/affected` 不再返回该测试，新增测试后能查出。
 
@@ -428,6 +435,37 @@ CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after \
 `before` 基线在改动前的 worktree 运行同一组命令（`CODESCHEMA_BENCH_TAG=before`）。
 GOROOT `/affected` 单次耗时受 GC 与机器负载影响，跨进程复跑可见 3.1~10.4 s 的波动；
 表中记录的是与 before 配对的那一轮，同轮内 P50/P95 稳定。
+
+#### 已知瓶颈：GOROOT `/affected` 仍为秒级（未优化，2026-11-15 记录）
+
+**只记录位置与原因，不给优化结论。** 2026-11-15 用当前实现复跑（GOROOT 10,345 文件，
+目标 `strings.TrimSpace`，`CODESCHEMA_TESTLINK_SAMPLES=3 CODESCHEMA_TESTLINK_WARMUP=0`，
+附 `-cpuprofile`）：`affected=10,927`（另一轮为 10,928，属递归调用者集合的稳定差异），
+`/affected` P50 **3,648 ms**、`/tests` P50 3.06 ms，与 §8.7 表内的 3,322/3,378 ms 同一量级。
+
+CPU profile（47.6 s 采样，含索引；`/affected` 占 18.2 s cum）：
+
+| 位置 | flat / cum | 说明 |
+|---|---|---|
+| `GetAffected` → `findTestLinksFromSnapshot` | 17.9 s cum（37.6% 全部采样） | 对 10,927 个受影响符号**逐个**跑完整五策略 + 排序 + 过滤 |
+| `linkBySameTag` | 0.50 s flat / 17.3 s cum（36.3%） | 每个符号遍历全部 `testOwners`，逐个查标签 |
+| `matchesTestMethod` | 0.25 s / 16.0 s cum（33.5%） | 命中同标签后按方法名匹配 |
+| `containsNameWords` / `splitNameWords` | 14.5 s / 5.6 s cum | 每次匹配都切词、建 `strings.Builder`，未按（目标名, 测试名）复用 |
+| `runtime.mallocgc` / `growslice` | 9.2 s（19.3%）/ 6.3 s（13.2%） | 每符号的 `seen` map、`results`、`filtered` 及切词切片 |
+
+**瓶颈不在存储往返**（快照已复用，`/tests` 仍在 3–6 ms 量级），而在
+**受影响符号数 × 每符号全量 `testOwners` 扫描**：10,927 × 0.3 ms ≈ 3.3 s。
+`same_tag` 的候选集没有按标签反查，只有目标方法自身带标签时才会进入循环，
+但进入后仍是 O(测试类数)。
+
+**波动原因**：3.1–10.4 s 的跨进程差异不是算法分支导致。每次 `/affected` 产生
+约 10^4 量级的短命 map/slice/字符串（profile 中 `mallocgc` + `growslice` 合计 32%），
+触发多轮 GC；不同进程的堆起点、GOGC 触发时机、CPU 频率/负载不同，GC 与
+syscall（16% flat）占比随之变化。同一进程内 P50/P95 稳定（3,322/3,378 ms），
+跨进程则出现数量级差异。
+
+后续若优化，候选方向是「按符号缓存链接结果 + 按标签反查测试类」，但需先证明
+与现有逐条结果等价（等置信度顺序、闭合世界过滤），本轮不做。
 
 ## 9. 复现
 
