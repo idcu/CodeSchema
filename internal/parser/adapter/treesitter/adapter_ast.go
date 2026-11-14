@@ -306,6 +306,14 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		goPkg = astGoPackage(data)
 	}
 	hasTopLevelFunc := false
+	// TS/JS 顶层函数与 Jest 回调的模块名（文件名去扩展名），与正则路径 FQN 口径统一。
+	tsModule := ""
+	if lang == "ts" || lang == "js" {
+		tsModule = tsModuleName(path)
+	}
+	hasTopLevelTSFunc := false
+	// Jest describe 路径：`describe('greet', ...)` 内的 it/test 标题拼在其后。
+	var jestDescribes []string
 
 	classTypes := astClassNodeTypes[lang]
 	methodTypes := astMethodNodeTypes[lang]
@@ -336,6 +344,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		prevClass, prevMethod := curClass, curMethod
 		prevLocalTypes := goLocalTypes
 		prevJavaLocalTypes := javaLocalTypes
+		prevJestDescribes := jestDescribes
 		scopeChanged := false
 
 		switch {
@@ -452,6 +461,12 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 				}
 			case curClass != nil:
 				m.ClassFQN = curClass.FullName
+			default:
+				// TS/JS 顶层函数归入模块容器，与正则路径一致。
+				if tsModule != "" {
+					m.ClassFQN = tsModule
+					hasTopLevelTSFunc = true
+				}
 			}
 			if lang == "java" {
 				// 参数进 IR，并作为方法体内的可见类型种子。
@@ -494,6 +509,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			}
 			if curClass != nil {
 				m.ClassFQN = curClass.FullName
+			} else if tsModule != "" {
+				m.ClassFQN = tsModule
+				hasTopLevelTSFunc = true
 			}
 			doc.Methods = append(doc.Methods, m)
 			curMethod = &doc.Methods[len(doc.Methods)-1]
@@ -527,6 +545,28 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 					doc.Constants = append(doc.Constants, *c)
 				}
 			}
+
+		case tsModule != "" && typ == "call_expression" && astIsJestCall(n, data):
+			// Jest describe/it/test：回调不是声明节点，合成为 MethodIR，
+			// 使回调体内的调用获得 CallerFQN（TS 测试关联可度量）。
+			kind, title, _ := astJestDecl(n, data)
+			if kind == "describe" {
+				jestDescribes = append(jestDescribes, sanitizeJestName(title))
+			} else {
+				name := jestMethodName(jestDescribes, title)
+				if name == "" {
+					name = fmt.Sprintf("jest_%d", int(start.Row)+1)
+				}
+				doc.Methods = append(doc.Methods, parser.MethodIR{
+					Name:      name,
+					Signature: title,
+					ClassFQN:  tsModule,
+					StartLine: int(start.Row) + 1,
+					EndLine:   endLine,
+				})
+				curMethod = &doc.Methods[len(doc.Methods)-1]
+			}
+			scopeChanged = true
 
 		case callTypes[typ]:
 			// Go 指针类型转换 `(*T)(x)`：function 是括号包裹的类型表达式，不是调用。
@@ -573,6 +613,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		}
 		if scopeChanged {
 			curClass, curMethod = prevClass, prevMethod
+			jestDescribes = prevJestDescribes
 			if lang == "go" {
 				goLocalTypes = prevLocalTypes
 			}
@@ -593,6 +634,22 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			EndLine:   int(tree.RootNode().EndPoint().Row) + 1,
 			Doc:       "package " + goPkg,
 		})
+	}
+
+	// 合成 TS/JS 模块容器：顶层函数与 Jest 回调合成方法统一归入模块（与正则路径一致）。
+	if tsModule != "" {
+		if (hasTopLevelTSFunc || astHasMethodInClass(doc.Methods, tsModule)) && !astHasClassFullName(doc.Classes, tsModule) {
+			doc.Classes = append(doc.Classes, parser.ClassIR{
+				Name:      tsModule,
+				FullName:  tsModule,
+				Type:      "MODULE",
+				StartLine: 1,
+				EndLine:   int(tree.RootNode().EndPoint().Row) + 1,
+				Doc:       "module " + tsModule,
+			})
+		}
+		// 模块内裸名调用限定 + 具名导入限定（测试文件导入生产函数后才有可解析 FQN）。
+		qualifyTSModuleCalls(doc, tsModule, parseTSImports(data))
 	}
 
 	return doc, nil
@@ -1443,4 +1500,63 @@ func qualifyJavaLocalCallee(raw string, locals map[string]string) string {
 		}
 	}
 	return raw
+}
+
+// astIsJestCall 判断 call_expression 是否为 Jest describe/it/test 声明。
+func astIsJestCall(n *ts.Node, src []byte) bool {
+	_, _, ok := astJestDecl(n, src)
+	return ok
+}
+
+// astJestDecl 提取 Jest 块声明的类型与标题。
+//
+// 支持 `describe('x', ...)` / `it('x', ...)` / `test('x', ...)` 以及
+// `it.only` / `test.skip` 等成员调用形式；标题必须是字符串字面量。
+func astJestDecl(n *ts.Node, src []byte) (kind, title string, ok bool) {
+	fn := n.ChildByFieldName("function")
+	if fn == nil || fn.IsNull() {
+		return "", "", false
+	}
+	name := string(fn.Content(src))
+	if fn.Type() == "member_expression" {
+		obj := fn.ChildByFieldName("object")
+		if obj == nil || obj.IsNull() {
+			return "", "", false
+		}
+		name = string(obj.Content(src))
+	}
+	kind, ok = jestDeclKind(name)
+	if !ok {
+		return "", "", false
+	}
+	args := n.ChildByFieldName("arguments")
+	if args == nil || args.IsNull() {
+		return "", "", false
+	}
+	for i := 0; i < int(args.NamedChildCount()); i++ {
+		c := args.NamedChild(i)
+		if c.Type() != "string" && c.Type() != "template_string" {
+			continue
+		}
+		t := string(c.Content(src))
+		if strings.Contains(t, "${") {
+			return "", "", false
+		}
+		title = strings.Trim(t, "\"'`")
+		break
+	}
+	if title == "" {
+		return "", "", false
+	}
+	return kind, title, true
+}
+
+// astHasMethodInClass 报告是否存在归属指定 ClassFQN 的方法。
+func astHasMethodInClass(methods []parser.MethodIR, classFQN string) bool {
+	for _, m := range methods {
+		if m.ClassFQN == classFQN {
+			return true
+		}
+	}
+	return false
 }

@@ -265,11 +265,11 @@ function helper(a: number, b: number): number {
 	}
 	got := map[string]bool{}
 	for _, c := range doc.Calls {
-		if c.CalleeFQN == "helper" {
+		if c.CalleeFQN == "util.helper" {
 			got[c.CallerFQN] = true
 		}
 	}
-	for _, want := range []string{"add", "mul"} {
+	for _, want := range []string{"util.add", "util.mul"} {
 		if !got[want] {
 			t.Errorf("helper 调用缺少 caller=%s；current=%v", want, got)
 		}
@@ -332,7 +332,7 @@ function Counter(): JSX.Element {
 			callers[c.CallerFQN] = true
 		}
 	}
-	for _, want := range []string{"Clock", "Counter"} {
+	for _, want := range []string{"app.Clock", "app.Counter"} {
 		if !callers[want] {
 			t.Errorf("useState 调用缺少 caller=%s；current=%v", want, callers)
 		}
@@ -623,5 +623,71 @@ public class OrderService {
 				t.Errorf("callerFQN=%q not found; calls=%+v", tc.wantCaller, doc.Calls)
 			}
 		})
+	}
+}
+
+// TestASTAdapter_JestCallbacksAsMethods 约束 AST 路径与正则路径同口径：
+// describe/it/test 回调合成为模块内方法，回调体调用带 CallerFQN，导入函数模块限定。
+func TestASTAdapter_JestCallbacksAsMethods(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "index.test.ts")
+	content := `import { describe, it, expect } from '@jest/globals';
+import { greet } from '../src/index';
+import { add } from '../src/utils/math';
+
+describe('greet', () => {
+  it('greets a name with capitalization', () => {
+    expect(greet('alice')).toBe('Hello, Alice!');
+  });
+
+  it('falls back to default', () => {
+    expect(greet('')).toBe('Hello, World!');
+  });
+});
+
+describe('add', () => {
+  test('sums two numbers', () => {
+    expect(add(1, 2)).toBe(3);
+  });
+});
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := map[string]string{
+		"greet_greets_a_name_with_capitalization": "index.greet",
+		"greet_falls_back_to_default":             "index.greet",
+		"add_sums_two_numbers":                    "math.add",
+	}
+	got := map[string]bool{}
+	for _, m := range doc.Methods {
+		if m.ClassFQN != "index.test" {
+			continue
+		}
+		got[m.Name] = true
+		if _, ok := want[m.Name]; !ok {
+			t.Errorf("unexpected jest method %q", m.Name)
+		}
+	}
+	for name, callee := range want {
+		if !got[name] {
+			t.Errorf("jest method %q not found; methods=%+v", name, doc.Methods)
+			continue
+		}
+		found := false
+		for _, c := range doc.Calls {
+			if c.CallerFQN == "index.test."+name && c.CalleeFQN == callee {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("call %q -> %q not found; calls=%+v", name, callee, doc.Calls)
+		}
 	}
 }

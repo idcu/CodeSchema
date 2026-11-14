@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "note": "人工标注真值（扩展版）：先以纯文本检索列出候选调用点，再逐条阅读测试方法体与接收者类型确认；不使用 IR 调用边或 FindTestLinks 输出。仅收录接收者可静态确定的直接调用；接口字段动态派发、mock 实现、反射/事件回调不计入。Go 闭合范围为 3 个测试文件；Java 闭合范围为 9 个测试类，含 @Test 方法与被其调用的测试内 helper，覆盖 controller/validator/formatter 与实体/访问器直接调用，Spring Data repository 接口与 @Mock 字段按规则排除。",
+  "note": "人工标注真值（扩展版）：先以纯文本检索列出候选调用点，再逐条阅读测试方法体与接收者类型确认；不使用 IR 调用边或 FindTestLinks 输出。仅收录接收者可静态确定的直接调用；接口字段动态派发、mock 实现、反射/事件回调不计入。Go 闭合范围为 3 个测试文件；Java 闭合范围为 9 个测试类，含 @Test 方法与被其调用的测试内 helper，覆盖 controller/validator/formatter 与实体/访问器直接调用，Spring Data repository 接口与 @Mock 字段按规则排除。TS 闭合范围为 lytd 全仓 7 个 Jest 测试文件（examples 01/02/03/08，commit f5e6604），仅收录测试文件相对路径具名导入的生产函数；Jest describe/it 标题到测试方法名的映射见 docs/01-开发者/解析适配器.md。",
   "repos": {
     "code-schema": {
       "language": "go",
@@ -1087,6 +1087,180 @@
           ],
           "tests": [
             "VetControllerTests.helen"
+          ]
+        }
+      ]
+    },
+    "lytd": {
+      "language": "ts",
+      "entries": [
+        {
+          "production": "index.buildPage",
+          "test_files": [
+            "examples/08-real-app/__tests__/index.test.ts"
+          ],
+          "tests": [
+            "index.test.buildPage_produces_a_complete_HTML_document_with_head_and_body",
+            "index.test.buildPage_renders_a_primary_card_with_tags",
+            "index.test.buildPage_renders_buttons_including_a_disabled_one"
+          ]
+        },
+        {
+          "production": "index.getSummary",
+          "test_files": [
+            "examples/08-real-app/__tests__/index.test.ts"
+          ],
+          "tests": [
+            "index.test.getSummary_returns_a_capitalized_title_and_computed_totals"
+          ]
+        },
+        {
+          "production": "math.add",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.add_adds_two_positive_numbers",
+            "math.test.add_handles_negative_operands"
+          ]
+        },
+        {
+          "production": "math.sub",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.sub_subtracts_b_from_a"
+          ]
+        },
+        {
+          "production": "math.mul",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.mul_multiplies_two_numbers"
+          ]
+        },
+        {
+          "production": "math.div",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.div_divides_two_numbers",
+            "math.test.div_throws_on_division_by_zero"
+          ]
+        },
+        {
+          "production": "math.sum",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.sum_sums_an_array_of_numbers",
+            "math.test.sum_returns_0_for_an_empty_array"
+          ]
+        },
+        {
+          "production": "math.average",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.average_computes_the_average_of_an_array",
+            "math.test.average_returns_0_for_an_empty_array"
+          ]
+        },
+        {
+          "production": "math.clamp",
+          "test_files": [
+            "examples/08-real-app/__tests__/math.test.ts"
+          ],
+          "tests": [
+            "math.test.clamp_keeps_values_within_range"
+          ]
+        },
+        {
+          "production": "App.greet",
+          "test_files": [
+            "examples/02-react-like-app/__tests__/App.test.tsx"
+          ],
+          "tests": [
+            "App.test.02_react_like_app_greet_greets_with_excitement_when_excited_true",
+            "App.test.02_react_like_app_greet_greets_without_excitement"
+          ]
+        },
+        {
+          "production": "index.greet",
+          "test_files": [
+            "examples/01-simple-lib/__tests__/index.test.ts"
+          ],
+          "tests": [
+            "index.test.greet_greets_a_name_with_capitalization",
+            "index.test.greet_returns_default_greeting_for_empty_input"
+          ]
+        },
+        {
+          "production": "index.add",
+          "test_files": [
+            "examples/01-simple-lib/__tests__/index.test.ts"
+          ],
+          "tests": [
+            "index.test.add_sums_two_numbers"
+          ]
+        },
+        {
+          "production": "index.factorial",
+          "test_files": [
+            "examples/01-simple-lib/__tests__/index.test.ts"
+          ],
+          "tests": [
+            "index.test.factorial_computes_base_cases",
+            "index.test.factorial_computes_larger_values",
+            "index.test.factorial_throws_on_invalid_input"
+          ]
+        },
+        {
+          "production": "index.times",
+          "test_files": [
+            "examples/03-mono/packages/core/__tests__/basic.test.ts"
+          ],
+          "tests": [
+            "basic.test.mono_core_times_calls_fn_n_times_and_collects_results",
+            "basic.test.mono_core_times_passes_the_correct_index_each_call",
+            "basic.test.mono_core_times_returns_empty_array_for_zero"
+          ]
+        },
+        {
+          "production": "index.renderReport",
+          "test_files": [
+            "examples/03-mono/packages/app/__tests__/basic.test.ts"
+          ],
+          "tests": [
+            "basic.test.mono_app_renderReport_produces_a_multi_line_report"
+          ]
+        },
+        {
+          "production": "index.repeat",
+          "test_files": [
+            "examples/03-mono/packages/bar/__tests__/basic.test.ts"
+          ],
+          "tests": [
+            "basic.test.mono_bar_repeat_repeats_a_value_without_separator_by_default",
+            "basic.test.mono_bar_repeat_repeats_with_a_separator",
+            "basic.test.mono_bar_repeat_returns_empty_for_zero_count"
+          ]
+        },
+        {
+          "production": "index.fibonacci",
+          "test_files": [
+            "examples/03-mono/packages/bar/__tests__/basic.test.ts"
+          ],
+          "tests": [
+            "basic.test.mono_bar_fibonacci_computes_base_cases",
+            "basic.test.mono_bar_fibonacci_computes_larger_values",
+            "basic.test.mono_bar_fibonacci_throws_on_invalid_input"
           ]
         }
       ]

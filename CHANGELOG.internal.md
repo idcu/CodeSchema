@@ -6,6 +6,56 @@
 
 ## 提交记录
 
+### Commit 252: feat(parser): Jest 回调建模为 IR 方法，TS 测试关联首次可度量（S-2j）
+
+- 根因：`describe/it/test` 回调不是声明式节点，回调体内的调用没有 `CallerFQN`；
+  lytd 两变体测试方法均为 0、自动/人工真值均为 0——能力在 TS 上不存在。
+- 方案对比（回调建模为方法 vs 文件级关联）后选前者：合成 `MethodIR` 可复用
+  `call_graph` 策略与影响面管道，真值口径与 Go/Java 一致；对比表写入
+  `docs/bench/2026-11-14/README.md` §S-2j。
+- 实现：
+  - 正则路径：`describe/it/test` 标题合成方法名（describe 路径 + 标题，下划线连接），
+    花括号净深度跟踪回调体；补 `detectTSNestedCalls` 抽取 `expect(greet(...))` 内层调用。
+  - AST 路径：`call_expression` 识别 Jest 声明，回调子树作用域恢复；TS 顶层函数与
+    箭头函数 `ClassFQN` 取模块名，与正则路径统一；补模块 `MODULE` 容器。
+  - 导入限定：测试文件相对路径具名导入按 basename 限定（`../src/utils/math.ts` → `math.add`），
+    包名导入不产生本地模块。
+  - 关键字：TS 改用 `tsControlKeywords`，修掉 `repeat(...)` 被全局 `isKeyword` 误杀，
+    同时保留 `constructor` 声明不记调用。
+- 真值：`manual-truth.json` 新增 `lytd`（`f5e6604`，7 个 Jest 测试文件、33 对），
+  逐用例阅读标注；`pairs>=200` 守护仍满足（354 对）。
+- 复跑：regex/AST 测试方法 33、真值 33、TP/FP/FN 33/0/0、P/R/F1 1.0000；
+  calls 408/369，仓内候选 109/88、已解析 109/88、仓内 resolution 1.0000。
+  披露：正则生产方法 859 vs AST 75 是既有 TS 方法模式过匹配，与本轮无关。
+- 负控：`TestTreeSitterAdapter_Parse_JestCallbacksAsMethods`（正则）与
+  `TestASTAdapter_JestCallbacksAsMethods`（AST）断言方法名、caller 与模块限定 callee。
+- 计数：非 vendor LoC 66192（66.2k）。
+
+### Commit 251: fix(parser): Java 接收者按可见类型限定，同名方法不再歧义
+
+- 红测：`TestTreeSitterAdapter_JavaReceiverType` 断言 `owner6.addVisit(...)` →
+  `Owner.addVisit`、`pet.addVisit(...)` → `Pet.addVisit`；修复前保持裸 receiver。
+- 实现：正则路径在方法声明时用参数播种、方法体内按局部变量/增强 for 声明累积
+  `名字 → 类型`，`qualifyCallee` 新增本地类型分支；AST 路径在
+  `local_variable_declaration` / `enhanced_for_statement` 节点累积，新增
+  `qualifyJavaLocalCallee`。泛型/变长/数组统一归一化（`Page<Owner>` → `Page`）。
+  Java 方法回填 `MethodIR.Params`（名称/类型/序号），为按实参个数匹配重载提供 IR。
+- 顺带修复：`String.length` 等限定后调用命中全局关键字表，导致 calls -5；
+  Java/TS 跳过限定后关键字检查，并移除 Java 内层调用的重复过滤。
+- 复跑（`/tmp/s2-petclinic` @ `500158f7`）：regex/AST 人工真值均 152/0/0、F1 1.0000
+  （修复前 151/0/1）；自动真值 164/168 对全命中；calls 1544/1609，仓内候选
+  287/311、已解析 284/308、仓内 resolution 0.9895/0.9904、前缀差异 3。
+- 夹具同步：`JavaNestedCalls` 期望改为类型限定后的 FQN；`NestedScopeRestore`
+  期望 `Service.after`。
+
+### Commit 250: fix(testlink): 短名索引按 FQN 去重，Java 重载不再被当作歧义
+
+- 红测：`TestFindTestLinks_CallGraphOverloadSameFQN`（mock 三条同 FQN 的
+  `Owner.getPet`）修复前短名索引 `len=3` → 放弃链接。
+- 实现：`linkByCallGraph` 的短名索引按 FQN 去重后再判唯一性；重载不是不同的可关联目标。
+- 复跑：Java 人工真值 145/0/7 → 151/0/1，F1 0.9764 → 0.9967；剩余 1 条为
+  `addVisit` 跨类同名（Commit 251 清零）。
+
 ### Commit 249: docs(bench): 恢复 Java 语料并按新口径复跑，总账数字同源
 
 - 语料恢复：GitHub 直连超时/重置、gitee 镜像要求认证，最终经

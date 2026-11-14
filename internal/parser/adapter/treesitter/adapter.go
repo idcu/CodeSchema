@@ -431,9 +431,17 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 	// TS/JS 顶层函数的模块名（文件名去扩展名）：同名跨文件函数的 FQN 消歧用。
 	tsModule := ""
 	if lang == "ts" {
-		base := filepath.Base(path)
-		tsModule = strings.TrimSuffix(base, filepath.Ext(base))
+		tsModule = tsModuleName(path)
 	}
+	// TS 具名导入（本地名 → 模块名）：测试文件导入生产函数后，裸 callee 才能
+	// 限定成 `math.add` 这样的可解析 FQN。
+	tsImports := map[string]string{}
+	// Jest 回调作用域：tsDepth 是 TS 文件的花括号净深度，describe/it/test 的
+	// 回调体按 openDepth 进入/退出；jestCaller 是回调体内调用的 CallerFQN。
+	tsDepth := 0
+	var jestDescribes []string
+	var jestScopes []jestScope
+	jestCaller := ""
 	nonGoPkg := "" // 非 Go 语言包/命名空间声明（Java/Kotlin/C#），调用图 caller FQN 包限定用
 	// Java 方法体内的可见类型：局部变量/参数名 → 类型，供 `owner.addVisit` 消歧。
 	// 每个方法声明时重置并按参数播种，方法体内按声明行累积。
@@ -700,6 +708,12 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		if p := parsePkgDecl(lang, trimmed); p != "" {
 			nonGoPkg = p
 		}
+		// TS 具名导入：记录本地名 → 模块名，供测试回调体内的裸 callee 限定。
+		if tsModule != "" && strings.HasPrefix(trimmed, "import ") {
+			for name, mod := range parseTSImports([]byte(trimmed)) {
+				tsImports[name] = mod
+			}
+		}
 
 		// 解析类定义
 		if matches := patterns.classPattern.FindStringSubmatch(line); len(matches) > patterns.classNameIndex {
@@ -724,6 +738,44 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			currentMethod = nil
 			docComment.Reset()
 			continue
+		}
+
+		// Jest 块声明：describe/it/test 的回调不是声明式方法，回调体内的调用
+		// 原本 CallerFQN 为空（TS 测试关联真值恒为 0 的根因）。这里把回调合成为
+		// MethodIR（ClassFQN=模块名），并按花括号深度跟踪回调体作用域。
+		if tsModule != "" {
+			if kind, title, ok := matchJestDecl(trimmed); ok {
+				if kind == "describe" {
+					jestScopes = append(jestScopes, jestScope{kind: "describe", openDepth: tsDepth, methodIdx: -1})
+					jestDescribes = append(jestDescribes, sanitizeJestName(title))
+				} else {
+					name := jestMethodName(jestDescribes, title)
+					if name == "" {
+						name = fmt.Sprintf("jest_%d", lineNum)
+					}
+					doc.Methods = append(doc.Methods, parser.MethodIR{
+						Name:      name,
+						Signature: strings.TrimSpace(trimmed),
+						ClassFQN:  tsModule,
+						StartLine: lineNum,
+						EndLine:   lineNum,
+					})
+					jestScopes = append(jestScopes, jestScope{
+						kind: "test", openDepth: tsDepth, methodIdx: len(doc.Methods) - 1,
+					})
+					jestCaller = tsModule + "." + name
+				}
+				code := sanitizer.clean(trimmed, lang)
+				// 同行内联回调（`it('x', () => expect(foo()).toBe(1))`）也要归属测试方法。
+				if strings.Contains(code, "(") {
+					detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, jestCaller, "", "", "", nonGoPkg, "", nil, lang)
+					detectTSNestedCalls(code, lineNum, &doc.Calls, jestCaller)
+				}
+				tsDepth += braceNet(code)
+				popJestScopes(&jestScopes, &jestDescribes, &jestCaller, tsDepth, lineNum, doc)
+				docComment.Reset()
+				continue
+			}
 		}
 
 		// 解析方法/函数定义。
@@ -799,8 +851,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			trackJavaLocalTypes(code, javaLocalTypes)
 		}
 		if lang == "bash" || lang == "ocaml" || strings.Contains(code, "(") {
-			caller := ""
-			if currentMethod != nil {
+			// Jest 回调体内没有声明式方法，caller 由回调合成的测试方法提供。
+			caller := jestCaller
+			if caller == "" && currentMethod != nil {
 				if currentMethod.ClassFQN != "" {
 					caller = currentMethod.ClassFQN + "." + currentMethod.Name
 				} else {
@@ -819,11 +872,22 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				curClass = currentClass.Name
 			}
 			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass, javaLocalTypes, lang)
+			// TS 实参内层调用（`expect(greet(...))`）会被外层调用整段吞掉，
+			// 与 AST 路径按 call_expression 遍历的口径补齐。
+			if tsModule != "" && caller != "" {
+				detectTSNestedCalls(code, lineNum, &doc.Calls, caller)
+			}
 			// Java 实参位置的内层调用会被外层整段吞掉（`assertThat(owner.getId())`），
 			// 与 AST 路径按 invocation 节点遍历的口径不一致，这里补齐。
 			if lang == "java" {
 				detectJavaNestedCalls(code, lineNum, &doc.Calls, caller, nonGoPkg, curClass, javaLocalTypes)
 			}
+		}
+
+		// TS 花括号深度：驱动 Jest 回调作用域的进入/退出（闭合行不一定含 `(`）。
+		if tsModule != "" {
+			tsDepth += braceNet(code)
+			popJestScopes(&jestScopes, &jestDescribes, &jestCaller, tsDepth, lineNum, doc)
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -863,7 +927,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		})
 	}
 	if tsModule != "" {
-		qualifyTSLocalCalls(doc, tsModule)
+		qualifyTSModuleCalls(doc, tsModule, tsImports)
 	}
 
 	return doc, nil
@@ -879,27 +943,23 @@ func hasMethodInClass(methods []parser.MethodIR, classFQN string) bool {
 	return false
 }
 
-// qualifyTSLocalCalls 把同模块内的裸名调用限定为 module.func。
-//
-// 只处理「本文件顶层函数」：导入函数仍保持裸名（无 import 解析，避免错误归属）。
-func qualifyTSLocalCalls(doc *parser.IRDocument, module string) {
-	local := make(map[string]struct{})
-	for _, m := range doc.Methods {
-		if m.ClassFQN == module {
-			local[m.Name] = struct{}{}
+// popJestScopes 关闭已达闭合深度的 Jest 作用域，并回填测试方法 EndLine。
+func popJestScopes(scopes *[]jestScope, describes *[]string, caller *string, depth, lineNum int, doc *parser.IRDocument) {
+	for len(*scopes) > 0 {
+		s := (*scopes)[len(*scopes)-1]
+		if depth > s.openDepth {
+			return
 		}
-	}
-	if len(local) == 0 {
-		return
-	}
-	prefix := module + "."
-	for i := range doc.Calls {
-		c := &doc.Calls[i]
-		if !strings.HasPrefix(c.CallerFQN, prefix) || strings.Contains(c.CalleeFQN, ".") {
+		*scopes = (*scopes)[:len(*scopes)-1]
+		if s.kind == "describe" {
+			if len(*describes) > 0 {
+				*describes = (*describes)[:len(*describes)-1]
+			}
 			continue
 		}
-		if _, ok := local[c.CalleeFQN]; ok {
-			c.CalleeFQN = prefix + c.CalleeFQN
+		*caller = ""
+		if s.methodIdx >= 0 && s.methodIdx < len(doc.Methods) {
+			doc.Methods[s.methodIdx].EndLine = lineNum
 		}
 	}
 }
@@ -1340,7 +1400,7 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 		if len(m) >= 2 {
 			// 先按裸名过滤关键字：qualifyCallee 会把 Java 的 `if (` 限定成
 			// `pkg.Class.if`，使 isKeyword 失效并产生假调用边。
-			if isKeyword(m[1]) || len(m[1]) <= 1 {
+			if isNonCallName(m[1], lang) || len(m[1]) <= 1 {
 				continue
 			}
 			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass, localTypes)
@@ -1522,12 +1582,18 @@ func detectGoNestedCalls(line string, lineNum int, calls *[]parser.CallIR, calle
 var javaInnerCallPattern = regexp.MustCompile(`[(,]\s*(\w[\w.]*)\s*\(`)
 
 // detectJavaNestedCalls 补充抽取 Java 实参位置上的内层调用。
-//
-// 默认 callPattern 为非重叠匹配：`assertThat(owner.getId())` 会把内层
-// owner.getId 整段吞掉，导致「测试方法 → 生产方法」的调用边丢失。
-// AST 路径按 invocation 节点遍历，本就能看到内层调用；这里补齐正则路径口径。
-// 链式后续调用（`f().g()` 的 g）已由 callPattern 的后续匹配覆盖，无需重复。
 func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, currentClass string, localTypes map[string]string) {
+	detectInnerCalls(line, lineNum, calls, caller, pkg, currentClass, localTypes, parser.CallSourceRegex, parser.ConfidenceRegex, "java")
+}
+
+// detectTSNestedCalls 补充抽取 TS 实参位置上的内层调用：
+// Jest 断言 `expect(greet('alice'))` 会被外层 expect 整段吞掉，生产函数边丢失。
+func detectTSNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller string) {
+	detectInnerCalls(line, lineNum, calls, caller, "", "", nil, parser.CallSourceRegex, parser.ConfidenceRegex, "ts")
+}
+
+// detectInnerCalls 是实参内层调用的通用抽取（Java/TS 共用）。
+func detectInnerCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, currentClass string, localTypes map[string]string, source string, confidence int, lang string) {
 	short := func(fqn string) string {
 		if i := strings.LastIndex(fqn, "."); i >= 0 {
 			return fqn[i+1:]
@@ -1536,7 +1602,7 @@ func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, cal
 	}
 	for _, m := range javaInnerCallPattern.FindAllStringSubmatch(line, -1) {
 		name := m[1]
-		if isKeyword(name) || len(name) <= 1 {
+		if isNonCallName(name, lang) || len(name) <= 1 {
 			continue
 		}
 		seen := false
@@ -1560,8 +1626,8 @@ func detectJavaNestedCalls(line string, lineNum int, calls *[]parser.CallIR, cal
 			CalleeFQN:  callee,
 			CallType:   "direct",
 			LineNumber: lineNum,
-			Source:     parser.CallSourceRegex,
-			Confidence: parser.ConfidenceRegex,
+			Source:     source,
+			Confidence: confidence,
 		})
 	}
 }
