@@ -201,6 +201,60 @@ func buildService() *Service { return &Service{} }
 	}
 }
 
+// TestGoNestedAndChainedCalls 负控：正则路径的 callPattern 只做非重叠匹配，
+// 两处内层 callee 会丢：链式 `NewService().WithImpactAnalyzer(...)` 的方法名
+// 被限成包级函数；嵌套 `wrap(NewService())` 的内层调用被外层整段吞掉。
+// 真实缺陷：`svc := NewService(st).WithImpactAnalyzer(...)` 与
+// `reflect.TypeOf(NewService(...))` 在人工真值中计 FN。
+func TestGoNestedAndChainedCalls(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "chain.go")
+	src := `package demo
+
+type Service struct{}
+
+func NewService() *Service { return &Service{} }
+
+func (s *Service) WithImpactAnalyzer(a any) *Service { return s }
+
+func Run() {
+	svc := NewService().WithImpactAnalyzer(NewService())
+	_ = svc
+	_ = wrap(NewService())
+}
+
+func wrap(v any) any { return v }
+`
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := NewTreeSitterAdapter().Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	want := map[string]bool{
+		"demo.Service.WithImpactAnalyzer": false,
+		"demo.NewService":                 false,
+	}
+	for _, c := range doc.Calls {
+		if c.CallerFQN != "demo.Run" {
+			continue
+		}
+		if _, ok := want[c.CalleeFQN]; ok {
+			want[c.CalleeFQN] = true
+		}
+		if strings.HasSuffix(c.CalleeFQN, ".WithImpactAnalyzer") && c.CalleeFQN != "demo.Service.WithImpactAnalyzer" {
+			t.Errorf("链式调用接收者未按返回类型限定: %s", c.CalleeFQN)
+		}
+	}
+	for callee, ok := range want {
+		if !ok {
+			t.Errorf("missing call %s; calls=%+v", callee, doc.Calls)
+		}
+	}
+}
+
 // TestGoLocalVarCallQualification 负控：`x := &T{}` / `var x *T` 声明的局部变量，
 // 其 `x.Method()` 调用必须限定为 pkg.T.Method；旧实现只跟踪 receiver，保持裸 selector。
 func TestGoLocalVarCallQualification(t *testing.T) {

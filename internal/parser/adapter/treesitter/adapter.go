@@ -667,6 +667,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 				// callPattern 要求 `(` 与 `)` 同行；参数换行时起始行整条丢失
 				// （`fs.BulkUpsert(ctx, []*parser.IRDocument{{`），测试关联与调用图同时漏召回。
 				detectUnclosedCalls(code, lineNum, &doc.Calls, caller, goPkg, curRecvVar, curRecvType, goLocalTypes)
+				// 非重叠匹配会吞掉内层/链式调用：`wrap(NewService())` 的 NewService、
+				// `NewService().WithX()` 的 WithX（后者还需按返回类型限定接收者）。
+				detectGoNestedCalls(code, lineNum, &doc.Calls, caller, goPkg, curRecvVar, curRecvType, goLocalTypes, goFuncReturns)
 			}
 			goDepth += braceNet(code)
 			if inIfaceBody && goDepth <= curIfaceOpenDepth {
@@ -1359,6 +1362,88 @@ func detectUnclosedCalls(line string, lineNum int, calls *[]parser.CallIR, calle
 		}
 		open := strings.Index(line[m[0]:m[1]], "(")
 		if open < 0 || parenClosesOnLine(line, m[0]+open) {
+			continue
+		}
+		callee := qualifyCallee(name, pkg, recvVar, recvType, "", "", localTypes)
+		if isKeyword(callee) || len(callee) <= 1 {
+			continue
+		}
+		*calls = append(*calls, parser.CallIR{
+			CallerFQN:  caller,
+			CalleeFQN:  callee,
+			CallType:   "direct",
+			LineNumber: lineNum,
+			Source:     parser.CallSourceRegex,
+			Confidence: parser.ConfidenceRegex,
+		})
+	}
+}
+
+// goInnerCallPattern 匹配调用实参位置上的内层调用：`f(g(...))` → g。
+var goInnerCallPattern = regexp.MustCompile(`\(\s*(\w[\w.]*)\s*\(`)
+
+// goChainCallPattern 匹配构造式链式调用：`NewService(x).M(...)` → base=NewService, method=M。
+// 参数部分不含括号，跳过参数本身也是嵌套调用的链（不做不可靠的类型推断）。
+var goChainCallPattern = regexp.MustCompile(`(\w[\w.]*)\s*\([^()]*\)\s*\.\s*(\w+)\s*\(`)
+
+// detectGoNestedCalls 补充抽取内层与链式调用（仅 Go）。
+//
+// 默认 callPattern 为非重叠匹配：`wrap(NewService())` 的内层 NewService 被外层整段吞掉；
+// `NewService().WithImpactAnalyzer(...)` 的 WithImpactAnalyzer 被记为包级函数。
+// 链式接收者类型取 base 函数（同包裸名）的具名返回类型，未知则跳过；已存在同名
+// callee 时就地改写（避免同一条边同时留下错误与正确两条）。
+func detectGoNestedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, recvVar, recvType string, localTypes, funcReturns map[string]string) {
+	short := func(fqn string) string {
+		if i := strings.LastIndex(fqn, "."); i >= 0 {
+			return fqn[i+1:]
+		}
+		return fqn
+	}
+	// 链式：改写或补充方法 callee
+	for _, m := range goChainCallPattern.FindAllStringSubmatch(line, -1) {
+		base, method := m[1], m[2]
+		if strings.Contains(base, ".") || isKeyword(method) || len(method) <= 1 {
+			continue
+		}
+		typ := funcReturns[base]
+		if typ == "" {
+			continue
+		}
+		callee := pkg + "." + typ + "." + method
+		replaced := false
+		for i := len(*calls) - 1; i >= 0; i-- {
+			c := &(*calls)[i]
+			if c.LineNumber == lineNum && c.CallerFQN == caller && short(c.CalleeFQN) == method {
+				c.CalleeFQN = callee
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			*calls = append(*calls, parser.CallIR{
+				CallerFQN:  caller,
+				CalleeFQN:  callee,
+				CallType:   "direct",
+				LineNumber: lineNum,
+				Source:     parser.CallSourceRegex,
+				Confidence: parser.ConfidenceRegex,
+			})
+		}
+	}
+	// 内层：仅补充本行尚未出现的 callee
+	for _, m := range goInnerCallPattern.FindAllStringSubmatch(line, -1) {
+		name := m[1]
+		if isKeyword(name) || len(name) <= 1 {
+			continue
+		}
+		seen := false
+		for _, c := range *calls {
+			if c.LineNumber == lineNum && c.CallerFQN == caller && short(c.CalleeFQN) == short(name) {
+				seen = true
+				break
+			}
+		}
+		if seen {
 			continue
 		}
 		callee := qualifyCallee(name, pkg, recvVar, recvType, "", "", localTypes)

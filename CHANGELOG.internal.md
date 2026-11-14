@@ -6,6 +6,30 @@
 
 ## 提交记录
 
+### Commit 245: fix(parser): Go 内层与链式调用抽取，链式接收者按返回类型限定
+
+- 默认 `callPattern` 为非重叠匹配：`wrap(NewService(...))` 的内层调用被外层整段
+  吞掉（`reflect.TypeOf(NewService(...))` 真值 FN）；`NewService().WithX(...)` 的
+  WithX 被记为包级函数（`svc := NewService(st).WithImpactAnalyzer(...)` 两条 FN）。
+- 正则路径补一轮扫描：内层调用（`(` 后紧跟 `name(`）按现有规则限定；链式调用
+  （`base(args).M(`）接收者类型取 base 同包裸函数的具名返回类型，未知则不记。
+  同名 callee 就地改写，避免同一行同时留下错误与正确两条边。
+- AST 路径链式 callee 原取最后一段标识符（`WithImpactAnalyzer`）后被包限定；
+  现按内层 `function` 的具名返回类型输出 `pkg.T.M`。
+- 负控：`TestGoNestedAndChainedCalls`（两变体旧实现均红：链式记成
+  `demo.WithImpactAnalyzer`、regex 内层 NewService 缺失；现绿）。
+- 同语料（code-schema go，人工真值 167 对）前→后：
+  regex TP 164/FP 9/FN 3 → 167/9/0，P 0.9480 → 0.9489、R 0.9820 → 1.0000、
+  F1 0.9647 → 0.9738；
+  treesitter TP 165/9/2 → 167/9/0，P 0.9483 → 0.9489、R 0.9880 → 1.0000、
+  F1 0.9677 → 0.9738。
+  调用图：regex calls 16419 → 17592（内层调用此前系统性少计）、resolved
+  4328 → 4427、resolution 0.2636 → 0.2516；treesitter calls 20567 → 20617、
+  resolved 4558 → 4568、resolution 0.2216 不变。
+  自动 test_link：regex TP 1740→1769、FP 27→46；treesitter TP 1782→1787、FP 64→60
+  （真值 pair 随抽取覆盖变化；剩余 FP 与下一提交的命名策略过匹配同源）。
+
+
 ### Commit 244: fix(parser): Go 接收者类型由同包函数返回类型推导（跨语句/跨文件）
 
 - 旧实现只认 `x := &T{}` / `var x *T`：`svc := newTestService(t)`、`svc := NewService(st)`

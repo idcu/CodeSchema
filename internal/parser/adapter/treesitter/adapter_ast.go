@@ -521,7 +521,13 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			}
 			raw := astCalleeName(n, data)
 			if lang == "go" {
-				raw = qualifyGoLocalCallee(raw, goPkg, goLocalTypes)
+				// 链式 `NewService(x).M(...)`：接收者类型取同包函数具名返回类型；
+				// 取不到时保持原有局部变量类型限定。
+				if typed := astGoChainedCallee(n, data, goPkg, goFuncReturns); typed != "" {
+					raw = typed
+				} else {
+					raw = qualifyGoLocalCallee(raw, goPkg, goLocalTypes)
+				}
 			}
 			callee := astQualifyCallee(raw, goPkg, astPkg, astCurClassName(curClass))
 			if callee == "" || isKeyword(callee) {
@@ -947,6 +953,29 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		return stripTypeArgs(strings.TrimSpace(text[:idx]))
 	}
 	return ""
+}
+
+// astGoChainedCallee 解析链式调用 `NewService(x).M(...)` 的 callee：base 为同包
+// 裸函数名且返回类型已知时，限定为 `pkg.T.M`；否则返回空串（不猜测接收者类型）。
+func astGoChainedCallee(n *ts.Node, src []byte, goPkg string, funcReturns map[string]string) string {
+	fn := n.ChildByFieldName("function")
+	if fn == nil || fn.IsNull() || !isMemberExprType(fn.Type()) {
+		return ""
+	}
+	obj := fn.ChildByFieldName("operand")
+	if obj == nil || obj.IsNull() || !isCallNodeType(obj.Type()) {
+		return ""
+	}
+	inner := obj.ChildByFieldName("function")
+	field := fn.ChildByFieldName("field")
+	if inner == nil || inner.IsNull() || inner.Type() != "identifier" || field == nil || field.IsNull() {
+		return ""
+	}
+	typ := funcReturns[string(inner.Content(src))]
+	if typ == "" {
+		return ""
+	}
+	return goPkg + "." + typ + "." + strings.TrimSpace(string(field.Content(src)))
 }
 
 // astCurClassName 安全返回当前类名（curClass 为 nil 时返回空串）。
