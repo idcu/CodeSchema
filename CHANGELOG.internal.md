@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### 结构性问题 2 后续（2026-11-14）：索引快照流式 + 原子落盘
+
+- perf(persist)：新增 `internal/atomicfile`（tmp → fsync → rename → fsync dir，失败清理 tmp）。
+  `PersistentStore.save` / `PersistentFTS.save` 由整索引 `MarshalIndent` + `fsperm.WriteFile`
+  改为按 ID 排序逐条流式序列化 + 原子替换；FTS 不再构建全量 `docEntryJSON` 副本。
+  负控：`TestWriteFailureKeepsPreviousVersion`、`TestPersistentStore_SaveFailureKeepsPreviousVersion`、
+  `TestPersistentFTS_StaleTempIgnoredOnLoad`、`TestPersistentFTS_OnlyTempNoMain`。
+- 实测（GOROOT `src`，10,345 文件 / 2,276,611 LoC，隔离口径）：构建峰值
+  1,382.2 → 623.6 MiB（-758.6 MiB / -54.9%），常驻 362.5 MiB 不变。
+  落盘 A/B（中位数）：向量 2,160 → 1,414 ms（峰值增量 873.7 → 101.0 MiB）、
+  FTS 695 → 518 ms（307.3 → 55.6 MiB）。
+- 边界：原子写仅保证同进程单写者；`maybeSave` 每 ≥10 次变更的全量快照写放大未变。
+- 文档：`perf-baseline.md` §8.5、`存储后端.md` 索引快照段落；原始数据
+  `mem-attribution-large-stream-atomic.json`、`save-ab-vector.json`、`save-ab-fts.json`。
+
 ### 结构性问题 2（2026-11-14）：file 后端内存归因 + 关键字 map 分配放大修复
 
 - 归因（`internal/scalebench/memory_attribution_test.go`，门控 `CODESCHEMA_MEM_ATTRIBUTION=1`）：

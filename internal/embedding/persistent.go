@@ -1,15 +1,16 @@
 package embedding
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"github.com/idcu/codeschema/internal/atomicfile"
 )
 
 // PersistentStore 磁盘持久化的向量存储。
@@ -192,23 +193,122 @@ func (ps *PersistentStore) Save() error {
 }
 
 // save 执行实际序列化写入（调用方需持有锁）。
+//
+// 流式写出 + 原子替换：按 ID 排序逐条序列化，避免整索引 MarshalIndent
+// 产生与索引等大的瞬态缓冲；写出中途失败不会留下半份索引（见 atomicfile）。
 func (ps *PersistentStore) save() error {
 	if ps.filePath == "" {
 		return nil
 	}
-	if err := fsperm.MkdirAll(filepath.Dir(ps.filePath)); err != nil {
-		return fmt.Errorf("persistent: mkdir: %w", err)
-	}
-	data := persistentData{Vectors: ps.vecs, Contents: ps.contents, ModelID: ps.modelID, Dim: ps.dim}
-	raw, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Errorf("persistent: marshal: %w", err)
-	}
-	if err := fsperm.WriteFile(ps.filePath, raw); err != nil {
-		return fmt.Errorf("persistent: write: %w", err)
+	if err := atomicfile.Write(ps.filePath, ps.writeJSON); err != nil {
+		return fmt.Errorf("persistent: save: %w", err)
 	}
 	ps.dirties = 0
 	return nil
+}
+
+// writeJSON 以稳定键序流式写出 persistentData 等价 JSON。
+//
+// 字段顺序与 omitempty 语义与旧 persistentData 保持一致，旧文件仍可加载；
+// 逐条 json.Marshal 使峰值只与单条向量相关，而不是整索引。
+func (ps *PersistentStore) writeJSON(w io.Writer) error {
+	bw := bufio.NewWriterSize(w, 64*1024)
+	if _, err := bw.WriteString(`{"vectors":{`); err != nil {
+		return err
+	}
+	for i, id := range sortedKeys(ps.vecs) {
+		if i > 0 {
+			if err := bw.WriteByte(','); err != nil {
+				return err
+			}
+		}
+		if err := writeJSONString(bw, id); err != nil {
+			return err
+		}
+		if err := bw.WriteByte(':'); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(ps.vecs[id])
+		if err != nil {
+			return err
+		}
+		if _, err := bw.Write(raw); err != nil {
+			return err
+		}
+	}
+	if _, err := bw.WriteString("}"); err != nil {
+		return err
+	}
+
+	if len(ps.contents) > 0 {
+		if _, err := bw.WriteString(`,"contents":{`); err != nil {
+			return err
+		}
+		for i, id := range sortedKeys(ps.contents) {
+			if i > 0 {
+				if err := bw.WriteByte(','); err != nil {
+					return err
+				}
+			}
+			if err := writeJSONString(bw, id); err != nil {
+				return err
+			}
+			if err := bw.WriteByte(':'); err != nil {
+				return err
+			}
+			raw, err := json.Marshal(ps.contents[id])
+			if err != nil {
+				return err
+			}
+			if _, err := bw.Write(raw); err != nil {
+				return err
+			}
+		}
+		if _, err := bw.WriteString("}"); err != nil {
+			return err
+		}
+	}
+	if ps.modelID != "" {
+		raw, err := json.Marshal(ps.modelID)
+		if err != nil {
+			return err
+		}
+		if _, err := bw.WriteString(`,"model_id":`); err != nil {
+			return err
+		}
+		if _, err := bw.Write(raw); err != nil {
+			return err
+		}
+	}
+	if ps.dim != 0 {
+		if _, err := fmt.Fprintf(bw, `,"dim":%d`, ps.dim); err != nil {
+			return err
+		}
+	}
+	if _, err := bw.WriteString("}\n"); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// writeJSONString 写出一个 JSON 字符串（键/值共用）。
+func writeJSONString(bw *bufio.Writer, s string) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = bw.Write(raw)
+	return err
+}
+
+// sortedKeys 返回 map 的升序键，保证落盘字节稳定、可比对。
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // load 从磁盘加载数据（初始化时调用）。

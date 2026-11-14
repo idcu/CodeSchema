@@ -1,6 +1,6 @@
 # 性能基线：索引吞吐、查询延迟与多租户隔离（S-3）
 
-> 最后更新：2026-11-14（追加调用图按代次缓存与 file 后端内存归因，见 §6.1 / §8.4）
+> 最后更新：2026-11-14（追加索引快照流式原子落盘实测，见 §8.5；调用图缓存与内存归因见 §6.1 / §8.4）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -12,7 +12,7 @@
 |---|---|
 | 最大语料 | Go 标准库 `src`：6,786 个 `.go` / 2,276,611 行 / 91,251 个符号 |
 | 索引吞吐（large） | scan 1,725.0 files/s、22,460.8 symbols/s；index 1,084.1 files/s、14,115.7 symbols/s |
-| 索引内存（large） | 堆峰值 1,935.5 MiB（瞬态，非常驻）；GC 后 live 363.8 MiB；查询期常驻 423.0 MiB |
+| 索引内存（large） | 隔离口径堆峰值 **623.6 MiB**（改前 1,382.2 MiB，见 §8.5）；GC 后 live 362.5 MiB；查询期常驻 421.5 MiB。perf 全流程口径改前 1,935.5 MiB，未同批复跑 |
 | `/context`（large） | P50 141.5 ms / P95 160.9 ms，0 错误 |
 | `/impact`（large） | P50 3.6 ms / P95 5.4 ms，0 错误（改造前 378.5 / 397.8 ms，见 §6.1） |
 | `/search`（large） | P50 244.9 ms / P95 256.8 ms，0 错误 |
@@ -21,9 +21,10 @@
 | 查询错误率 | 7,294 次并发查询 / 0 错误 |
 
 发现的明确结构性问题：持久化向量存储的 O(n²) 写放大（§8.1）、调用图逐请求全量重建
-（§6.1）、关键字判定每次调用重建 map 的分配放大（§8.4），均已先红后绿修复。
-`file` 后端的 1.9 GiB 堆峰值经归因为**索引构建期瞬态**（GC 余量 + JSON 快照序列化），
-常驻仅 363.8 MiB，未发现泄漏或非线性增长；上限位置见 §8.4，本轮未做进一步优化。
+（§6.1）、关键字判定每次调用重建 map 的分配放大（§8.4）、索引快照整块 `MarshalIndent`
+（§8.5），均已先红后绿修复。`file` 后端的堆峰值经归因为**索引构建期瞬态**（GC 余量 +
+快照序列化），常驻仅 362.5 MiB，未发现泄漏或非线性增长；改流式落盘后隔离口径峰值
+1,382.2 → 623.6 MiB。
 
 ## 2. 硬件与运行环境
 
@@ -263,7 +264,7 @@ CODESCHEMA_MEM_ATTRIBUTION=1 go test -run '^TestMemoryAttribution_FileBackend$' 
 | 阶段 | 修复前分配 | 修复后分配 | 说明 |
 |---|---:|---:|---|
 | scan | 12.46 GB | 2.58 GB | 修复前 `isKeyword` 单函数 9.65 GB（占 scan 分配 77%） |
-| index（BuildRuntime） | 3.53 GB | 3.53 GB | `json.MarshalIndent` cum 2.42 GB（69%）、`LocalEmbedder` 0.56 GB、分词 0.26 GB |
+| index（BuildRuntime） | 3.53 GB | 3.53 GB | `json.MarshalIndent` cum 2.42 GB（69%）、`LocalEmbedder` 0.56 GB、分词 0.26 GB；快照序列化已在 §8.5 改为流式 |
 | 全流程峰值（scan 前启动采样） | 1,872.3 MiB | 1,382.2 MiB | 修复后峰值由 index 阶段决定 |
 | 全流程峰值（perf 口径：scan/index 连续，不插 GC） | 1,921–1,935 MiB | 1,935.5 MiB | scan 修复不改变该项：峰值由 index 阶段 JSON 快照与 GC 余量叠加 |
 
@@ -273,16 +274,57 @@ CODESCHEMA_MEM_ATTRIBUTION=1 go test -run '^TestMemoryAttribution_FileBackend$' 
 scan 吞吐 1,262 → 1,725 files/s（+36.7%），隔离口径峰值 1,872.3 → 1,382.2 MiB（-26.2%）。
 但 perf 全流程峰值仍为 1,935.5 MiB：瓶颈已转移到 index 阶段的整索引 JSON 序列化。
 
-**未改的上限位置**：`PersistentFTS.save` 与 `PersistentStore.save` 在构建结束时把整个索引
-`MarshalIndent` 成单个 `[]byte` 再落盘，单轮构建累计分配约 2.4 GB，最大单次缓冲区决定了
-峰值下界的一部分。该行为是**线性**的（不随构建次数增长），不属于缺陷；改成流式编码/原子
-重命名会改变落盘路径与故障恢复语义，本轮不做无依据的优化。生产大仓应优先 sqlite/pg/redis。
+**上限位置（已在 §8.5 修复）**：`PersistentFTS.save` 与 `PersistentStore.save` 在构建结束时把
+整个索引 `MarshalIndent` 成单个 `[]byte` 再落盘，单轮构建累计分配约 2.4 GB，最大单次缓冲区
+决定了峰值下界的一部分。该行为是**线性**的（不随构建次数增长），不属于泄漏；后续按
+「流式序列化 + 原子替换」改造并带负控验证，见 §8.5。生产大仓仍应优先 sqlite/pg/redis。
 
 `GOGC=20` 对照（同一修复后代码）：峰值 1,382.2 → 1,108.1 MiB（-19.8%），常驻 362.4 MiB
 不变，说明峰值中约 274 MiB 来自 GC 余量，其余约 1.1 GiB 是构建期临时对象（整索引 JSON
 快照、文档文本、向量中间值），与数据驻留规模无关。
 
-### 8.5 未验证边界
+### 8.5 索引快照流式原子落盘（结构性问题 2 后续，已修复）
+
+**先红后绿**：新增 `internal/atomicfile`，两处 `save()` 由「整索引 `MarshalIndent` →
+`fsperm.WriteFile`（直写目标）」改为「按 ID 排序逐条序列化 → 写 `<file>.tmp` → `fsync` →
+原子 `rename` → `fsync` 目录」。负控：
+
+- `TestWriteFailureKeepsPreviousVersion`：回调写一半后报错，目标文件保持旧版本且无 `.tmp` 残留；
+- `TestPersistentStore_SaveFailureKeepsPreviousVersion`：NaN 触发序列化中途失败，旧索引仍可加载；
+- `TestPersistentFTS_StaleTempIgnoredOnLoad` / `TestPersistentFTS_OnlyTempNoMain`：
+  中断残留的半份 `.tmp` 不得被当作索引，只有 `.tmp` 时按空索引启动。
+
+**GOROOT 构建期峰值（隔离口径，同机同语料，10,345 文件 / 2,276,611 LoC）**：
+
+| 指标 | 改前 | 改后 | 变化 |
+|---|---:|---:|---:|
+| build_peak | 1,449,365,920 B（1,382.2 MiB） | 653,910,688 B（623.6 MiB） | **-758.6 MiB（-54.9%）** |
+| after_scan | 131.1 MiB | 131.1 MiB | 不变 |
+| after_index | 362.4 MiB | 362.5 MiB | 常驻不变 |
+| 调用图缓存后常驻 | 421.6 MiB | 421.5 MiB | 常驻不变 |
+
+原始数据：`mem-attribution-large-keyword-fix.json`（改前）、
+`mem-attribution-large-stream-atomic.json`（改后）。build_peak 是 scan+index 复合峰值；
+本轮只改落盘路径，峰值下降可直接归因于快照序列化缓冲的消失。
+
+**落盘耗时 A/B（真实语料文件、同一份内存数据、5 轮丢弃首轮取中位数）**：
+
+| 组件 | 文件大小 | 旧路径（整索引 MarshalIndent + 直写） | 新路径（流式 + 原子） | 序列化分配 旧 → 新 |
+|---|---:|---:|---:|---:|
+| 向量 `vector.json` | 86.5 MiB | 2,160 ms | 1,414 ms | 1,015.7 → 100.9 MiB |
+| FTS `fts.json` | 44.3 MiB | 695 ms | 518 ms | 307.3 → 55.4 MiB |
+
+采样峰值增量：向量 873.7 → 101.0 MiB（-88.4%）；FTS 307.3 → 55.6 MiB（-81.9%）。
+纯序列化（写 `io.Discard`）向量 2,031 → 1,044 ms、FTS 625 → 253 ms。
+旧路径为测试内逐字复刻（非生产代码）；时长含 2 ms 堆采样开销，各变体同口径。
+原始数据：`save-ab-vector.json` / `save-ab-fts.json`；
+复跑：`CODESCHEMA_SNAPSHOT_DIR=<snapshot_dir>` + 对应 `TestPersistentStore_SaveAB` /
+`TestPersistentFTS_SaveAB`。
+
+**边界**：原子写只保证**同进程单写者**（调用方持存储写锁），跨进程并发写同一目录不在承诺内；
+`maybeSave` 仍是每 ≥10 次变更做一次全量快照，O(n²) 写放大未变（§8.1），增量落盘不在本次范围。
+
+### 8.6 未验证边界
 
 - 未连真实 Redis（见 §7）；未验证 PG/redis 后端的并发性能。
 - 未做并发查询吞吐上限测试（查询循环带 1 ms sleep，只用于争用与错误率观测）。
@@ -344,7 +386,8 @@ make bench-perf
 | `perf-go.json` / `perf-java.json` / `perf-ts.json` | 单租户：语料规模、scan/index 吞吐、内存、三端点 P50/P95/P99/max/mean |
 | `perf-large.json` | 同上，Go 标准库 `src` |
 | `perf-multitenant.json` | 顺序/并发墙钟、争用比、goroutine 峰值、查询次数与错误、逐租户明细、隔离断言 |
-| `mem-attribution-large*.json` | file 后端分阶段 live heap、构建峰值、调用图驻留增量（`before-keyword-fix` / `keyword-fix` / `gogc20`） |
+| `mem-attribution-large*.json` | file 后端分阶段 live heap、构建峰值、调用图驻留增量、快照导出目录（`before-keyword-fix` / `keyword-fix` / `gogc20` / `stream-atomic`） |
+| `save-ab-vector.json` / `save-ab-fts.json` | 真实语料上向量/FTS 快照落盘 A/B：旧 `MarshalIndent` 与流式原子写的时长、堆峰值增量、分配量 |
 
 ### 9.4 复跑注意事项
 
@@ -362,6 +405,10 @@ make bench-perf
 - [mem-attribution-large-before-keyword-fix.json](./mem-attribution-large-before-keyword-fix.json)
 - [mem-attribution-large-keyword-fix.json](./mem-attribution-large-keyword-fix.json)
 - [mem-attribution-large-gogc20.json](./mem-attribution-large-gogc20.json)
+- [mem-attribution-large-stream-atomic.json](./mem-attribution-large-stream-atomic.json)
+- [save-ab-vector.json](./save-ab-vector.json)
+- [save-ab-fts.json](./save-ab-fts.json)
 
-基准代码：`internal/scalebench/perf_baseline_test.go`、`internal/scalebench/memory_attribution_test.go`；
-门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1`。
+基准代码：`internal/scalebench/perf_baseline_test.go`、`internal/scalebench/memory_attribution_test.go`、
+`internal/embedding/persistent_save_ab_test.go`、`internal/retrieval/persistent_save_ab_test.go`；
+门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1` / `CODESCHEMA_SNAPSHOT_DIR`。

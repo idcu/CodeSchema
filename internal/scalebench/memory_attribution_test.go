@@ -14,6 +14,7 @@ package scalebench
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,13 +29,15 @@ import (
 const memAttributionGate = "CODESCHEMA_MEM_ATTRIBUTION"
 
 type attributionResult struct {
-	Corpus  string            `json:"corpus"`
-	Root    string            `json:"root"`
-	Files   int               `json:"files"`
-	LoC     int               `json:"loc"`
-	Stages  map[string]uint64 `json:"stages_bytes"`
-	Notes   []string          `json:"notes"`
-	Profile []string          `json:"profile_files"`
+	Corpus        string            `json:"corpus"`
+	Root          string            `json:"root"`
+	Files         int               `json:"files"`
+	LoC           int               `json:"loc"`
+	Stages        map[string]uint64 `json:"stages_bytes"`
+	Notes         []string          `json:"notes"`
+	Profile       []string          `json:"profile_files"`
+	SnapshotDir   string            `json:"snapshot_dir,omitempty"`
+	SnapshotFiles []string          `json:"snapshot_files,omitempty"`
 }
 
 // TestMemoryAttribution_FileBackend 分阶段测量 file 后端在 large 语料上的堆内存：
@@ -136,6 +139,19 @@ func TestMemoryAttribution_FileBackend(t *testing.T) {
 	}
 	res.Stages["call_graph_retained"] = uint64(graphDelta)
 
+	// 导出真实语料的持久化文件（向量/FTS），供落盘耗时 A/B 测试复用；
+	// 只复制这两个文件，不复制整个索引目录。
+	snapshotDir := filepath.Join(profileDir, "snapshot")
+	if tag := os.Getenv("MEM_ATTRIBUTION_TAG"); tag != "" {
+		snapshotDir = filepath.Join(profileDir, "snapshot-"+tag)
+	}
+	res.SnapshotDir, res.SnapshotFiles = exportSnapshots(t, []string{
+		filepath.Join(cfg.Storage.Search.VectorDir, "vector.json"),
+		filepath.Join(cfg.Storage.Search.FTSDir, "fts.json"),
+	}, snapshotDir)
+	res.Notes = append(res.Notes, "snapshot_dir 供 CODESCHEMA_SNAPSHOT_DIR 门控的落盘 A/B 测试复用真实语料")
+	t.Logf("snapshot files in %s: %v", res.SnapshotDir, res.SnapshotFiles)
+
 	outDir := filepath.Join(repoRoot(), perfOutSubdir)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatalf("mkdir out dir: %v", err)
@@ -229,6 +245,52 @@ func writeHeapProfileFile(path string) error {
 }
 
 func mb(b uint64) float64 { return float64(b) / 1024 / 1024 }
+
+// exportSnapshots 把指定持久化文件流式复制到 dir（保留上一级目录名），
+// 返回实际导出的路径列表；源文件不存在时跳过。
+func exportSnapshots(t *testing.T, srcs []string, dir string) (string, []string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir snapshot dir: %v", err)
+	}
+	var out []string
+	for _, src := range srcs {
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(dir, filepath.Base(filepath.Dir(src)), filepath.Base(src))
+		if err := copyFile(src, dst); err != nil {
+			t.Fatalf("copy snapshot %s: %v", src, err)
+		}
+		out = append(out, dst)
+	}
+	return dir, out
+}
+
+// copyFile 流式复制，避免把大文件整个读入内存污染峰值测量。
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
 
 // liveHeapStable 连续 3 次 GC 后取 HeapAlloc 最小值，降低测量抖动。
 func liveHeapStable() uint64 {

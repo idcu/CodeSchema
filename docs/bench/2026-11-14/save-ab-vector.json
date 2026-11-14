@@ -1,0 +1,148 @@
+{
+  "component": "vector",
+  "source_file": "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/snapshot-stream-atomic/vector/vector.json",
+  "source_bytes": 90650906,
+  "rounds": 5,
+  "gogc": "",
+  "legacy_serialize_only": {
+    "min_ms": 1961.31,
+    "median_ms": 2031.378,
+    "max_ms": 2043.105,
+    "min_peak_delta_bytes": 916106112,
+    "median_peak_delta_bytes": 916106472,
+    "max_peak_delta_bytes": 916106592,
+    "median_alloc_bytes": 1065041336,
+    "samples": [
+      {
+        "duration_ms": 2043.105,
+        "peak_heap_delta_bytes": 916106472,
+        "total_alloc_delta_bytes": 1065041544,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 2031.378,
+        "peak_heap_delta_bytes": 916106592,
+        "total_alloc_delta_bytes": 1065041272,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 1986.049,
+        "peak_heap_delta_bytes": 916106376,
+        "total_alloc_delta_bytes": 1065041336,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 1961.31,
+        "peak_heap_delta_bytes": 916106112,
+        "total_alloc_delta_bytes": 1065040792,
+        "num_gc": 1
+      }
+    ]
+  },
+  "legacy_marshalindent_plus_write": {
+    "min_ms": 2059.218,
+    "median_ms": 2160.239,
+    "max_ms": 2228.888,
+    "min_peak_delta_bytes": 916106592,
+    "median_peak_delta_bytes": 916106960,
+    "max_peak_delta_bytes": 916107336,
+    "median_alloc_bytes": 1065042112,
+    "samples": [
+      {
+        "duration_ms": 2160.239,
+        "peak_heap_delta_bytes": 916107336,
+        "total_alloc_delta_bytes": 1065042128,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 2228.888,
+        "peak_heap_delta_bytes": 916106592,
+        "total_alloc_delta_bytes": 1065041632,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 2108.816,
+        "peak_heap_delta_bytes": 916106720,
+        "total_alloc_delta_bytes": 1065041760,
+        "num_gc": 1
+      },
+      {
+        "duration_ms": 2059.218,
+        "peak_heap_delta_bytes": 916106960,
+        "total_alloc_delta_bytes": 1065042112,
+        "num_gc": 1
+      }
+    ]
+  },
+  "stream_serialize_only": {
+    "min_ms": 1040.534,
+    "median_ms": 1044.049,
+    "max_ms": 1064.138,
+    "min_peak_delta_bytes": 105174176,
+    "median_peak_delta_bytes": 105713568,
+    "max_peak_delta_bytes": 105739384,
+    "median_alloc_bytes": 105779064,
+    "samples": [
+      {
+        "duration_ms": 1064.138,
+        "peak_heap_delta_bytes": 105276624,
+        "total_alloc_delta_bytes": 105827568,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1044.049,
+        "peak_heap_delta_bytes": 105174176,
+        "total_alloc_delta_bytes": 105744096,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1040.534,
+        "peak_heap_delta_bytes": 105713568,
+        "total_alloc_delta_bytes": 105762304,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1042.602,
+        "peak_heap_delta_bytes": 105739384,
+        "total_alloc_delta_bytes": 105779064,
+        "num_gc": 0
+      }
+    ]
+  },
+  "stream_atomic_write": {
+    "min_ms": 1138.211,
+    "median_ms": 1413.93,
+    "max_ms": 1988.836,
+    "min_peak_delta_bytes": 105927552,
+    "median_peak_delta_bytes": 105928256,
+    "max_peak_delta_bytes": 106013064,
+    "median_alloc_bytes": 105928256,
+    "samples": [
+      {
+        "duration_ms": 1138.211,
+        "peak_heap_delta_bytes": 105927888,
+        "total_alloc_delta_bytes": 105927888,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1988.836,
+        "peak_heap_delta_bytes": 106013064,
+        "total_alloc_delta_bytes": 106013064,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1335.334,
+        "peak_heap_delta_bytes": 105928256,
+        "total_alloc_delta_bytes": 105928256,
+        "num_gc": 0
+      },
+      {
+        "duration_ms": 1413.93,
+        "peak_heap_delta_bytes": 105927552,
+        "total_alloc_delta_bytes": 105927552,
+        "num_gc": 0
+      }
+    ]
+  },
+  "note": "旧路径为测试内逐字复刻（整索引 MarshalIndent + fsperm.WriteFile）；峰值由 2ms 采样 HeapAlloc 得到，GC 后取基线"
+}

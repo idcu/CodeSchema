@@ -1,14 +1,16 @@
 package retrieval
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
+	"sort"
 	"sync"
 
-	"github.com/idcu/codeschema/internal/fsperm"
+	"github.com/idcu/codeschema/internal/atomicfile"
 )
 
 // PersistentFTS 磁盘持久化的全文搜索引擎。
@@ -116,33 +118,64 @@ func (pf *PersistentFTS) Save() error {
 }
 
 // save 序列化写入（调用方需持有写锁）。
+//
+// 流式写出 + 原子替换：按 ID 排序逐篇序列化，不再先把全部文档复制成
+// map[string]*docEntryJSON，也不产生与索引等大的整块 JSON 缓冲。
 func (pf *PersistentFTS) save() error {
 	if pf.filePath == "" {
 		return nil
 	}
-	if err := fsperm.MkdirAll(filepath.Dir(pf.filePath)); err != nil {
-		return fmt.Errorf("persistent fts: mkdir: %w", err)
-	}
-	data := persistentFTSData{
-		Docs: make(map[string]*docEntryJSON, len(pf.docs)),
-	}
-	for id, doc := range pf.docs {
-		entry := &docEntryJSON{
-			ID:      doc.ID,
-			Content: doc.Content,
-			Tokens:  doc.Tokens,
-		}
-		data.Docs[id] = entry
-	}
-	raw, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Errorf("persistent fts: marshal: %w", err)
-	}
-	if err := fsperm.WriteFile(pf.filePath, raw); err != nil {
-		return fmt.Errorf("persistent fts: write: %w", err)
+	if err := atomicfile.Write(pf.filePath, pf.writeJSON); err != nil {
+		return fmt.Errorf("persistent fts: save: %w", err)
 	}
 	pf.dirties = 0
 	return nil
+}
+
+// writeJSON 以稳定键序流式写出 persistentFTSData 等价 JSON。
+func (pf *PersistentFTS) writeJSON(w io.Writer) error {
+	bw := bufio.NewWriterSize(w, 64*1024)
+	if _, err := bw.WriteString(`{"docs":{`); err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(pf.docs))
+	for id := range pf.docs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for i, id := range ids {
+		if i > 0 {
+			if err := bw.WriteByte(','); err != nil {
+				return err
+			}
+		}
+		rawID, err := json.Marshal(id)
+		if err != nil {
+			return err
+		}
+		if _, err := bw.Write(rawID); err != nil {
+			return err
+		}
+		if err := bw.WriteByte(':'); err != nil {
+			return err
+		}
+		doc := pf.docs[id]
+		raw, err := json.Marshal(&docEntryJSON{
+			ID:      doc.ID,
+			Content: doc.Content,
+			Tokens:  doc.Tokens,
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := bw.Write(raw); err != nil {
+			return err
+		}
+	}
+	if _, err := bw.WriteString("}}\n"); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 // load 从磁盘加载（初始化时调用）。
