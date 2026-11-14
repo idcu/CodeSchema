@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 162: fix(server): viz 文档列表分页参数夹取，消除负数切片 panic（P3-1）
+
+- 背景：`/viz/api/documents` 直接把 `offset/limit` 用于 `docs[offset:end]`，`limit=-1` 触发 `slice bounds out of range [:-1]`，线上被 recovery 兜成 500；`Sscanf` 解析失败也会静默保留原值。
+- 动作：改用 `strconv.Atoi`，并把 `offset` 夹取到 `[0,len]`、`limit` 夹取到 `[0,len-offset]` 后再切片，任何输入都返回 200 且不 panic。
+- 负控（先红后绿）：新增 `internal/server/viz_test.go::TestVizAPIDocuments_PaginationBounds`（5 组参数）。修复前 `limit=-1` 实测 panic（栈顶 `viz.go:141`）；修复后 5 组全部 200，文档数分别 0/3/0/0/1。
+- 验证：`make test` 全绿；`make counts-check` 通过（LoC 55505 ≈ 55.5k）。
+
 ### Commit 161: fix(parser): Go 原始字符串 / const 块泄漏 / 泛型函数三项硬化（P3-9）
 
 - 反引号原始字符串：`codeSanitizer` 增加跨行 `inRawString` 状态，串内内容全屏蔽。修复前串内 `fake(1)` 被记录为真实调用，且串内 `{` 使方法深度失衡、`UsesRaw` 的 EndLine 停在定义行（实测 3，应为 6）。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -116,28 +117,37 @@ func (h *VizHandler) apiDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 支持分页
+	// 支持分页。offset/limit 均夹取到合法区间：负数或越界参数直接切片会 panic（P3-1）。
 	offset := 0
 	limit := len(docs)
 	if o := r.URL.Query().Get("offset"); o != "" {
-		fmt.Sscanf(o, "%d", &offset)
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
 	}
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
 	}
-
-	end := offset + limit
-	if end > len(docs) {
-		end = len(docs)
+	if offset < 0 {
+		offset = 0
 	}
 	if offset > len(docs) {
 		offset = len(docs)
 	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit > len(docs)-offset {
+		limit = len(docs) - offset
+	}
+	end := offset + limit
 
 	resp := map[string]any{
-		"total":  len(docs),
-		"offset": offset,
-		"limit":  limit,
+		"total":     len(docs),
+		"offset":    offset,
+		"limit":     limit,
 		"documents": docs[offset:end],
 	}
 	writeJSON(w, http.StatusOK, resp)
