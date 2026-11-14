@@ -93,6 +93,7 @@ go build -o codeschema ./cmd/codeschema
 ./codeschema benchmark ./repo --out build/bench.json
 
 # Agent 任务端到端评测（对外可信基准：三档上下文 × 任务集的通过率与 token 节省）
+# 默认下限 MinPassRate=0.80：full/minimal 任一档低于该值即非零退出；--min-pass-rate 可覆盖
 ./codeschema agent-bench --repo . --out build/agent-task-bench
 # 多仓库评测（按 RepoHint 过滤任务，跨仓对比报告）
 ./codeschema agent-bench --repos "repo1;repo2" --out build/agent-task-bench

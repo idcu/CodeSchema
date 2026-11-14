@@ -2,7 +2,7 @@
 
 > 写给：要 clone、构建、调试、扩展 CodeSchema 的工程师
 
-> 最后更新：2026-09-08
+> 最后更新：2026-11-14
 ## 0. 构建前置（必读）
 
 - **Go 1.25+**
@@ -28,7 +28,7 @@ make build          # 默认构建
 make test           # 跑测试
 make test-race      # 竞态测试
 make lint           # 静态检查
-make verify-tags    # 校验 -tags 'onnx pg redis' 全包可解析+类型检查
+make verify-tags    # 真正编译 -tags 'pg redis' 变体 + onnx/pg/redis 全包类型检查
 make counts         # 打印项目计数（包数/工具数/路由数/LoC）
 make counts-check   # CI 用：与基线比对，数字漂移则失败
 make bench-agent    # agent-bench 端到端评测

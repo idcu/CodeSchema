@@ -190,14 +190,17 @@ fmt-check:
 	fi
 	@echo "==> gofmt OK"
 
-# 标签隔离代码看护：解析并类型检查 onnx/pg/redis 标签隔离包（不链接运行时，轻量）
+# 标签隔离代码看护：真正编译 pg/redis 变体，并对 onnx/pg/redis 全标签做类型检查。
 # 防止默认构建外的 ONNX 嵌入 / PG / Redis 存储代码长期无人编译而腐化。
-# 等价于「该变体至少能编译」；CI 见 .github/workflows/ci.yml 的 tag-guard job。
+# onnx 变体需 CGO 与 onnxruntime 库，CI 不安装运行时，故用 vet 做完整类型检查。
+# CI 见 .github/workflows/ci.yml 的 tag-guard job（调用本目标）。
 .PHONY: verify-tags
 verify-tags:
-	@echo "==> Verifying tag-isolated packages (onnx/pg/redis) ..."
-	$(GO) list -tags 'onnx pg redis' ./...
-	@echo "==> Tag-isolated packages resolve OK."
+	@echo "==> Compiling tag-isolated packages (pg/redis) ..."
+	$(GO) build -tags 'pg redis' ./...
+	@echo "==> Type-checking onnx/pg/redis variant ..."
+	$(GO) vet -tags 'onnx pg redis' ./...
+	@echo "==> Tag-isolated packages compile OK."
 
 # 项目计数审计（P3#10）：脚本化输出包数 / LoC / MCP 工具数 / HTTP 路由数，
 # 取代手工数字，防止文档口径长期漂移（此前出现过 27/31/32/36 四处包数不一）。

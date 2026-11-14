@@ -6,6 +6,23 @@
 
 ## 提交记录
 
+### Commit 219: test(release): verify-tags 真编译 + agent-bench 绝对下限（R6-7 / P3-13）
+
+- `make verify-tags` 从 `go list` 改为 `go build -tags 'pg redis' ./...` +
+  `go vet -tags 'onnx pg redis' ./...`；CI `tag-guard` 改为调用该目标。
+- `agentbench.MinPassRate = 0.80` + `CheckPassRateFloor`：full/minimal 任一档
+  低于下限即返回错误；`agent-bench` CLI 新增 `--min-pass-rate`（0 关闭），
+  覆盖默认值时 stderr 打印「阈值变更需单独评审」。
+- 负控（先红后绿）：临时模块中带 `//go:build redis` 的类型错误文件，旧
+  `go list` 退出 0、新 `go build` 退出 1；`CheckPassRateFloor` 未实现时测试
+  编译失败，实现后 50% 两档均被拒、100% 放行。
+- 实测：`make verify-tags` 退出 0；本仓 `agent-bench` 默认下限退出 0，
+  `--min-pass-rate 1.01` 退出 1（`full pass rate 1.00 below floor 1.01`）。
+- 串行门禁：`go build` / `go vet` / `go vet -tags "pg redis treesitter"` /
+  `make test` 全部通过。
+- 文档：`测试与CI.md`、`01-开发者/README.md`、`04-贡献者/README.md`、`README.md`
+  同步；counts 62976（63.0k）。
+
 ### Commit 218: chore: gofmt 一次性格式化 + CI 格式门禁（R6-6 / P3-13）
 
 - 新增 `make fmt-check`：对 `git ls-files '*.go'` 排除 `vendor/`、`down/` 后跑

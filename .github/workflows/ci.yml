@@ -403,10 +403,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Verify tag-isolated packages resolve (onnx/pg/redis)
-        # go list -tags 'onnx pg redis' ./... ：解析并类型检查全部标签隔离包；
-        # 不链接 onnxruntime 运行时，轻量守护标签隔离代码不腐化。
-        run: go list -tags 'onnx pg redis' ./...
+      - name: Compile tag-isolated packages (onnx/pg/redis)
+        # make verify-tags：go build -tags 'pg redis' ./... 真正编译 PG/Redis 变体，
+        # go vet -tags 'onnx pg redis' ./... 对 ONNX 变体做完整类型检查（不链接运行时）。
+        run: make verify-tags
 
   # === 计数漂移断言（P3#10 CI 闭环） ===
   # 实时计数（包数 / MCP 工具数 / HTTP 路由数）与 scripts/counts_baseline.json 比对，

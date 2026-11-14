@@ -222,6 +222,24 @@ func (s *Sample) Add() int {
 	return service.NewService(comps.store).WithSearcher(comps.searcher)
 }
 
+// TestAgentBenchFloorRejectsRegression 通过率绝对下限：full/minimal 任一档低于
+// MinPassRate 即报错（CLI 退出非 0）；两档均达标才放行。
+func TestAgentBenchFloorRejectsRegression(t *testing.T) {
+	if err := CheckPassRateFloor(Summary{PassRateFull: 1.0, PassRateMinimal: 1.0}, MinPassRate); err != nil {
+		t.Fatalf("both modes at 100%%: unexpected error: %v", err)
+	}
+	if err := CheckPassRateFloor(Summary{PassRateFull: 0.5, PassRateMinimal: 1.0}, MinPassRate); err == nil {
+		t.Fatal("full=50%% should be rejected by floor")
+	}
+	if err := CheckPassRateFloor(Summary{PassRateFull: 1.0, PassRateMinimal: 0.5}, MinPassRate); err == nil {
+		t.Fatal("minimal=50%% should be rejected by floor")
+	}
+	// 显式覆盖为 0 表示关闭下限（供实验性评测使用）。
+	if err := CheckPassRateFloor(Summary{PassRateFull: 0.1, PassRateMinimal: 0.1}, 0); err != nil {
+		t.Fatalf("explicit zero floor should disable check: %v", err)
+	}
+}
+
 // TestRun_RealRepo 以本仓库为评测对象跑通 Run 全流程（真实扫描+索引+评测）。
 // 报告快照受 testutil.BenchOutPath 防护：默认写临时目录，CI 不触碰 build/。
 func TestRun_RealRepo(t *testing.T) {

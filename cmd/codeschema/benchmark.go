@@ -117,12 +117,16 @@ func splitRepos(s string) []string {
 //
 // 用法：
 //
-//	codeschema agent-bench [--repo=path] [--repos="p1;p2"] [--out=build/agent-task-bench] [--workers=N] [--context-lines=10]
+//	codeschema agent-bench [--repo=path] [--repos="p1;p2"] [--out=build/agent-task-bench] [--workers=N] [--context-lines=10] [--min-pass-rate=0.80]
 //
 // 评测对象：单仓库（默认 CodeSchema 自身）或多仓库（--repos 分号分隔）+ 内置
 // Agent 任务集（bug 修复/特性实现/重构，按 RepoHint 匹配仓库），对比 none/full/
 // minimal 三档上下文供给的「任务可完成率 × token 消耗」，输出 Markdown 到
 // stdout、md+json 落盘到 --out。
+//
+// 默认下限 agentbench.MinPassRate（0.80）：full/minimal 任一档低于该值即返回
+// 错误（退出非 0）。--min-pass-rate 可显式覆盖（0 关闭下限）；覆盖默认值需单独
+// 评审阈值变更并附复跑数据。
 func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("agent-bench", flag.ExitOnError)
 	repoFlag := fs.String("repo", "", "评测仓库路径（默认 CodeSchema 自身，与 --repos 二选一）")
@@ -130,7 +134,13 @@ func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error
 	outFlag := fs.String("out", filepath.Join("build", "agent-task-bench"), "报告输出目录（md + json）")
 	workers := fs.Int("workers", cfg.Scanner.Workers, "并发解析 worker 数")
 	contextLines := fs.Int("context-lines", 10, "full 档位注入上下文行数（0 表示不裁剪）")
+	minPassRate := fs.Float64("min-pass-rate", agentbench.MinPassRate, "full/minimal 通过率绝对下限（0 关闭；覆盖默认值需单独评审）")
 	fs.Parse(args)
+
+	if *minPassRate != agentbench.MinPassRate {
+		fmt.Fprintf(os.Stderr, "WARN: --min-pass-rate=%.2f 覆盖默认下限 %.2f，阈值变更需单独评审并附复跑数据\n",
+			*minPassRate, agentbench.MinPassRate)
+	}
 
 	var repos []string
 	switch {
@@ -160,6 +170,9 @@ func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error
 		if err != nil {
 			return fmt.Errorf("agent-bench: %w", err)
 		}
+		if err := agentbench.CheckPassRateFloor(report.Summary, *minPassRate); err != nil {
+			return err
+		}
 		md := agentbench.GenerateMarkdown(report)
 		fmt.Printf("\n%s\n", md)
 		paths, err := agentbench.WriteOutput(report, *outFlag)
@@ -180,6 +193,9 @@ func agentBenchCmd(ctx context.Context, cfg *config.Config, args []string) error
 	md := agentbench.GenerateMultiMarkdown(reports)
 	fmt.Printf("\n%s\n", md)
 	for _, r := range reports {
+		if err := agentbench.CheckPassRateFloor(r.Summary, *minPassRate); err != nil {
+			return fmt.Errorf("agent-bench repo %s: %w", r.RepoPath, err)
+		}
 		sub := filepath.Join(*outFlag, filepath.Base(r.RepoPath))
 		if _, err := agentbench.WriteOutput(r, sub); err != nil {
 			return fmt.Errorf("agent-bench write output %s: %w", r.RepoPath, err)

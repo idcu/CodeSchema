@@ -99,6 +99,26 @@ type Summary struct {
 	TaskTotal int `json:"task_total"`
 }
 
+// MinPassRate agent-bench 的默认绝对下限：full 与 minimal 两档通过率都不得低于
+// 该值，否则 CLI 返回错误（退出非 0），防止基准「静默退化」。
+// 阈值变更必须单独评审，并附连续两轮复跑数据（见 docs/01-开发者/测试与CI.md）。
+const MinPassRate = 0.80
+
+// CheckPassRateFloor 校验 full/minimal 两档通过率是否达到下限 min。
+// min <= 0 表示显式关闭下限（实验性评测）；任一档低于 min 返回错误。
+func CheckPassRateFloor(s Summary, min float64) error {
+	if min <= 0 {
+		return nil
+	}
+	if s.PassRateFull < min {
+		return fmt.Errorf("agent-bench: full pass rate %.2f below floor %.2f", s.PassRateFull, min)
+	}
+	if s.PassRateMinimal < min {
+		return fmt.Errorf("agent-bench: minimal pass rate %.2f below floor %.2f", s.PassRateMinimal, min)
+	}
+	return nil
+}
+
 // Report 完整评测报告。
 type Report struct {
 	Timestamp   string       `json:"timestamp"`

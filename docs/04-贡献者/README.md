@@ -2,7 +2,7 @@
 
 > 写给：要提 PR / 修 bug / 加特性的贡献者（含 AI 编程工具）
 
-> 最后更新：2026-09-02
+> 最后更新：2026-11-14
 ## 0. 先读
 
 - `AGENTS.md`（项目接入指南，AI 工具必读）
@@ -44,7 +44,7 @@ make counts-check   # CI 断言漂移
 
 ## 4. CI 门禁
 
-`test`（单元+竞态）、`tag-guard`（`-tags 'onnx pg redis'` 解析+类型检查）、`counts-guard`（数字漂移）、`agent-bench`（端到端）。本地先跑 `make test && make verify-tags && make counts-check`。
+`test`（单元+`make fmt-check`）、`tag-guard`（`make verify-tags`：真正编译 `-tags 'pg redis'` 并做 onnx 类型检查）、`counts-guard`（数字漂移）、`agent-bench`（端到端）。本地先跑 `make test && make fmt-check && make verify-tags && make counts-check`。
 
 ## 5. 破坏性变更
 

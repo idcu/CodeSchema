@@ -28,10 +28,10 @@ go test ./internal/... -run TestX -v   # 单测聚焦
 | `test` | 单元测试（OS 矩阵 ubuntu / macos / windows），核心合并门禁；含 `go build` / `go vet` / `make fmt-check`（gofmt 格式门禁） |
 | `race` | Race Detector 专项（`-race`） |
 | `treesitter` | TreeSitter AST 变体（`-tags treesitter` CGO 真语法树） |
-| `tag-guard` | `go list -tags 'onnx pg redis' ./...` 解析+类型检查（不链接运行时），防止 build-tag 变体编译断裂 |
+| `tag-guard` | `make verify-tags`：`go build -tags 'pg redis' ./...` 真正编译 PG/Redis 变体，`go vet -tags 'onnx pg redis' ./...` 对 ONNX 变体做完整类型检查（不链接运行时），防止 build-tag 变体编译断裂 |
 | `pg-redis` | 真实 PG/Redis 实例集成（services 容器，`-tags 'pg redis'`），验证 PG 存储 + Redis 缓存真实验证 |
 | `counts-guard` | `make counts-check`：实时计数 vs `scripts/counts_baseline.json`，任一漂移即失败（防「包数/工具数」文档漂移） |
-| `agent-bench` | Agent 任务端到端评测（快照归一化 repo_path） |
+| `agent-bench` | Agent 任务端到端评测（快照归一化 repo_path）；`agent-bench` CLI 内置 `MinPassRate=0.80` 下限，full/minimal 任一档低于该值即退出非 0（`--min-pass-rate` 可覆盖，0 关闭） |
 | `bench` | Scale Benchmark 规模基准 |
 | `nightly-scale` | Nightly Scale E2E（100k）夜间规模端到端 |
 | `cross` | Cross-Compile 交叉编译 |
