@@ -37,7 +37,7 @@ func noNetConfig(t *testing.T) *config.Config {
 // TestDeriveIndexDirs_DefaultsFromDSN 验证：未显式配置时按 store 目录派生隔离子目录。
 func TestDeriveIndexDirs_DefaultsFromDSN(t *testing.T) {
 	s := &config.StorageConfig{Driver: "file", DSN: "/var/lib/cs/mt-a"}
-	deriveIndexDirs(s, s.DSN, "", "", "")
+	deriveIndexDirs(s, "a", s.DSN, "", "", "")
 	wantFTS := filepath.Join("/var/lib/cs/mt-a", "fts")
 	wantVec := filepath.Join("/var/lib/cs/mt-a", "vector")
 	wantIDF := filepath.Join("/var/lib/cs/mt-a", "idf")
@@ -58,7 +58,7 @@ func TestDeriveIndexDirs_ExplicitOverride(t *testing.T) {
 	s := &config.StorageConfig{Driver: "file", DSN: "/var/lib/cs/mt-a"}
 	s.Search.FTSDir = "/custom/fts"   // 模拟 ToConfig 已叠加的显式值
 	s.Search.IDFDir = "/custom/idf"
-	deriveIndexDirs(s, s.DSN, "/custom/fts", "", "/custom/idf")
+	deriveIndexDirs(s, "a", s.DSN, "/custom/fts", "", "/custom/idf")
 	if s.Search.FTSDir != "/custom/fts" {
 		t.Errorf("FTSDir = %q, want explicit /custom/fts preserved", s.Search.FTSDir)
 	}
@@ -70,12 +70,21 @@ func TestDeriveIndexDirs_ExplicitOverride(t *testing.T) {
 	}
 }
 
-// TestDeriveIndexDirs_NonDirBackend 验证：非目录型后端（如 pg）不派生。
+// TestDeriveIndexDirs_NonDirBackend 负控（P1-3）：
+// PG 元数据在库内，但 FTS/向量/IDF 仍是本地文件，必须按租户派生目录，
+// 否则多租户共享 ./data/fts 互相覆盖。
 func TestDeriveIndexDirs_NonDirBackend(t *testing.T) {
 	s := &config.StorageConfig{Driver: "pg", DSN: "postgres://localhost/cs"}
-	deriveIndexDirs(s, s.DSN, "", "", "")
-	if s.Search.FTSDir != "" {
-		t.Errorf("pg backend should not derive FTSDir, got %q", s.Search.FTSDir)
+	deriveIndexDirs(s, "alpha", s.DSN, "", "", "")
+	want := filepath.Join("./data", "alpha")
+	if s.Search.FTSDir != filepath.Join(want, "fts") {
+		t.Errorf("pg FTSDir = %q, want %q", s.Search.FTSDir, filepath.Join(want, "fts"))
+	}
+	if s.Search.VectorDir != filepath.Join(want, "vector") {
+		t.Errorf("pg VectorDir = %q, want %q", s.Search.VectorDir, filepath.Join(want, "vector"))
+	}
+	if s.Search.IDFDir != filepath.Join(want, "idf") {
+		t.Errorf("pg IDFDir = %q, want %q", s.Search.IDFDir, filepath.Join(want, "idf"))
 	}
 }
 
@@ -396,4 +405,31 @@ func slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestResolveTargets_DerivesIsolatedDSNWhenOmitted 负控（P1-3）：
+// 租户省略 storage.dsn 时必须回退 ./data/<id>，不能继承全局默认 ./data
+// （cloneConfig 会预填默认 DSN，导致此前的空值判断永不成立）。
+func TestResolveTargets_DerivesIsolatedDSNWhenOmitted(t *testing.T) {
+	base := config.DefaultConfig()
+	base.Tenants = []config.TenantConfig{
+		{ID: "alpha", Name: "Alpha"},
+		{ID: "beta", Name: "Beta"},
+	}
+	targets := resolveTargets(base)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %d, want 2", len(targets))
+	}
+	for _, tgt := range targets {
+		want := filepath.Join("./data", tgt.id)
+		if tgt.cfg.Storage.DSN != want {
+			t.Errorf("tenant %s DSN = %q, want %q", tgt.id, tgt.cfg.Storage.DSN, want)
+		}
+		if tgt.cfg.Storage.Search.FTSDir != filepath.Join(want, "fts") {
+			t.Errorf("tenant %s FTSDir = %q, want %q", tgt.id, tgt.cfg.Storage.Search.FTSDir, filepath.Join(want, "fts"))
+		}
+	}
+	if targets[0].cfg.Storage.DSN == targets[1].cfg.Storage.DSN {
+		t.Errorf("tenants must not share DSN: %q", targets[0].cfg.Storage.DSN)
+	}
 }

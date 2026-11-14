@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 171: fix(tenant): 省略 DSN 时真正回退 ./data/<id>，PG 租户派生独立索引目录（P1-3）
+
+- 背景：`cloneConfig` 把全局默认 `storage.dsn: ./data` 预填进每个租户配置，`resolveTargets` 用合并后的值判断 `DSN == ""` 永不成立 → 所有租户共用 `./data`；`deriveIndexDirs` 只处理 file/sqlite，PG 租户的 FTS/向量/IDF 保持全局默认 `./data/fts` 等，多租户互相覆盖。
+- 动作：
+  - `resolveTargets` 改用租户原始配置 `tc.Storage.DSN == ""` 判断，省略时回退 `filepath.Join("./data", tc.ID)`。
+  - `deriveIndexDirs` 增加 `tenantID` 参数：file/sqlite/空 仍以 DSN 为根；pg/postgres/postgresql 以 `./data/<id>` 为根派生 fts/vector/idf（连接串不能拼路径）；显式设置仍然优先。
+- 契约取舍：原 `TestDeriveIndexDirs_NonDirBackend` 断言「PG 不派生」，与文档「各租户索引目录绝不共享」冲突，按隔离优先改为断言派生。
+- 负控（先红后绿）：
+  - `TestResolveTargets_DerivesIsolatedDSNWhenOmitted`：修复前两个租户 DSN 均为 `./data`、FTSDir 均为 `./data/fts`。
+  - `TestDeriveIndexDirs_NonDirBackend`：修复前三项目录均为空。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 56404 ≈ 56.4k）。
+
 ### Commit 170: fix(pg): method 表补 full_name 列，PG 后端方法 FQN 不再恒为空（P1-5）
 
 - 背景：PG `method` 表 DDL、`GetMethodsByClassID`、`UpsertMethods`、`BulkUpsert`、`upsertMethodsTx` 均无 `full_name`，`MethodRecord.FullName` 在 PG 上恒为空。依赖方法 FQN 的能力（测试关联、标签、`/context` 方法匹配）在 PG 上全部失效；SQLite/FileStore 均正常。

@@ -124,14 +124,16 @@ func resolveTargets(base *config.Config) []tenantTarget {
 	out := make([]tenantTarget, 0, len(base.Tenants))
 	for _, tc := range base.Tenants {
 		tcfg := tc.ToConfig(base)
-		if tcfg.Storage.DSN == "" {
-			tcfg.Storage.DSN = "./data/" + tc.ID
+		// 用租户原始配置判断是否省略 DSN：ToConfig 已从 base 预填默认 "./data"，
+		// 合并后的值永远非空，不能作为「未设置」的依据（P1-3）。
+		if tc.Storage.DSN == "" {
+			tcfg.Storage.DSN = filepath.Join("./data", tc.ID)
 		}
 		// 检索/向量索引目录需与 store 隔离，否则多租户会共享同一份索引
 		// （后写入者覆盖前者）。仅当租户未显式配置时，按 store 目录派生隔离子目录。
 		// 注意：需用租户原始配置 tc.Storage.Search 判断是否显式设置，因为 base
 		// 的 DefaultConfig 已预填 ./data/fts 等默认值，merged 永远不会为空。
-		deriveIndexDirs(&tcfg.Storage, tcfg.Storage.DSN,
+		deriveIndexDirs(&tcfg.Storage, tc.ID, tcfg.Storage.DSN,
 			tc.Storage.Search.FTSDir, tc.Storage.Search.VectorDir, tc.Storage.Search.IDFDir)
 		out = append(out, tenantTarget{
 			id:       tc.ID,
@@ -180,21 +182,31 @@ func (m *Manager) buildTenant(ctx context.Context, tgt tenantTarget) (*Tenant, e
 
 // deriveIndexDirs 为显式多租户派生隔离的检索/向量索引目录。
 // explicitFTS/Vec/IDF 为租户原始配置中是否显式设置了对应目录；显式设置优先，
-// 未设置则按 store 目录派生隔离子目录，保证多租户各自持有独立索引
-// （避免共享索引被后写入者覆盖）。仅对目录型后端（file/sqlite/空）生效；
-// 其余后端（如 pg）保持原样由用户显式配置。
-func deriveIndexDirs(s *config.StorageConfig, dsn, explicitFTS, explicitVec, explicitIDF string) {
+// 未设置则按租户数据目录派生隔离子目录，保证多租户各自持有独立索引
+// （避免共享索引被后写入者覆盖）。
+//
+// 目录型后端（file/sqlite/空）以 DSN 为数据根目录；PG 等连接串后端元数据在
+// 库内，但 FTS/向量/IDF 仍是本地文件，需要按 ./data/<tenantID> 隔离
+// （此前 PG 完全不派生，多租户会共享 ./data/fts，P1-3）。
+func deriveIndexDirs(s *config.StorageConfig, tenantID, dsn, explicitFTS, explicitVec, explicitIDF string) {
+	base := dsn
 	switch s.Driver {
 	case "file", "sqlite", "":
-		if explicitFTS == "" {
-			s.Search.FTSDir = filepath.Join(dsn, "fts")
-		}
-		if explicitVec == "" {
-			s.Search.VectorDir = filepath.Join(dsn, "vector")
-		}
-		if explicitIDF == "" {
-			s.Search.IDFDir = filepath.Join(dsn, "idf")
-		}
+		// DSN 即索引根目录
+	case "pg", "postgres", "postgresql":
+		// 连接串不能拼路径，按租户数据目录隔离本地索引文件
+		base = filepath.Join("./data", tenantID)
+	default:
+		return
+	}
+	if explicitFTS == "" {
+		s.Search.FTSDir = filepath.Join(base, "fts")
+	}
+	if explicitVec == "" {
+		s.Search.VectorDir = filepath.Join(base, "vector")
+	}
+	if explicitIDF == "" {
+		s.Search.IDFDir = filepath.Join(base, "idf")
 	}
 }
 
