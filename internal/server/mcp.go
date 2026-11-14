@@ -416,9 +416,26 @@ func (m *MCPServer) Stop() error {
 	if m.server == nil {
 		return nil
 	}
+	// 先结束活跃 SSE 会话：Shutdown 会等待长连接自然结束，不主动关闭会固定
+	// 等到 5s 超时（P3-4）。
+	m.closeSessions()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return m.server.Shutdown(ctx)
+}
+
+// closeSessions 关闭并移除所有登记会话，触发 GET /sse 循环退出。
+func (m *MCPServer) closeSessions() {
+	m.sessMu.Lock()
+	sessions := make([]*mcpSession, 0, len(m.sessions))
+	for id, s := range m.sessions {
+		sessions = append(sessions, s)
+		delete(m.sessions, id)
+	}
+	m.sessMu.Unlock()
+	for _, s := range sessions {
+		s.close()
+	}
 }
 
 // handleSSE SSE 端点：建立会话并推送 endpoint 事件，随后把该会话的
@@ -445,6 +462,9 @@ func (m *MCPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-sess.done:
+			// Stop 主动关闭会话：结束响应流，让 http.Server.Shutdown 立即返回。
 			return
 		case data := <-sess.ch:
 			fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
