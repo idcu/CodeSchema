@@ -278,6 +278,65 @@ func TestRedisCache_SetsTTL(t *testing.T) {
 	}
 }
 
+// TestRedisCache_InvalidateFileRemovesOnlyTarget 负控（P2-1）：
+// 旁路文件标记 parse_skipped 后，必须清掉该文件的类/方法缓存与反查索引，
+// 其他文件不受影响。
+func TestRedisCache_InvalidateFileRemovesOnlyTarget(t *testing.T) {
+	ctx := context.Background()
+	backend := newMemBackend()
+	c := newRedisCache(backend, "tenant-a")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+	}
+
+	must(c.PutClass(ctx, &parser.ClassIR{FullName: "pkg.A"}))
+	must(c.PutClassPath(ctx, "pkg.A", "/repo/a.go"))
+	must(c.PutMethod(ctx, &parser.MethodIR{Name: "Run", ClassFQN: "pkg.A"}))
+	must(c.PutMethodPath(ctx, "pkg.A.Run", "/repo/a.go"))
+	must(c.PutFileClasses(ctx, "/repo/a.go", []string{"pkg.A"}))
+	must(c.PutFileMethods(ctx, "/repo/a.go", []string{"pkg.A.Run"}))
+
+	must(c.PutClass(ctx, &parser.ClassIR{FullName: "pkg.B"}))
+	must(c.PutClassPath(ctx, "pkg.B", "/repo/b.go"))
+	must(c.PutMethod(ctx, &parser.MethodIR{Name: "Run", ClassFQN: "pkg.B"}))
+	must(c.PutMethodPath(ctx, "pkg.B.Run", "/repo/b.go"))
+	must(c.PutFileClasses(ctx, "/repo/b.go", []string{"pkg.B"}))
+	must(c.PutFileMethods(ctx, "/repo/b.go", []string{"pkg.B.Run"}))
+
+	if err := c.InvalidateFile(ctx, "/repo/a.go"); err != nil {
+		t.Fatalf("invalidate: %v", err)
+	}
+
+	if cls, _ := c.GetClass(ctx, "pkg.A"); cls != nil {
+		t.Errorf("类缓存未失效: %+v", cls)
+	}
+	if path, ok := c.ClassPath(ctx, "pkg.A"); ok {
+		t.Errorf("类路径索引未失效: %s", path)
+	}
+	if m, _ := c.GetMethod(ctx, "pkg.A.Run"); m != nil {
+		t.Errorf("方法缓存未失效: %+v", m)
+	}
+	if path, ok := c.MethodPath(ctx, "pkg.A.Run"); ok {
+		t.Errorf("方法路径索引未失效: %s", path)
+	}
+	if fqns, _ := c.ClassesOfFile(ctx, "/repo/a.go"); len(fqns) != 0 {
+		t.Errorf("文件→类索引未失效: %v", fqns)
+	}
+
+	if cls, err := c.GetClass(ctx, "pkg.B"); err != nil || cls == nil {
+		t.Errorf("其他文件类缓存被误删: got=%+v err=%v", cls, err)
+	}
+	if m, err := c.GetMethod(ctx, "pkg.B.Run"); err != nil || m == nil {
+		t.Errorf("其他文件方法缓存被误删: got=%+v err=%v", m, err)
+	}
+	if fqns, _ := c.ClassesOfFile(ctx, "/repo/b.go"); len(fqns) != 1 || fqns[0] != "pkg.B" {
+		t.Errorf("其他文件→类索引被误删: %v", fqns)
+	}
+}
+
 // TestRedisCache_FlushScopedToNamespace 负控（P1-4）：
 // Flush 只能清理本命名空间的键，不得 SCAN "*" 清空整个库。
 func TestRedisCache_FlushScopedToNamespace(t *testing.T) {

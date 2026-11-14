@@ -76,6 +76,32 @@ func (c *redisCacheStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocume
 	return nil
 }
 
+// MarkParseSkipped 转发基础存储的跳过留痕，并失效该文件在 Redis 的旧缓存。
+//
+// 基础存储未实现 store.SkippedWriter 时回退 UpsertFile，与 Scanner 语义一致。
+// 包装器若不显式实现该接口，Scanner 的类型断言会失败并回退 UpsertFile，
+// 把跳过文件写成 parse_ok（-tags redis 形态下留痕退化，P2-1）。
+func (c *redisCacheStore) MarkParseSkipped(ctx context.Context, path string, byteSize int64, lineCount int) (int64, error) {
+	var (
+		id  int64
+		err error
+	)
+	if sw, ok := c.Store.(store.SkippedWriter); ok {
+		id, err = sw.MarkParseSkipped(ctx, path, byteSize, lineCount)
+	} else {
+		id, err = c.Store.UpsertFile(ctx, path, "", lineCount, byteSize)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if c.cache != nil {
+		if ferr := c.cache.InvalidateFile(ctx, path); ferr != nil {
+			log.Printf("[warn] redis 失效文件缓存 %s 失败：%v", path, ferr)
+		}
+	}
+	return id, nil
+}
+
 // populate 把类、方法、调用关系与文件→类索引 best-effort 推入 Redis；
 // 任一错误仅记录，不影响主路径。
 func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
@@ -91,16 +117,22 @@ func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
 		fqns = append(fqns, ir.Classes[i].FullName)
 	}
 	// 方法 FQN（ClassFQN.Name）→ 方法体 + 源文件路径（service 方法符号快速路径）。
+	methodFQNs := make([]string, 0, len(ir.Methods))
 	for i := range ir.Methods {
+		fqn := ir.Methods[i].ClassFQN + "." + ir.Methods[i].Name
+		methodFQNs = append(methodFQNs, fqn)
 		if err := c.cache.PutMethod(ctx, &ir.Methods[i]); err != nil {
-			log.Printf("[warn] redis 写入方法 %s 失败：%v", ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, err)
+			log.Printf("[warn] redis 写入方法 %s 失败：%v", fqn, err)
 		}
-		if err := c.cache.PutMethodPath(ctx, ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, ir.FilePath); err != nil {
-			log.Printf("[warn] redis 写入方法路径索引 %s 失败：%v", ir.Methods[i].ClassFQN+"."+ir.Methods[i].Name, err)
+		if err := c.cache.PutMethodPath(ctx, fqn, ir.FilePath); err != nil {
+			log.Printf("[warn] redis 写入方法路径索引 %s 失败：%v", fqn, err)
 		}
 	}
 	if err := c.cache.PutFileClasses(ctx, ir.FilePath, fqns); err != nil {
 		log.Printf("[warn] redis 写入文件→类索引 %s 失败：%v", ir.FilePath, err)
+	}
+	if err := c.cache.PutFileMethods(ctx, ir.FilePath, methodFQNs); err != nil {
+		log.Printf("[warn] redis 写入文件→方法索引 %s 失败：%v", ir.FilePath, err)
 	}
 	for i := range ir.Calls {
 		if err := c.cache.PutCall(ctx, &ir.Calls[i]); err != nil {
@@ -109,9 +141,10 @@ func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {
 	}
 }
 
-// —— store.CacheReader 可选接口实现（读路径接入） ——
+// —— 可选接口实现（读路径/跳过留痕接入） ——
 
 var _ store.CacheReader = (*redisCacheStore)(nil)
+var _ store.SkippedWriter = (*redisCacheStore)(nil)
 
 // DriverName 报告驱动名（store.DriverNamer 可选接口）：
 // Redis 缓存层叠加在基础驱动之上，报告基础驱动的名称。

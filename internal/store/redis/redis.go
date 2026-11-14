@@ -330,6 +330,46 @@ func (c *RedisCache) ClassesOfFile(ctx context.Context, path string) ([]string, 
 	return c.backend.SMembers(ctx, c.key("file:", path))
 }
 
+// PutFileMethods 建立文件→方法 FQN 反向索引，供 InvalidateFile 精确失效。
+func (c *RedisCache) PutFileMethods(ctx context.Context, path string, fqns []string) error {
+	if len(fqns) == 0 {
+		return nil
+	}
+	members := make([]any, len(fqns))
+	for i, f := range fqns {
+		members[i] = f
+	}
+	key := c.key("filemethods:", path)
+	if err := c.backend.SAdd(ctx, key, members...); err != nil {
+		return err
+	}
+	return c.touch(ctx, key)
+}
+
+// InvalidateFile 删除某文件相关的类/方法缓存与反查索引。
+//
+// 键从写入时建立的 file:<path> 与 filemethods:<path> 集合枚举；调用边
+// （caller:/callee:）无法按下标反查，交由 TTL 自然过期，避免全命名空间扫描。
+func (c *RedisCache) InvalidateFile(ctx context.Context, path string) error {
+	classFQNs, err := c.ClassesOfFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	methodFQNs, err := c.backend.SMembers(ctx, c.key("filemethods:", path))
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, 2+2*len(classFQNs)+2*len(methodFQNs))
+	keys = append(keys, c.key("file:", path), c.key("filemethods:", path))
+	for _, fqn := range classFQNs {
+		keys = append(keys, c.key("class:", fqn), c.key("classpath:", fqn))
+	}
+	for _, fqn := range methodFQNs {
+		keys = append(keys, c.key("method:", fqn), c.key("methodpath:", fqn))
+	}
+	return c.backend.Del(ctx, keys...)
+}
+
 // Flush 清空本命名空间下的所有键（仅用于测试/重置）。
 //
 // 只按 prefix+"*" 扫描删除，绝不使用 "*" 清库：同一 Redis 可能被其他应用 /
