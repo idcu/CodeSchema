@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 221: docs: R0-1 旧账无法对账结论 + 最终修复总账（R0-1）
+
+- R0-1 核查：`C-16` / `check-deps` 在全历史（`git log --all -S`）、已删文件、
+  全工作区（含 `analysis/`、`.trae/`、`build/`）、本地与上游分支均 0 命中
+  （唯一命中为本轮总账/清单自身引用）；无 stash、无额外 tag。结论标 `blocked`，
+  不编造 C-16 → 本轮条目的映射；62 条审计项作为替代总账。
+- 新增 `2026-11-14/roadmap/outputs/final-ledger-2026-11-14.md`：结论先行，
+  含 72 笔提交的缺陷→哈希总账、测试关联自动/人工 P/R/F1、调用图分辨率、
+  agent-bench 数字与口径、砍掉/延后项、10 条残留风险与复现入口。
+- CSV：R0-1 `todo` → `blocked`（原因入 decision 列）；roadmap §1.3、§7、
+  §9.1 同步最终结论。
+- 仅文档变更；`make fmt-check` / `make counts-check` 通过，计数保持
+  36/40/62976（63.0k）。
+
 ### Commit 219: test(release): verify-tags 真编译 + agent-bench 绝对下限（R6-7 / P3-13）
 
 - `make verify-tags` 从 `go list` 改为 `go build -tags 'pg redis' ./...` +

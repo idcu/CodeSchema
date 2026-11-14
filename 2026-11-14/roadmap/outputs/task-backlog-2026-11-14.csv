@@ -1,5 +1,5 @@
 id,batch,priority,title,audit_ref,deps,effort_pd,acceptance,status,decision
-R0-1,0,P0,基线冻结与旧账对账,审计基线,-,1,工作区状态有记录；旧C-16清单与53条对账完成；不修改任何快照,todo,必做
+R0-1,0,P0,基线冻结与旧账对账,审计基线,-,1,工作区状态有记录；旧C-16清单与53条对账完成；不修改任何快照,blocked,无法对账：旧C-16清单与check-deps在全历史、工作区（含analysis/.trae）、已删文件与上游main均0命中；不编造映射，本轮62条作为替代总账
 R1-1,A,P0,顶层函数入库（file/sqlite/pg+IR+Redis）,P0-1,R0-1,6,三后端均可见TopLevelFunc/helper/Method；/context返回200与源码；负控不污染类搜索与/projects,done,必做
 R1-2,A,P1,Go多行函数签名作用域,P1-14,R0-1,2.5,多行签名方法产生正确CallerFQN与调用边；单行签名行为不变,done,必做
 R1-3,A,P1,方法EndLine回填,P1-1,R1-2,2.5,Svc.Method的end_line>start_line且覆盖方法体；嵌套闭包不越界,done,必做
