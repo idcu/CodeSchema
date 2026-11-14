@@ -306,6 +306,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 
 	var curClass *parser.ClassIR
 	var curMethod *parser.MethodIR // 跟踪当前方法，用于回填调用关系的 CallerFQN
+	// goLocalTypes：Go 方法体内 `x := &T{}` / `x := T{}` / `var x *T` 的变量类型，
+	// 用于把 `x.Method()` 限定为 `pkg.T.Method`（与正则路径 goLocalTypes 同口径）。
+	goLocalTypes := map[string]string{}
 	// skipChild：Elixir def 的 arguments（函数签名）子节点，避免签名中的
 	// `create(order)` 被误判为调用
 	var skipChild *ts.Node
@@ -321,6 +324,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		// 作用域跟踪：进入 class/method 节点后，离开其子树必须恢复外层作用域，
 		// 否则后续兄弟声明会被错挂到刚遍历过的类/方法（P0-1 遗留项）。
 		prevClass, prevMethod := curClass, curMethod
+		prevLocalTypes := goLocalTypes
 		scopeChanged := false
 
 		switch {
@@ -440,7 +444,15 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			}
 			doc.Methods = append(doc.Methods, m)
 			curMethod = &doc.Methods[len(doc.Methods)-1]
+			if lang == "go" {
+				goLocalTypes = map[string]string{}
+			}
 			scopeChanged = true
+
+		case lang == "go" && (typ == "short_var_declaration" || typ == "var_spec"):
+			if name, t := astGoLocalDecl(n, data); name != "" && t != "" {
+				goLocalTypes[name] = t
+			}
 
 		case (lang == "ts" || lang == "js") && typ == "variable_declarator":
 			// 具名箭头函数 / 函数表达式（`const f = () => {...}`）等价于具名函数：
@@ -500,7 +512,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			if lang == "go" && astGoTypeConversion(n, data) {
 				break
 			}
-			callee := astQualifyCallee(astCalleeName(n, data), goPkg, astPkg, astCurClassName(curClass))
+			raw := astCalleeName(n, data)
+			if lang == "go" {
+				raw = qualifyGoLocalCallee(raw, goPkg, goLocalTypes)
+			}
+			callee := astQualifyCallee(raw, goPkg, astPkg, astCurClassName(curClass))
 			if callee == "" || isKeyword(callee) {
 				break
 			}
@@ -524,6 +540,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		}
 		if scopeChanged {
 			curClass, curMethod = prevClass, prevMethod
+			if lang == "go" {
+				goLocalTypes = prevLocalTypes
+			}
 		}
 	}
 	walk(tree.RootNode())
@@ -884,7 +903,6 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		}
 	}
 	// Java method_invocation：object 是 method_invocation → 链式，取 name 字段（`invoke`）；
-	// Java method_invocation：object 是 method_invocation → 链式，取 name 字段（`invoke`）；
 	// object 是 object_creation_expression（`new Calculator().add(...)`）→ `类型.方法`；
 	// object 是 identifier → 普通 obj.method，取 `(` 前完整文本
 	if n.Type() == "method_invocation" {
@@ -930,6 +948,76 @@ func astCurClassName(cur *parser.ClassIR) string {
 		return ""
 	}
 	return cur.Name
+}
+
+// astGoLocalDecl 提取 Go 局部变量声明的「变量名 → 类型（去指针）」：
+// `x := &T{}` / `x := T{}`（composite_literal）与 `var x *T` / `var x T`。
+// 其它右值（函数调用、make、类型断言）不做推导，宁可保持裸 selector。
+func astGoLocalDecl(n *ts.Node, src []byte) (string, string) {
+	switch n.Type() {
+	case "short_var_declaration":
+		left := n.ChildByFieldName("left")
+		right := n.ChildByFieldName("right")
+		if left == nil || right == nil || left.IsNull() || right.IsNull() ||
+			left.NamedChildCount() != 1 || right.NamedChildCount() != 1 {
+			return "", ""
+		}
+		name := string(left.NamedChild(0).Content(src))
+		if !isPlainIdent(name) {
+			return "", ""
+		}
+		r := right.NamedChild(0)
+		if r.Type() == "unary_expression" {
+			if op := r.ChildByFieldName("operator"); op != nil && string(op.Content(src)) == "&" {
+				if operand := r.ChildByFieldName("operand"); operand != nil && !operand.IsNull() {
+					r = operand
+				}
+			}
+		}
+		if r.Type() != "composite_literal" {
+			return "", ""
+		}
+		t := r.ChildByFieldName("type")
+		if t == nil || t.IsNull() {
+			return "", ""
+		}
+		return name, strings.TrimPrefix(string(t.Content(src)), "*")
+	case "var_spec":
+		nameNode := n.ChildByFieldName("name")
+		typeNode := n.ChildByFieldName("type")
+		if nameNode == nil || typeNode == nil || nameNode.IsNull() || typeNode.IsNull() {
+			return "", ""
+		}
+		name := string(nameNode.Content(src))
+		if !isPlainIdent(name) {
+			return "", ""
+		}
+		switch typeNode.Type() {
+		case "type_identifier", "pointer_type":
+			return name, strings.TrimPrefix(string(typeNode.Content(src)), "*")
+		}
+	}
+	return "", ""
+}
+
+// qualifyGoLocalCallee 把 `x.Method` 按局部类型表限定为 `pkg.T.Method`；
+// 类型未知或 callee 不是单层 selector 时原样返回。
+func qualifyGoLocalCallee(callee, goPkg string, locals map[string]string) string {
+	if callee == "" || len(locals) == 0 {
+		return callee
+	}
+	dot := strings.Index(callee, ".")
+	if dot <= 0 {
+		return callee
+	}
+	t := locals[callee[:dot]]
+	if t == "" {
+		return callee
+	}
+	if goPkg == "" {
+		return t + callee[dot:]
+	}
+	return goPkg + "." + t + callee[dot:]
 }
 
 // astQualifyCallee 把 AST 路径的裸 callee 包限定：

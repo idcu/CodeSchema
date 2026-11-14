@@ -181,11 +181,12 @@ func main() {
 			t.Errorf("expected string pseudo-call filtered, got %+v", doc.Calls)
 		}
 	}
-	// 真实调用 u.Greet 与 realCall 应被检出（Go 裸 callee 包限定为 main.realCall，
-	// 与默认正则路径口径一致，P0-1 遗留对齐）
+	// 真实调用 u.Greet 与 realCall 应被检出：裸 callee 包限定为 main.realCall；
+	// 接收者变量 u 由 `u := &User{}` 静态确定为 User，callee 限定为 main.User.Greet
+	// （与默认正则路径同口径）。
 	foundGreet, foundReal := false, false
 	for _, c := range doc.Calls {
-		if c.CalleeFQN == "u.Greet" {
+		if c.CalleeFQN == "main.User.Greet" {
 			foundGreet = true
 		}
 		if c.CalleeFQN == "main.realCall" {
@@ -193,7 +194,7 @@ func main() {
 		}
 	}
 	if !foundGreet || !foundReal {
-		t.Errorf("expected u.Greet & main.realCall detected, got calls: %+v", doc.Calls)
+		t.Errorf("expected main.User.Greet & main.realCall detected, got calls: %+v", doc.Calls)
 	}
 }
 
@@ -380,6 +381,50 @@ public class OrderService {
 	}
 	if !foundPay || !foundSend {
 		t.Errorf("expected paymentService.pay & notifyService.send, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestASTAdapter_GoLocalVarCallQualification 负控：AST 路径此前不跟踪方法体内的
+// 局部变量类型，`fs := &FileStore{}` 后 `fs.GetFileByPath()` 的 callee 恒为
+// `fs.GetFileByPath`。短名在 FileStore/PGStore/SQLiteStore 间多义时，测试关联
+// 无法归位（treesitter 人工真值 Go recall 0.6287 的主因）。现按 `x := &T{}` /
+// `x := T{}` / `var x *T` 限定为 `pkg.T.Method`，与正则路径一致。
+func TestASTAdapter_GoLocalVarCallQualification(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.go")
+	content := `package demo
+
+type FileStore struct{}
+
+func (f *FileStore) GetFileByPath(p string) (string, error) { return "", nil }
+
+func Run() {
+	fs := &FileStore{}
+	var other FileStore
+	_, _ = fs.GetFileByPath("x")
+	_, _ = other.GetFileByPath("y")
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := map[string]bool{
+		"demo.FileStore.GetFileByPath": false,
+	}
+	for _, c := range doc.Calls {
+		if _, ok := want[c.CalleeFQN]; ok {
+			want[c.CalleeFQN] = true
+		}
+	}
+	for callee, found := range want {
+		if !found {
+			t.Fatalf("callee %q not qualified: %+v", callee, doc.Calls)
+		}
 	}
 }
 

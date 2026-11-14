@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### Commit 243: fix(parser): AST 路径跟踪 Go 局部变量类型，selector 按类型限定
+
+- 正则路径已有 `goLocalTypes`（`x := &T{}` / `var x *T`），AST 路径未跟踪：
+  `fs := &FileStore{}` 后 `fs.GetFileByPath()` 的 callee 恒为裸名，短名在
+  FileStore/PGStore/SQLiteStore 间多义，测试关联无法归位——treesitter 人工真值
+  Go recall 0.6287 的主因（FN 62 中绝大多数为该类）。
+- 现按 `short_var_declaration`（`&T{}` / `T{}`）与 `var_spec`（`*T` / `T`）收集
+  局部类型，callee 先按局部类型限定为 `pkg.T.Method` 再做原有包限定；进入方法清空、
+  离开作用域恢复。其它右值（函数调用、make、类型断言）不推导，不伪造。
+- 负控：`TestASTAdapter_GoLocalVarCallQualification`（旧实现裸 callee，红；新实现绿）；
+  `TestASTAdapter_Parse_Go` 期望同步为 `main.User.Greet`（`u := &User{}` 已可静态确定）。
+- 同语料（code-schema go treesitter）前→后：calls 20452、unique callers 2235、
+  resolved 4543/0.2221 不变；仓内候选边 4548 → 4676、仓内已解析 4543 → 4543
+  （0.9989 → 0.9716，分母扩大而解析数不变：新限定的裸名中仍有跨包/接口派发）；
+  自动 test_link TP 1517 → 1567、FN 18 → 18、P 0.9889 → 0.9880、R 0.9883 → 0.9886、
+  F1 0.9886 → 0.9883（真值 pair 2288 → 2373）。
+  人工真值：TP 105 → 161、FN 62 → 6、P 0.9211 → 0.9471、R 0.6287 → 0.9641、
+  F1 0.7473 → 0.9555。
+
 ### Commit 242: fix(parser): Java `new X().m()` 链式调用提取类型限定 callee（AST 路径）
 
 - Java 的 `method_invocation.object` 为 `object_creation_expression` 时
