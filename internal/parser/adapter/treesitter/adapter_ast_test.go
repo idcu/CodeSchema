@@ -275,6 +275,69 @@ function helper(a: number, b: number): number {
 	}
 }
 
+// TestASTAdapter_TSXGrammar .tsx 必须用 TSX grammar 解析：JSX 语法在纯 TypeScript
+// grammar 下会产生 ERROR 节点，内部方法/调用作用域全部丢失（caller 为空）。
+func TestASTAdapter_TSXGrammar(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.tsx")
+	content := `function Clock(): JSX.Element {
+  const [now, setNow] = React.useState<string>(new Date().toLocaleString());
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      setNow(new Date().toLocaleString());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <section className="clock">
+      <h2>Live Clock</h2>
+      <div className="clock-time">{now}</div>
+    </section>
+  );
+}
+
+function Counter(): JSX.Element {
+  const [count, setCount] = React.useState<number>(0);
+  return (
+    <section className="counter">
+      <button onClick={() => setCount((c) => c - 1)}>-1</button>
+    </section>
+  );
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if doc.Language != "ts" {
+		t.Errorf("Language = %q, want ts（IR 口径不变，仅 grammar 切换）", doc.Language)
+	}
+	names := map[string]bool{}
+	for _, m := range doc.Methods {
+		names[m.Name] = true
+	}
+	for _, want := range []string{"Clock", "Counter"} {
+		if !names[want] {
+			t.Fatalf("tsx 中的 %s 未登记为方法；methods=%+v", want, doc.Methods)
+		}
+	}
+	callers := map[string]bool{}
+	for _, c := range doc.Calls {
+		if c.CalleeFQN == "React.useState" || c.CalleeFQN == "useState" {
+			callers[c.CallerFQN] = true
+		}
+	}
+	for _, want := range []string{"Clock", "Counter"} {
+		if !callers[want] {
+			t.Errorf("useState 调用缺少 caller=%s；current=%v", want, callers)
+		}
+	}
+}
+
 // TestASTAdapter_Parse_Java 验证 Java 语法级解析（类/方法/调用，含字符串陷阱）。
 func TestASTAdapter_Parse_Java(t *testing.T) {
 	a := NewTreeSitterAdapter()

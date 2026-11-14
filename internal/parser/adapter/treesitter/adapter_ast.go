@@ -55,6 +55,7 @@ import (
 	"github.com/smacker/go-tree-sitter/svelte"
 	"github.com/smacker/go-tree-sitter/swift"
 	"github.com/smacker/go-tree-sitter/toml"
+	"github.com/smacker/go-tree-sitter/typescript/tsx"
 	tslang "github.com/smacker/go-tree-sitter/typescript/typescript"
 	"github.com/smacker/go-tree-sitter/yaml"
 
@@ -77,6 +78,7 @@ func NewTreeSitterAdapter() *TreeSitterAdapter {
 			"go":         golang.GetLanguage(),
 			"java":       java.GetLanguage(),
 			"ts":         tslang.GetLanguage(),
+			"tsx":        tsx.GetLanguage(),
 			"js":         javascript.GetLanguage(),
 			"py":         python.GetLanguage(),
 			"rust":       rust.GetLanguage(),
@@ -260,7 +262,14 @@ func (a *TreeSitterAdapter) ParseSource(ctx context.Context, path string, data [
 
 func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data []byte) (*parser.IRDocument, error) {
 	lang := a.parseLang(path)
-	langPtr, ok := a.langs[lang]
+	// .tsx 使用 TSX grammar（含 JSX）：纯 TypeScript grammar 会把 JSX 之后的方法声明
+	// 吞进 ERROR 节点，导致后续文件段落的方法/调用作用域全部丢失（caller 为空）。
+	// IR 语言口径仍为 ts，下游语言过滤不受影响。
+	grammarLang := lang
+	if lang == "ts" && strings.EqualFold(filepath.Ext(path), ".tsx") {
+		grammarLang = "tsx"
+	}
+	langPtr, ok := a.langs[grammarLang]
 	if !ok {
 		return &parser.IRDocument{Source: "treesitter", FilePath: path}, nil
 	}

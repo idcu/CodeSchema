@@ -199,6 +199,15 @@ resolution 97/0.2519 → 61/0.1748：这 36 条假边此前恰好命中索引里
 剩余 25 条为包级 `var` 初始化（`errors.New` / `regexp.MustCompile` / `template.Must`）
 与 Go 类型转换，无可归属方法，不做伪造归属。
 
+### Caller 归属：`.tsx` 改用 TSX grammar（treesitter 变体）
+
+`.tsx` 之前复用纯 TypeScript grammar，JSX 之后的声明被吞进 ERROR 节点，同一文件的
+后续组件不再登记（lytd `App.tsx` 25 条空 caller）。现在按扩展名选择 `tsx` grammar，
+`IRDocument.Language` 仍为 `ts`，下游语言过滤口径不变。
+
+同语料 lytd ts：calls 376 → 382、caller 为空 270 → 245，`App.tsx` 从空 caller
+前 8 文件消失（25 → 0）。剩余 245 条集中在 `__tests__` 的 `describe/it` 匿名回调。
+
 ### Caller 归属：TS/JS 具名箭头函数入索引（treesitter 变体）
 
 AST 路径只识别 `function_declaration` / `method_definition`，`const f = () => {...}` 与

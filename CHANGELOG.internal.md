@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 235: fix(parser): .tsx 改用 TSX grammar 解析（treesitter 变体）
+
+- `.tsx` 之前复用纯 TypeScript grammar，JSX 之后的声明被吞进 ERROR 节点：
+  同一文件的后续组件（Counter/TodoList…）不再登记，体内调用 caller 为空（lytd 25 条）。
+- 新增 `tsx` grammar 注册；按扩展名选择 grammar，`IRDocument.Language` 仍为 `ts`，
+  下游语言过滤/统计口径不变。
+- 负控：`TestASTAdapter_TSXGrammar`（旧实现 Counter 未登记，红；新实现绿）。
+- 同语料 lytd ts（同一诊断命令）：calls 376 → 382、caller 空 270 → 245。
+  `App.tsx` 从空 caller 前 8 文件消失（25 → 0）。
+- 文档：bench README 同步。
+
 ### Commit 234: fix(parser): TS/JS 具名箭头函数与函数表达式入索引（treesitter 变体）
 
 - AST 路径只识别 `function_declaration` / `method_definition`，`const f = () => {...}`
