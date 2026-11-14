@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### Commit 206: fix(fswatch): 监听错误可观测 + 目录 rename 重建 watch（R6-4 / P2-18）
+
+- 根因：`FsWatcher.Start` 的 `watcher.Errors` 分支 `_ = err` 直接丢弃错误，
+  `addRecursive` 的 Walk/Add 失败同样静默跳过——监听悄悄失效时调用方无从感知，
+  增量索引长期停更而进程看似正常。
+- 修复：新增 `SetErrorHandler(func(error))`（未设置时写标准日志），Errors 通道、
+  Walk/Add 失败均上报；根目录不可访问时 `Start` 显式返回错误（不再阻塞假装在监听）。
+  目录 Rename/Remove 事件命中受监听目录时，先移除旧 watch 再重扫 root，
+  在新路径重建 watch（规避 inotify 仍按旧路径上报 / 目录重建后漏监听）。
+- 负控（先红后绿）：`TestFsWatcher_StartFailsOnMissingRoot`——修复前 Start 阻塞
+  1s 未返回（红），修复后立即返回错误（绿）。
+  `TestFsWatcher_ReportsWatchErrors` 覆盖 handler 上报；
+  `TestFsWatcher_RenameRebuildsWatch` 覆盖 rename 后按新路径上报（macOS FSEvents
+  后端本身会跟随 rename，该用例作为跨平台回归守卫，Linux inotify 下的价值更高）。
+- 文档：`仓库结构.md` 补充 fswatch 语义；counts 60652（60.7k）。
+
 ### Commit 205: fix(store): FileStore 原子落盘 + 损坏即失败（R3-12 / P2-9）
 
 - 根因：两处可靠性缺口。

@@ -66,6 +66,89 @@ func TestPollWatcher_IgnoresGitDir(t *testing.T) {
 	}
 }
 
+// TestFsWatcher_RenameRebuildsWatch 负控（R6-4）：子目录被 rename 后，
+// 必须在新的路径上重建 watch 并按新路径上报事件；否则后续变更会以旧路径上报
+// 或完全丢失，增量索引失效。
+func TestFsWatcher_RenameRebuildsWatch(t *testing.T) {
+	dir := t.TempDir()
+	oldDir := filepath.Join(dir, "old_pkg")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	var c capture
+	fw, err := NewFsWatcher(dir, func(p string) { c.add(p) }, nil)
+	if err != nil {
+		t.Fatalf("NewFsWatcher: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go fw.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	newDir := filepath.Join(dir, "new_pkg")
+	if err := os.Rename(oldDir, newDir); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	newFile := filepath.Join(newDir, "lib.go")
+	if err := os.WriteFile(newFile, []byte("package lib\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	cancel()
+
+	if !c.has(newFile) {
+		t.Errorf("rename 后应在新路径重建 watch 并按新路径上报，实际收到: %v", c.paths)
+	}
+}
+
+// TestFsWatcher_StartFailsOnMissingRoot 负控（R6-4）：根目录不可访问时
+// `addRecursive` 的错误必须让 Start 立即返回，而不是静默阻塞“假装在监听”。
+func TestFsWatcher_StartFailsOnMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing_root")
+
+	fw, err := NewFsWatcher(root, func(string) {}, nil)
+	if err != nil {
+		t.Fatalf("NewFsWatcher: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- fw.Start(context.Background()) }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("根目录不可访问时 Start 应返回错误")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Start 未返回错误（文件监听错误被静默吞掉）")
+	}
+}
+
+// TestFsWatcher_ReportsWatchErrors 校验监听错误可通过 handler 观测（R6-4）：
+// Start 时根目录不存在（Walk 失败）必须上报，而不是静默继续。
+func TestFsWatcher_ReportsWatchErrors(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing_root")
+
+	fw, err := NewFsWatcher(root, func(string) {}, nil)
+	if err != nil {
+		t.Fatalf("NewFsWatcher: %v", err)
+	}
+	errCh := make(chan error, 4)
+	fw.SetErrorHandler(func(err error) { errCh <- err })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go fw.Start(ctx)
+
+	select {
+	case <-errCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("根目录不可访问时监听错误未上报")
+	}
+}
+
 func TestFsWatcher_DetectsNewFile(t *testing.T) {
 	dir := t.TempDir()
 

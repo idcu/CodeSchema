@@ -11,8 +11,10 @@ package fswatch
 
 import (
 	"context"
+	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -172,6 +174,12 @@ type FsWatcher struct {
 	ignoreDirs map[string]bool
 	watcher    *fsnotify.Watcher
 	done       chan struct{}
+
+	// mu 保护 onError 与 dirs（SetErrorHandler 可能与 Start 并发调用）。
+	mu      sync.RWMutex
+	onError func(error)
+	// dirs 记录当前已加入监听的目录，用于 rename/remove 后精准重建。
+	dirs map[string]struct{}
 }
 
 // NewFsWatcher 创建 fsnotify 原生监听器。
@@ -189,7 +197,39 @@ func NewFsWatcher(root string, onChange func(string), ignoreDirs []string) (*FsW
 		ignoreDirs: buildIgnoreSet(ignoreDirs),
 		watcher:    w,
 		done:       make(chan struct{}),
+		dirs:       make(map[string]struct{}),
 	}, nil
+}
+
+// SetErrorHandler 设置监听错误回调（R6-4）。
+// 未设置时错误写入标准日志；设置后由调用方决定上报方式（如指标/告警）。
+func (fw *FsWatcher) SetErrorHandler(h func(error)) {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	fw.onError = h
+}
+
+// reportErr 上报监听过程中的非致命错误，避免错误被静默吞掉。
+func (fw *FsWatcher) reportErr(err error) {
+	if err == nil {
+		return
+	}
+	fw.mu.RLock()
+	h := fw.onError
+	fw.mu.RUnlock()
+	if h != nil {
+		h(err)
+		return
+	}
+	log.Printf("fswatch: %v", err)
+}
+
+// isWatchedDir 报告路径是否为当前受监听的目录。
+func (fw *FsWatcher) isWatchedDir(path string) bool {
+	fw.mu.RLock()
+	defer fw.mu.RUnlock()
+	_, ok := fw.dirs[path]
+	return ok
 }
 
 // Start 启动 fsnotify 原生监听，阻塞直到 context 取消。
@@ -216,8 +256,8 @@ func (fw *FsWatcher) Start(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			// 非致命错误，继续监听
-			_ = err
+			// 非致命错误，继续监听，但必须可观测（R6-4）
+			fw.reportErr(err)
 		}
 	}
 }
@@ -235,7 +275,12 @@ func (fw *FsWatcher) Stop() error {
 
 // addRecursive 递归添加目录及其子目录到 fsnotify 监听。
 func (fw *FsWatcher) addRecursive(root string) error {
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	// Walk 对不存在的根目录只回调 err 且返回 nil，需显式判定根不可用（R6-4）。
+	if _, err := os.Stat(root); err != nil {
+		fw.reportErr(err)
+		return err
+	}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // 跳过无法访问的路径
 		}
@@ -246,12 +291,20 @@ func (fw *FsWatcher) addRecursive(root string) error {
 			}
 			// 添加目录到 fsnotify 监听
 			if err := fw.watcher.Add(path); err != nil {
-				// 非致命错误，跳过此目录
+				// 非致命错误：上报后跳过此目录
+				fw.reportErr(err)
 				return nil
 			}
+			fw.mu.Lock()
+			fw.dirs[path] = struct{}{}
+			fw.mu.Unlock()
 		}
 		return nil
-	})
+	}); err != nil {
+		fw.reportErr(err)
+		return err
+	}
+	return nil
 }
 
 // handleEvent 处理 fsnotify 事件。
@@ -259,6 +312,20 @@ func (fw *FsWatcher) handleEvent(ctx context.Context, event fsnotify.Event) {
 	// 检查文件是否在忽略目录下
 	if fw.IsIgnored(event.Name) {
 		return
+	}
+
+	// 目录被 rename / remove：旧路径的 watch 已失效（inotify 仍绑定 inode，
+	// 会继续用旧路径上报），移除旧 watch 并重扫 root，在新路径上重建（R6-4）。
+	if event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
+		if fw.isWatchedDir(event.Name) {
+			_ = fw.watcher.Remove(event.Name)
+			fw.mu.Lock()
+			delete(fw.dirs, event.Name)
+			fw.mu.Unlock()
+			if err := fw.addRecursive(fw.root); err != nil {
+				fw.reportErr(err)
+			}
+		}
 	}
 
 	// 如果是新创建的目录，递归添加到监听
