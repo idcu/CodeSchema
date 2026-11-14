@@ -6,6 +6,18 @@
 
 ## 提交记录
 
+### Commit 240: fix(parser): Go 跨行调用起始行计入调用边
+
+- `callPattern` 要求 `(` 与 `)` 同行；参数换行的调用
+  （`fs.BulkUpsert(ctx, []*parser.IRDocument{{`）整条丢失，测试关联与调用图同时漏召回。
+- 新增跨行兜底：仅登记本行内括号未闭合的 `name(`，已闭合调用仍由原路径处理，避免重复。
+- 负控：`TestGoMultilineCall`（旧实现 calls=[]，红；新实现绿）。
+- 同语料（code-schema go regex）前→后：calls 15560 → 16165、unique callers 2116 → 2125、
+  resolved 4161 → 4296（0.2674 → 0.2658，分母增长更快）、仓内 4322/4161 → 4466/4296
+  （0.9627 → 0.9619）；扩展人工真值 TP 155 → 158、FN 10 → 7、F1 0.9365 → 0.9461。
+- 自动 test_link 同口径：TP 1462 → 1503、FN 9 → 23、F1 0.9908 → 0.9839——真值随解析
+  覆盖面扩大，属暴露而非链路回退。
+
 ### Commit 239: fix(service): 包限定 callee 按后缀解析到生产方法
 
 - Go selector 的 callee 为 `pkg.Type.Method`（`store.FileStore.GetFileByPath`），

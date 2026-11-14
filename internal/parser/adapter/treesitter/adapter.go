@@ -651,6 +651,9 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			}
 			if !(inIfaceBody && curMethodIdx < 0 && goDepth > curIfaceOpenDepth) && strings.Contains(code, "(") {
 				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes)
+				// callPattern 要求 `(` 与 `)` 同行；参数换行时起始行整条丢失
+				// （`fs.BulkUpsert(ctx, []*parser.IRDocument{{`），测试关联与调用图同时漏召回。
+				detectUnclosedCalls(code, lineNum, &doc.Calls, caller, goPkg, curRecvVar, curRecvType, goLocalTypes)
 			}
 			goDepth += braceNet(code)
 			if inIfaceBody && goDepth <= curIfaceOpenDepth {
@@ -1333,9 +1336,54 @@ func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string
 	return callee
 }
 
+// detectUnclosedCalls 兜底跨行调用：仅登记本行内括号未闭合的 `name(`。
+// 已闭合的调用由 detectCalls 处理，这里用括号配平判断避免重复登记。
+func detectUnclosedCalls(line string, lineNum int, calls *[]parser.CallIR, caller, pkg, recvVar, recvType string, localTypes map[string]string) {
+	for _, m := range callStartPattern.FindAllStringSubmatchIndex(line, -1) {
+		name := line[m[2]:m[3]]
+		if isKeyword(name) || len(name) <= 1 {
+			continue
+		}
+		open := strings.Index(line[m[0]:m[1]], "(")
+		if open < 0 || parenClosesOnLine(line, m[0]+open) {
+			continue
+		}
+		callee := qualifyCallee(name, pkg, recvVar, recvType, "", "", localTypes)
+		if isKeyword(callee) || len(callee) <= 1 {
+			continue
+		}
+		*calls = append(*calls, parser.CallIR{
+			CallerFQN:  caller,
+			CalleeFQN:  callee,
+			CallType:   "direct",
+			LineNumber: lineNum,
+			Source:     parser.CallSourceRegex,
+			Confidence: parser.ConfidenceRegex,
+		})
+	}
+}
+
+// parenClosesOnLine 判断从 open 位置开始的括号是否在本行闭合。
+func parenClosesOnLine(line string, open int) bool {
+	depth := 0
+	for i := open; i < len(line); i++ {
+		switch line[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 var (
 	goVarDeclPattern   = regexp.MustCompile(`^\s*var\s+(\w+)\s+(\*?)([A-Za-z_]\w*)(?:\[[^\]]*\])?`)
 	goShortDeclPattern = regexp.MustCompile(`^\s*(\w+(?:\s*,\s*\w+)*)\s*:=\s*&?([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*\{`)
+	callStartPattern   = regexp.MustCompile(`(\w[\w.]*)\s*\(`)
 )
 
 // trackGoLocalTypes 记录方法体内局部变量类型，供 `x.Method()` 消歧：

@@ -191,6 +191,34 @@ func Run() {
 	}
 }
 
+// TestGoMultilineCall 负控：跨行调用（参数换行）此前整体丢失——callPattern 要求
+// `(` 与 `)` 同行，`fs.BulkUpsert(ctx, []*parser.IRDocument{{` 这类起始行不产生
+// 调用边，测试关联与调用图同时漏召回。
+func TestGoMultilineCall(t *testing.T) {
+	if BuildVariant() != "regex" {
+		t.Skip("断言正则路径的跨行调用兜底；AST 变体天然覆盖完整调用节点")
+	}
+	src := `package demo
+
+type Item struct{ Name string }
+
+func Run() {
+	helper(
+		&Item{Name: "x"},
+	)
+}
+
+func helper(i *Item) {}
+`
+	doc := parseGoSource(t, src)
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "demo.Run" && c.CalleeFQN == "demo.helper" {
+			return
+		}
+	}
+	t.Fatalf("multi-line call not detected: %+v", doc.Calls)
+}
+
 // TestGoInterfaceSignaturesNotCalls 负控：接口方法声明（type X interface { M() }）
 // 是类型契约而非调用。旧实现按 callPattern 把每个签名行登记为调用边，
 // 这些边的 CallerFQN 恒为空（接口体不属于任何方法），污染调用图归属统计。
