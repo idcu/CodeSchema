@@ -62,6 +62,7 @@ Commands:
   rebuild-kv        重建 KV 缓存（P2）
   benchmark         全链路基准（扫描/索引/检索指标，多仓库对比）
   agent-bench        Agent 任务端到端评测（三档上下文 × 任务集；--repos 多仓对比）
+  release-bench      公开基准：测试关联 P/R/F1 + 调用图结构指标（只报告）
   mcp               启动 MCP Server（P0）
   serve             启动 HTTP API Server（P0）
   tags-stats        离线标签覆盖率统计（P21 质量评估基线，无需 LLM key）
@@ -155,6 +156,9 @@ Use "codeschema <command> -h" for more information about a command.
 
 	case "agent-bench":
 		return agentBenchCmd(ctx, cfg, args[1:])
+
+	case "release-bench":
+		return releaseBenchCmd(ctx, cfg, args[1:])
 
 	case "rebuild-kv":
 		return rebuildKVCmd(ctx, cfg, args[1:])

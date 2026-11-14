@@ -67,6 +67,9 @@ type TreeSitterAdapter struct {
 	langs map[string]*ts.Language
 }
 
+// BuildVariant 返回当前构建的解析实现标识（供基准报告区分正则/真语法树）。
+func BuildVariant() string { return "treesitter" }
+
 // NewTreeSitterAdapter 创建适配器并注册全部支持语言的 grammar。
 func NewTreeSitterAdapter() *TreeSitterAdapter {
 	return &TreeSitterAdapter{

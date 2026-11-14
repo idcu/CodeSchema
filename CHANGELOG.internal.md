@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 178: feat(bench): 公开基准 release-bench（测试关联 P/R/F1 + 调用图对照）（S-2）
+
+- 背景：缺少可复现的公开基准来回答「测试关联和调用图到底有多准」。既有 `benchmark`（扫描/索引/检索性能）与 `agent-bench`（Agent 任务）都不测关联精度，也没有跨构建变体对照。
+- 动作：
+  - 新增 `internal/releasebench`：真值取「测试方法 → 生产方法」的直接调用边（不依赖命名约定，避免自我实现）；文件/ pair 固定排序 + 等距采样保证可复现；微平均 P/R/F1；调用图 calls/callers/callees/resolved/resolution。
+  - 新增 CLI `release-bench --repo --lang --max-pairs --min-confidence --workers --out`，输出 `report.json` / `report.md`。
+  - `treesitter.BuildVariant()`（`regex` / `treesitter`）写入报告，支持同仓两构建变体对照。
+  - 负控 `TestAffectedNegativeControl_DeleteTest`：删除测试文件后 `GetAffected` 必须不再返回该测试；`TestRun_MultiLanguageFixtures` 断言 3 语言夹具 TP≥1 且二次运行除时间戳外 DeepEqual。
+- 实测（3 仓库 × 2 变体，min-confidence=60，原始数据 `docs/bench/2026-11-14/*.json`）：
+  - 测试关联：Go 真值 1720/1844（采样 192/185），Java 45/160，TS 0；**`PredictedLinks` 全为 0**，故 P=R=F1=0（策略无输出，不是 FQN 口径不一致）。
+  - 根因（已写入基准文档，属后续独立条目）：Go 包级测试函数挂在 `PACKAGE` 容器下，`discoverTestClasses` 只认 `*Test`/`Test*` 类名；petclinic 的 `*Tests` 后缀未剥离；TS 的 Jest `it/test` 回调不是 IR 方法。
+  - 调用图：Go 16376 边 / 0.2126（regex）vs 18593 / 0.2044（AST）；Java 1451 / 0.1234 vs 1609 / 0.1790；TS 848 / 0.0425 vs 407 / 0.1425。
+- 验证：`go build ./...` / `go vet ./...`（含 pg/redis/treesitter tags）/ `make test` 全绿；`make counts-check` 通过（LoC 58976 ≈ 59.0k）。首轮只报告，不设 CI 阈值。
+
 ### Commit 177: fix(parser): Java 方法体语句不再被误判为方法声明（S-2 前置）
 
 - 背景：Java/Groovy 的方法模式无行首锚点、类型捕获组允许空白，`return helper(a);` 被解释为「返回类型 `return` + 方法名 `helper`」；该行随后被 `continue`，方法体内调用边全部丢失。公开基准的 Java 夹具因此真值 pair 恒为 0，且大仓 `ProdMethods` 会按语句行数虚增。
