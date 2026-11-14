@@ -99,6 +99,17 @@ Java 重载、同名多声明被多次登记，精确 FQN 命中本身并无歧�
 采样评估的生产方法集合随之改变（Go regex 预测 1343 → 1604），原先被隐藏的漏召
 （Go regex FN 0 → 14、Java regex 0 → 5）因此显形。两套数字都保留。
 
+### TS 正则路径：顶层函数与无返回类型方法入索引
+
+旧 TS `methodPattern` 强制 `):` 返回类型注解，且没有 `function` 分支：lytd 中 555 条
+`export function foo(` / `function foo(` 全部漏解析，无注解的类方法（`start(port: number) {`）
+同样漏掉；这些声明行又被 `callPattern` 误读成调用边。修复后方法模式允许省略返回类型
+（`;` 分支仍要求注解，避免 `foo(a);` 误判），并新增 `funcPattern` 兜底顶层函数。
+
+同语料、同一命令，lytd ts regex：calls 848 → 385（原先把函数声明当调用），
+可解析边 36 → 109，resolution 0.0425 → 0.2831。Go/Java 复核无回退
+（Go 0.2328 → 0.2327 的差异来自新增单测使语料 +15 条 calls；Java 0.1582 不变）。
+
 ### 残余漏召（23/24 条）根因更正与清零
 
 此前把 FN 归为「callee 短名多义 + 调用边未抽取」。**该归因错误**：两条调用边

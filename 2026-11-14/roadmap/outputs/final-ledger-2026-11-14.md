@@ -149,8 +149,11 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 | code-schema | treesitter | 20031 | 0.2233 |
 | petclinic | regex | 1365 | 0.1582 |
 | petclinic | treesitter | 1609 | 0.1889 |
-| lytd | regex | 848 | 0.0425 |
+| lytd | regex | 385 | 0.2831 |
 | lytd | treesitter | 407 | 0.2236 |
+
+> lytd regex 的 calls 由 848 降至 385：旧 TS 模式把 555 条顶层函数声明误当调用边，
+> 修复后这些行成为方法、不再是调用；可解析边 36 → 109。
 
 > `count[fqn]==1` 改为 `>0` 属**度量缺陷修正**（精确 FQN 命中不构成歧义），
 > 上面的提升不计入引擎收益；两套数字与旧口径均保留。

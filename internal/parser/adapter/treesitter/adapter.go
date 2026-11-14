@@ -60,8 +60,11 @@ type langPatterns struct {
 	// methodNameIndex 方法名在 methodPattern 匹配结果中的索引；
 	// 0 表示取最后一个捕获组（默认），用于末组是修饰符/关键字的语言（Elixir/C++）。
 	methodNameIndex int
-	callPattern     *regexp.Regexp // 匹配函数调用
-	commentTrim     string         // 注释前缀，用于提取文档
+	// funcPattern 顶层/无归属函数声明（可选，如 TS `export function foo(`）。
+	// 方法模式无法覆盖的声明式函数由此兜底，名字同样取最后一个捕获组。
+	funcPattern *regexp.Regexp
+	callPattern *regexp.Regexp // 匹配函数调用
+	commentTrim string         // 注释前缀，用于提取文档
 }
 
 // TreeSitterAdapter 基于文本模式匹配的解析适配器。
@@ -103,9 +106,13 @@ func initPatterns() map[string]langPatterns {
 		"ts": {
 			classPattern:   regexp.MustCompile(`^(export\s+)?(abstract\s+)?(class|interface|enum|type)\s+(\w+)`),
 			classNameIndex: 4,
-			methodPattern:  regexp.MustCompile(`^\s*(public|private|protected|static|async|\s)*\s*(\w[\w]*)\s*\([^)]*\)\s*:`),
-			callPattern:    regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
-			commentTrim:    "//",
+			// 返回类型可省略（`start(port: number) {`），有类型时允许对象字面量（贪婪到行尾的 `{`）；
+			// `;` 分支只接受带返回类型注解的声明，避免把 `foo(a);` 调用语句误判为方法。
+			methodPattern: regexp.MustCompile(`^\s*(?:(?:public|private|protected|static|async|readonly|override|abstract|declare|get|set)\s+)*(\w[\w$]*)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*(?:(?::.*)?\{|:.*;)`),
+			// 顶层函数声明：export/default/async 前缀均可选（旧模式漏掉全部 555 条）。
+			funcPattern: regexp.MustCompile(`^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w[\w$]*)\s*(?:<[^>]*>)?\s*\(`),
+			callPattern: regexp.MustCompile(`(\w[\w.]*)\s*\([^)]*\)`),
+			commentTrim: "//",
 		},
 		"py": {
 			classPattern:   regexp.MustCompile(`^class\s+(\w+)\s*[\(:]`),
@@ -663,7 +670,11 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		// Java/Groovy 的模式未加行首锚点且类型组过宽，会把 `return helper(a);`
 		// 读成「返回类型 return + 方法名 helper」，既虚增方法数又让整行被 continue
 		// 吞掉、丢失方法体内的调用边（S-2 基准真值为 0 的根因）。
-		if matches := patterns.methodPattern.FindStringSubmatch(line); len(matches) >= 2 && !isStatementLine(trimmed) {
+		matches := patterns.methodPattern.FindStringSubmatch(line)
+		if len(matches) < 2 && patterns.funcPattern != nil {
+			matches = patterns.funcPattern.FindStringSubmatch(line)
+		}
+		if len(matches) >= 2 && !isStatementLine(trimmed) {
 			nameIdx := patterns.methodNameIndex
 			if nameIdx <= 0 || nameIdx >= len(matches) {
 				nameIdx = len(matches) - 1

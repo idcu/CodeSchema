@@ -282,6 +282,69 @@ export class UserService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions 负控：顶层 function 与
+// 无返回类型注解的方法都必须入索引（旧 TS 模式强制 `):`，这两类全部漏解析）。
+func TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "handlers.ts")
+	content := `export function buildIndex(items: string[]): number {
+    return items.length;
+}
+
+async function loadConfig() {
+    return readConfig();
+}
+
+function plain() {
+    return 1;
+}
+
+export class Server {
+    start(port: number) {
+        return listen(port);
+    }
+
+    stop(): void {
+        closeAll();
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	got := make(map[string]string, len(doc.Methods))
+	for _, m := range doc.Methods {
+		got[m.Name] = m.ClassFQN
+	}
+	for name, class := range map[string]string{
+		"buildIndex": "",
+		"loadConfig": "",
+		"plain":      "",
+	} {
+		fqn, ok := got[name]
+		if !ok {
+			t.Errorf("top-level function %q not parsed; methods=%v", name, got)
+			continue
+		}
+		if fqn != class {
+			t.Errorf("%q ClassFQN = %q, want %q", name, fqn, class)
+		}
+	}
+	if fqn, ok := got["start"]; !ok || fqn != "Server" {
+		t.Errorf("method without return annotation: got (%q, %v), want (\"Server\", true)", fqn, ok)
+	}
+	if fqn, ok := got["stop"]; !ok || fqn != "Server" {
+		t.Errorf("method with return annotation: got (%q, %v), want (\"Server\", true)", fqn, ok)
+	}
+}
+
 func TestTreeSitterAdapter_Parse_Python(t *testing.T) {
 	a := NewTreeSitterAdapter()
 	dir := t.TempDir()

@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 224: fix(parser): TS 顶层函数与无返回类型方法入索引
+
+- 旧 TS `methodPattern` 强制 `):`，且无 `function` 分支：555 条顶层函数声明漏解析，
+  无注解类方法（`start(port: number) {`）同样漏掉；声明行还被 `callPattern` 当成调用边。
+- 新增 `langPatterns.funcPattern` 兜底顶层函数（`export`/`default`/`async` 可选）；
+  `methodPattern` 允许省略返回类型，`;` 分支仅接受带注解声明，避免 `foo(a);` 误判。
+- 负控：`TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions`（旧实现 4 条断言全红，
+  新实现绿）；`go test ./internal/parser/...` 通过。
+- 实测 lytd ts regex：calls 848 → 385（声明不再计为调用）、resolved 36 → 109、
+  resolution 0.0425 → 0.2831；Go 0.2328 → 0.2327（语料 +15 calls，来自新增单测）、
+  Java 0.1582 不变。
+- 文档：`解析适配器.md`、`docs/bench/2026-11-14/README.md`、`final-ledger` 同步。
+
 ### Commit 223: fix(bench): 方法索引精确 FQN 命中不再按次数判歧义（度量缺陷修正）
 
 - `methodIndex.resolve` 原要求 `count[fqn]==1`；Java 重载/同名多声明会把同一 FQN
