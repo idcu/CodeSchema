@@ -454,6 +454,10 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			}
 
 		case callTypes[typ]:
+			// Go 指针类型转换 `(*T)(x)`：function 是括号包裹的类型表达式，不是调用。
+			if lang == "go" && astGoTypeConversion(n, data) {
+				break
+			}
 			callee := astQualifyCallee(astCalleeName(n, data), goPkg, astPkg, astCurClassName(curClass))
 			if callee == "" || isKeyword(callee) {
 				break
@@ -963,6 +967,17 @@ func isCppCtorCall(fn *ts.Node, src []byte) bool {
 		return false
 	}
 	return cppCtorTypes[text[idx+2:]]
+}
+
+// astGoTypeConversion 判断 Go 调用节点是否为类型转换 `(*T)(x)`：
+// function 字段为 parenthesized_expression 且内容以 `(*` 开头（指针类型）。
+// `(f)(x)` 形式的间接函数调用内容不以 `(*` 开头，不受影响。
+func astGoTypeConversion(n *ts.Node, src []byte) bool {
+	fn := n.ChildByFieldName("function")
+	if fn == nil || fn.IsNull() || fn.Type() != "parenthesized_expression" {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(fn.Content(src))), "(*")
 }
 
 // isTypeNode 判断节点类型是否为「类型」节点（用于跳过类型构造/转换调用）。

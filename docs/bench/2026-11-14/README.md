@@ -199,6 +199,15 @@ resolution 97/0.2519 → 61/0.1748：这 36 条假边此前恰好命中索引里
 剩余 25 条为包级 `var` 初始化（`errors.New` / `regexp.MustCompile` / `template.Must`）
 与 Go 类型转换，无可归属方法，不做伪造归属。
 
+### Caller 归属：Go 指针类型转换不再计为调用（treesitter 变体）
+
+AST 路径把 `var _ Embedder = (*ONNXEmbedder)(nil)` 的 `(*ONNXEmbedder)` 当作
+function 节点，产出 callee=`vector.(*ONNXEmbedder)`、caller 为空的假调用边（本仓 6 条）。
+括号包裹且以 `(*` 开头的 function 一律按类型转换跳过；`(f)(x)` 间接调用不受影响。
+
+同语料（同一诊断命令，含新增测试代码 calls +9）：calls 20183 → 20192，
+caller 为空 36 → 30，净移除 6 条假边。剩余 30 条为包级 `var` 初始化。
+
 ### 新增「仓内可解析边」口径（与旧 resolution 并排）
 
 旧 `resolution_rate = resolved / 全部调用边` 把 `fmt.Println`、`expect(...)` 这类

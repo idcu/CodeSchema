@@ -6,6 +6,17 @@
 
 ## 提交记录
 
+### Commit 233: fix(parser): Go 指针类型转换不再计为调用（treesitter 变体）
+
+- AST 路径把 `var _ I = (*T)(nil)` 的 `(*T)` 当作 function 节点，产出
+  callee=`pkg.(*T)`、caller 为空的假调用边（本仓 6 条）。
+- `parenthesized_expression` 且内容以 `(*` 开头 → 类型转换，跳过；`(f)(x)` 不受影响。
+- 负控：`TestASTAdapter_GoTypeConversionNotCall`（旧实现 1 条假边，红；新实现绿）。
+- 同语料（同一诊断命令，含新增测试代码 calls +9）：calls 20183 → 20192、
+  caller 空 36 → 30；净移除 6 条假边。
+- 剩余 30 条为包级 `var` 初始化，无可归属方法，不伪造归属。
+- 文档：bench README 同步。
+
 ### Commit 232: fix(parser): Go 接口方法签名不再计为调用（caller 归属）
 
 - `type X interface { M() }` 的方法签名被 `callPattern` 登记为调用边，caller 恒为空

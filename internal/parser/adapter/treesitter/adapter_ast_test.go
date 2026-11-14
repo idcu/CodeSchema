@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -193,6 +194,36 @@ func main() {
 	}
 	if !foundGreet || !foundReal {
 		t.Errorf("expected u.Greet & main.realCall detected, got calls: %+v", doc.Calls)
+	}
+}
+
+// TestASTAdapter_GoTypeConversionNotCall 负控：`(*T)(nil)` 是类型转换而非函数调用。
+// 旧实现把括号包裹的指针类型当作 function 节点，产出 callee=`pkg.(*T)` 的假调用边。
+func TestASTAdapter_GoTypeConversionNotCall(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conv.go")
+	content := `package demo
+
+type Embedder interface{ Embed() }
+
+type impl struct{}
+
+func (i *impl) Embed() {}
+
+var _ Embedder = (*impl)(nil)
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for _, c := range doc.Calls {
+		if strings.HasPrefix(c.CalleeFQN, "demo.(*") || strings.HasPrefix(c.CalleeFQN, "(*") {
+			t.Errorf("类型转换被登记为调用: %+v", c)
+		}
 	}
 }
 
