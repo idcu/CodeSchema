@@ -357,6 +357,7 @@ func (s *Service) linkByCallGraph(ctx context.Context, files []*store.FileRecord
 	infos := make(map[int64]*fileInfo, len(files))
 	exact := make(map[string]struct{})
 	shortIndex := make(map[string][]string)
+	shortSeen := make(map[string]map[string]struct{})
 	for _, f := range files {
 		info := &fileInfo{test: isTestFileName(f.AbsolutePath)}
 		classes, _ := s.store.GetClassesByFileID(ctx, f.ID)
@@ -368,7 +369,17 @@ func (s *Service) linkByCallGraph(ctx context.Context, files []*store.FileRecord
 			for _, m := range methods {
 				info.methods = append(info.methods, m)
 				exact[m.FullName] = struct{}{}
-				shortIndex[shortMethodName(m.FullName)] = append(shortIndex[shortMethodName(m.FullName)], m.FullName)
+				// 同一 FQN 可能因重载（Java overload / 同名多声明）被登记多次；
+				// 重载不是不同的可关联目标，短名唯一性必须按 FQN 去重后再判断。
+				short := shortMethodName(m.FullName)
+				if shortSeen[short] == nil {
+					shortSeen[short] = make(map[string]struct{})
+				}
+				if _, ok := shortSeen[short][m.FullName]; ok {
+					continue
+				}
+				shortSeen[short][m.FullName] = struct{}{}
+				shortIndex[short] = append(shortIndex[short], m.FullName)
 			}
 		}
 		infos[f.ID] = info

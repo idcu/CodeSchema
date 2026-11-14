@@ -412,6 +412,45 @@ func TestFindTestLinks_CallGraphPackageQualifiedCallee(t *testing.T) {
 	assertCallGraphLink(t, links, "store.TestFileStore_GetFileByPath")
 }
 
+// TestFindTestLinks_CallGraphOverloadSameFQN 负控：Java 重载（Owner.getPet 三重载）
+// 在方法表里是同一 FQN 的三条登记。旧实现把「短名命中 3 条」当成歧义，
+// `owner.getPet` 无法解析，人工真值 6 条 FN。重载不是不同的可关联目标，
+// 短名索引应按 FQN 去重后再判唯一。
+func TestFindTestLinks_CallGraphOverloadSameFQN(t *testing.T) {
+	st := &mockStoreWithTestData{
+		files: []*store.FileRecord{
+			{ID: 1, AbsolutePath: "/repo/src/main/java/org/demo/Owner.java", Language: "java"},
+			{ID: 2, AbsolutePath: "/repo/src/test/java/org/demo/OwnerControllerTests.java", Language: "java"},
+		},
+		classes: map[int64][]store.ClassRecord{
+			1: {{ID: 10, FileID: 1, Name: "Owner", FullName: "Owner", Type: "CLASS"}},
+			2: {{ID: 20, FileID: 2, Name: "OwnerControllerTests", FullName: "OwnerControllerTests", Type: "CLASS"}},
+		},
+		methods: map[int64][]store.MethodRecord{
+			10: {
+				// 三个重载共享同一 FullName（FQN 不含参数），是三行不同的方法记录。
+				{ID: 100, ClassID: 10, Name: "getPet", FullName: "Owner.getPet"},
+				{ID: 101, ClassID: 10, Name: "getPet", FullName: "Owner.getPet"},
+				{ID: 102, ClassID: 10, Name: "getPet", FullName: "Owner.getPet"},
+			},
+			20: {{ID: 200, ClassID: 20, Name: "shouldGetPetByName", FullName: "OwnerControllerTests.shouldGetPetByName"}},
+		},
+		calls: map[int64][]store.CallRecord{
+			2: {{
+				CallerFQN: "OwnerControllerTests.shouldGetPetByName",
+				CalleeFQN: "owner.getPet",
+				CallType:  "direct",
+			}},
+		},
+	}
+
+	links, err := NewService(st).FindTestLinks(context.Background(), "Owner.getPet", 60)
+	if err != nil {
+		t.Fatalf("FindTestLinks: %v", err)
+	}
+	assertCallGraphLink(t, links, "OwnerControllerTests.shouldGetPetByName")
+}
+
 func assertCallGraphLink(t *testing.T, links []TestLink, want string) {
 	t.Helper()
 	for _, l := range links {
