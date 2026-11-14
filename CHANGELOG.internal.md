@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 160: fix(parser): 超长单行不再中断整次扫描（P1-15）
+
+- 背景：解析器用 `bufio.Scanner` 按行读取文件，默认单行上限 64KB；生成代码/压缩产物的长行触发 `bufio.Scanner: token too long`，`Parse` 返回错误并向上中断整次扫描，一个文件可拖垮全仓索引。
+- 动作：`adapter.go` 改为 `bufio.Reader.ReadString('\n')` 逐行读取（无 64KB 限制）；新增 `maxParseLineBytes=4MiB` 解析上限，超限行仅跳过内容解析、行号照常推进，文件其余部分与其余文件不受影响。
+- 负控（先红后绿）：`TestGoLongLine_DoesNotFailFile`（70KB 注释行 + 5MiB 行 + 两个正常函数）。修复前实测 `scan file: bufio.Scanner: token too long`；修复后 Parse 成功，`AfterLong`/`AfterHuge` 均被解析。
+- 验证：`make test` 全绿；`make counts-check` 通过（LoC 55316 ≈ 55.3k）。
+
 ### Commit 159: fix(parser): Go 方法 EndLine 回填到闭合行（P1-1）
 
 - 背景：treesitter Go 路径创建 `MethodIR` 时 `EndLine=StartLine`，全文件无任何回填；`/context` 的语义块只取 1 行（仅签名），「精准裁剪」退化为「只回签名」。

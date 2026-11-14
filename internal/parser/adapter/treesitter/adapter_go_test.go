@@ -165,6 +165,36 @@ func MultiLine(
 	}
 }
 
+// TestGoLongLine_DoesNotFailFile 是 P1-15 负控：单行超过 bufio.Scanner 默认
+// 64KB 上限时，旧实现返回 ErrTooLong，scanner 聚合后使整次扫描以错误退出。
+// 修复后超长行不再中断文件解析：<4MiB 行照常解析，超限行跳过但继续后续行。
+func TestGoLongLine_DoesNotFailFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "long.go")
+	longComment := "// " + strings.Repeat("x", 70*1024) // 70KB，超过旧 64KB 限制
+	hugeLine := strings.Repeat("y", 5*1024*1024)     // 5MiB，超过解析上限，应跳过
+	src := "package sample\n\n" + longComment + "\n\nfunc AfterLong() {}\n\n// " + hugeLine + "\n\nfunc AfterHuge() {}\n"
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewTreeSitterAdapter()
+	doc, err := a.Parse(context.Background(), p)
+	if err != nil {
+		t.Fatalf("超长行不应使 Parse 失败：%v", err)
+	}
+
+	names := map[string]bool{}
+	for _, m := range doc.Methods {
+		names[m.Name] = true
+	}
+	for _, want := range []string{"AfterLong", "AfterHuge"} {
+		if !names[want] {
+			t.Errorf("超长行之后的函数 %s 未被解析；methods=%v", want, doc.Methods)
+		}
+	}
+}
+
 // TestGoFieldAndConstantExtraction 验证 Go 路径的变量/常量 IR 产出（2026-09-03 新增）：
 //  1. 包级常量：单行 const X [Type] = v 与 const ( ... ) 块内行 X = v 均产出为
 //     ConstantIR{FilePath}（包/文件级常量）；

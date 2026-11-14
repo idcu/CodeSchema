@@ -15,6 +15,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,10 @@ import (
 	"github.com/idcu/codeschema/internal/parser"
 	"github.com/idcu/codeschema/internal/parser/adapter"
 )
+
+// maxParseLineBytes 单行内容解析上限（4MiB）。超限行跳过解析但继续文件，
+// 避免生成代码/压缩产物的超长单行中断整次扫描（P1-15）。
+const maxParseLineBytes = 4 << 20
 
 // langPatterns 每种语言的解析模式。
 type langPatterns struct {
@@ -337,7 +342,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		FilePath: path,
 	}
 
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewReaderSize(file, 64*1024)
 	lineNum := 0
 	var currentClass *parser.ClassIR
 	var currentMethod *parser.MethodIR // 通用路径：当前方法作用域（用于回填 CallerFQN）
@@ -362,15 +367,30 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	constBlock := false      // 是否处于 const ( ... ) 块内
 	hasTopLevelFunc := false // 是否存在包级函数（决定是否合成包级容器）
 
-	for scanner.Scan() {
+	for {
+		raw, readErr := scanner.ReadString('\n')
+		if raw == "" && readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("scan file: %w", readErr)
+		}
+
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		line := scanner.Text()
+		line := strings.TrimRight(raw, "\r\n")
 		lineNum++
+
+		// 超长单行（生成代码/压缩产物）：跳过本行内容解析但保留行号推进，
+		// 不得因单行超限中断整个文件（P1-15，旧实现返回 ErrTooLong）。
+		if len(line) > maxParseLineBytes {
+			docComment.Reset()
+			continue
+		}
 
 		// 收集文档注释
 		trimmed := strings.TrimSpace(line)
@@ -634,10 +654,6 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		if !strings.HasPrefix(trimmed, patterns.commentTrim) && trimmed != "" {
 			docComment.Reset()
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan file: %w", err)
 	}
 
 	// 更新类结束行号
