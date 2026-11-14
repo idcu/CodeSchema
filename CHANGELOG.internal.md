@@ -6,6 +6,19 @@
 
 ## 提交记录
 
+### Commit 225: fix(parser): 关键字假调用按裸名过滤（Java/Go 内建）
+
+- `detectCalls` 先把裸名做包/类限定再查 `isKeyword`，导致 `if (` → `pkg.Class.if`、
+  Go `len(` → `pkg.len` 绕过过滤，成为假调用边。
+- 改为裸名先过滤，再做限定；补入 Java `try/synchronized/do/else/finally`。
+- 负控：`TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls`（旧实现 6 条关键字调用全红；
+  新实现绿，且 `helper()` 真调用保留）。
+- 实测：petclinic java regex calls 1365 → 1262、resolution 0.1582 → 0.1712；
+  code-schema go regex calls 17656 → 15486、resolution 0.2327 → 0.2653；
+  java treesitter / lytd regex 不变（不走该正则路径/无关键字边）。
+- `test_link` 的 TP 与真值同步收缩（伪边此前也进真值），属口径修正。
+- 文档：`解析适配器.md`、bench README、`final-ledger` 同步。
+
 ### Commit 224: fix(parser): TS 顶层函数与无返回类型方法入索引
 
 - 旧 TS `methodPattern` 强制 `):`，且无 `function` 分支：555 条顶层函数声明漏解析，

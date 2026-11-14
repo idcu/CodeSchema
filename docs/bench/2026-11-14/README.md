@@ -110,6 +110,28 @@ Java 重载、同名多声明被多次登记，精确 FQN 命中本身并无歧�
 可解析边 36 → 109，resolution 0.0425 → 0.2831。Go/Java 复核无回退
 （Go 0.2328 → 0.2327 的差异来自新增单测使语料 +15 条 calls；Java 0.1582 不变）。
 
+### 关键字假调用：裸名须在包/类限定前过滤
+
+`detectCalls` 原先把 `if (` 这类关键字先经 `qualifyCallee` 限定成 `pkg.Class.if`，
+再查 `isKeyword`，限定后的名字永远查不到，控制流因此变成调用边；Go 内建函数
+（`len/cap/append/close/make/...`）同样被包限定后绕过过滤。
+
+修复：先按裸名过滤，再做限定（限定后仍保留一次关键字检查，覆盖 `IO.puts` 等）。
+补入 Java `try/synchronized/do/else/finally`。
+
+同语料、同一命令：
+
+| 仓库 | 变体 | calls（前→后） | resolution（前→后） |
+|---|---|---:|---:|
+| petclinic (java) | regex | 1365 → 1262 | 0.1582 → 0.1712 |
+| petclinic (java) | treesitter | 1609 → 1609 | 0.1889 → 0.1889（该路径不走正则） |
+| code-schema (go) | regex | 17656 → 15486 | 0.2327 → 0.2653 |
+| lytd (ts) | regex | 385 → 385 | 0.2831 → 0.2831 |
+
+Go 的降幅主要来自 `len/cap/append/make/close` 等内建伪调用被正确剔除，
+Java 的 103 条降幅含 72 条控制流关键字。`test_link` 的 TP/真值同步收缩
+（这些伪边此前也进了自动真值），属口径修正而非召回退化。
+
 ### 残余漏召（23/24 条）根因更正与清零
 
 此前把 FN 归为「callee 短名多义 + 调用边未抽取」。**该归因错误**：两条调用边

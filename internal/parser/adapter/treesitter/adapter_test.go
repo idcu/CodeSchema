@@ -282,6 +282,57 @@ export class UserService {
 	}
 }
 
+// TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls 负控：控制流关键字（if/for/...）
+// 经包+类限定后（demo.Foo.if）曾绕过 isKeyword 过滤，被记为调用边。
+func TestTreeSitterAdapter_Parse_JavaControlFlowNotCalls(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Foo.java")
+	content := `package demo;
+
+public class Foo {
+    public void run(int x) {
+        if (x > 0) { helper(x); }
+        for (int i = 0; i < x; i++) { helper(i); }
+        while (x > 0) { x--; }
+        switch (x) { case 1: break; default: break; }
+        synchronized (this) { helper(x); }
+        try { helper(x); } catch (Exception e) { throw e; }
+    }
+
+    private void helper(int i) { }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	blocked := map[string]bool{
+		"if": true, "for": true, "while": true, "switch": true,
+		"catch": true, "synchronized": true, "try": true, "case": true,
+	}
+	var helperCalls int
+	for _, c := range doc.Calls {
+		name := c.CalleeFQN
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:]
+		}
+		if blocked[name] {
+			t.Errorf("control-flow keyword recorded as call: %s (caller=%s)", c.CalleeFQN, c.CallerFQN)
+		}
+		if name == "helper" {
+			helperCalls++
+		}
+	}
+	if helperCalls == 0 {
+		t.Errorf("expected helper() calls to remain, got %d calls: %+v", len(doc.Calls), doc.Calls)
+	}
+}
+
 // TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions 负控：顶层 function 与
 // 无返回类型注解的方法都必须入索引（旧 TS 模式强制 `):`，这两类全部漏解析）。
 func TestTreeSitterAdapter_Parse_TypeScriptTopLevelFunctions(t *testing.T) {

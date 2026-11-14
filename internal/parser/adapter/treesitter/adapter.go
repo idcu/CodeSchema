@@ -1174,6 +1174,11 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 	matches := pattern.FindAllStringSubmatch(line, -1)
 	for _, m := range matches {
 		if len(m) >= 2 {
+			// 先按裸名过滤关键字：qualifyCallee 会把 Java 的 `if (` 限定成
+			// `pkg.Class.if`，使 isKeyword 失效并产生假调用边。
+			if isKeyword(m[1]) || len(m[1]) <= 1 {
+				continue
+			}
 			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass)
 			// 跳过关键字和常见误匹配
 			if isKeyword(callee) || len(callee) <= 1 {
@@ -1321,6 +1326,8 @@ func isKeyword(name string) bool {
 		"recover": true, "range": true, "defer": true, "go": true,
 		"assert": true, "raise": true, "yield": true, "await": true,
 		"async": true, "super": true, "this": true, "self": true,
+		// Java 控制流（带括号时会被 callPattern 误匹配）
+		"try": true, "synchronized": true, "do": true, "else": true, "finally": true,
 		// Kotlin 关键字
 		"fun": true, "val": true, "var": true, "when": true, "is": true,
 		"in": true, "suspend": true, "require": true,
