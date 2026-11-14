@@ -288,10 +288,12 @@ func (idx *methodIndex) add(fqn string) {
 }
 
 func (idx *methodIndex) resolve(name string) (string, bool) {
-	if idx.count[name] == 1 {
+	// 同一 FQN 可能被多次登记（Java 重载、同名多声明）；精确命中即唯一，
+	// 不能用 count==1 判歧义，否则会把真实方法误判为不可解析。
+	if idx.count[name] > 0 {
 		return name, true
 	}
-	if cands := idx.short[shortName(name)]; len(cands) == 1 && idx.count[cands[0]] == 1 {
+	if cands := idx.short[shortName(name)]; len(cands) == 1 {
 		return cands[0], true
 	}
 	return "", false

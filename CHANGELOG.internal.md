@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 223: fix(bench): 方法索引精确 FQN 命中不再按次数判歧义（度量缺陷修正）
+
+- `methodIndex.resolve` 原要求 `count[fqn]==1`；Java 重载/同名多声明会把同一 FQN
+  登记多次，导致真实方法被误判为不可解析。改为精确 FQN 命中即解析，短名歧义仍要求
+  唯一 FQN。
+- **这是度量缺陷修正，不算引擎收益**：边一直能被解析器产出，只是被基准索引挡掉。
+- 负控：`TestMethodIndex_ResolveDuplicateCount`（旧实现红：`("", false)`；新实现绿）。
+- 同一语料（新增单测使本仓 calls +9）、同一命令，resolution 前→后：
+  Go regex 3963/0.2246 → 4106/0.2328；Go ts 4314/0.2154 → 4472/0.2233；
+  Java regex 203/0.1487 → 216/0.1582；Java ts 288/0.1790 → 304/0.1889；
+  lytd regex 36/0.0425 不变；lytd ts 58/0.1425 → 91/0.2236。
+- `test_link` 变化来自真值/采样集合扩大（Go regex FN 0→14、Java regex 0→5），
+  非召回退化；两套口径数字均保留。
+- 文档：`docs/bench/2026-11-14/README.md`、`final-ledger-2026-11-14.md` 同步。
+
 ### Commit 222: fix(bench): 人工真值数据集移除失效引用（28→27）
 
 - `manual-truth.json` 删除 `service.TestFindTestLinks_Coverage`：对应测试已随 coverage

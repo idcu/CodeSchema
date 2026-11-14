@@ -119,10 +119,10 @@
 
 | 仓库 | 变体 | 预测链接 | TP | FP | Precision | Recall | F1 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| code-schema (go) | regex | 1343 | 1181 | 4 | 0.9966 | 1.0000 | 0.9983 |
-| code-schema (go) | treesitter | 1380 | 1219 | 16 | 0.9871 | 1.0000 | 0.9935 |
-| petclinic (java) | regex | 126 | 123 | 0 | 1.0000 | 1.0000 | 1.0000 |
-| petclinic (java) | treesitter | 164 | 160 | 0 | 1.0000 | 1.0000 | 1.0000 |
+| code-schema (go) | regex | 1604 | 1441 | 19 | 0.9870 | 0.9904 | 0.9887 |
+| code-schema (go) | treesitter | 1657 | 1497 | 16 | 0.9894 | 0.9881 | 0.9887 |
+| petclinic (java) | regex | 126 | 123 | 0 | 1.0000 | 0.9609 | 0.9801 |
+| petclinic (java) | treesitter | 164 | 160 | 0 | 1.0000 | 0.9581 | 0.9786 |
 | lytd (ts) | regex/treesitter | 0 | 0 | 0 | — | — | — |
 
 **口径耦合（必须披露）**：自动真值与 `call_graph` 策略同为直接调用边，因此接近饱和的数字衡量的是「扫描 → 入库 → 反查」链路完整性与 FQN 归一，不是独立启发式的判别力。TS 的 `PredictedLinks=0` 是因为 Jest `it/test` 回调不是 IR 方法、真值也为 0，属解析缺口，不是「没有测试」。
@@ -145,12 +145,15 @@ Go 原为 28：`TestFindTestLinks_Coverage` 已随测试删除，数据集同步
 
 | 仓库 | 变体 | calls | resolution |
 |---|---|---:|---:|
-| code-schema | regex | 16593 | 0.2130 |
-| code-schema | treesitter | 18839 | 0.2048 |
-| petclinic | regex | 1365 | 0.1487 |
-| petclinic | treesitter | 1609 | 0.1790 |
+| code-schema | regex | 17641 | 0.2328 |
+| code-schema | treesitter | 20031 | 0.2233 |
+| petclinic | regex | 1365 | 0.1582 |
+| petclinic | treesitter | 1609 | 0.1889 |
 | lytd | regex | 848 | 0.0425 |
-| lytd | treesitter | 407 | 0.1425 |
+| lytd | treesitter | 407 | 0.2236 |
+
+> `count[fqn]==1` 改为 `>0` 属**度量缺陷修正**（精确 FQN 命中不构成歧义），
+> 上面的提升不计入引擎收益；两套数字与旧口径均保留。
 
 ### 3.4 Agent 端到端（agent-bench）
 

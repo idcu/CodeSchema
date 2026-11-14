@@ -85,6 +85,24 @@ export class CalculatorTest {
 	return dir
 }
 
+// TestMethodIndex_ResolveDuplicateCount 负控：同一 FQN 出现多次（重载/同名多声明）
+// 不代表歧义，精确 FQN 仍应可解析；只有短名对应多个不同 FQN 时才拒绝。
+func TestMethodIndex_ResolveDuplicateCount(t *testing.T) {
+	idx := newMethodIndex()
+	idx.add("OwnerController.processCreationForm")
+	idx.add("OwnerController.processCreationForm")
+
+	if got, ok := idx.resolve("OwnerController.processCreationForm"); !ok || got != "OwnerController.processCreationForm" {
+		t.Fatalf("resolve exact duplicate = (%q, %v), want (%q, true)", got, ok, "OwnerController.processCreationForm")
+	}
+
+	idx.add("A.helper")
+	idx.add("B.helper")
+	if got, ok := idx.resolve("helper"); ok {
+		t.Fatalf("resolve ambiguous short name = (%q, true), want not found", got)
+	}
+}
+
 // TestPrepareEvaluation_UsesAllPairsForSampledProds 负控：采样只收缩评估的
 // 生产方法集合，真值必须保留全部 pair；否则未被采样到的真实测试会被计为 FP。
 func TestPrepareEvaluation_UsesAllPairsForSampledProds(t *testing.T) {
