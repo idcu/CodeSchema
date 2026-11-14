@@ -111,15 +111,85 @@ func TestChromemStore_Search_ZeroK(t *testing.T) {
 	}
 }
 
-func TestChromemStore_Delete_Unsupported(t *testing.T) {
+// TestChromemStore_DeleteRemovesFromSearch 负控（R6-3 / P2-17）：Delete 必须真正
+// 从集合移除文档，删除后 Search / Size / ListIDs 均不得再出现该 ID。
+func TestChromemStore_DeleteRemovesFromSearch(t *testing.T) {
 	s := NewChromemStore("test-delete", 4, nil)
 	if s == nil {
 		t.Fatal("expected non-nil store")
 	}
+	ctx := context.Background()
+	if err := s.Add(ctx, "doc1", []float32{1, 0, 0, 0}); err != nil {
+		t.Fatalf("Add doc1: %v", err)
+	}
+	if err := s.Add(ctx, "doc2", []float32{0, 1, 0, 0}); err != nil {
+		t.Fatalf("Add doc2: %v", err)
+	}
 
-	err := s.Delete(context.Background(), "doc1")
-	if err == nil {
-		t.Fatal("expected error for delete (unsupported)")
+	if err := s.Delete(ctx, "doc1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	results, err := s.Search(ctx, []float32{1, 0, 0, 0}, 2)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, r := range results {
+		if r.ID == "doc1" {
+			t.Fatalf("已删除的 doc1 仍可被检索到: %+v", results)
+		}
+	}
+	if got := s.Size(); got != 1 {
+		t.Errorf("Size after delete = %d, want 1", got)
+	}
+	ids, err := s.ListIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListIDs: %v", err)
+	}
+	for _, id := range ids {
+		if id == "doc1" {
+			t.Fatalf("已删除的 doc1 仍在 ListIDs 中: %v", ids)
+		}
+	}
+}
+
+// TestPersistentChromemStore_DeletePersists 负控（R6-3 / P2-17）：删除必须落盘，
+// 重新打开后已删文档不得复活。
+func TestPersistentChromemStore_DeletePersists(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	s1, err := NewPersistentChromemStore("codeschema", dir, 4, nil)
+	if err != nil {
+		t.Fatalf("open instance 1: %v", err)
+	}
+	if err := s1.Add(ctx, "a", []float32{1, 0, 0, 0}); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	if err := s1.Add(ctx, "b", []float32{0, 1, 0, 0}); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+	if err := s1.Delete(ctx, "a"); err != nil {
+		t.Fatalf("delete a: %v", err)
+	}
+	if got := s1.Size(); got != 1 {
+		t.Fatalf("size after delete = %d, want 1", got)
+	}
+
+	s2, err := NewPersistentChromemStore("codeschema", dir, 4, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	if got := s2.Size(); got != 1 {
+		t.Fatalf("删除未持久化：重启后 size=%d, want 1", got)
+	}
+	res, err := s2.Search(ctx, []float32{1, 0, 0, 0}, 1)
+	if err != nil {
+		t.Fatalf("search after restart: %v", err)
+	}
+	if len(res) != 1 || res[0].ID != "b" {
+		t.Fatalf("重启后已删文档复活: %+v", res)
 	}
 }
 

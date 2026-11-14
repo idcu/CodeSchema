@@ -6,6 +6,21 @@
 
 ## 提交记录
 
+### Commit 207: fix(vector): chromem 删除真正生效且不可检索（R6-3 / P2-17）
+
+- 根因：`ChromemStore.Delete` 恒返回 `chromem-go does not support single document deletion`，
+  注释声称「通过 Search 过滤模拟删除」，但 `Search` 从未实现任何过滤——被删除的符号
+  仍可被语义检索命中；持久化目录中的文档文件也未清理，重启后继续存在。
+- 修复：改用 chromem-go 的 `Collection.Delete(ctx, nil, nil, id)`，内存与持久化文件同步移除；
+  `Search` / `QueryText` 将 Top-K 收敛到 `Collection.Count()`（chromem 要求
+  `nResults <= 文档数`，删除后请求较大 K 不再返回错误；空集合直接返回空结果）。
+- 负控（先红后绿）：
+  `TestChromemStore_DeleteRemovesFromSearch` 修前 `Delete` 返回 unsupported（红）→
+  修后 `Search`/`Size`/`ListIDs` 均无已删 ID（绿）；
+  `TestPersistentChromemStore_DeletePersists` 修前删除即失败（红）→ 修复后重开实例
+  `Size=1` 且 Top-1 为未删除文档（绿）。
+- 文档：`存储后端.md` 新增「向量后端语义（R6-3）」；counts 见本笔 `make counts`。
+
 ### Commit 206: fix(fswatch): 监听错误可观测 + 目录 rename 重建 watch（R6-4 / P2-18）
 
 - 根因：`FsWatcher.Start` 的 `watcher.Errors` 分支 `_ = err` 直接丢弃错误，

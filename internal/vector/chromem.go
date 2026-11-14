@@ -119,6 +119,15 @@ func (s *ChromemStore) Search(ctx context.Context, query []float32, k int) ([]Se
 	if k <= 0 {
 		k = 10
 	}
+	// chromem 要求 nResults <= 文档数：删除后集合变小，这里按实际数量收敛，
+	// 避免「请求 Top-K 大于剩余文档数」直接报错（R6-3）。
+	n := s.col.Count()
+	if n == 0 {
+		return nil, nil
+	}
+	if k > n {
+		k = n
+	}
 
 	results, err := s.col.QueryEmbedding(ctx, query, k, nil, nil)
 	if err != nil {
@@ -136,18 +145,17 @@ func (s *ChromemStore) Search(ctx context.Context, query []float32, k int) ([]Se
 }
 
 // Delete 删除指定 ID 的向量。
-// chromem-go 原生不支持删除单个文档，这里通过重新创建集合实现。
-// 注意：这是 O(n) 操作，批量删除应使用 Reset。
+//
+// chromem-go 的 Collection.Delete 会同时从内存集合与持久化目录移除文档，
+// 因此删除后 Search / Size / ListIDs 均不再包含该 ID，重启也不会复活。
 func (s *ChromemStore) Delete(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// chromem-go 没有直接删除文档的方法，我们通过重新创建集合来实现
-	// 这需要遍历所有文档并跳过要删除的
-	// 但 chromem-go 的 Collection 内部 documents 是 map，无法直接遍历
-	// 因此仅记录删除操作，实际效果通过 Search 时的过滤来模拟
-	// 生产环境建议使用支持删除的向量库
-	return fmt.Errorf("chromem-go does not support single document deletion; use a new collection")
+	if err := s.col.Delete(ctx, nil, nil, id); err != nil {
+		return fmt.Errorf("chromem delete %q: %w", id, err)
+	}
+	return nil
 }
 
 // Size 返回当前索引中的向量数量。
@@ -198,6 +206,14 @@ func (s *ChromemStore) QueryText(ctx context.Context, query string, k int) ([]Se
 
 	if k <= 0 {
 		k = 10
+	}
+	// 同 Search：按集合实际文档数收敛 Top-K（R6-3）。
+	n := s.col.Count()
+	if n == 0 {
+		return nil, nil
+	}
+	if k > n {
+		k = n
 	}
 
 	results, err := s.col.Query(ctx, query, k, nil, nil)
