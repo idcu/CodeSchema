@@ -25,6 +25,50 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	return s
 }
 
+// TestSQLite_MarkParseSkippedClearsStaleIR P2 负控：跳过解析后旧 IR 必须清空，
+// 否则 GetClassesByFileID / GetCallsByFileID 仍返回上一轮结果。
+func TestSQLite_MarkParseSkippedClearsStaleIR(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	ir := &parser.IRDocument{
+		FilePath:  "/repo/big.go",
+		Language:  "go",
+		LineCount: 20,
+		ByteSize:  2048,
+		Classes: []parser.ClassIR{
+			{Name: "Svc", FullName: "pkg.Svc", Type: "CLASS", StartLine: 1, EndLine: 20},
+		},
+		Methods: []parser.MethodIR{
+			{Name: "Run", ClassFQN: "pkg.Svc", StartLine: 3, EndLine: 5},
+		},
+		Calls: []parser.CallIR{
+			{CallerFQN: "pkg.Svc.Run", CalleeFQN: "fmt.Println", CallType: "direct", LineNumber: 4},
+		},
+	}
+	if err := s.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("upsert ir: %v", err)
+	}
+	f, err := s.GetFileByPath(ctx, "/repo/big.go")
+	if err != nil || f == nil {
+		t.Fatalf("get file: %v", err)
+	}
+
+	if _, err := s.MarkParseSkipped(ctx, "/repo/big.go", 2048, 20); err != nil {
+		t.Fatalf("mark skipped: %v", err)
+	}
+	got, _ := s.GetFileByPath(ctx, "/repo/big.go")
+	if got == nil || got.ParseStatus != "parse_skipped" {
+		t.Fatalf("parse_status = %+v", got)
+	}
+	if classes, _ := s.GetClassesByFileID(ctx, f.ID); len(classes) != 0 {
+		t.Errorf("跳过解析后仍残留 %d 个类", len(classes))
+	}
+	if calls, _ := s.GetCallsByFileID(ctx, f.ID); len(calls) != 0 {
+		t.Errorf("跳过解析后仍残留 %d 条调用边", len(calls))
+	}
+}
+
 // TestSQLite_HotIndexes 负控（R3-10）：标签反查与按文件清调用必须走索引。
 // 无索引时 class_tag/method_tag(tag_id) 与 call(file_id) 全表扫描，
 // 标签检索与重索引清理随数据量线性退化。

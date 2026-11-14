@@ -394,9 +394,27 @@ func (s *PGStore) MarkParseSkipped(ctx context.Context, filePath string, byteSiz
 		VALUES ($1,$2,'', $3,$4,'parse_skipped')
 		ON CONFLICT (absolute_path) DO UPDATE SET content_hash='', line_count=EXCLUDED.line_count,
 		byte_size=EXCLUDED.byte_size, parse_status='parse_skipped', updated_at=now() RETURNING id`
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	var id int64
-	err := s.db.QueryRowContext(ctx, q, filePath, filePath, lineCount, byteSize).Scan(&id)
-	return id, err
+	if err := tx.QueryRowContext(ctx, q, filePath, filePath, lineCount, byteSize).Scan(&id); err != nil {
+		return 0, err
+	}
+	// 跳过解析没有新 IR：清掉上一轮的调用边与类（method/tag 由 FK ON DELETE CASCADE 级联）。
+	if _, err := tx.ExecContext(ctx, `DELETE FROM call WHERE file_id=$1`, id); err != nil {
+		return 0, fmt.Errorf("clear stale calls: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM class WHERE file_id=$1`, id); err != nil {
+		return 0, fmt.Errorf("clear stale classes: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func (s *PGStore) GetFileByID(ctx context.Context, id int64) (*store.FileRecord, error) {

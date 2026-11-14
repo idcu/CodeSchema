@@ -270,8 +270,14 @@ func (s *SQLiteStore) MarkParseSkipped(ctx context.Context, filePath string, byt
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
 	var id int64
-	err := s.db.QueryRow(`
+	err = tx.QueryRow(`
 		INSERT INTO file (absolute_path, content_hash, line_count, byte_size, parse_status)
 		VALUES (?, '', ?, ?, 'parse_skipped')
 		ON CONFLICT(absolute_path) DO UPDATE SET
@@ -284,6 +290,22 @@ func (s *SQLiteStore) MarkParseSkipped(ctx context.Context, filePath string, byt
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("mark file skipped: %w", err)
+	}
+	// 跳过解析没有新 IR：上一轮的类/方法/调用边/标签必须一并清掉，
+	// 否则检索与影响面继续返回陈旧结果（P2）。
+	for _, q := range []string{
+		"DELETE FROM class_tag WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)",
+		"DELETE FROM method_tag WHERE method_id IN (SELECT m.id FROM method m JOIN class c ON m.class_id = c.id WHERE c.file_id = ?)",
+		"DELETE FROM method WHERE class_id IN (SELECT id FROM class WHERE file_id = ?)",
+		"DELETE FROM call WHERE file_id = ?",
+		"DELETE FROM class WHERE file_id = ?",
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return 0, fmt.Errorf("clear stale IR: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return id, nil
 }

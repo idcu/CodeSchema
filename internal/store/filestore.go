@@ -161,6 +161,9 @@ func (fs *FileStore) MarkParseSkipped(ctx context.Context, filePath string, byte
 	defer fs.mu.Unlock()
 
 	if existing, ok := fs.files[filePath]; ok {
+		// 跳过解析意味着本次没有可用的 IR：上一轮的类/方法/调用边/标签全部失效，
+		// 只改 parse_status 会让检索与影响面继续返回陈旧结果（P2）。
+		fs.clearIRLocked(existing.ID)
 		existing.ContentHash = ""
 		existing.LineCount = lineCount
 		existing.ByteSize = byteSize
@@ -212,23 +215,27 @@ func (fs *FileStore) DeleteFile(ctx context.Context, fileID int64) error {
 
 	for path, f := range fs.files {
 		if f.ID == fileID {
-			// 先取该文件的类集合（用于清理方法/标签），再删除文件与类记录
-			classes := fs.classes[fileID]
 			delete(fs.files, path)
-			delete(fs.classes, fileID)
-			delete(fs.calls, fileID)
-			// 清理关联的 methods 与其标签（methodTags 以 method ID 为键，不能拿 class ID 删）
-			for _, c := range classes {
-				for _, m := range fs.methods[c.ID] {
-					delete(fs.methodTags, m.ID)
-				}
-				delete(fs.methods, c.ID)
-				delete(fs.classTags, c.ID)
-			}
+			fs.clearIRLocked(fileID)
 			return nil
 		}
 	}
 	return nil
+}
+
+// clearIRLocked 清理一个文件关联的类/方法/调用边/标签（调用方须持有写锁）。
+func (fs *FileStore) clearIRLocked(fileID int64) {
+	classes := fs.classes[fileID]
+	delete(fs.classes, fileID)
+	delete(fs.calls, fileID)
+	// 清理关联的 methods 与其标签（methodTags 以 method ID 为键，不能拿 class ID 删）
+	for _, c := range classes {
+		for _, m := range fs.methods[c.ID] {
+			delete(fs.methodTags, m.ID)
+		}
+		delete(fs.methods, c.ID)
+		delete(fs.classTags, c.ID)
+	}
 }
 
 // UpsertClasses 批量更新类记录。

@@ -486,6 +486,55 @@ func TestContainsAll(t *testing.T) {
 	}
 }
 
+// TestFileStore_MarkParseSkippedClearsStaleIR P2 负控：文件被跳过解析时
+// 只改 parse_status 会留下上一轮的类/方法/调用边，检索与影响面继续返回陈旧结果。
+func TestFileStore_MarkParseSkippedClearsStaleIR(t *testing.T) {
+	dir := t.TempDir()
+	fs := &FileStore{}
+	ctx := context.Background()
+	if err := fs.Open(ctx, dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer fs.Close()
+
+	ir := &parser.IRDocument{
+		FilePath: "/proj/big.go",
+		Language: "go",
+		Classes: []parser.ClassIR{{
+			Name: "Svc", FullName: "pkg.Svc", Type: "CLASS",
+			StartLine: 1, StartCol: 1, EndLine: 20, EndCol: 2,
+		}},
+		Methods: []parser.MethodIR{{
+			Name: "Run", ClassFQN: "pkg.Svc",
+			StartLine: 3, StartCol: 1, EndLine: 5, EndCol: 2,
+		}},
+		Calls: []parser.CallIR{{
+			CallerFQN: "pkg.Svc.Run", CalleeFQN: "fmt.Println", LineNumber: 4,
+		}},
+	}
+	if err := fs.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("UpsertIR: %v", err)
+	}
+	f, err := fs.GetFileByPath(ctx, "/proj/big.go")
+	if err != nil || f == nil {
+		t.Fatalf("GetFileByPath: %v %v", f, err)
+	}
+
+	if _, err := fs.MarkParseSkipped(ctx, "/proj/big.go", 1024, 20); err != nil {
+		t.Fatalf("MarkParseSkipped: %v", err)
+	}
+	got, _ := fs.GetFileByPath(ctx, "/proj/big.go")
+	if got == nil || got.ParseStatus != "parse_skipped" {
+		t.Fatalf("parse_status = %+v, want parse_skipped", got)
+	}
+	if classes, _ := fs.GetClassesByFileID(ctx, f.ID); len(classes) != 0 {
+		t.Errorf("跳过解析后仍残留 %d 个类", len(classes))
+	}
+	if calls, _ := fs.GetCallsByFileID(ctx, f.ID); len(calls) != 0 {
+		t.Errorf("跳过解析后仍残留 %d 条调用边", len(calls))
+	}
+}
+
 // TestFileStore_ReindexRemovesStaleMethods 负控（P1-6）：
 // 重索引后旧 class ID 下的 method 映射必须清理，否则内存/落盘都留孤儿。
 func TestFileStore_ReindexRemovesStaleMethods(t *testing.T) {
