@@ -254,7 +254,7 @@ func defineTools() []mcpTool {
 				Properties: map[string]toolProperty{
 					"method":         {Type: "string", Description: "方法全限定名（单符号查询，与 methods 二选一）"},
 					"methods":        {Type: "array", Description: "批量方法列表：一次调用取回多个方法的关联单测", Items: &toolProperty{Type: "string"}},
-					"min_confidence": {Type: "number", Description: "最小置信度", Default: 60},
+					"min_confidence": {Type: "integer", Description: "最小置信度", Default: 60},
 					"project":        projectProp,
 				},
 			},
@@ -315,10 +315,11 @@ func defineTools() []mcpTool {
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"q":       {Type: "string", Description: "搜索关键词"},
-					"mode":    {Type: "string", Description: "搜索模式: exact/semantic/both", Default: "both"},
-					"limit":   {Type: "number", Description: "返回结果数量限制", Default: 20},
-					"project": projectProp,
+					"q":         {Type: "string", Description: "搜索关键词"},
+					"mode":      {Type: "string", Description: "搜索模式: exact/semantic/both", Default: "both"},
+					"limit":     {Type: "number", Description: "返回结果数量限制", Default: 20},
+					"min_score": {Type: "number", Description: "最低置信度阈值（0 不过滤）", Default: 0},
+					"project":   projectProp,
 				},
 				Required: []string{"q"},
 			},
