@@ -156,22 +156,23 @@ func rateLimiterFromRPM(rpm int) *tokenBucket {
 //   - addr：非空且与当前不同时，无中断重绑监听地址（旧监听关闭、在途请求
 //     由原 server 继续处理完毕），返回非 nil 错误表示重绑失败（保留旧监听）。
 func (h *HTTPServer) UpdateRuntime(addr, authToken string, rpm int) error {
-	h.runtime.Store(httpRuntimeConfig{
-		authToken:   authToken,
-		rateLimiter: rateLimiterFromRPM(rpm),
-	})
 	if addr != "" && addr != h.addr {
 		if h.server == nil {
 			// 尚未 Start：仅记录新地址，Start 时按最新地址监听（避免提前开监听）。
 			h.addr = addr
-			return nil
+		} else {
+			if err := h.rebind(addr); err != nil {
+				// 重绑失败整体不生效：token/限流保持旧快照，避免部分更新（P3-5）。
+				return fmt.Errorf("rebind %s: %w", addr, err)
+			}
+			h.addr = addr
+			h.logger.Info("HTTP API server rebound", "addr", addr)
 		}
-		if err := h.rebind(addr); err != nil {
-			return fmt.Errorf("rebind %s: %w", addr, err)
-		}
-		h.addr = addr
-		h.logger.Info("HTTP API server rebound", "addr", addr)
 	}
+	h.runtime.Store(httpRuntimeConfig{
+		authToken:   authToken,
+		rateLimiter: rateLimiterFromRPM(rpm),
+	})
 	return nil
 }
 

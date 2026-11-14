@@ -750,6 +750,25 @@ func waitForListener(t *testing.T, srv *HTTPServer) {
 	t.Fatal("server listener did not become ready")
 }
 
+// TestHTTPServer_UpdateRuntime_RebindFailureKeepsRuntime 负控（P3-5）：
+// 地址重绑失败时不得部分生效，token/限流必须保持旧值。
+func TestHTTPServer_UpdateRuntime_RebindFailureKeepsRuntime(t *testing.T) {
+	srv := NewHTTPServer(nil, "127.0.0.1:0")
+	srv.SetAuthToken("old-token")
+	srv.SetRateLimit(3)
+	srv.server = &http.Server{} // 模拟已启动，强制走 rebind 分支
+
+	if err := srv.UpdateRuntime("127.0.0.1:0:bad", "new-token", 9); err == nil {
+		t.Fatal("非法地址重绑应失败")
+	}
+	if got := srv.currentAuthToken(); got != "old-token" {
+		t.Fatalf("重绑失败后 token 被部分更新: %q", got)
+	}
+	if got := srv.currentRateLimit(); got != 3 {
+		t.Fatalf("重绑失败后限流被部分更新: %d", got)
+	}
+}
+
 func TestHTTPServer_UpdateRuntime_AddrRebind(t *testing.T) {
 	dir := t.TempDir()
 	st := store.NewStore("file")
