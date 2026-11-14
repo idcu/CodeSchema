@@ -169,6 +169,9 @@ func cloneSymbolContext(sc *SymbolContext) *SymbolContext {
 	if sc.RelatedTests != nil {
 		out.RelatedTests = append([]string(nil), sc.RelatedTests...)
 	}
+	if sc.IncludedSymbols != nil {
+		out.IncludedSymbols = append([]string(nil), sc.IncludedSymbols...)
+	}
 	if sc.Trace != nil {
 		trace := *sc.Trace
 		if sc.Trace.Config != nil {
@@ -324,6 +327,9 @@ type ContextOptions struct {
 	MaxBytes int
 	// MaxTokens 输出 token 预算（<=0 不限），按 CharsPerToken 口径折算。
 	MaxTokens int
+	// BudgetTokens 是 MaxTokens 的对外别名（R6-1）；>0 时覆盖 MaxTokens，便于
+	// 与 `budget_tokens` 这一通用命名对齐（HTTP query / MCP 参数同名）。
+	BudgetTokens int
 	// MaxLineChars 单行字符上限（<=0 不截断）。用于防止压缩产物/生成代码一行吃掉整份预算。
 	MaxLineChars int
 	// CharsPerToken token 估算口径（每 token 折合字节数）；<=0 用 trim.DefaultCharsPerToken（4）。
@@ -352,6 +358,23 @@ type SymbolContext struct {
 	Doc          string      `json:"doc,omitempty"`
 	RelatedTests []string    `json:"related_tests,omitempty"`
 	Trace        *TraceEntry `json:"_trace,omitempty"` // 追溯日志（仅供调试/审计，不公开）
+
+	// 预算化上下文的响应级状态（R6-1）：不依赖 _trace 也能判断是否被裁剪。
+	TrimReason      string   `json:"trim_reason"`      // 裁剪原因：mode_minimal / file_unreadable / 预算降级原因
+	Filtered        int      `json:"filtered"`         // 低于置信度阈值被丢弃的关联单测数
+	IncludedSymbols []string `json:"included_symbols"` // 本次实际注入的符号
+	Truncated       bool     `json:"truncated"`        // 是否因预算过小发生降级/截断
+}
+
+// normalize 归一化预算别名（BudgetTokens > 0 时覆盖 MaxTokens）与默认模式。
+func (o ContextOptions) normalize() ContextOptions {
+	if o.Mode == "" {
+		o.Mode = ModeFull
+	}
+	if o.BudgetTokens > 0 {
+		o.MaxTokens = o.BudgetTokens
+	}
+	return o
 }
 
 // GetContext 获取指定符号的上下文（contextLines=0 表示完整内容，>0 前后裁剪）。
@@ -380,6 +403,7 @@ func (s *Service) GetContext(ctx context.Context, symbol string, contextLines in
 // 命中结果做浅拷贝返回（避免调用方改到缓存里的对象），并把 _trace.cache_hit 置为 true
 // 回传——命中与否对调用方可见，便于判断省下了多少工作。
 func (s *Service) GetContextMode(ctx context.Context, symbol string, opts ContextOptions) (*SymbolContext, error) {
+	opts = opts.normalize()
 	if s.queryCache == nil {
 		return s.getContextModeUncached(ctx, symbol, opts)
 	}
@@ -406,9 +430,7 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 	if symbol == "" {
 		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "symbol is required"}
 	}
-	if opts.Mode == "" {
-		opts.Mode = ModeFull
-	}
+	opts = opts.normalize()
 
 	loc, ok := s.resolveSymbolLocation(ctx, symbol)
 	if !ok {
@@ -432,12 +454,14 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 			ActualTokens:  trim.EstimateTokens(len(summary)+1, opts.charsPerToken()),
 		}
 		ctx2 := &SymbolContext{
-			Symbol:    symbol,
-			Source:    summary,
-			FilePath:  s.renderPath(loc.FilePath, opts.PathStyle),
-			StartLine: loc.StartLine,
-			EndLine:   loc.EndLine,
-			Doc:       loc.Doc,
+			Symbol:          symbol,
+			Source:          summary,
+			FilePath:        s.renderPath(loc.FilePath, opts.PathStyle),
+			StartLine:       loc.StartLine,
+			EndLine:         loc.EndLine,
+			Doc:             loc.Doc,
+			TrimReason:      "mode_minimal",
+			IncludedSymbols: []string{symbol},
 		}
 		if opts.IncludeTrace {
 			ctx2.Trace = trace
@@ -460,12 +484,14 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 			Config:        opts.traceConfig(),
 		}
 		ctx2 := &SymbolContext{
-			Symbol:    symbol,
-			Source:    loc.renderMinimal(),
-			FilePath:  s.renderPath(loc.FilePath, opts.PathStyle),
-			StartLine: loc.StartLine,
-			EndLine:   loc.EndLine,
-			Doc:       loc.Doc,
+			Symbol:          symbol,
+			Source:          loc.renderMinimal(),
+			FilePath:        s.renderPath(loc.FilePath, opts.PathStyle),
+			StartLine:       loc.StartLine,
+			EndLine:         loc.EndLine,
+			Doc:             loc.Doc,
+			TrimReason:      "file_unreadable",
+			IncludedSymbols: []string{symbol},
 		}
 		if opts.IncludeTrace {
 			ctx2.Trace = trace
@@ -494,9 +520,11 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 		fitted = fallbackFit(lines, start, end)
 	}
 
-	// 关联单测（沿用五策略，低置信度过滤 60，静默失败）。
+	// 关联单测（沿用五策略，低置信度过滤 60，静默失败）；同时记录被阈值丢弃条数。
 	var related []string
-	if links, err := s.FindTestLinks(ctx, symbol, 60); err == nil {
+	filtered := 0
+	if links, dropped, err := s.FindTestLinksWithStats(ctx, symbol, 60); err == nil {
+		filtered = dropped
 		for _, l := range links {
 			related = append(related, l.TestMethod)
 		}
@@ -525,13 +553,17 @@ func (s *Service) getContextModeUncached(ctx context.Context, symbol string, opt
 	}
 
 	ctx2 := &SymbolContext{
-		Symbol:       symbol,
-		Source:       fitted.Text(),
-		FilePath:     s.renderPath(loc.FilePath, opts.PathStyle),
-		StartLine:    loc.StartLine,
-		EndLine:      loc.EndLine,
-		Doc:          loc.Doc,
-		RelatedTests: related,
+		Symbol:          symbol,
+		Source:          fitted.Text(),
+		FilePath:        s.renderPath(loc.FilePath, opts.PathStyle),
+		StartLine:       loc.StartLine,
+		EndLine:         loc.EndLine,
+		Doc:             loc.Doc,
+		RelatedTests:    related,
+		TrimReason:      trimReasonOf(fitted),
+		Filtered:        filtered,
+		IncludedSymbols: []string{symbol},
+		Truncated:       fitted.Degraded,
 	}
 	if opts.IncludeTrace {
 		ctx2.Trace = trace

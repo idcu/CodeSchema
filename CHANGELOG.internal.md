@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 216: feat(api): 预算化上下文接口补全（R6-1 / S-3）
+
+- `ContextOptions` 增 `BudgetTokens`（`>0` 时覆盖 `MaxTokens`），HTTP query 与
+  MCP 参数同步解析 `budget_tokens`；归一化在缓存 key 之前完成。
+- `SymbolContext` 增响应级字段 `trim_reason` / `filtered` / `included_symbols` /
+  `truncated`，minimal、file_unreadable、正常裁剪三条路径均填充。
+- `FindTestLinksWithStats` 额外返回低于 minConfidence 被丢弃的条数，
+  `FindTestLinks` 委托以保持向后兼容；`GetContext` 用 stats 版填 `filtered`。
+- 负控（先红后绿）：修前编译失败（无 `BudgetTokens`/`TrimReason`/`Truncated`）；
+  修后 `budget_tokens=10` 与 `max_tokens=10` 输出逐字节一致且 64→40 bytes、
+  极小预算 `truncated=true`、minimal `trim_reason=mode_minimal`、
+  20 次重跑（清时间戳）一致；`budget_tokens` HTTP/MCP 解析用例通过。
+- 文档：`接口层.md` 补参数与响应级状态；counts 62717（62.7k）。
+
 ### Commit 215: fix(parser): 非 Go 缩进作用域与 Elixir/C++ 方法名（R5-5 / P3-8）
 
 - 根因：通用路径只有一个 `currentClass` 指针，类结束后不复位——

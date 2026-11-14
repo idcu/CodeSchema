@@ -800,6 +800,7 @@ func contextOptionsFromQuery(q url.Values) service.ContextOptions {
 		IncludeTrace:  true,
 		MaxBytes:      atoiOr(q.Get("max_bytes"), 0),
 		MaxTokens:     atoiOr(q.Get("max_tokens"), 0),
+		BudgetTokens:  atoiOr(q.Get("budget_tokens"), 0),
 		MaxLineChars:  atoiOr(q.Get("max_line_chars"), 0),
 		CharsPerToken: atofOr(q.Get("chars_per_token"), 0),
 		PathStyle:     service.PathStyle(q.Get("path_style")),

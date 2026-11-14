@@ -40,8 +40,15 @@ type TestLink struct {
 //   - same_tag: 同 Tag 聚类
 //   - dependency: 导入依赖递归
 func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfidence int) ([]TestLink, error) {
+	links, _, err := s.FindTestLinksWithStats(ctx, methodFQN, minConfidence)
+	return links, err
+}
+
+// FindTestLinksWithStats 与 FindTestLinks 相同，但额外返回因低于 minConfidence
+// 被丢弃的候选条数（R6-1：上下文响应需要暴露 filtered 计数）。
+func (s *Service) FindTestLinksWithStats(ctx context.Context, methodFQN string, minConfidence int) ([]TestLink, int, error) {
 	if methodFQN == "" {
-		return nil, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "methodFQN is required"}
+		return nil, 0, &ServiceError{Code: "ERR_INVALID_PARAMETER", Message: "methodFQN is required"}
 	}
 	if minConfidence <= 0 {
 		minConfidence = 60
@@ -76,7 +83,7 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 	// 获取所有文件数据
 	files, err := s.store.GetAllFiles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get all files: %w", err)
+		return nil, 0, fmt.Errorf("get all files: %w", err)
 	}
 
 	// 查找目标方法所在的类
@@ -136,7 +143,7 @@ func (s *Service) FindTestLinks(ctx context.Context, methodFQN string, minConfid
 		}
 	}
 
-	return filtered, nil
+	return filtered, len(results) - len(filtered), nil
 }
 
 // discoverTestClasses 发现所有测试类及其对应的源类映射。

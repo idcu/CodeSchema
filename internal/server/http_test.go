@@ -1020,3 +1020,16 @@ func TestOpenAPIDeclaresHandlerParameters(t *testing.T) {
 		}
 	}
 }
+
+// TestContextOptionsBudgetTokensParse 负控（R6-1）：HTTP query 与 MCP 参数都要
+// 能解析 budget_tokens，不能只认 max_tokens。
+func TestContextOptionsBudgetTokensParse(t *testing.T) {
+	q := url.Values{"budget_tokens": {"33"}, "max_tokens": {"99"}}
+	if got := contextOptionsFromQuery(q); got.BudgetTokens != 33 || got.MaxTokens != 99 {
+		t.Fatalf("query parse: budget=%d max=%d", got.BudgetTokens, got.MaxTokens)
+	}
+	args := map[string]any{"budget_tokens": float64(33), "max_tokens": float64(99)}
+	if got := contextOptionsFromArgs(args); got.BudgetTokens != 33 || got.MaxTokens != 99 {
+		t.Fatalf("args parse: budget=%d max=%d", got.BudgetTokens, got.MaxTokens)
+	}
+}

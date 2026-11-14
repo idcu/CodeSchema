@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -437,4 +438,119 @@ func TestServiceMetrics(t *testing.T) {
 	if !strings.Contains(render, `querycache_misses_total`) || !strings.Contains(render, `querycache_hits_total`) {
 		t.Fatalf("查询缓存指标缺失:\n%s", render)
 	}
+}
+
+// contextJSON 序列化上下文并清空时间戳，供「同输入同输出」比对。
+func contextJSON(t *testing.T, sc *SymbolContext) string {
+	t.Helper()
+	cp := *sc
+	if cp.Trace != nil {
+		tr := *cp.Trace
+		tr.Timestamp = ""
+		cp.Trace = &tr
+	}
+	b, err := json.Marshal(cp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+// TestContextBudgetTokensAlias 负控（R6-1）：budget_tokens 必须与 max_tokens 等价，
+// 且预算确实生效（输出小于无预算基线）。
+func TestContextBudgetTokensAlias(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	ctx := context.Background()
+	const sym = "com.example.OrderService.GetUser"
+
+	base, err := svc.GetContextMode(ctx, sym, ContextOptions{Mode: ModeFull})
+	if err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	asMax, err := svc.GetContextMode(ctx, sym, ContextOptions{Mode: ModeFull, MaxTokens: 10})
+	if err != nil {
+		t.Fatalf("max_tokens: %v", err)
+	}
+	asBudget, err := svc.GetContextMode(ctx, sym, ContextOptions{Mode: ModeFull, BudgetTokens: 10})
+	if err != nil {
+		t.Fatalf("budget_tokens: %v", err)
+	}
+
+	if got, want := contextJSON(t, asBudget), contextJSON(t, asMax); got != want {
+		t.Fatalf("budget_tokens 与 max_tokens 输出不一致:\n got=%s\nwant=%s", got, want)
+	}
+	if len(asBudget.Source) >= len(base.Source) {
+		t.Fatalf("预算未生效: budget=%d base=%d", len(asBudget.Source), len(base.Source))
+	}
+}
+
+// TestContextBudgetTruncatedFlag 负控（R6-1）：极小预算必须显式 truncated=true
+// 且 trim_reason 非空，调用方无需解析 _trace 即可判断被裁剪。
+func TestContextBudgetTruncatedFlag(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	ctx := context.Background()
+	const sym = "com.example.OrderService.GetUser"
+
+	got, err := svc.GetContextMode(ctx, sym, ContextOptions{Mode: ModeFull, BudgetTokens: 5})
+	if err != nil {
+		t.Fatalf("GetContextMode: %v", err)
+	}
+	if !got.Truncated {
+		t.Fatalf("极小预算应 truncated=true, trace=%+v", got.Trace)
+	}
+	if got.TrimReason == "" {
+		t.Fatal("truncated 时 trim_reason 不能为空")
+	}
+	if len(got.IncludedSymbols) != 1 || got.IncludedSymbols[0] != sym {
+		t.Fatalf("included_symbols=%v, want [%s]", got.IncludedSymbols, sym)
+	}
+}
+
+// TestContextResponseFieldsMinimal 负控（R6-1）：minimal 模式也要有响应级状态字段。
+func TestContextResponseFieldsMinimal(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	ctx := context.Background()
+	const sym = "com.example.OrderService.GetUser"
+
+	got, err := svc.GetContextMode(ctx, sym, ContextOptions{Mode: ModeMinimal})
+	if err != nil {
+		t.Fatalf("GetContextMode: %v", err)
+	}
+	if got.TrimReason != "mode_minimal" {
+		t.Fatalf("trim_reason=%q, want mode_minimal", got.TrimReason)
+	}
+	if got.Truncated || got.Filtered != 0 {
+		t.Fatalf("minimal 不应 truncated/filtered: %+v", got)
+	}
+	if len(got.IncludedSymbols) != 1 || got.IncludedSymbols[0] != sym {
+		t.Fatalf("included_symbols=%v", got.IncludedSymbols)
+	}
+}
+
+// TestContextSameInputSameOutput 负控（R6-1）：同输入连跑 20 次，除时间戳外逐字节一致。
+func TestContextSameInputSameOutput(t *testing.T) {
+	svc := newTestService(t)
+	seedContextFile(t, svc)
+	ctx := context.Background()
+	const sym = "com.example.OrderService.GetUser"
+	opts := ContextOptions{Mode: ModeFull, ContextLines: 2, BudgetTokens: 120}
+
+	first := contextJSON(t, mustContext(t, svc, ctx, sym, opts))
+	for i := 0; i < 20; i++ {
+		if got := contextJSON(t, mustContext(t, svc, ctx, sym, opts)); got != first {
+			t.Fatalf("第 %d 次输出漂移:\n got=%s\nwant=%s", i+1, got, first)
+		}
+	}
+}
+
+func mustContext(t *testing.T, svc *Service, ctx context.Context, sym string, opts ContextOptions) *SymbolContext {
+	t.Helper()
+	got, err := svc.GetContextMode(ctx, sym, opts)
+	if err != nil {
+		t.Fatalf("GetContextMode: %v", err)
+	}
+	return got
 }
