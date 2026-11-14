@@ -834,9 +834,11 @@ func cloneConfig(cfg *Config) *Config {
 				IndexDir: cfg.Parser.SCIP.IndexDir,
 			},
 			CodeGraph: CodeGraphConfig{
-				DB: cfg.Parser.CodeGraph.DB,
+				Enabled: cfg.Parser.CodeGraph.Enabled,
+				DB:      cfg.Parser.CodeGraph.DB,
 			},
 			JCodeIndexer: JCodeIndexerConfig{
+				Enabled:    cfg.Parser.JCodeIndexer.Enabled,
 				DB:         cfg.Parser.JCodeIndexer.DB,
 				ConfigFile: cfg.Parser.JCodeIndexer.ConfigFile,
 				Env:        cloneStringMap(cfg.Parser.JCodeIndexer.Env),

@@ -107,6 +107,25 @@ func TestNewParserRegistry_CodeGraphNotDefault(t *testing.T) {
 	}
 }
 
+// TestNewParserRegistry_CodeGraphEnabledDefaultDB P1 负控：enabled=true 且 db 为默认路径时，
+// 适配器必须真正注册。旧实现要求 db 非默认值，导致「只打开开关」的配置静默无效。
+func TestNewParserRegistry_CodeGraphEnabledDefaultDB(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	cfg := config.DefaultConfig()
+	cfg.Parser.CodeGraph.Enabled = true
+
+	reg := NewParserRegistry(context.Background(), cfg, t.TempDir())
+	p, err := reg.Select("go")
+	if err != nil {
+		t.Fatalf("Select(go) error: %v", err)
+	}
+	if p.Name() != "codegraph" {
+		t.Fatalf("enabled=true + 默认 db 时应注册 codegraph，实际选中 %q", p.Name())
+	}
+}
+
 // TestNewParserRegistry_SCIPBeforeCodeGraph 负控（R5-1）：SCIP 与 CodeGraph 同时
 // 可用时（CodeGraph 显式 enabled），go 语言必须选中 scip——SCIP 的 Parse 有实际实现，
 // CodeGraph 的 Parse 恒不可用。旧优先级表把 codegraph 排在 scip 前，导致选中的是

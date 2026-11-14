@@ -86,17 +86,19 @@ storage:
 # ---------------------------------------------------------------------------
 parser:
   # 声明性适配器清单（不作为运行时注册开关：tree-sitter 始终注册兜底，LSP 由
-  # lsp.enabled 启用、SCIP 由 scip.index_dir、CodeGraph 由 codegraph.db）
+  # lsp.enabled 启用、SCIP 由 scip.index_dir、CodeGraph/JCodeIndexer 由各自 enabled）
   adapters:
     - treesitter
   # SCIP index 适配器配置
   scip:
     index_dir: "./scipout"
-  # CodeGraph 适配器配置
+  # CodeGraph 适配器配置（enabled: true 才注册；db 省略时用默认 ./codegraph.db）
   codegraph:
+    enabled: false
     db: "./codegraph.db"
-  # JCodeIndexer 适配器配置
+  # JCodeIndexer 适配器配置（enabled: true 才注册；db 省略时用默认 ./jcodeindexer.db）
   jcodeindexer:
+    enabled: false
     db: "./jcodeindexer.db"
     config_file: ".jindexer/config.yaml"
     env:

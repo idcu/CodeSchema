@@ -95,7 +95,8 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 	// ④ CodeGraph 适配器（默认不注册：需 parser.codegraph.enabled=true 显式开启）
 	// 该适配器只实现批量 ParseAll，单文件 Parse 恒返回 ErrSourceUnavailable，
 	// 生产扫描走 Parse，注册后只会遮蔽真正可用的高精度适配器（R5-1）。
-	if cgCfg := cfg.Parser.CodeGraph; cgCfg.Enabled && cgCfg.DB != "" && cgCfg.DB != config.DefaultCodeGraphDB {
+	// 只以 enabled 为开关：db 使用默认路径时同样生效，避免「打开开关却静默不注册」。
+	if cgCfg := cfg.Parser.CodeGraph; cgCfg.Enabled {
 		cg := codegraph.NewCodeGraphAdapter(cgCfg.DB)
 		if err := cg.Init(ctx, map[string]any{"db_path": cgCfg.DB}); err != nil {
 			log.Printf("parser.codegraph: init failed (%v), skipping", err)
@@ -105,8 +106,8 @@ func NewParserRegistry(ctx context.Context, cfg *config.Config, rootDir string) 
 	}
 
 	// ⑤ JCodeIndexer 适配器（默认不注册：需 parser.jcodeindexer.enabled=true 显式开启）
-	// 同 CodeGraph：Parse 未实现，仅显式开启才进入生产注册表。
-	if jiCfg := cfg.Parser.JCodeIndexer; jiCfg.Enabled && jiCfg.DB != "" && jiCfg.DB != config.DefaultJCodeIndexerDB {
+	// 同 CodeGraph：Parse 未实现，仅显式开启才进入生产注册表；db 使用默认路径时同样生效。
+	if jiCfg := cfg.Parser.JCodeIndexer; jiCfg.Enabled {
 		ji := jcodeindexer.NewJCodeIndexerAdapter(jiCfg.DB)
 		if err := ji.Init(ctx, map[string]any{"db_path": jiCfg.DB}); err != nil {
 			log.Printf("parser.jcodeindexer: init failed (%v), skipping", err)

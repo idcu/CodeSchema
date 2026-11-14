@@ -629,6 +629,28 @@ func TestCloneConfig_PreservesPoolLimits(t *testing.T) {
 	}
 }
 
+// TestCloneConfig_PreservesAdapterEnabled P1 负控：适配器的 enabled 是显式开关，
+// 深拷贝/租户继承必须保留。旧实现漏拷 Enabled，租户配置里 enabled: true 的
+// codegraph/jcodeindexer 会静默失效。
+func TestCloneConfig_PreservesAdapterEnabled(t *testing.T) {
+	base := DefaultConfig()
+	base.Parser.CodeGraph.Enabled = true
+	base.Parser.JCodeIndexer.Enabled = true
+
+	inherited := TenantConfig{ID: "t1"}.ToConfig(base)
+	if !inherited.Parser.CodeGraph.Enabled {
+		t.Error("租户继承丢失 parser.codegraph.enabled")
+	}
+	if !inherited.Parser.JCodeIndexer.Enabled {
+		t.Error("租户继承丢失 parser.jcodeindexer.enabled")
+	}
+
+	if clone := cloneConfig(base); !clone.Parser.CodeGraph.Enabled || !clone.Parser.JCodeIndexer.Enabled {
+		t.Errorf("cloneConfig 丢失适配器 enabled: codegraph=%v jcodeindexer=%v",
+			clone.Parser.CodeGraph.Enabled, clone.Parser.JCodeIndexer.Enabled)
+	}
+}
+
 func TestCloneConfig_DeepCopy(t *testing.T) {
 	original := DefaultConfig()
 	clone := cloneConfig(original)
