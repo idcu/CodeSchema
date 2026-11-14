@@ -605,6 +605,30 @@ func TestMerge_PartialOverlay(t *testing.T) {
 	}
 }
 
+// TestCloneConfig_PreservesPoolLimits P1 负控：租户继承全局配置时，
+// storage.max_open_conns / max_idle_conns 必须随深拷贝保留；租户显式配置时
+// 必须覆盖全局值。旧实现漏拷这两个字段，租户连接池上限静默变成 0（不限）。
+func TestCloneConfig_PreservesPoolLimits(t *testing.T) {
+	base := DefaultConfig()
+	base.Storage.MaxOpenConns = 32
+	base.Storage.MaxIdleConns = 16
+
+	inherited := TenantConfig{ID: "t1"}.ToConfig(base)
+	if inherited.Storage.MaxOpenConns != 32 || inherited.Storage.MaxIdleConns != 16 {
+		t.Fatalf("租户继承丢失连接池上限: open=%d idle=%d，期望 32/16",
+			inherited.Storage.MaxOpenConns, inherited.Storage.MaxIdleConns)
+	}
+
+	overridden := TenantConfig{
+		ID:      "t2",
+		Storage: StorageConfig{MaxOpenConns: 8, MaxIdleConns: 4},
+	}.ToConfig(base)
+	if overridden.Storage.MaxOpenConns != 8 || overridden.Storage.MaxIdleConns != 4 {
+		t.Fatalf("租户覆盖连接池上限未生效: open=%d idle=%d，期望 8/4",
+			overridden.Storage.MaxOpenConns, overridden.Storage.MaxIdleConns)
+	}
+}
+
 func TestCloneConfig_DeepCopy(t *testing.T) {
 	original := DefaultConfig()
 	clone := cloneConfig(original)

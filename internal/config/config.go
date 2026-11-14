@@ -93,6 +93,12 @@ func (t TenantConfig) ToConfig(base *Config) *Config {
 	if t.Storage.KV != "" {
 		c.Storage.KV = t.Storage.KV
 	}
+	if t.Storage.MaxOpenConns > 0 {
+		c.Storage.MaxOpenConns = t.Storage.MaxOpenConns
+	}
+	if t.Storage.MaxIdleConns > 0 {
+		c.Storage.MaxIdleConns = t.Storage.MaxIdleConns
+	}
 	if t.Storage.Vector.Driver != "" {
 		c.Storage.Vector.Driver = t.Storage.Vector.Driver
 	}
@@ -800,9 +806,11 @@ func cloneConfig(cfg *Config) *Config {
 		},
 		Tenants: cloneTenantSlice(cfg.Tenants),
 		Storage: StorageConfig{
-			Driver: cfg.Storage.Driver,
-			DSN:    cfg.Storage.DSN,
-			KV:     cfg.Storage.KV,
+			Driver:       cfg.Storage.Driver,
+			DSN:          cfg.Storage.DSN,
+			KV:           cfg.Storage.KV,
+			MaxOpenConns: cfg.Storage.MaxOpenConns,
+			MaxIdleConns: cfg.Storage.MaxIdleConns,
 			Vector: VectorConfig{
 				Driver:           cfg.Storage.Vector.Driver,
 				DSN:              cfg.Storage.Vector.DSN,
