@@ -273,6 +273,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 	// P20：Java/Kotlin/C# 单文件显式包/命名空间声明 → caller FQN 包限定，
 	// 与默认正则路径（adapter.go 的 nonGoPkg）对齐，使非 Go 调用图与 Go 同命名空间。
 	astPkg := astPackageDecl(lang, data)
+	// Go 包名：顶层函数归入合成包级容器，caller/callee 包限定（P0-1 遗留）。
+	goPkg := ""
+	if lang == "go" {
+		goPkg = astGoPackage(data)
+	}
+	hasTopLevelFunc := false
 
 	classTypes := astClassNodeTypes[lang]
 	methodTypes := astMethodNodeTypes[lang]
@@ -290,6 +296,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 		}
 		typ := n.Type()
 		start := n.StartPoint()
+		endLine := int(n.EndPoint().Row) + 1
+
+		// 作用域跟踪：进入 class/method 节点后，离开其子树必须恢复外层作用域，
+		// 否则后续兄弟声明会被错挂到刚遍历过的类/方法（P0-1 遗留项）。
+		prevClass, prevMethod := curClass, curMethod
+		scopeChanged := false
 
 		switch {
 		case lang == "elixir" && typ == "call":
@@ -305,10 +317,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 							FullName:  name,
 							Type:      "MODULE",
 							StartLine: int(start.Row) + 1,
+							EndLine:   endLine,
 						}
 						doc.Classes = append(doc.Classes, cls)
 						curClass = &doc.Classes[len(doc.Classes)-1]
 						curMethod = nil // 进入新的模块作用域，方法跟踪重置
+						scopeChanged = true
 					}
 				case head == "def" || head == "defp" || head == "defmacro" || head == "defguard":
 					name := elixirDefName(n, data)
@@ -317,12 +331,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 							Name:      name,
 							Signature: string(n.Content(data)),
 							StartLine: int(start.Row) + 1,
+							EndLine:   endLine,
 						}
 						if curClass != nil {
 							m.ClassFQN = curClass.FullName
 						}
 						doc.Methods = append(doc.Methods, m)
 						curMethod = &doc.Methods[len(doc.Methods)-1]
+						scopeChanged = true
 						// 跳过 arguments（函数签名 `create(order)`）子树
 						for i := 0; i < int(n.NamedChildCount()); i++ {
 							if c := n.NamedChild(i); c.Type() == "arguments" {
@@ -332,23 +348,11 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 						}
 					}
 				default:
-					callee := astQualifyCallee(astCalleeName(n, data), astPkg, astCurClassName(curClass))
+					callee := astQualifyCallee(astCalleeName(n, data), goPkg, astPkg, astCurClassName(curClass))
 					if callee != "" && !isKeyword(callee) {
-						caller := ""
-						if curMethod != nil {
-							if curMethod.ClassFQN != "" {
-								caller = curMethod.ClassFQN + "." + curMethod.Name
-							} else {
-								caller = curMethod.Name
-							}
-							// 包/命名空间限定（Java/Kotlin/C#）：pkg.Class.Method / pkg.func
-							if astPkg != "" {
-								caller = astPkg + "." + caller
-							}
-						}
 						doc.Calls = append(doc.Calls, parser.CallIR{
 							CalleeFQN:  callee,
-							CallerFQN:  caller,
+							CallerFQN:  astCallerFQN(lang, goPkg, astPkg, curMethod),
 							CallType:   "direct",
 							LineNumber: int(start.Row) + 1,
 						})
@@ -367,10 +371,12 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				FullName:  name,
 				Type:      astClassType(typ, lang),
 				StartLine: int(start.Row) + 1,
+				EndLine:   endLine,
 			}
 			doc.Classes = append(doc.Classes, cls)
 			curClass = &doc.Classes[len(doc.Classes)-1]
 			curMethod = nil // 进入新的类作用域，方法跟踪重置
+			scopeChanged = true
 
 		case methodTypes[typ]:
 			// OCaml：value_definition 可能是纯值绑定（`let s = "..." in`），
@@ -386,33 +392,62 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				Name:      name,
 				Signature: string(n.Content(data)),
 				StartLine: int(start.Row) + 1,
+				EndLine:   endLine,
 			}
-			if curClass != nil {
+			switch {
+			case lang == "go":
+				// Go：receiver 类型决定方法归属；无 receiver 的顶层函数归入
+				// 合成包级容器（ClassFQN=包名），与默认正则路径一致（P0-1）。
+				if recvType := astGoReceiverType(n, data); recvType != "" {
+					m.ClassFQN = recvType
+				} else if goPkg != "" {
+					m.ClassFQN = goPkg
+					hasTopLevelFunc = true
+				}
+			case curClass != nil:
 				m.ClassFQN = curClass.FullName
 			}
 			doc.Methods = append(doc.Methods, m)
 			curMethod = &doc.Methods[len(doc.Methods)-1]
+			scopeChanged = true
+
+		case lang == "go" && typ == "field_declaration":
+			// 成员变量：struct 体字段（局部变量是 short_var_declaration/var_declaration，
+			// 不会命中）；方法体内不产出成员变量。
+			if curClass != nil && curMethod == nil {
+				if ft := n.ChildByFieldName("type"); ft != nil && !ft.IsNull() {
+					fieldType := string(ft.Content(data))
+					for i := 0; i < int(n.NamedChildCount()); i++ {
+						c := n.NamedChild(i)
+						if c.Type() != "field_identifier" {
+							continue
+						}
+						doc.Fields = append(doc.Fields, parser.FieldIR{
+							Name:      string(c.Content(data)),
+							Type:      fieldType,
+							ClassFQN:  curClass.Name,
+							StartLine: int(c.StartPoint().Row) + 1,
+						})
+					}
+				}
+			}
+
+		case lang == "go" && typ == "const_spec":
+			// 包级常量（方法内局部 const 不入库，与默认正则路径一致）。
+			if curMethod == nil {
+				if c := astGoConstSpec(n, data, path); c != nil {
+					doc.Constants = append(doc.Constants, *c)
+				}
+			}
 
 		case callTypes[typ]:
-			callee := astQualifyCallee(astCalleeName(n, data), astPkg, astCurClassName(curClass))
+			callee := astQualifyCallee(astCalleeName(n, data), goPkg, astPkg, astCurClassName(curClass))
 			if callee == "" || isKeyword(callee) {
 				break
 			}
-			caller := ""
-			if curMethod != nil {
-				if curMethod.ClassFQN != "" {
-					caller = curMethod.ClassFQN + "." + curMethod.Name
-				} else {
-					caller = curMethod.Name
-				}
-				// 包/命名空间限定（Java/Kotlin/C#）：pkg.Class.Method / pkg.func
-				if astPkg != "" {
-					caller = astPkg + "." + caller
-				}
-			}
 			doc.Calls = append(doc.Calls, parser.CallIR{
 				CalleeFQN:  callee,
-				CallerFQN:  caller,
+				CallerFQN:  astCallerFQN(lang, goPkg, astPkg, curMethod),
 				CallType:   "direct",
 				LineNumber: int(start.Row) + 1,
 			})
@@ -426,8 +461,23 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			}
 			walk(c)
 		}
+		if scopeChanged {
+			curClass, curMethod = prevClass, prevMethod
+		}
 	}
 	walk(tree.RootNode())
+
+	// 合成 Go 包级容器：顶层函数必须有非空 ClassFQN 才能被三后端入库（P0-1）。
+	if lang == "go" && hasTopLevelFunc && goPkg != "" && !astHasClassFullName(doc.Classes, goPkg) {
+		doc.Classes = append(doc.Classes, parser.ClassIR{
+			Name:      goPkg,
+			FullName:  goPkg,
+			Type:      "PACKAGE",
+			StartLine: 1,
+			EndLine:   int(tree.RootNode().EndPoint().Row) + 1,
+			Doc:       "package " + goPkg,
+		})
+	}
 
 	return doc, nil
 }
@@ -558,6 +608,105 @@ func astPackageDecl(lang string, data []byte) string {
 		return string(m[1])
 	}
 	return ""
+}
+
+// astGoPackage 提取 Go 文件的 package 名（顶层函数合成包级容器 / caller 包限定用）。
+func astGoPackage(data []byte) string {
+	re := regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z_]\w*)`)
+	if m := re.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
+}
+
+// astGoReceiverType 提取 Go 方法声明的 receiver 类型名（`func (u *User)` → User）。
+// 只取 type_identifier，避免把 receiver 变量名当成类型。
+func astGoReceiverType(n *ts.Node, src []byte) string {
+	recv := n.ChildByFieldName("receiver")
+	if recv == nil || recv.IsNull() {
+		return ""
+	}
+	var found string
+	var walk func(x *ts.Node)
+	walk = func(x *ts.Node) {
+		if found != "" || x == nil || x.IsNull() {
+			return
+		}
+		if x.Type() == "type_identifier" {
+			found = string(x.Content(src))
+			return
+		}
+		for i := 0; i < int(x.NamedChildCount()); i++ {
+			walk(x.NamedChild(i))
+		}
+	}
+	walk(recv)
+	return found
+}
+
+// astCallerFQN 按语言口径合成调用者 FQN：
+//   - Go：包级函数 pkg.Func；方法 pkg.Type.Method（与默认正则路径一致）；
+//   - Java/Kotlin/C# 等：显式包声明时 pkg.Class.Method / pkg.func。
+func astCallerFQN(lang, goPkg, astPkg string, m *parser.MethodIR) string {
+	if m == nil {
+		return ""
+	}
+	if lang == "go" {
+		switch {
+		case m.ClassFQN == "":
+			if goPkg != "" {
+				return goPkg + "." + m.Name
+			}
+			return m.Name
+		case goPkg != "" && m.ClassFQN == goPkg:
+			// 包级容器下的顶层函数：FQN 为 pkg.Func，不得重复包前缀。
+			return goPkg + "." + m.Name
+		case goPkg != "":
+			return goPkg + "." + m.ClassFQN + "." + m.Name
+		default:
+			return m.ClassFQN + "." + m.Name
+		}
+	}
+	caller := m.Name
+	if m.ClassFQN != "" {
+		caller = m.ClassFQN + "." + m.Name
+	}
+	if astPkg != "" {
+		return astPkg + "." + caller
+	}
+	return caller
+}
+
+// astGoConstSpec 把一个 Go const_spec 转为 ConstantIR（包级常量）。
+func astGoConstSpec(n *ts.Node, src []byte, path string) *parser.ConstantIR {
+	name := ""
+	for i := 0; i < int(n.NamedChildCount()); i++ {
+		if c := n.NamedChild(i); c.Type() == "identifier" {
+			name = string(c.Content(src))
+			break
+		}
+	}
+	if name == "" {
+		return nil
+	}
+	typ, val := "", ""
+	if t := n.ChildByFieldName("type"); t != nil && !t.IsNull() {
+		typ = string(t.Content(src))
+	}
+	if v := n.ChildByFieldName("value"); v != nil && !v.IsNull() {
+		val = string(v.Content(src))
+	}
+	return &parser.ConstantIR{Name: name, Type: typ, Value: val, FilePath: path}
+}
+
+// astHasClassFullName 报告类列表中是否已存在指定 FullName 的类。
+func astHasClassFullName(classes []parser.ClassIR, fullName string) bool {
+	for i := range classes {
+		if classes[i].FullName == fullName {
+			return true
+		}
+	}
+	return false
 }
 
 // astClassType 从 AST 节点类型映射 IR 类类型。
@@ -701,15 +850,19 @@ func astCurClassName(cur *parser.ClassIR) string {
 	return cur.Name
 }
 
-// astQualifyCallee 把 AST 路径的裸 callee（当前类内无点前缀的方法调用）包限定，
-// 与正则路径（adapter.go qualifyCallee）口径一致（P21 遗留收敛）：
-// Java/Kotlin/C# 显式包声明语言 → pkg.Class.callee；含点前缀（obj.method / pkg.func）
-// 或 astPkg 为空 → 原样返回（类型消歧留待语种类别逐步收敛）。
-func astQualifyCallee(callee, astPkg, curClass string) string {
-	if astPkg == "" || curClass == "" {
+// astQualifyCallee 把 AST 路径的裸 callee 包限定：
+//   - Go：bare func → pkg.func（含点前缀的 obj.method 保持原样）；
+//   - Java/Kotlin/C# 显式包声明语言 → pkg.Class.callee。
+//
+// 与默认正则路径（adapter.go qualifyCallee）口径一致（P21/P0-1）。
+func astQualifyCallee(callee, goPkg, astPkg, curClass string) string {
+	if callee == "" || strings.Contains(callee, ".") {
 		return callee
 	}
-	if strings.Contains(callee, ".") {
+	if goPkg != "" {
+		return goPkg + "." + callee
+	}
+	if astPkg == "" || curClass == "" {
 		return callee
 	}
 	return astPkg + "." + curClass + "." + callee

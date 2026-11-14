@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 173: fix(parser): AST 路径作用域跟踪与 Go 包级容器对齐（P0-1 遗留）
+
+- 背景：Commit 157 只修了默认正则路径，`-tags treesitter` 的 `adapter_ast.go` 仍用「进入声明即覆盖 `curClass/curMethod` 且永不恢复」的遍历方式：嵌套类/嵌套函数之后的兄弟声明被错挂到内层作用域；Go 顶层函数继承最近一次 `type` 声明作为 `ClassFQN`（或不归属任何类），无 PACKAGE 容器、caller/callee 无包限定；类/方法 `EndLine` 恒为 0，且 AST 路径不产出 Go 的 `Fields/Constants`。CI 的 treesitter job 因此红（6 个测试失败）。
+- 动作（全部在 `internal/parser/adapter/treesitter/adapter_ast.go`）：
+  - 作用域跟踪：进入 class/method/Elixir def 节点时保存外层 `curClass/curMethod`，子树遍历结束恢复；嵌套类/嵌套函数不再污染后续兄弟声明。
+  - Go：按 AST `receiver` 字段（只取 `type_identifier`）确定方法归属；无 receiver 的顶层函数 `ClassFQN=package` 并合成同款 `PACKAGE` 容器；caller 形如 `pkg.Func` / `pkg.Type.Method`，裸 callee 包限定为 `pkg.func`（含点前缀的 `obj.method` 保持原样）。
+  - 补齐 class/method `EndLine = EndPoint().Row+1`，以及 Go `field_declaration → FieldIR`、包级 `const_spec → ConstantIR`（方法内局部 const 不入库）。
+  - 基准黄金集与适配器输出对齐：Go 样本 golden 改为包限定 FQN（`main.realA` 等），Java 自调用改为 `com.example.OrderFacade.findById`；非 Go 样本不变。
+- 负控（先红后绿）：
+  - `TestASTAdapter_GoScopeAndPackageContainer`：修复前 `helper/main` 的 `ClassFQN=User`、无 PACKAGE 容器、caller 为 `User.*` 且 callee 裸名（无包前缀）。
+  - `TestASTAdapter_NestedScopeRestore`：修复前嵌套类之后的 `last` 被挂成 `com.example.Inner.last`（期望 `com.example.Outer.last`）。
+  - 既有跨路径用例（`TestGoCallAndTypeExtraction`/`TestGoMultiLineSignature_CallAttribution`/`TestGoParser_RawStringConstGeneric`/`TestGoFieldAndConstantExtraction`/`TestTreeSitterAdapter_Parse_Go`/`TestTreeSitterAdapter_Parse_StringCallFiltered`）修复前整体为 FAIL。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`go build -tags treesitter ./...`、`go vet -tags treesitter ./internal/parser/adapter/treesitter/... ./internal/adapterbench/`、`go test -tags treesitter ./internal/parser/adapter/treesitter/... ./internal/adapterbench/` 全绿；AST 调用图基准 P=1.000 R=1.000（TP=72 FP=0 FN=0，门槛 0.95）；`make counts-check` 通过（LoC 57146 ≈ 57.1k）。
+
 ### Commit 172: fix(redis): 键加租户命名空间与 TTL，Flush 限定本命名空间（P1-4）
 
 - 背景：Redis L2 缓存所有键均为裸键（`class:<fqn>` 等），多租户/多实例共用同一 Redis 时同名 FQN 互相覆盖；写入不设 TTL，删除/重建后残留键永久驻留并可能返回陈旧数据；`Flush` 用 `SCAN "*"` 清整库，会误删同库其他应用/租户的数据。

@@ -23,6 +23,119 @@ func TestASTAdapter_Supports(t *testing.T) {
 	}
 }
 
+// TestASTAdapter_GoScopeAndPackageContainer 是 P0-1 遗留项的负控：AST 路径
+// 必须像默认正则路径一样
+//  1. 把无 receiver 的顶层函数挂到合成 PACKAGE 容器（ClassFQN=包名）；
+//  2. 方法归属由 receiver 类型决定，不依赖「最近遍历到的 type 声明」；
+//  3. caller/callee 使用包限定 FQN（pkg.Func / pkg.Type.Method）。
+func TestASTAdapter_GoScopeAndPackageContainer(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	path := filepath.Join(t.TempDir(), "sample.go")
+	content := `package sample
+
+type User struct{ Name string }
+
+func (u *User) Greet() string {
+	return helper()
+}
+
+func helper() string { return "x" }
+
+func main() {
+	u := User{}
+	u.Greet()
+	helper()
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	wantClass := map[string]string{"Greet": "User", "helper": "sample", "main": "sample"}
+	for name, want := range wantClass {
+		var got string
+		for _, m := range doc.Methods {
+			if m.Name == name {
+				got = m.ClassFQN
+			}
+		}
+		if got != want {
+			t.Errorf("method %s ClassFQN = %q, want %q", name, got, want)
+		}
+	}
+	var pkgContainer int
+	for _, c := range doc.Classes {
+		if c.Type == "PACKAGE" {
+			pkgContainer++
+			if c.FullName != "sample" {
+				t.Errorf("package container FullName = %q, want sample", c.FullName)
+			}
+		}
+	}
+	if pkgContainer != 1 {
+		t.Errorf("expected exactly 1 PACKAGE container, got %d (classes=%+v)", pkgContainer, doc.Classes)
+	}
+
+	wantCalls := map[string]string{
+		"sample.main":       "sample.helper",
+		"sample.User.Greet": "sample.helper",
+	}
+	gotCalls := map[string]string{}
+	for _, c := range doc.Calls {
+		gotCalls[c.CallerFQN] = c.CalleeFQN
+	}
+	for caller, callee := range wantCalls {
+		if gotCalls[caller] != callee {
+			t.Errorf("call %s -> %s not found; calls=%+v", caller, callee, doc.Calls)
+		}
+	}
+}
+
+// TestASTAdapter_NestedScopeRestore 是作用域跟踪负控：离开嵌套类/顶层类后，
+// curClass 必须恢复上一层，否则嵌套类之后的兄弟方法会被错挂到内层类。
+func TestASTAdapter_NestedScopeRestore(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	path := filepath.Join(t.TempDir(), "Outer.java")
+	content := `package com.example;
+
+public class Outer {
+    public void first(Service svc) {
+        svc.before();
+    }
+
+    class Inner {
+        public void innerCall(Service svc) {
+            svc.inside();
+        }
+    }
+
+    public void last(Service svc) {
+        svc.after();
+    }
+}
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := a.Parse(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	found := false
+	for _, c := range doc.Calls {
+		if c.CallerFQN == "com.example.Outer.last" && c.CalleeFQN == "svc.after" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("method after nested class should belong to Outer, calls=%+v", doc.Calls)
+	}
+}
+
 // TestASTAdapter_Parse_Go 验证 Go 语法级解析（类/方法/调用）。
 func TestASTAdapter_Parse_Go(t *testing.T) {
 	a := NewTreeSitterAdapter()
@@ -55,8 +168,8 @@ func main() {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(doc.Classes) != 1 {
-		t.Errorf("expected 1 class (User), got %d: %+v", len(doc.Classes), doc.Classes)
+	if len(doc.Classes) != 2 {
+		t.Errorf("expected 2 classes (User + PACKAGE main), got %d: %+v", len(doc.Classes), doc.Classes)
 	}
 	if len(doc.Methods) < 2 {
 		t.Errorf("expected >=2 methods (Greet + main), got %d", len(doc.Methods))
@@ -67,18 +180,19 @@ func main() {
 			t.Errorf("expected string pseudo-call filtered, got %+v", doc.Calls)
 		}
 	}
-	// 真实调用 u.Greet 与 realCall 应被检出
+	// 真实调用 u.Greet 与 realCall 应被检出（Go 裸 callee 包限定为 main.realCall，
+	// 与默认正则路径口径一致，P0-1 遗留对齐）
 	foundGreet, foundReal := false, false
 	for _, c := range doc.Calls {
 		if c.CalleeFQN == "u.Greet" {
 			foundGreet = true
 		}
-		if c.CalleeFQN == "realCall" {
+		if c.CalleeFQN == "main.realCall" {
 			foundReal = true
 		}
 	}
 	if !foundGreet || !foundReal {
-		t.Errorf("expected u.Greet & realCall detected, got calls: %+v", doc.Calls)
+		t.Errorf("expected u.Greet & main.realCall detected, got calls: %+v", doc.Calls)
 	}
 }
 

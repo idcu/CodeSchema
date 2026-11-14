@@ -36,6 +36,8 @@ type callSample struct {
 
 // 7 语言黄金样本：每份含 ≥2 真实调用 + ≥2 伪调用陷阱（字符串/注释内的括号）。
 // Golden 仅列「真实调用」，用于计算 Precision（检出∩golden / 检出）与 Recall（检出∩golden / golden）。
+// Go 样本的 golden 使用与适配器输出一致的包限定 FQN（pkg.Func / pkg.Type.Method）：
+// 默认正则与 -tags treesitter 两条路径已对齐该口径，裸名不再匹配（P0-1 遗留收敛）。
 var callSamples = []callSample{
 	{
 		Lang: "go", Ext: ".go",
@@ -49,7 +51,7 @@ func (s *Svc) Run() {
 	realB(msg) // fakeB(2)
 }
 `,
-		Golden: []string{"realA", "realB"},
+		Golden: []string{"main.realA", "main.realB"},
 	},
 	{
 		Lang: "java", Ext: ".java",
@@ -403,7 +405,7 @@ func (h *Handler) Handle(
 	return Result{}, nil
 }
 `,
-		Golden: []string{"repo.FindByID", "notify.Send", "chain", "Next", "Final", "Then"},
+		Golden: []string{"repo.FindByID", "notify.Send", "main.chain", "main.Next", "main.Final", "main.Then"},
 	},
 	{
 		Lang: "java", Ext: ".java",
@@ -423,7 +425,7 @@ public class OrderFacade {
     }
 }
 `,
-		Golden: []string{"validator.validate", "mapper.toEntity", "findById"},
+		Golden: []string{"validator.validate", "mapper.toEntity", "com.example.OrderFacade.findById"},
 	},
 	{
 		Lang: "ts", Ext: ".ts",
@@ -507,7 +509,7 @@ func run() {
 	realFn("afterReflect")
 }
 `,
-		Golden: []string{"reflect.ValueOf", "value.MethodByName", "Call", "realFn"},
+		Golden: []string{"reflect.ValueOf", "value.MethodByName", "main.Call", "main.realFn"},
 	},
 	{
 		Lang: "java", Ext: ".java",
