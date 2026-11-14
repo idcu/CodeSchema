@@ -44,7 +44,8 @@ func recoveryMiddlewareFor(withError bool, logger *log.Logger) func(http.Handler
 						)
 					}
 					if withError {
-						writeError(w, "ERR_INTERNAL", fmt.Sprintf("internal server error: %v", rec), 500)
+						// 只回固定文案：panic 原文可能含 DSN/路径/凭据，仅写日志。
+						writeError(w, "ERR_INTERNAL", "internal server error", 500)
 					}
 				}
 			}()

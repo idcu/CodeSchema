@@ -6,6 +6,13 @@
 
 ## 提交记录
 
+### Commit 163: fix(server): 未知租户返回 404 而非 nil 解引用 500，panic 原文不再外泄（P1-11）
+
+- 背景：`serve` 以 `NewHTTPServer(nil, ...)` 启动并注入租户 resolver；`serviceForRequest` 在 resolver 失败后回退到 `h.service`（即 nil），所有 handler 直接方法调用触发 nil 解引用 panic，被 recovery 兜成 500，且响应体回传 `internal server error: <panic 原文>`（可能含 DSN/路径等敏感信息）。
+- 动作：`http.go` 将 `serviceForRequest` 改为 `resolveService`（返回 `(*service.Service, error)`），未知租户返回 `ERR_UNKNOWN_TENANT` + 404、未配置 Service 返回 `ERR_SERVICE_UNAVAILABLE` + 503；10 个 handler 统一接入。`middleware.go` 的 500 响应体改为固定文案 `internal server error`，panic 详情仅写结构化日志。
+- 负控（先红后绿）：`internal/server/http_test.go` 新增 `TestUnknownTenantReturns404`（context/health/search 三路由）与 `TestRecoveryMiddlewareHidesPanicDetail`。修复前实测 `panic: runtime error: invalid memory address or nil pointer dereference`（栈顶 `service.go:388`）且 500 体含 panic 原文；修复后三路由均 404/`ERR_UNKNOWN_TENANT`，500 体不含敏感串。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 55645 ≈ 55.6k）。
+
 ### Commit 162: fix(server): viz 文档列表分页参数夹取，消除负数切片 panic（P3-1）
 
 - 背景：`/viz/api/documents` 直接把 `offset/limit` 用于 `docs[offset:end]`，`limit=-1` 触发 `slice bounds out of range [:-1]`，线上被 recovery 兜成 500；`Sscanf` 解析失败也会静默保留原值。

@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -14,13 +15,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	cerrors "github.com/idcu/codeschema/internal/errors"
 	auth "gitee.com/idcu-go/auth"
 	log "gitee.com/idcu-go/log"
 	"gitee.com/idcu-go/metrics"
+	trace "gitee.com/idcu-go/trace"
+	cerrors "github.com/idcu/codeschema/internal/errors"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/tenant"
-	trace "gitee.com/idcu-go/trace"
 )
 
 // init 注册 HTTP 服务器模块的监控指标。
@@ -232,7 +233,10 @@ func (h *HTTPServer) SetVectorHealthCheck(fn func(ctx context.Context) error) {
 
 // serviceForRequest 从请求中解析租户 ID 并返回对应 Service。
 // 单项目模式下忽略租户标识，始终返回唯一实例。
-func (h *HTTPServer) serviceForRequest(r *http.Request) *service.Service {
+//
+// 解析失败（未知租户 / 未配置 Service）时返回错误，由调用方按 404/503 处理，
+// 不得回退到 h.service（多租户模式下为 nil，会触发 nil 解引用 panic）。
+func (h *HTTPServer) resolveService(r *http.Request) (*service.Service, error) {
 	id := r.Header.Get("X-Tenant")
 	if id == "" {
 		id = r.URL.Query().Get("tenant")
@@ -241,11 +245,31 @@ func (h *HTTPServer) serviceForRequest(r *http.Request) *service.Service {
 		id = h.defaultTenant
 	}
 	if h.resolver != nil {
-		if svc, err := h.resolver(r.Context(), id); err == nil {
-			return svc
+		svc, err := h.resolver(r.Context(), id)
+		if err != nil || svc == nil {
+			return nil, fmt.Errorf("%w: %q", errUnknownTenant, id)
 		}
+		return svc, nil
 	}
-	return h.service
+	if h.service == nil {
+		return nil, errServiceUnavailable
+	}
+	return h.service, nil
+}
+
+// errUnknownTenant 请求指定的租户不存在（HTTP 404）。
+var errUnknownTenant = errors.New("unknown tenant")
+
+// errServiceUnavailable 服务器未配置任何 Service（HTTP 503）。
+var errServiceUnavailable = errors.New("service unavailable")
+
+// writeResolveError 把租户解析失败映射为 404/503，避免泄露内部错误详情。
+func writeResolveError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUnknownTenant) {
+		writeError(w, "ERR_UNKNOWN_TENANT", err.Error(), http.StatusNotFound)
+		return
+	}
+	writeError(w, "ERR_SERVICE_UNAVAILABLE", err.Error(), http.StatusServiceUnavailable)
 }
 
 // Start 启动 HTTP 服务器，阻塞直到 Shutdown 被调用。
@@ -339,7 +363,12 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "ERR_INVALID_PARAMETER", "method not allowed", 405)
 		return
 	}
-	status := h.serviceForRequest(r).Health(r.Context())
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+	status := svc.Health(r.Context())
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -349,8 +378,14 @@ func (h *HTTPServer) handleHealthDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	start := time.Now()
-	err := h.serviceForRequest(r).StoreHealthCheck(r.Context())
+	err = svc.StoreHealthCheck(r.Context())
 	latency := time.Since(start).Milliseconds()
 
 	status := "ok"
@@ -421,19 +456,25 @@ func (h *HTTPServer) handleContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	q := r.URL.Query()
 	symbols := querySymbols(q, "symbols", "symbol")
 	opts := h.mergeContextOptions(contextOptionsFromQuery(q))
 	if len(symbols) > 1 {
 		// 批量：单轮返回 N 个符号，把 N 次请求压成 1 次（B5）。
-		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetContextBatchDetailed(r.Context(), symbols, opts))
+		writeJSON(w, http.StatusOK, svc.GetContextBatchDetailed(r.Context(), symbols, opts))
 		return
 	}
 	symbol := q.Get("symbol")
 	if len(symbols) == 1 {
 		symbol = symbols[0]
 	}
-	result, err := h.serviceForRequest(r).GetContextMode(r.Context(), symbol, opts)
+	result, err := svc.GetContextMode(r.Context(), symbol, opts)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -447,18 +488,24 @@ func (h *HTTPServer) handleImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	q := r.URL.Query()
 	methods := querySymbols(q, "methods", "method")
 	depth, _ := strconv.Atoi(q.Get("depth"))
 	if len(methods) > 1 {
-		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetImpactBatch(r.Context(), methods, depth))
+		writeJSON(w, http.StatusOK, svc.GetImpactBatch(r.Context(), methods, depth))
 		return
 	}
 	method := q.Get("method")
 	if len(methods) == 1 {
 		method = methods[0]
 	}
-	result, err := h.serviceForRequest(r).GetImpact(r.Context(), method, depth)
+	result, err := svc.GetImpact(r.Context(), method, depth)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -472,18 +519,24 @@ func (h *HTTPServer) handleTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	q := r.URL.Query()
 	methods := querySymbols(q, "methods", "method")
 	minConfidence, _ := strconv.Atoi(q.Get("min_confidence"))
 	if len(methods) > 1 {
-		writeJSON(w, http.StatusOK, h.serviceForRequest(r).GetTestsBatch(r.Context(), methods, minConfidence))
+		writeJSON(w, http.StatusOK, svc.GetTestsBatch(r.Context(), methods, minConfidence))
 		return
 	}
 	method := q.Get("method")
 	if len(methods) == 1 {
 		method = methods[0]
 	}
-	result, err := h.serviceForRequest(r).GetTests(r.Context(), method, minConfidence)
+	result, err := svc.GetTests(r.Context(), method, minConfidence)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -499,6 +552,12 @@ func (h *HTTPServer) handleAffected(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	q := r.URL.Query()
 	symbol := q.Get("symbol")
 	if symbol == "" {
@@ -507,7 +566,7 @@ func (h *HTTPServer) handleAffected(w http.ResponseWriter, r *http.Request) {
 	}
 	recursive := q.Get("recursive") == "true" || q.Get("recursive") == "1"
 
-	affectedTests, err := h.serviceForRequest(r).GetAffected(r.Context(), symbol, recursive)
+	affectedTests, err := svc.GetAffected(r.Context(), symbol, recursive)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -525,12 +584,18 @@ func (h *HTTPServer) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	query := r.URL.Query().Get("q")
 	mode := r.URL.Query().Get("mode")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	minScore, _ := strconv.ParseFloat(r.URL.Query().Get("min_score"), 64)
 
-	outcome, err := h.serviceForRequest(r).SearchWithOptions(r.Context(), query, mode, limit, minScore)
+	outcome, err := svc.SearchWithOptions(r.Context(), query, mode, limit, minScore)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -546,8 +611,14 @@ func (h *HTTPServer) handleGetTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	symbol := r.URL.Query().Get("symbol")
-	result, err := h.serviceForRequest(r).GetTags(r.Context(), symbol)
+	result, err := svc.GetTags(r.Context(), symbol)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -561,8 +632,14 @@ func (h *HTTPServer) handleSearchByTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
 	tags := parseQueryTags(r.URL.Query())
-	result, err := h.serviceForRequest(r).SearchByTags(r.Context(), tags)
+	result, err := svc.SearchByTags(r.Context(), tags)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -593,7 +670,13 @@ func (h *HTTPServer) handleGetAllTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.serviceForRequest(r).GetAllTags(r.Context())
+	svc, err := h.resolveService(r)
+	if err != nil {
+		writeResolveError(w, err)
+		return
+	}
+
+	result, err := svc.GetAllTags(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
 		return

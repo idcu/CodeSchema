@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -817,5 +819,59 @@ func TestAffectedEndpoint_Success(t *testing.T) {
 	}
 	if resp.AffectedTests == nil {
 		t.Errorf("expected non-nil affected_tests slice")
+	}
+}
+
+// TestUnknownTenantReturns404 负控（P1-11）：未知租户必须返回 404，
+// 不得 fallback 到 nil service 触发 panic 或掩盖为 500。
+func TestUnknownTenantReturns404(t *testing.T) {
+	srv := NewHTTPServer(nil, ":0")
+	srv.resolver = func(_ context.Context, id string) (*service.Service, error) {
+		return nil, fmt.Errorf("tenant %q not found", id)
+	}
+	srv.defaultTenant = "default"
+
+	cases := []struct {
+		name    string
+		target  string
+		handler func(*HTTPServer, http.ResponseWriter, *http.Request)
+	}{
+		{"context", "/context?symbol=x", (*HTTPServer).handleContext},
+		{"health", "/health", (*HTTPServer).handleHealth},
+		{"search", "/search?q=x", (*HTTPServer).handleSearch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			req.Header.Set("X-Tenant", "ghost")
+			w := httptest.NewRecorder()
+			tc.handler(srv, w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
+			}
+			var errResp errorResponse
+			if err := json.NewDecoder(w.Result().Body).Decode(&errResp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if errResp.Error.Code != "ERR_UNKNOWN_TENANT" {
+				t.Fatalf("code=%q message=%q", errResp.Error.Code, errResp.Error.Message)
+			}
+		})
+	}
+}
+
+// TestRecoveryMiddlewareHidesPanicDetail 负控（P1-11）：500 响应不得回传 panic 原文。
+func TestRecoveryMiddlewareHidesPanicDetail(t *testing.T) {
+	const secret = "secret-dsn-postgres://user:pw@host"
+	h := recoveryMiddlewareFor(true, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(secret)
+	}))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/context", nil))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+	if got := w.Body.String(); strings.Contains(got, secret) {
+		t.Fatalf("panic detail leaked: %s", got)
 	}
 }
