@@ -308,6 +308,20 @@ func mergeUnique(existing, added []string) []string {
 	return merged
 }
 
+// isCallRelation 判断 CallIR.CallType 是否代表真实调用。
+//
+// 适配器会把 imports/references/implements/extends 等非调用关系如实标注
+// （P1-7），这些边只属于文件依赖/类层次，不应进入调用图，否则 /impact 与
+// /affected 会出现假影响面。空值按 direct 兼容历史记录。
+func isCallRelation(callType string) bool {
+	switch strings.ToLower(callType) {
+	case "", "direct", "interface", "dynamic":
+		return true
+	default:
+		return false
+	}
+}
+
 // BuildAll 构建所有代码图（单次遍历）。
 //
 // 返回所有四种图结构。如果某个图构建失败，返回错误。
@@ -367,7 +381,7 @@ func (a *Analyzer) BuildAll(ctx context.Context) (*CallGraph, *ClassHierarchy, *
 
 		// 构建调用图
 		for _, call := range calls {
-			if call.CallerFQN != "" && call.CalleeFQN != "" {
+			if call.CallerFQN != "" && call.CalleeFQN != "" && isCallRelation(call.CallType) {
 				callGraph.AddEdge(call.CallerFQN, call.CalleeFQN)
 			}
 		}
@@ -432,7 +446,7 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 			return nil, fmt.Errorf("get calls for file %d: %w", f.ID, err)
 		}
 		for _, call := range calls {
-			if call.CallerFQN != "" && call.CalleeFQN != "" {
+			if call.CallerFQN != "" && call.CalleeFQN != "" && isCallRelation(call.CallType) {
 				cg.AddEdge(call.CallerFQN, call.CalleeFQN)
 			}
 		}

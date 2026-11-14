@@ -84,6 +84,6 @@ type ConstantIR struct {
 // CallIR 表示调用关系。
 type CallIR struct {
 	CallerFQN, CalleeFQN string
-	CallType             string // direct / interface / dynamic / unknown
+	CallType             string // direct / interface / dynamic / unknown；非调用关系另标 imports / references / implements / extends
 	LineNumber           int
 }

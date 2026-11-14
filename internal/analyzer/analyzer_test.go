@@ -1857,3 +1857,60 @@ func TestAnalyzer_TagAll_WithEnhancer_Concurrent(t *testing.T) {
 		t.Errorf("ScanRemaining want 0 after all enhanced, got %d", rem)
 	}
 }
+
+// TestCallGraph_ExcludesNonCallRelations 负控（P1-7）：
+// CallIR.CallType 为 imports/references/implements/extends 的关系不是调用，
+// 不得进入调用图（否则 /impact、/affected 出现假影响面）。
+func TestCallGraph_ExcludesNonCallRelations(t *testing.T) {
+	const (
+		directCaller = "pkg.A.Call"
+		directCallee = "pkg.B.Callee"
+	)
+	nonCalls := []store.CallRecord{
+		{CallerFQN: "pkg.A.Import", CalleeFQN: "pkg.B.Imported", CallType: "imports"},
+		{CallerFQN: "pkg.A.Ref", CalleeFQN: "pkg.B.Referenced", CallType: "references"},
+		{CallerFQN: "pkg.A.Impl", CalleeFQN: "pkg.B.Interface", CallType: "implements"},
+		{CallerFQN: "pkg.A.Ext", CalleeFQN: "pkg.B.Base", CallType: "extends"},
+	}
+
+	buildStore := func() *mockStore {
+		st := newTestStore()
+		st.calls[1] = append(st.calls[1], nonCalls...)
+		st.calls[1] = append(st.calls[1], store.CallRecord{
+			CallerFQN: directCaller, CalleeFQN: directCallee, CallType: "direct", LineNumber: 1,
+		})
+		return st
+	}
+
+	assertGraph := func(t *testing.T, cg *CallGraph) {
+		t.Helper()
+		for _, c := range nonCalls {
+			if cg.Nodes[c.CallerFQN] != nil && contains(cg.Nodes[c.CallerFQN].Callees, c.CalleeFQN) {
+				t.Errorf("non-call relation %q leaked into call graph: %s -> %s",
+					c.CallType, c.CallerFQN, c.CalleeFQN)
+			}
+		}
+		node := cg.Nodes[directCaller]
+		if node == nil || !contains(node.Callees, directCallee) {
+			t.Errorf("direct call edge missing: %s -> %s", directCaller, directCallee)
+		}
+	}
+
+	t.Run("BuildCallGraph", func(t *testing.T) {
+		a := NewAnalyzer(buildStore())
+		cg, err := a.BuildCallGraph(context.Background())
+		if err != nil {
+			t.Fatalf("BuildCallGraph: %v", err)
+		}
+		assertGraph(t, cg)
+	})
+
+	t.Run("BuildAll", func(t *testing.T) {
+		a := NewAnalyzer(buildStore())
+		cg, _, _, _, err := a.BuildAll(context.Background())
+		if err != nil {
+			t.Fatalf("BuildAll: %v", err)
+		}
+		assertGraph(t, cg)
+	})
+}

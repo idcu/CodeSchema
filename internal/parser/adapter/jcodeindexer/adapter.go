@@ -240,14 +240,20 @@ func classTypeFromKind(kind string) string {
 }
 
 // callTypeFromKind 将 JCodeIndexer edge type 映射为 CallIR.CallType。
+//
+// 非调用关系保留原名，供分析器构建调用图时排除（P1-7）。
 func callTypeFromKind(ekind string) string {
 	switch strings.ToLower(ekind) {
 	case "calls", "call", "invoke":
 		return "direct"
-	case "extends", "implements", "inherits":
-		return "interface"
-	case "imports", "references", "uses", "dynamic":
-		return "dynamic"
+	case "extends", "inherits":
+		return "extends"
+	case "implements":
+		return "implements"
+	case "imports":
+		return "imports"
+	case "references", "uses", "dynamic":
+		return "references"
 	default:
 		return "unknown"
 	}

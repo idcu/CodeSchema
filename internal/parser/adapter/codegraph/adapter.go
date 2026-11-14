@@ -305,7 +305,7 @@ func readLegacySchema(ctx context.Context, db *sql.DB, docsByFile map[string]*pa
 			continue
 		}
 		docsByFile[filePath].Calls = append(docsByFile[filePath].Calls, parser.CallIR{
-			CallerFQN: caller, CalleeFQN: callee, CallType: etype,
+			CallerFQN: caller, CalleeFQN: callee, CallType: callTypeFromKind(etype),
 		})
 	}
 	if err := edgeRows.Err(); err != nil {
@@ -351,14 +351,21 @@ func classTypeFromKind(kind string) string {
 }
 
 // callTypeFromKind 将 CodeGraph edge kind 映射为 CallIR.CallType。
+//
+// 非调用关系（imports/references/implements/extends）保留原名，供分析器在
+// 构建调用图时排除（P1-7）；只有 calls/invoke 才映射为 direct。
 func callTypeFromKind(kind string) string {
 	switch strings.ToLower(kind) {
-	case "calls", "call":
+	case "calls", "call", "invoke":
 		return "direct"
 	case "extends", "inherits":
-		return "interface"
-	case "imports", "references", "implements":
-		return "dynamic"
+		return "extends"
+	case "implements":
+		return "implements"
+	case "imports":
+		return "imports"
+	case "references", "uses":
+		return "references"
 	default:
 		return "unknown"
 	}

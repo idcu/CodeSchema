@@ -6,6 +6,16 @@
 
 ## 提交记录
 
+### Commit 166: fix(analyzer): 调用图只纳入真实调用关系，非调用边不再制造假影响面（P1-7）
+
+- 背景：`BuildAll`/`BuildCallGraph` 建边时完全丢弃 `CallIR.CallType`，任何非空 `CallerFQN/CalleeFQN` 都成为调用边；而 CodeGraph/JCodeIndexer 适配器把 imports/references/implements/extends 映射成 `dynamic`/`interface`，于是文件依赖与类层次关系被当作调用，`/impact`、`/affected` 出现假影响面。
+- 动作：
+  - 适配器如实标注关系类型：`codegraph`/`jcodeindexer` 的 `callTypeFromKind` 改为 calls/invoke→`direct`、extends→`extends`、implements→`implements`、imports→`imports`、references/uses→`references`；CodeGraph legacy schema 路径也统一走该映射（此前直接透传原始字符串）。
+  - `analyzer` 新增 `isCallRelation` 白名单（`direct`/`interface`/`dynamic`/空值），`BuildAll` 与 `BuildCallGraph` 两个建边循环统一过滤；空值按 `direct` 兼容历史记录。
+  - `parser/ir.go` 的 `CallType` 契约注释补充非调用关系取值。
+- 负控（先红后绿）：`internal/analyzer/analyzer_test.go::TestCallGraph_ExcludesNonCallRelations`（BuildCallGraph/BuildAll 两路）。修复前实测四条非调用边全部泄漏进图（imports/references/implements/extends）；修复后四条均不在图中，direct 边保留。
+- 验证：`go build ./...` / `go vet ./...` / `make test` 全绿；`make counts-check` 通过（LoC 55835 ≈ 55.8k）。
+
 ### Commit 165: fix(retrieval): PersistentFTS 搜索全程持读锁，消除并发 map fatal（P1-10）
 
 - 背景：`PersistentFTS.Search` 在 `RUnlock` 后才调用 `MemoryFTS.Search`，而临时 `MemoryFTS` 持有的是自己的零值锁，保护不到共享的 `pf.docs`。并发 `Index/BatchIndex/Remove` 与搜索遍历冲突，触发 Go fatal「concurrent map read and map write」（不可 recover，直接拖垮进程）。
