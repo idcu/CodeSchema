@@ -394,6 +394,19 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 		FilePath: path,
 	}
 
+	// Go 需要预扫描同包函数签名（`x := helper()` 的类型来自 helper 的返回类型），
+	// 先一次性读入后重放；其它语言保持流式解析。必须在包装 scanner 之前完成。
+	var goFuncReturns map[string]string
+	if lang == "go" {
+		data, rerr := io.ReadAll(r)
+		if rerr != nil {
+			return nil, fmt.Errorf("read source: %w", rerr)
+		}
+		// 同包跨文件（`svc := NewService(st)`）+ 当前文件，当前文件同名项优先。
+		goFuncReturns = mergeGoReturns(scanGoPkgReturns(path), scanGoFuncReturns(data))
+		r = bytes.NewReader(data)
+	}
+
 	scanner := bufio.NewReaderSize(r, 64*1024)
 	lineNum := 0
 	var currentClass *parser.ClassIR
@@ -647,7 +660,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, r io.R
 			}
 			// 类型声明行通常不含 `(`（`x := &T{}`），须在调用检测之外收集。
 			if curMethodIdx >= 0 && goDepth > methodOpenDepth {
-				trackGoLocalTypes(code, goLocalTypes)
+				trackGoLocalTypes(code, goLocalTypes, goFuncReturns)
 			}
 			if !(inIfaceBody && curMethodIdx < 0 && goDepth > curIfaceOpenDepth) && strings.Contains(code, "(") {
 				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "", goLocalTypes)
@@ -1383,7 +1396,10 @@ func parenClosesOnLine(line string, open int) bool {
 var (
 	goVarDeclPattern   = regexp.MustCompile(`^\s*var\s+(\w+)\s+(\*?)([A-Za-z_]\w*)(?:\[[^\]]*\])?`)
 	goShortDeclPattern = regexp.MustCompile(`^\s*(\w+(?:\s*,\s*\w+)*)\s*:=\s*&?([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*\{`)
-	callStartPattern   = regexp.MustCompile(`(\w[\w.]*)\s*\(`)
+	// goCallDeclPattern 匹配 `x := samePkgFunc(`：接收者类型由同文件函数返回类型推导
+	// （真实缺陷：`svc := newTestService(t)` 后 `svc.SearchByTag` 短名与其它类型重名）。
+	goCallDeclPattern = regexp.MustCompile(`^\s*(\w+)\s*:=\s*(\w+)\s*\(`)
+	callStartPattern  = regexp.MustCompile(`(\w[\w.]*)\s*\(`)
 )
 
 // trackGoLocalTypes 记录方法体内局部变量类型，供 `x.Method()` 消歧：
@@ -1391,7 +1407,7 @@ var (
 //   - `x := &T{}` / `x := T{}`（含泛型 `T[P]`）→ T
 //
 // 仅按行内声明增量收集，不做数据流分析；离开方法时由调用方清空。
-func trackGoLocalTypes(code string, locals map[string]string) {
+func trackGoLocalTypes(code string, locals map[string]string, funcReturns map[string]string) {
 	if locals == nil {
 		return
 	}
@@ -1403,6 +1419,11 @@ func trackGoLocalTypes(code string, locals map[string]string) {
 			if name = strings.TrimSpace(name); name != "" {
 				locals[name] = m[2]
 			}
+		}
+	}
+	if m := goCallDeclPattern.FindStringSubmatch(code); len(m) >= 3 && m[1] != "" {
+		if typ := funcReturns[m[2]]; typ != "" {
+			locals[m[1]] = typ
 		}
 	}
 }

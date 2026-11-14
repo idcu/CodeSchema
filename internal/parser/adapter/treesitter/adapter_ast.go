@@ -290,6 +290,13 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 		FilePath: path,
 	}
 
+	// 预扫描同包函数返回类型：`x := helper()` 的接收者类型推导（与正则路径同口径），
+	// 同包跨文件（`svc := NewService(st)`）+ 当前文件，当前文件同名项优先。
+	goFuncReturns := map[string]string{}
+	if lang == "go" {
+		goFuncReturns = mergeGoReturns(scanGoPkgReturns(path), scanGoFuncReturns(data))
+	}
+
 	// P20：Java/Kotlin/C# 单文件显式包/命名空间声明 → caller FQN 包限定，
 	// 与默认正则路径（adapter.go 的 nonGoPkg）对齐，使非 Go 调用图与 Go 同命名空间。
 	astPkg := astPackageDecl(lang, data)
@@ -450,7 +457,7 @@ func (a *TreeSitterAdapter) parseSource(ctx context.Context, path string, data [
 			scopeChanged = true
 
 		case lang == "go" && (typ == "short_var_declaration" || typ == "var_spec"):
-			if name, t := astGoLocalDecl(n, data); name != "" && t != "" {
+			if name, t := astGoLocalDecl(n, data, goFuncReturns); name != "" && t != "" {
 				goLocalTypes[name] = t
 			}
 
@@ -951,9 +958,10 @@ func astCurClassName(cur *parser.ClassIR) string {
 }
 
 // astGoLocalDecl 提取 Go 局部变量声明的「变量名 → 类型（去指针）」：
-// `x := &T{}` / `x := T{}`（composite_literal）与 `var x *T` / `var x T`。
-// 其它右值（函数调用、make、类型断言）不做推导，宁可保持裸 selector。
-func astGoLocalDecl(n *ts.Node, src []byte) (string, string) {
+// `x := &T{}` / `x := T{}`（composite_literal）、`var x *T` / `var x T`，
+// 以及 `x := samePkgFunc()`（返回类型来自同文件函数签名表）。
+// 其它右值（跨包调用、make、类型断言、多返回值）不做推导，宁可保持裸 selector。
+func astGoLocalDecl(n *ts.Node, src []byte, funcReturns map[string]string) (string, string) {
 	switch n.Type() {
 	case "short_var_declaration":
 		left := n.ChildByFieldName("left")
@@ -967,6 +975,14 @@ func astGoLocalDecl(n *ts.Node, src []byte) (string, string) {
 			return "", ""
 		}
 		r := right.NamedChild(0)
+		if r.Type() == "call_expression" {
+			if fn := r.ChildByFieldName("function"); fn != nil && !fn.IsNull() && fn.Type() == "identifier" {
+				if typ := funcReturns[string(fn.Content(src))]; typ != "" {
+					return name, typ
+				}
+			}
+			return "", ""
+		}
 		if r.Type() == "unary_expression" {
 			if op := r.ChildByFieldName("operator"); op != nil && string(op.Content(src)) == "&" {
 				if operand := r.ChildByFieldName("operand"); operand != nil && !operand.IsNull() {

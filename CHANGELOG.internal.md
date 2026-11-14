@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 244: fix(parser): Go 接收者类型由同包函数返回类型推导（跨语句/跨文件）
+
+- 旧实现只认 `x := &T{}` / `var x *T`：`svc := newTestService(t)`、`svc := NewService(st)`
+  的 `svc.Method()` 恒为裸 selector。`resolveCallee` 要求短名唯一，
+  `WithAIEnhancer` / `WithImpactAnalyzer` / `SearchByTag` 与其它类型同名时直接
+  判为歧义、不链接（Go 人工真值 FN 7 条中 6 条来自此）。
+- 现预扫描包级函数签名的单一具名返回类型（`func helper() *T` → `T`），
+  `x := helper()` 记入局部类型表；helper 可在同包另一 `.go` 文件
+  （`NewService` 在 service.go），按目录扫描并缓存（键含目录 mtime 与 `.go` 数）。
+  多返回值/命名返回值/泛型/切片/带包路径返回类型不推导，不做数据流分析。
+- 正则与 AST 两路径同口径（共享 `go_returns.go`）；仅改 selector 限定，不增删调用边。
+- 负控：`TestGoFuncReturnLocalQualification`（同包跨文件构造器；去掉跨文件扫描时
+  两变体均红：`svc.Search` 未消歧、qualified=1/2；现绿）。
+- 同语料（code-schema go，人工真值 167 对）前→后：
+  regex TP 160/FP 9/FN 7 → 164/9/3，P 0.9467 → 0.9480、R 0.9581 → 0.9820、
+  F1 0.9524 → 0.9647；
+  treesitter TP 161/9/6 → 165/9/2，P 0.9471 → 0.9483、R 0.9641 → 0.9880、
+  F1 0.9555 → 0.9677。
+  自动 test_link（真值由 IR 调用边生成，随解析覆盖变化）：regex TP 1521→1740、
+  FP 16→27、F1 0.9873→0.9889；treesitter TP 1567→1782、FP 19→64、F1 0.9883→0.9786
+  （真值 pair 2373→2922，新增对集中在原裸 selector 方法上；精度问题与命名策略
+  过匹配同源，下一提交处理）。调用图 calls/regex 16327→16419、treesitter 20452→20567。
+
 ### Commit 243: fix(parser): AST 路径跟踪 Go 局部变量类型，selector 按类型限定
 
 - 正则路径已有 `goLocalTypes`（`x := &T{}` / `var x *T`），AST 路径未跟踪：

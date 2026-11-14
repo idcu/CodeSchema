@@ -145,6 +145,62 @@ func TestGoRawStringDoesNotCreateMethods(t *testing.T) {
 	}
 }
 
+// TestGoFuncReturnLocalQualification 负控：`x := helper()` 的接收者类型由
+// 函数返回类型决定（`func helper() *T`），旧实现只认 `&T{}` / `var x *T`，
+// `x.Method()` 保持裸 selector；短名在多类型间重名时无法消歧（真实缺陷：
+// `svc := newTestService(t)` 后 `svc.SearchByTag` 因与 PGStore.SearchByTag 重名而丢链）。
+// 要求跨语句 + 同包跨文件推导：helper 可在另一个 .go 文件。
+func TestGoFuncReturnLocalQualification(t *testing.T) {
+	dir := t.TempDir()
+	types := filepath.Join(dir, "types.go")
+	run := filepath.Join(dir, "run.go")
+	typesSrc := `package demo
+
+type Service struct{}
+
+func (s *Service) Search() {}
+
+func newService() *Service { return &Service{} }
+`
+	runSrc := `package demo
+
+func Run() {
+	svc := newService()
+	svc.Search()
+	later := buildService()
+	later.Search()
+}
+
+func buildService() *Service { return &Service{} }
+`
+	if err := os.WriteFile(types, []byte(typesSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(run, []byte(runSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := NewTreeSitterAdapter().Parse(context.Background(), run)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	var qualified int
+	for _, c := range doc.Calls {
+		if c.CallerFQN != "demo.Run" {
+			continue
+		}
+		if strings.HasSuffix(c.CalleeFQN, "Service.Search") {
+			qualified++
+		}
+		if strings.HasPrefix(c.CalleeFQN, "svc.") || strings.HasPrefix(c.CalleeFQN, "later.") {
+			t.Errorf("函数返回值赋值的局部变量未消歧: %s", c.CalleeFQN)
+		}
+	}
+	if qualified != 2 {
+		t.Errorf("qualified Search calls = %d, want 2; calls=%+v", qualified, doc.Calls)
+	}
+}
+
 // TestGoLocalVarCallQualification 负控：`x := &T{}` / `var x *T` 声明的局部变量，
 // 其 `x.Method()` 调用必须限定为 pkg.T.Method；旧实现只跟踪 receiver，保持裸 selector。
 func TestGoLocalVarCallQualification(t *testing.T) {
