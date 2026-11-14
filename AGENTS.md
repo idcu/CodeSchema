@@ -71,7 +71,7 @@ Agent 在参与 CodeSchema 开发时必须遵循以下流程。完整规范见 [
 | `affected` | 递归查找受影响的测试 |
 | `get_call_graph` | 获取双向调用图 |
 | `search_symbols` | 搜索符号（精确/语义/融合） |
-| `search_config` | 搜索配置项 |
+| `search_config` | 子串搜索符号（名称/文档/签名） |
 | `find_dependencies` | 查找依赖关系 |
 | `get_tags` / `search_by_tag` / `get_all_tags` | 标签查询 |
 | `list_projects` | 枚举多租户仓库 |

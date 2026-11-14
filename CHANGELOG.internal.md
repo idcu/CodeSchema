@@ -6,6 +6,15 @@
 
 ## 提交记录
 
+### Commit 188: fix(mcp): search_config 描述与实现对齐（R4-3 / P2-5）
+
+- 问题：工具描述写「搜索配置项和注解」，实现是类/方法 `FullName/Name/Doc/Signature/ReturnType`
+  的大小写不敏感子串匹配（注解只经 `Doc` 文本覆盖），属能力夸大。
+- 修复：描述改为「按名称/文档/签名子串搜索符号（大小写不敏感，含注解文本）」，
+  `pattern` 参数说明改为「子串（大小写不敏感）」；`AGENTS.md` 工具表同步。
+- 负控（先红后绿）：`TestMCP_ToolsList` 断言 `search_config` 描述包含「子串」且不含「配置项」；
+  修复前红，修复后绿；`TestMCP_ToolCall_AllTools` 保持绿（符号搜索行为不变）。
+
 ### Commit 187: fix(server): viz 分页负数/非法参数返回 400（R1-5 / P3-1）
 
 - 背景：Commit 162 已用「夹取到 [0,len]」消除 `docs[offset:end]` panic，但批次 A 退出标准

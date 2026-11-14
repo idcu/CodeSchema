@@ -30,8 +30,8 @@ R3-10,C,P2,PG/SQLite热点索引,P2-11,R3-2,2,call(file_id)/class_tag(tag_id)/me
 R3-11,C,P2,PG/SQLite连接池上限,P2-12,R3-2,1.5,连接池上限可配置；默认值有说明；压测无连接泄漏,todo,必做
 R3-12,C,P2,FileStore持久化可靠性,P2-9,R3-1,2.5,强杀后不丢已确认写入或明确恢复策略；损坏文件返回错误；无data race,todo,必做
 R4-1,D,P2,MCP stdio/SSE传输合规,P2-20,R0-1,5,逐行JSON跑通initialize/tools/list/tools/call；notification无响应；取消生效；SSE带sessionId且POST返回202,todo,必做
-R4-2,D,P3,OpenAPI补齐与参数名统一,P3-14,R4-1,1.5,仅用OpenAPI声明参数可调用每个端点；/affected参数名一致；批量参数统一；旧别名保留,todo,必做
-R4-3,D,P2,search_config描述与实现对齐,P2-5,R0-1,1,描述与实现一致或改名降级；符号搜索不变,todo,必做
+R4-2,D,P3,OpenAPI补齐与参数名统一,P3-14,R4-1,1.5,仅用OpenAPI声明参数可调用每个端点；/affected参数名一致；批量参数统一；旧别名保留,done,必做
+R4-3,D,P2,search_config描述与实现对齐,P2-5,R0-1,1,描述与实现一致或改名降级；符号搜索不变,done,必做
 R4-4,D,P1,规范MCP客户端stdio+SSE e2e,S-1,R4-1,2,规范客户端跑通两种传输；transcript入库；不靠自写客户端自证,todo,必做
 R5-1,E,P1,SCIP优先+CodeGraph/JCodeIndexer去生产,P1-16,R0-1,1,同时配置时SCIP被选中；死适配器不再宣称生产可用；默认treesitter不变,todo,必做
 R5-2,E,P0,LSP路径方法/调用边/回退/生命周期,工作底稿P0-2;P3-7,R1-1;R2-1,6.5,LSP开启时Go/Java方法非空调用边非空；空结果回退treesitter；Close后无孤儿进程,todo,必做

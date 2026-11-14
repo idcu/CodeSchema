@@ -286,11 +286,11 @@ func defineTools() []mcpTool {
 		},
 		{
 			Name:        "search_config",
-			Description: "搜索配置项和注解",
+			Description: "按名称/文档/签名子串搜索符号（大小写不敏感，含注解文本）",
 			InputSchema: toolParams{
 				Type: "object",
 				Properties: map[string]toolProperty{
-					"pattern": {Type: "string", Description: "搜索模式"},
+					"pattern": {Type: "string", Description: "子串（大小写不敏感）"},
 					"project": projectProp,
 				},
 				Required: []string{"pattern"},

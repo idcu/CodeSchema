@@ -81,6 +81,23 @@ func TestMCP_ToolsList(t *testing.T) {
 	if len(tools) != 12 {
 		t.Errorf("expected 12 tools, got %d", len(tools))
 	}
+
+	// P2-5 负控：search_config 的实现是符号字段子串扫描，描述不得声称「配置项」能力。
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		if tool["name"] != "search_config" {
+			continue
+		}
+		desc, _ := tool["description"].(string)
+		if !strings.Contains(desc, "子串") {
+			t.Errorf("search_config description should state 子串 semantics, got %q", desc)
+		}
+		if strings.Contains(desc, "配置项") {
+			t.Errorf("search_config description overstates config capability: %q", desc)
+		}
+		return
+	}
+	t.Error("search_config tool not found")
 }
 
 func TestMCP_ToolCall_Context(t *testing.T) {
