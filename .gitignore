@@ -100,5 +100,9 @@ build/idcu-mt/
 # ONNX inference binary (large Mach-O executable, build artifact — must not be tracked)
 /codeschema-onnx
 
+# P21 本地验证产物（22MB 二进制 + 一次性验证配置，不入库）
+build/codeschema-p21
+build/p21/
+
 # TRAE 内部工作目录（不入库）
 .trae/

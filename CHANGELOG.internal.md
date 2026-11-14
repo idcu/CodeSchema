@@ -6,6 +6,29 @@
 
 ## 提交记录
 
+### Commit 155: feat(ai): P21 生产化 — 增强并发化 + 429 限流退避重试 + 提示词质量约束 + 真实端到端验证
+
+- 背景：P21（AI 标签/文档增强生产化）因 LLM API key 缺失长期阻塞。用户提供 AMD OpenAI 兼容端点（`https://developer.amd.com.cn/radeon/api/v1`，模型 `DeepSeek-V4-Flash`）后解除阻塞，本轮实施三项生产化改进并完成真实质量端到端验证。
+- 动作：
+  - **增强并发化**：`internal/analyzer/analyzer.go` 的 `enhanceTagsWithAI` 由串行逐实体调用 LLM 改为 worker pool 并发（`aiWorkersCap=4`，worker 数按实体量收敛）；`internal/ai/budget.go` 的 `Budget` 计数器原子化（`sync/atomic` CAS，`tryConsume*` 并发不超发硬限）；`enhanceOne` 抽取单实体处理，失败隔离保留。
+  - **429 限流退避重试**：`internal/ai/http_client.go` 的 `chat` 用 `retry.Do`（`gitee.com/idcu-go/retry`）包裹，对 429/网络超时等可重试错误指数退避重试（200ms 起、最多 3 次），新增 `llm rate limited, will retry` 日志区分 429 与其他错误。
+  - **提示词质量约束**：`buildTagPrompt` 明确要求「分类:标签」格式前缀（biz/tech/risk/test 四类，排除 layer/lang），修正模型把分类名与标签值混淆（此前产出 `risk:biz` 等异常标签）。
+  - **测试**：新增 `TestBudget_ConcurrentConsume_NoOvershoot` / `TestBudget_ConcurrentQuery_Independent`（budget 原子并发不超发）；`TestAnalyzer_TagAll_WithEnhancer_Concurrent`（并发 worker 全实体打标）；`mockStore` tag 方法（`UpsertTags`/`GetTagsByClassID` 等）加 `sync.RWMutex` 修 -race 数据竞争。
+- 验证（`internal/config` 24 实体：18 类 + 6 方法）：AMD 端点 → scan 时 `Enhancer` 调用真实 LLM → 标签合并写回 store → `tags-stats` 覆盖率从 **75.0% → 79.2%**（+4.2pp）；方法标签 0→1，biz 业务标签 0→12 实体；AI 标签格式正确（`biz:LSP适配器`、`test:单元测试` 等）；全程 `go build ./...` / `go test -race ./internal/ai/ ./internal/analyzer/` 全绿。验证配置 `build/p21/{baseline,ai,ai-small}.yaml` 落盘。
+- 遗留：`tree-sitter grammar 头文件补齐` 已本轮推进（见下）；AST 路径（-tags treesitter）Go 支持的整体完善仍为开放项。
+- 后续补充（同轮）：`DeriveTagCategory` 新增「分类:值」前缀识别（tech:配置管理→tech、test:单元测试→test 等），修正 tags-stats 分类口径失真；新增 `internal/store/tagcategory_test.go` 3 用例。
+
+### 遗留开放项推进（Commit 156）：非 Go 裸 callee FQN 双路径收敛 + tree-sitter 头文件补齐
+
+- 背景：承接 P19/P20 的开放遗留——非 Go 语言 callee 仍走裸名启发式；`-tags treesitter` 真语法树路径在第三方 grammar（go-tree-sitter/sql、/php）C 头文件处构建失败（`tree_sitter/parser.h` / `tree_sitter/array.h` 找不到）。
+- 动作：
+  - **非 Go 裸 callee FQN 收敛（正则路径 adapter.go）**：`detectCalls`/`qualifyCallee` 增加 `nonGoPkg`/`currentClass` 参数，Java/Kotlin/C# 当前类内**无点前缀裸 callee** 限定为 `pkg.Class.method`，与 caller 命名空间对齐；带点前缀（obj.method）保持原样（类型消歧留待收敛）；无包声明语言（Python/TS/Rust/C++）nonGoPkg 为空 → 行为不变。
+  - **AST 路径同等收敛（adapter_ast.go，P20 宗旨）**：新增 `astQualifyCallee`/`astCurClassName`，两处 call 处理对裸 callee 做与正则路径一致的 `pkg.Class.method` 限定，消除双路径解析漂移。
+  - **tree-sitter grammar 头文件补齐**：`go mod vendor` 不复制 C 间接引用的 `tree_sitter/*.h` 头文件（上游模块的 sql/tree_sitter、php/tree_sitter 子目录在 vendor 化后丢失）→ 在 vendor 内按上游结构补回（php 需 alloc.h/array.h/parser.h，sql 需 parser.h），`-tags treesitter` 构建通过。
+  - **测试**：新增 `TestTreeSitterAdapter_Parse_NonGoBareCalleePkgQualified`（Java/Kotlin/C# 三例，验证裸 callee 包限定），默认 tag 与 `-tags treesitter` 双路径通过；`TestGoCallAndTypeExtraction`/`TestTreeSitterAdapter_Parse_StringCallFiltered` 在 -tags treesitter 下预存失败（AST 路径 Go 处理缺口，非本改动引入，已核验）。
+- 验证：`go build ./...` / `go build -tags treesitter ./...` 通过；`go test ./internal/parser/...`（默认）全绿含 -race；`go test -tags treesitter -run "NonGoBareCalleePkgQualified|NonGoCallerPkgQualified"` 双路径通过；`make counts-check` 通过。
+- 遗留：**AST 路径（-tags treesitter）Go 支持整体完善**（caller/callee 裸名、常量提取在 AST 路径下与正则路径不一致）为开放项；tree-sitter 头文件补丁在 vendor 内、vendor 不被 git 跟踪（项目既有架构矛盾：Docker 依赖仓库 vendor 但 gitignore 之），建议后续迁至 `third_party/` 并接入构建流程持久化。
+
 ### Commit 154: docs: 逐行修正文档漂移（命令数 9 / 包数 33·37 / 语言 31 / 日期刷新）
 
 - 背景：Commit 153 落地 tags-stats 命令与 Docker 纯 Go 默认口径后，逐行复查发现数处文档-代码漂移（均未被 counts-guard 的内联格式覆盖）：入口层仍写 8 个子命令、两处包数仍是 internal=32/total=36、两处语言计数仍是 30、目录速览漏列命令。

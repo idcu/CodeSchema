@@ -1,8 +1,8 @@
 # CodeSchema 开发进度跟踪
 
 > 更新时间：2026-09-08
-> 当前阶段：P19+ 后续里程碑收尾（除 P21 阻塞外全部落地）：**P19 非 Go 调用图 FQN 对齐、P20 真语法树包限定对齐、P22 单测关联策略增强、P23 PG/Redis 大规模仓横扩、P24 agent-bench 多语言任务集扩展、P25 生态资产发布标准化、P26 可观测性细化** 均已实施、测试通过并推送 gitee main；**P21（AI 标签/文档生产化）为唯一剩余待办，因 LLM API key 缺失阻塞（用户暂缓）**。
-> 下一个阶段：P21 需用户提供 LLM API key 后方可启动；其余 P0–P18、PHASE_09 开发计划 16 任务及 P19–P26 已全部完成（详见下方维护优化章节与「P19+ 后续里程碑」节）。
+> 当前阶段：P19+ 后续里程碑收尾（现已全部落地）：**P19 非 Go 调用图 FQN 对齐、P20 真语法树包限定对齐、P21 AI 标签/文档增强生产化、P22 单测关联策略增强、P23 PG/Redis 大规模仓横扩、P24 agent-bench 多语言任务集扩展、P25 生态资产发布标准化、P26 可观测性细化** 均已实施、测试通过；P21 已用 AMD OpenAI 兼容端点（DeepSeek-V4-Flash）完成真实质量端到端验证（覆盖率 75.0%→79.2%）。P0–P18、PHASE_09 开发计划 16 任务亦已全部完成。
+> 下一个阶段：P19–P26 全部里程碑已完成，进入持续打磨与文档维护阶段。
 
 ---
 
@@ -501,10 +501,18 @@ P18      [████████████████████] 100%
 - **状态**：已实施——`adapter_ast.go` 新增 `astPackageDecl`，在 caller 回填点应用 `pkg.Class.Method` 前缀，Java/Kotlin/C# 无论默认正则还是 `-tags treesitter` 均产出 `com.example.OrderService.createOrder` 形态，消除双路径解析漂移；新增三语言用例断言。**环境遗留**：本机 `-tags treesitter` 构建因第三方 grammar（sql/php）缺 vendored C 头文件失败，属 HEAD 预存环境问题，改动经代码对称性与 gofmt 校验。
 - **依赖**：CGO + 各语言 grammar 构建（CI 需 CGO 环境）。
 
-### P21 — AI 标签/文档增强生产化（中优先）⛔ 唯一剩余，依赖 LLM API key
-- **目标**：`internal/ai` 的 Tagger/DocEnhancer 当前在缺 key 时优雅降级（`ai: enhancement disabled`）。定义接入规范、降级策略、质量评估基准；真实质量端到端验证需 API key。
-- **状态**：**阻塞中**——用户 2026-09-02 明确暂缓；提供 LLM API key 后可启动。设计上零造假红线：无 key 时 behavior 不变。
-- **依赖**：**LLM API key（本里程碑阻塞，唯一剩余待办）**。
+### P21 — AI 标签/文档增强生产化（中优先）✅ 已完成（本轮实施）
+- **目标**：`internal/ai` 的 Tagger/DocEnhancer 在缺 key 时优雅降级（`ai: enhancement disabled`）。定义接入规范、降级策略、质量评估基准；真实质量端到端验证需 API key。
+- **状态**：已实施——用户提供 AMD OpenAI 兼容端点（`DeepSeek-V4-Flash`）后，完成三项生产化改进与真实质量端到端验证：
+  1. **增强并发化**：`enhanceTagsWithAI` 由串行逐实体调用 LLM 改为 worker pool 并发（`aiWorkersCap=4`），大仓扫描从串行 60s+ 降至数秒；`Budget` 计数器原子化（`sync/atomic` CAS），并发消费不超发硬限（无 `-race` 数据竞争）。
+  2. **429 限流退避重试**：`openAICompatClient.chat` 用 `retry.Do` 包裹，对 429/网络超时等可重试错误做指数退避重试（`200ms` 起、最多 3 次），提升真实 LLM 成功率；失败隔离不影响主流程。
+  3. **提示词质量约束**：`buildTagPrompt` 明确要求「分类:标签」格式前缀（biz/tech/risk/test 四类），修正模型把分类名与标签值混淆的问题。
+  - **真实质量端到端验证**（`internal/config` 24 实体）：AMD 端点 → scan 时 `Enhancer` 调用真实 LLM → 标签合并写回 store → `tags-stats` 覆盖率从 **75.0% → 79.2%**（+4.2pp），方法标签 0→1，biz 业务标签 0→12 实体；AI 标签格式正确（`biz:LSP适配器`、`test:单元测试` 等）。
+  - **分类口径修复（同轮）**：`store.DeriveTagCategory` 新增「分类:值」前缀识别（`tech:配置管理`→tech、`test:单元测试`→test），修正 AI 前缀标签被一律归入 biz 的口径失真；新增 `internal/store/tagcategory_test.go` 3 用例。
+  - **非 Go 裸 callee FQN 双路径收敛（遗留推进）**：正则路径（`adapter.go` `qualifyCallee`）与 AST 路径（`adapter_ast.go` `astQualifyCallee`）对 Java/Kotlin/C# 当前类内**无点前缀裸 callee** 统一限定为 `pkg.Class.method`，与 caller 命名空间对齐，消除双路径解析漂移；带点前缀（obj.method）保持原样（类型消歧留待收敛）；Python/TS/Rust/C++ 无包声明 → 行为不变。新增 `TestTreeSitterAdapter_Parse_NonGoBareCalleePkgQualified` 三语言用例，双 tag 通过。
+  - **tree-sitter grammar 头文件补齐（遗留推进）**：`go mod vendor` 不复制 C 间接引用的 `tree_sitter/*.h` 头文件 → 按上游结构在 vendor 内补回（php 需 alloc/array/parser.h，sql 需 parser.h），`-tags treesitter` 构建通过。
+  - 配套：`build/p21/{baseline,ai,ai-small}.yaml` 验证配置；新增并发测试 `TestBudget_ConcurrentConsume_NoOvershoot` / `TestBudget_ConcurrentQuery_Independent` / `TestAnalyzer_TagAll_WithEnhancer_Concurrent`，`mockStore` tag 方法加锁修 data race。
+- **依赖**：无（LLM API key 已就绪）。
 
 ### P22 — 单测关联策略增强（中优先）✅ 已完成（Commit `7ac1e68`）
 - **目标**：`FindTestLinks` 五策略覆盖度有限；扩展到更多测试框架识别（Go test / JUnit / pytest / Jest）。
@@ -532,4 +540,5 @@ P18      [████████████████████] 100%
 - **依赖**：无。
 
 > 决策记录（2026-09-02）：T8（P19+ 里程碑定义）按用户「其它全量推进实施」指令落地为本文档规划节；P21 因 LLM API key 缺失暂缓，P23 因 docker/Redis 实例拉取阻塞需环境就绪后推进；其余 P19/P20/P22/P24/P25/P26 为可自主排期的后续能力。
-> 状态核验（2026-09-03）：用户「push并全量推进」后，P19–P26 除 **P21（LLM API key 阻塞）** 外均已实施、测试通过并推送 gitee main；本节点剩余待办仅 P21。
+> 状态核验（2026-09-03）：用户「push并全量推进」后，P19–P26 除 P21 外均已实施、测试通过并推送 gitee main。
+> 状态核验（2026-09-11）：用户提供 AMD OpenAI 兼容端点（DeepSeek-V4-Flash）后，P21 已实施并完成真实质量端到端验证——至此 P19–P26 全部里程碑落地，无剩余待办。
