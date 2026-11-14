@@ -332,7 +332,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 						}
 					}
 				default:
-					callee := astCalleeName(n, data)
+					callee := astQualifyCallee(astCalleeName(n, data), astPkg, astCurClassName(curClass))
 					if callee != "" && !isKeyword(callee) {
 						caller := ""
 						if curMethod != nil {
@@ -394,7 +394,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 			curMethod = &doc.Methods[len(doc.Methods)-1]
 
 		case callTypes[typ]:
-			callee := astCalleeName(n, data)
+			callee := astQualifyCallee(astCalleeName(n, data), astPkg, astCurClassName(curClass))
 			if callee == "" || isKeyword(callee) {
 				break
 			}
@@ -691,6 +691,28 @@ func astCalleeName(n *ts.Node, src []byte) string {
 		return stripTypeArgs(strings.TrimSpace(text[:idx]))
 	}
 	return ""
+}
+
+// astCurClassName 安全返回当前类名（curClass 为 nil 时返回空串）。
+func astCurClassName(cur *parser.ClassIR) string {
+	if cur == nil {
+		return ""
+	}
+	return cur.Name
+}
+
+// astQualifyCallee 把 AST 路径的裸 callee（当前类内无点前缀的方法调用）包限定，
+// 与正则路径（adapter.go qualifyCallee）口径一致（P21 遗留收敛）：
+// Java/Kotlin/C# 显式包声明语言 → pkg.Class.callee；含点前缀（obj.method / pkg.func）
+// 或 astPkg 为空 → 原样返回（类型消歧留待语种类别逐步收敛）。
+func astQualifyCallee(callee, astPkg, curClass string) string {
+	if astPkg == "" || curClass == "" {
+		return callee
+	}
+	if strings.Contains(callee, ".") {
+		return callee
+	}
+	return astPkg + "." + curClass + "." + callee
 }
 
 // ocamlHasParam 判断 OCaml value_definition 是否为函数定义（let_binding 含 parameter 子节点）。

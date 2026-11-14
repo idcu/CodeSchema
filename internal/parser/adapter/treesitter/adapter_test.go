@@ -1258,3 +1258,81 @@ public class OrderService {
 		})
 	}
 }
+
+// TestTreeSitterAdapter_Parse_NonGoBareCalleePkgQualified 验证非 Go 语言裸 callee
+// （当前类内无点前缀的方法调用）的包限定（P21 遗留收敛）：
+// Java/Kotlin/C# 显式包声明语言，裸 callee 产出 pkg.Class.Method，与 caller 命名空间对齐。
+func TestTreeSitterAdapter_Parse_NonGoBareCalleePkgQualified(t *testing.T) {
+	a := NewTreeSitterAdapter()
+	dir := t.TempDir()
+
+	cases := []struct {
+		name, filename, content, wantCallee string
+	}{
+		{
+			name:     "java",
+			filename: "OrderService.java",
+			content: `package com.example;
+
+public class OrderService {
+    public void createOrder(Order order) {
+        helper();
+    }
+    private void helper() {}
+}
+`,
+			wantCallee: "com.example.OrderService.helper",
+		},
+		{
+			name:     "kotlin",
+			filename: "UserService.kt",
+			content: `package com.example
+
+class UserService {
+    fun getUser(id: Long) {
+        normalize(id)
+    }
+    private fun normalize(id: Long): Long = id
+}
+`,
+			wantCallee: "com.example.UserService.normalize",
+		},
+		{
+			name:     "csharp",
+			filename: "OrderService.cs",
+			content: `namespace Acme.Orders;
+
+public class OrderService {
+    public void Create(Order order) {
+        Normalize(order);
+    }
+    private void Normalize(Order o) {}
+}
+`,
+			wantCallee: "Acme.Orders.OrderService.Normalize",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.filename)
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := a.Parse(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			found := false
+			for _, c := range doc.Calls {
+				if c.CalleeFQN == tc.wantCallee {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("bare callee FQN=%q not found; calls=%+v", tc.wantCallee, doc.Calls)
+			}
+		})
+	}
+}

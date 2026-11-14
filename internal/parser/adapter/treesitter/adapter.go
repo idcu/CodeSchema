@@ -493,7 +493,7 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 				}
 			}
 			if strings.Contains(code, "(") {
-				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType)
+				detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, goPkg, curRecvVar, curRecvType, "", "")
 			}
 			goDepth += braceNet(code)
 			if curMethodIdx >= 0 && goDepth <= methodOpenDepth {
@@ -572,8 +572,14 @@ func (a *TreeSitterAdapter) Parse(ctx context.Context, path string) (*parser.IRD
 					caller = nonGoPkg + "." + caller
 				}
 			}
-			// 通用路径传空 pkg/recv（非 Go 不包限定，保持原启发式行为）
-			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "")
+			// 通用路径：传 nonGoPkg 与当前类名（Java/Kotlin/C# 显式包声明语言），
+			// 使裸 callee（无点前缀）也包限定为 pkg.Class.Method，与 caller 命名空间对齐；
+			// 无包信息语言（Python/TS/Rust/C++ 等）nonGoPkg 为空 → callee 保持裸名启发式。
+			curClass := ""
+			if currentClass != nil {
+				curClass = currentClass.Name
+			}
+			detectCalls(code, lineNum, &doc.Calls, patterns.callPattern, caller, "", "", "", nonGoPkg, curClass)
 		}
 
 		// 非注释行清空文档注释缓冲区
@@ -966,11 +972,16 @@ func (c *codeSanitizer) clean(line, lang string) string {
 // caller 为调用所在方法 FQN（Go 精确路径已包限定）；
 // pkg/recvVar/recvType 仅 Go 精确路径提供，用于把 callee 包限定为
 // pkg.Func（包级函数）或 pkg.RecvType.Method（自接收者调用）；其余语言传空，保持原行为。
-func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType string) {
+// detectCalls 从一行源码中提取函数调用关系。
+//
+// caller 为当前方法的 FQN；pkg/recvVar/recvType 供 Go 精确路径的 callee 限定；
+// nonGoPkg/currentClass 供 Java/Kotlin/C# 显式包声明语言的裸 callee 限定
+// （把当前类内无点前缀的方法调用限定为 nonGoPkg.Class.Method）。
+func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *regexp.Regexp, caller, pkg, recvVar, recvType, nonGoPkg, currentClass string) {
 	matches := pattern.FindAllStringSubmatch(line, -1)
 	for _, m := range matches {
 		if len(m) >= 2 {
-			callee := qualifyCallee(m[1], pkg, recvVar, recvType)
+			callee := qualifyCallee(m[1], pkg, recvVar, recvType, nonGoPkg, currentClass)
 			// 跳过关键字和常见误匹配
 			if isKeyword(callee) || len(callee) <= 1 {
 				continue
@@ -987,27 +998,32 @@ func detectCalls(line string, lineNum int, calls *[]parser.CallIR, pattern *rege
 
 // qualifyCallee 把裸名/ receiver.Method 形式的 callee 限定为包级 FQN。
 //
-// 规则（仅当 pkg 非空，即 Go 精确路径）：
-//   - 裸名（如 loadConfig）→ pkg.loadConfig（包级函数）；
-//   - 自接收者调用（recv.Method 且 recv == 当前方法 receiver 变量）→ pkg.RecvType.Method；
-//   - 其余 receiver.Method（无法消歧 receiver 类型，属类型推导范畴）→ 保持原样；
-//   - 已带 pkg 前缀（如 pkg.Func）→ 保持。
-//
-// pkg 为空（非 Go / 无包信息）→ 原样返回，保持原启发式行为。
-func qualifyCallee(callee, pkg, recvVar, recvType string) string {
-	if pkg == "" {
-		return callee
-	}
+// 规则（优先级从高到低）：
+//   - 已带 pkg 前缀（如 pkg.Func）→ 保持原样；
+//   - 自接收者调用（recv.Method 且 recv == 当前方法 receiver 变量）→ pkg.RecvType.Method（Go 精确路径）；
+//   - 无点前缀的裸名（当前作用域方法调用）→ 若有 nonGoPkg+currentClass（Java/Kotlin/C#）限定为
+//     nonGoPkg.CurrentClass.callee；否则若 pkg 非空（Go 包级函数）限定为 pkg.callee；
+//   - 其余 receiver.Method（无法消歧 receiver 类型）→ 保持原样。
+func qualifyCallee(callee, pkg, recvVar, recvType, nonGoPkg, currentClass string) string {
 	if strings.Contains(callee, ".") {
-		// 自接收者调用：recv == 当前方法 receiver 变量 → pkg.RecvType.Method
+		// 自接收者调用：recv == 当前方法 receiver 变量 → pkg.RecvType.Method（Go 精确路径）
 		if recvVar != "" && recvType != "" && strings.HasPrefix(callee, recvVar+".") {
 			return pkg + "." + recvType + strings.TrimPrefix(callee, recvVar)
 		}
 		// 已带 pkg 前缀或无法消歧的 receiver.Method → 保持
 		return callee
 	}
-	// 裸名（包级函数调用）→ 包限定 pkg.callee
-	return pkg + "." + callee
+	// 无点前缀的裸名：当前作用域内的方法调用
+	if nonGoPkg != "" && currentClass != "" {
+		// Java/Kotlin/C# 显式包声明：限定为 pkg.Class.callee
+		return nonGoPkg + "." + currentClass + "." + callee
+	}
+	if pkg != "" {
+		// Go 包级函数调用 → 包限定 pkg.callee
+		return pkg + "." + callee
+	}
+	// 无包信息（Python/TS/Rust/C++ 等）→ 原样返回，保持原启发式行为
+	return callee
 }
 
 // goRecvVar 从方法定义的 receiver 段解析归属变量名。
