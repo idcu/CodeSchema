@@ -22,7 +22,7 @@ R3-2,C,P1,PG method.full_name列与读写,P1-5,R1-1,2.5,PG method.full_name非�
 R3-3,C,P1,租户DSN与检索/向量目录隔离,P1-3,R3-6,4,两租户无DSN时各自./data/<id>；fts/vector/idf隔离；跨租户查不到；单租户行为不变,todo,必做
 R3-4,C,P1,Redis租户前缀/TTL/Flush scoping,P1-4,R3-3,2.5,键带租户前缀；TTL>0；rebuild只清本租户；同名FQN不覆盖,todo,必做
 R3-5,C,P1,cloneConfig补齐AI/Vector字段,P1-17,R0-1,0.5,租户继承AI key/base_url与Vector模型字段；基础配置不变,done,必做
-R3-6,C,P1,启动时调用Validate,P1-18,R3-5,1,非法配置启动失败并明确报错；合法配置仍启动,todo,必做
+R3-6,C,P1,启动时调用Validate,P1-18,R3-5,1,非法配置启动失败并明确报错；合法配置仍启动,done,必做
 R3-7,C,P2,目录0700/文件0600/SQLite chmod,P2-13,R0-1,0.75,目录0700文件0600；功能不变,todo,必做
 R3-8,C,P2,CORS默认收敛,P2-14,R0-1,0.5,启用认证时不返回通配CORS；文档说明,done,必做
 R3-9,C,P2,健康检查报告真实驱动与向量状态,P2-15,R0-1,1.5,/health/db报告实际驱动；向量不可用时非ok；健康时仍ok,done,必做

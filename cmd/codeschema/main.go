@@ -47,6 +47,13 @@ func main() {
 	}
 }
 
+// validateConfig 启动前校验配置，聚合报告全部问题（而非只报第一条）。
+func validateConfig(cfg *config.Config) error {
+	if errs := config.Validate(cfg); len(errs) > 0 {
+		return fmt.Errorf("invalid config (%d problems): %v", len(errs), errs)
+	}
+	return nil
+}
 func run() error {
 	// 全局配置标志
 	configPath := flag.String("config", "", "配置文件路径（.yaml/.yml/.json）")
@@ -90,6 +97,11 @@ Use "codeschema <command> -h" for more information about a command.
 
 	// P9: 环境变量覆盖（优先级高于配置文件，但低于 CLI 参数）
 	config.LoadFromEnv(cfg)
+
+	// 启动前校验：一次性报告全部配置问题，避免带病启动后在中途才失败。
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
 
 	// 优雅关闭管理器（30s 全局超时）
 	graceful := gcm.NewGracefulManager(30 * time.Second)

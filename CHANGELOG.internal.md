@@ -6,6 +6,20 @@
 
 ## 提交记录
 
+### Commit 195: fix(cmd): 启动时校验配置并聚合报告全部问题（R3-6 / P1-18）
+
+- 问题：`config.Validate` 早已实现且返回全部错误，但生产路径从未调用；非法配置
+  （`scanner.workers=-1`、未知 `storage.driver`）会带病启动，直到运行期才以无关
+  症状失败。
+- 修复：`run()` 在环境变量覆盖后调用新增的 `validateConfig`；错误信息带问题计数
+  与全部条目（含配置项名），一次性可定位。
+- 负控（先红后绿）：`TestValidateConfigReportsAllErrors`——临时将校验置空后实测
+  `非法配置应返回错误（当前静默放行）`（红）；恢复后断言错误同时包含
+  `scanner.workers` 与 `storage.driver`（绿）。`TestValidateConfigAcceptsDefaults`
+  保证默认配置可通过。
+- 验证：`go build ./... && go vet ./... && go vet -tags "pg redis treesitter" ./... && make test`
+  全绿；counts 60305（60.3k）。
+
 ### Commit 194: fix(retrieval): exact 模式改用 token 精确匹配（R2-9 / P1-2）
 
 - 问题：`Searcher.Search` 的 `SearchModeExact` 分支调用 `FTSModeFuzzy`，exact 与
