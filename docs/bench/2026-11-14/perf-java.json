@@ -15,61 +15,61 @@
     "yaml": 8
   },
   "scan": {
-    "duration_ms": 41.262,
+    "duration_ms": 38.211,
     "files": 79,
     "classes": 45,
     "methods": 195,
     "calls": 1544,
     "symbols": 240,
-    "files_per_sec": 1914.565,
-    "symbols_per_sec": 5816.401
+    "files_per_sec": 2067.457,
+    "symbols_per_sec": 6280.882
   },
   "index": {
-    "duration_ms": 138.734,
+    "duration_ms": 132.483,
     "files": 79,
     "classes": 45,
     "methods": 195,
     "calls": 1544,
     "symbols": 240,
-    "files_per_sec": 569.432,
-    "symbols_per_sec": 1729.919
+    "files_per_sec": 596.302,
+    "symbols_per_sec": 1811.55
   },
   "memory": {
-    "peak_heap_alloc_bytes": 85458784,
-    "peak_heap_inuse_bytes": 89866240,
-    "peak_heap_sys_bytes": 137461760,
-    "total_alloc_bytes": 3758974680,
-    "live_heap_alloc_bytes": 10763424
+    "peak_heap_alloc_bytes": 85880072,
+    "peak_heap_inuse_bytes": 90046464,
+    "peak_heap_sys_bytes": 120651776,
+    "total_alloc_bytes": 3331334600,
+    "live_heap_alloc_bytes": 10774216
   },
   "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
-  "live_heap_after_endpoints_bytes": 11267320,
+  "live_heap_after_endpoints_bytes": 11267008,
   "endpoints": {
     "context": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 3.744,
-      "p95_ms": 5.247,
-      "p99_ms": 5.669,
-      "max_ms": 5.805,
-      "mean_ms": 4.131
+      "p50_ms": 4.011,
+      "p95_ms": 5.049,
+      "p99_ms": 5.345,
+      "max_ms": 5.71,
+      "mean_ms": 4.09
     },
     "impact": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 0.093,
-      "p95_ms": 0.149,
-      "p99_ms": 0.223,
-      "max_ms": 0.302,
-      "mean_ms": 0.1
+      "p50_ms": 0.092,
+      "p95_ms": 0.136,
+      "p99_ms": 0.193,
+      "max_ms": 0.288,
+      "mean_ms": 0.098
     },
     "search": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 2.015,
-      "p95_ms": 2.382,
-      "p99_ms": 2.579,
-      "max_ms": 2.716,
-      "mean_ms": 2.047
+      "p50_ms": 2.034,
+      "p95_ms": 2.453,
+      "p99_ms": 2.718,
+      "max_ms": 3.964,
+      "mean_ms": 2.09
     }
   },
   "symbols_used": {

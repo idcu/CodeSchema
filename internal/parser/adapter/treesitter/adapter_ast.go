@@ -1371,39 +1371,41 @@ func firstIdentifierText(n *ts.Node, src []byte) string {
 	return found
 }
 
+// keywordSet 语言关键字集合，包级复用：每次调用重建 map 会带来 GB 级分配。
+var keywordSet = map[string]bool{
+	"if": true, "for": true, "while": true, "switch": true,
+	"return": true, "catch": true, "throw": true, "new": true,
+	"delete": true, "typeof": true, "instanceof": true, "import": true,
+	"print": true, "len": true, "cap": true, "make": true,
+	"append": true, "copy": true, "close": true, "panic": true,
+	"recover": true, "range": true, "defer": true, "go": true,
+	"assert": true, "raise": true, "yield": true, "await": true,
+	"async": true, "super": true, "this": true, "self": true,
+	"fun": true, "val": true, "var": true, "when": true, "is": true,
+	"in": true, "suspend": true, "require": true,
+	"check": true, "error": true, "TODO": true, "println": true,
+	"fn": true, "let": true, "mut": true, "match": true, "impl": true,
+	"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
+	"sizeof": true, "static_cast": true, "dynamic_cast": true,
+	"reinterpret_cast": true, "const_cast": true, "printf": true,
+	// Bash
+	"echo": true, "cd": true, "source": true, "local": true,
+	"export": true, "eval": true, "exit": true,
+	// Ruby / Scala
+	"puts": true, "require_relative": true,
+	// Elixir 标准库
+	"IO.puts": true, "IO.inspect": true, "IO.gets": true,
+	"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
+	"Map.get": true, "Map.put": true, "String.length": true,
+	// OCaml 标准库
+	"print_endline": true, "print_string": true, "print_int": true,
+	"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
+	"Printf.printf": true, "failwith": true,
+}
+
 // isKeyword 判断是否为语言关键字，避免把控制流表达式误当调用。
 func isKeyword(name string) bool {
-	keywords := map[string]bool{
-		"if": true, "for": true, "while": true, "switch": true,
-		"return": true, "catch": true, "throw": true, "new": true,
-		"delete": true, "typeof": true, "instanceof": true, "import": true,
-		"print": true, "len": true, "cap": true, "make": true,
-		"append": true, "copy": true, "close": true, "panic": true,
-		"recover": true, "range": true, "defer": true, "go": true,
-		"assert": true, "raise": true, "yield": true, "await": true,
-		"async": true, "super": true, "this": true, "self": true,
-		"fun": true, "val": true, "var": true, "when": true, "is": true,
-		"in": true, "suspend": true, "require": true,
-		"check": true, "error": true, "TODO": true, "println": true,
-		"fn": true, "let": true, "mut": true, "match": true, "impl": true,
-		"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
-		"sizeof": true, "static_cast": true, "dynamic_cast": true,
-		"reinterpret_cast": true, "const_cast": true, "printf": true,
-		// Bash
-		"echo": true, "cd": true, "source": true, "local": true,
-		"export": true, "eval": true, "exit": true,
-		// Ruby / Scala
-		"puts": true, "require_relative": true,
-		// Elixir 标准库
-		"IO.puts": true, "IO.inspect": true, "IO.gets": true,
-		"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
-		"Map.get": true, "Map.put": true, "String.length": true,
-		// OCaml 标准库
-		"print_endline": true, "print_string": true, "print_int": true,
-		"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
-		"Printf.printf": true, "failwith": true,
-	}
-	return keywords[name]
+	return keywordSet[name]
 }
 
 // —— Java 参数与可见类型（2026-11-14 新增，同名方法消歧用） ——

@@ -1,0 +1,37 @@
+{
+  "corpus": "large",
+  "root": "/usr/local/Cellar/go/1.26.5/libexec/src",
+  "files": 7008,
+  "loc": 2276611,
+  "stages_bytes": {
+    "after_call_graph_cache": 442096040,
+    "after_index": 379985632,
+    "after_scan": 137465208,
+    "baseline_open": 2329888,
+    "before_call_graph_cache": 379985936,
+    "build_peak": 1161875296,
+    "call_graph_retained": 62110104
+  },
+  "notes": [
+    "live heap = runtime.GC() 后 HeapAlloc，仅本进程、不含子进程与 OS 页缓存",
+    "peak 由 20ms 采样得到；peak-*.pprof 为构建期按新峰值抓取的堆快照"
+  ],
+  "profile_files": [
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-12.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/after-scan.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-01.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-02.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-03.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-04.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-05.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-06.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-07.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-08.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-09.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-10.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-11.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/peak-12.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/after-index.pprof",
+    "/var/folders/kl/bbrjbqsd62n9sfj2cdgqwq1r0000gn/T/codeschema-mem-attribution/after-graph.pprof"
+  ]
+}

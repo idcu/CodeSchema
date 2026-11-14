@@ -1,6 +1,6 @@
 # 性能基线：索引吞吐、查询延迟与多租户隔离（S-3）
 
-> 最后更新：2026-11-14（追加调用图按代次缓存后的对比数据，见 §6.1）
+> 最后更新：2026-11-14（追加调用图按代次缓存与 file 后端内存归因，见 §6.1 / §8.4）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -11,17 +11,19 @@
 | 维度 | 实测（本机单进程） |
 |---|---|
 | 最大语料 | Go 标准库 `src`：6,786 个 `.go` / 2,276,611 行 / 91,251 个符号 |
-| 索引吞吐（large） | scan 1,262.1 files/s、16,433.3 symbols/s；index 1,080.2 files/s、14,065.2 symbols/s |
-| 索引内存（large） | 堆峰值 1,921.3 MiB；GC 后 live 363.8 MiB；查询期常驻 423.4 MiB |
-| `/context`（large） | P50 142.2 ms / P95 158.9 ms，0 错误 |
-| `/impact`（large） | P50 3.6 ms / P95 4.5 ms，0 错误（改造前 378.5 / 397.8 ms，见 §6.1） |
-| `/search`（large） | P50 243.9 ms / P95 257.8 ms，0 错误 |
+| 索引吞吐（large） | scan 1,725.0 files/s、22,460.8 symbols/s；index 1,084.1 files/s、14,115.7 symbols/s |
+| 索引内存（large） | 堆峰值 1,935.5 MiB（瞬态，非常驻）；GC 后 live 363.8 MiB；查询期常驻 423.0 MiB |
+| `/context`（large） | P50 141.5 ms / P95 160.9 ms，0 错误 |
+| `/impact`（large） | P50 3.6 ms / P95 5.4 ms，0 错误（改造前 378.5 / 397.8 ms，见 §6.1） |
+| `/search`（large） | P50 244.9 ms / P95 256.8 ms，0 错误 |
 | 多租户并发 | 顺序总和 6,474.9 ms → 并发墙钟 4,751.3 ms（争用比 0.734） |
 | 多租户隔离 | **通过**：store 路径 0 越界、FTS 目录互异、连接池上限生效、Redis 命名空间互异 |
 | 查询错误率 | 7,294 次并发查询 / 0 错误 |
 
-发现的明确结构性问题：持久化向量存储的 O(n²) 写放大（§8.1）与调用图逐请求全量重建
-（§6.1），均已先红后绿修复；`file` 后端全量驻留内存未发现结构缺陷，归因见 §8.2。
+发现的明确结构性问题：持久化向量存储的 O(n²) 写放大（§8.1）、调用图逐请求全量重建
+（§6.1）、关键字判定每次调用重建 map 的分配放大（§8.4），均已先红后绿修复。
+`file` 后端的 1.9 GiB 堆峰值经归因为**索引构建期瞬态**（GC 余量 + JSON 快照序列化），
+常驻仅 363.8 MiB，未发现泄漏或非线性增长；上限位置见 §8.4，本轮未做进一步优化。
 
 ## 2. 硬件与运行环境
 
@@ -75,40 +77,41 @@
 
 | key | scan 耗时 | scan files/s | scan symbols/s | index 耗时 | index files/s | index symbols/s | 堆峰值 | GC 后 live |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `go` | 310.9 ms | 942.3 | 10,709.4 | 322.7 ms | 908.0 | 10,319.0 | 98.6 MiB | 20.9 MiB |
-| `java` | 41.3 ms | 1,914.6 | 5,816.4 | 138.7 ms | 569.4 | 1,729.9 | 81.5 MiB | 10.3 MiB |
-| `ts` | 252.5 ms | 1,426.0 | 2,463.7 | 368.1 ms | 978.0 | 1,689.9 | 98.4 MiB | 20.2 MiB |
-| `large` | 5,552.8 ms | 1,262.1 | 16,433.3 | 6,487.7 ms | 1,080.2 | 14,065.2 | 1,921.3 MiB | 363.8 MiB |
+| `go` | 216.1 ms | 1,365.0 | 15,477.2 | 295.3 ms | 999.1 | 11,328.3 | 71.1 MiB | 21.0 MiB |
+| `java` | 38.2 ms | 2,067.5 | 6,280.9 | 132.5 ms | 596.3 | 1,811.5 | 81.9 MiB | 10.3 MiB |
+| `ts` | 191.3 ms | 1,882.0 | 3,251.6 | 351.5 ms | 1,024.1 | 1,769.4 | 102.5 MiB | 20.2 MiB |
+| `large` | 4,062.7 ms | 1,725.0 | 22,460.8 | 6,464.5 ms | 1,084.1 | 14,115.7 | 1,935.5 MiB | 363.8 MiB |
 
-补充（`large`）：`HeapInuse` 峰值 1,971.2 MiB；累计分配 22.88 GiB（该值随进程内前序语料累计，
+补充（`large`）：`HeapInuse` 峰值 2,010.4 MiB；累计分配 6.11 GiB（该值随进程内前序语料累计，
 只适合同口径对比）。小语料的堆峰值有 30% 量级的运行间波动，绝对值仅供回归参考。
 
 观察：
 
-- 小语料的 scan 吞吐在 908–1,976 files/s，`large` 仍有 1,246 files/s，未出现随规模崩塌的吞吐拐点。
-- index 阶段在小语料上比 scan 慢（Java 3.7 倍、TS 1.9 倍），因为要额外完成 FTS 批量写入、
-  向量构建（每篇一次 `LocalEmbedder`）与原文批量落盘；`large` 的 index 仅为 scan 的 1.17 倍，
-  说明批量通道在规模上摊薄了固定成本。
-- 堆峰值主要随**符号与向量数量**增长：`large` 1.92 GiB 峰值、364 MiB live，符合 `file` 后端
-  全量驻留内存的设计；这是后端选型问题，不是本轮代码缺陷（归因见 §8.2）。
+- 小语料的 scan 吞吐在 1,365–2,068 files/s，`large` 仍有 1,725 files/s，未出现随规模崩塌的吞吐拐点。
+- `large` 的 scan 吞吐由 1,262 提升到 1,725 files/s（+36.7%），来自 §8.4 的关键字 map 复用修复；
+  index 吞吐基本持平（1,080 → 1,084 files/s），其成本由 FTS/向量构建主导。
+- index 阶段在小语料上比 scan 慢（Java 3.5 倍、TS 1.8 倍），因为要额外完成 FTS 批量写入、
+  向量构建（每篇一次 `LocalEmbedder`）与原文批量落盘；`large` 的 index 仅为 scan 的 1.59 倍。
+- 堆峰值 1.9 GiB 是**构建期瞬态**而非常驻：GC 后 live 仅 363.8 MiB（IR 131.1 + 文档/向量/FTS 约 232），
+  峰值来自索引构建的 JSON 快照与 GC 余量，归因见 §8.4。
 
 ## 6. 查询延迟（串行，n=200，0 错误）
 
 | key | `/context` P50 / P95 | `/impact` P50 / P95 | `/search` P50 / P95 |
 |---|---:|---:|---:|
-| `go` | 5.7 / 7.8 ms | 8.6 / 10.9 ms | 10.2 / 11.8 ms |
-| `java` | 3.7 / 5.2 ms | 0.1 / 0.1 ms | 2.0 / 2.4 ms |
-| `ts` | 10.1 / 11.8 ms | 0.1 / 0.1 ms | 7.0 / 8.2 ms |
-| `large` | 142.2 / 158.9 ms | 3.6 / 4.5 ms | 243.9 / 257.8 ms |
+| `go` | 5.7 / 7.6 ms | 8.7 / 10.6 ms | 10.4 / 11.8 ms |
+| `java` | 4.0 / 5.0 ms | 0.1 / 0.1 ms | 2.0 / 2.5 ms |
+| `ts` | 10.1 / 12.1 ms | 0.1 / 0.1 ms | 7.0 / 8.4 ms |
+| `large` | 141.5 / 160.9 ms | 3.6 / 5.4 ms | 244.9 / 256.8 ms |
 
 P99 / max：
 
 | key | `/context` P99 / max | `/impact` P99 / max | `/search` P99 / max |
 |---|---:|---:|---:|
-| `go` | 8.7 / 10.0 ms | 11.6 / 12.5 ms | 12.5 / 14.9 ms |
-| `java` | 5.7 / 5.8 ms | 0.2 / 0.3 ms | 2.6 / 2.7 ms |
-| `ts` | 13.8 / 16.4 ms | 0.2 / 0.2 ms | 8.7 / 10.3 ms |
-| `large` | 160.7 / 166.2 ms | 5.0 / 5.2 ms | 263.2 / 272.4 ms |
+| `go` | 8.2 / 8.7 ms | 11.2 / 13.2 ms | 12.6 / 13.5 ms |
+| `java` | 5.3 / 5.7 ms | 0.2 / 0.3 ms | 2.7 / 4.0 ms |
+| `ts` | 13.2 / 14.8 ms | 0.2 / 0.2 ms | 9.3 / 10.9 ms |
+| `large` | 163.9 / 166.3 ms | 6.1 / 6.6 ms | 267.8 / 269.5 ms |
 
 说明：`java`/`ts` 的 `/impact` 延迟极低，是因为选样符号位于最小文件中、调用图邻域很小；
 不能据此推断这两个语料的全局影响面成本。跨语料比较只看 `large` 与同语料内的端点相对关系。
@@ -119,7 +122,8 @@ P99 / max：
 全量读取 466,505 条调用边重建图（`large` 每次约 0.36 s），并发请求各自重建，CPU 与分配
 随 QPS 线性放大。此前只有「同一请求内 ctx 复用」，没有跨请求缓存。
 
-**修改前 vs 修改后**（`large` 语料，同机同口径，n=200，0 错误）：
+**修改前 vs 修改后**（`large` 语料，同机同口径，n=200，0 错误；数据取自提交 `d58f861`
+的独立复跑，未混入 §8.4 的关键字修复）：
 
 | 指标 | 修改前（`ab54af0`） | 修改后 | 变化 |
 |---|---:|---:|---:|
@@ -193,7 +197,7 @@ P99 / max：
   读写隔离由 `go test ./internal/store/redis -run Namespace` 覆盖，但**本基准未连真实 Redis**，不虚报。
 - 争用比 0.734 表示并发仍有净收益（墙钟比串行总和少 26.6%），同时存在可观测争用。
   本轮**未做锁等待/IO 剖析**，不把争用归因到具体锁或 FTS 写路径。
-- 并发阶段的 scan 明显慢于 §5 单租户同语料（如 `go` 1,944.6 ms vs 319.3 ms），
+- 并发阶段的 scan 明显慢于 §5 单租户同语料（如 `go` 1,944.6 ms vs 216.1 ms），
   差异同时来自 sqlite 写入与三租户争用，两者本轮未拆分，不能单归于某一项。
 
 ## 8. 瓶颈位置与修复
@@ -214,8 +218,8 @@ P99 / max：
 
 | 位置 | 现象（large） | 判断 |
 |---|---|---|
-| [service.go `SearchWithOptions`](file:///Volumes/Data/code-schema/internal/service/service.go#L1095-L1120) → [search/searcher.go](file:///Volumes/Data/code-schema/internal/search/searcher.go#L67) | `/search` exact P50 243.9 ms（91,251 符号） | FTS 内存结构上的 exact 查询随符号量线性增长；未做 profiling，不归因到具体函数 |
-| `file` 后端 / `PersistentStore` | 堆峰值 1,921.3 MiB（2.28M LoC） | 全量索引驻留内存是后端设计取舍；归因见 §8.3。生产大仓应使用 sqlite/pg/redis。未改默认行为 |
+| [service.go `SearchWithOptions`](file:///Volumes/Data/code-schema/internal/service/service.go#L1095-L1120) → [search/searcher.go](file:///Volumes/Data/code-schema/internal/search/searcher.go#L67) | `/search` exact P50 244.9 ms（91,251 符号） | FTS 内存结构上的 exact 查询随符号量线性增长；未做 profiling，不归因到具体函数 |
+| `file` 后端 / `PersistentStore` | 堆峰值 1,935.5 MiB（2.28M LoC） | 峰值是**构建期瞬态**，常驻仅 363.8 MiB；上限位置见 §8.4。未改默认行为 |
 | sqlite 多租户并发 | 争用比 0.734，goroutine 峰值 28 | 并发仍有收益；查询 0 错误、隔离全通过。争用归因需要锁/IO 剖析，本轮不做 |
 
 ### 8.3 已修复：调用图逐请求全量重建
@@ -223,7 +227,62 @@ P99 / max：
 原 `GetImpact`/`GetCallGraph` 每次请求全量建图（`/impact` P50 378.5 ms）。改为按索引代次
 缓存后 P50 3.6 ms，实现、失效接线与负控见 §6.1。
 
-### 8.3 未验证边界
+### 8.4 `file` 后端内存归因（结构性问题 2）
+
+**结论先说**：GOROOT 的 1,935.5 MiB 是**索引构建期瞬态峰值**，不是常驻内存，也未发现泄漏或
+随文件数非线性增长。GC 后常驻 363.8 MiB；缓存调用图后查询期常驻 423.0 MiB。
+峰值由两部分构成：**IR/文档/向量/FTS 的构建期临时对象**（占大头）与 **GC 余量**（GOGC=100
+下允许堆在两次 GC 间继续增长）。上限位置在持久化后端的整索引 JSON 序列化，本轮未改。
+
+测量方法（门控，可复跑）：
+
+```bash
+CODESCHEMA_MEM_ATTRIBUTION=1 go test -run '^TestMemoryAttribution_FileBackend$' \
+  -v -timeout 1800s ./internal/scalebench
+```
+
+- 分阶段 `runtime.GC()` 后读 `HeapAlloc`（3 次取最小）；峰值由 20 ms ticker 采样 `HeapAlloc`；
+- 堆快照用 `pprof.WriteHeapProfile`（不强制 GC），按 `inuse_space` 归因常驻对象；
+- 分配归因用 `go tool pprof -sample_index=alloc_space` 对比 scan 前后快照；
+- `GOGC=20` 重跑作为「峰值是否来自 GC 余量」的敏感性对照。
+
+**常驻内存（索引完成后，GC 后 362.4 MiB）**：
+
+| 类别 | 实测 | 证据 |
+|---|---:|---|
+| IR（FileStore：文件/类/方法/调用 + 解析期保留的签名与文档字符串） | 131.1 MiB | scan 后 live heap；`UpsertCalls` 45.0、`UpsertMethods` 16.7、解析字符串约 40 |
+| 文档原文（contents） | ≈50 MiB | `strings.Builder` 28.5 + `utf8.AppendRune` 23.0 |
+| 向量（96,732 × 256 × 4B + map 开销） | 94.1 MiB | `LocalEmbedder.Embed` flat 94.1 |
+| FTS 索引（分词 + postings） | 90.7 MiB | `PersistentFTS.BatchIndex` cum 90.7（含 `Tokenize` 49.6） |
+| 合计 | 362.4 MiB | 与四项之和（采样误差内）一致 |
+
+调用图缓存再 +59.3 MiB（85,358 节点 / 243,380 边），查询期常驻 421.7 MiB。
+
+**峰值来源（分阶段分配量）**：
+
+| 阶段 | 修复前分配 | 修复后分配 | 说明 |
+|---|---:|---:|---|
+| scan | 12.46 GB | 2.58 GB | 修复前 `isKeyword` 单函数 9.65 GB（占 scan 分配 77%） |
+| index（BuildRuntime） | 3.53 GB | 3.53 GB | `json.MarshalIndent` cum 2.42 GB（69%）、`LocalEmbedder` 0.56 GB、分词 0.26 GB |
+| 全流程峰值（scan 前启动采样） | 1,872.3 MiB | 1,382.2 MiB | 修复后峰值由 index 阶段决定 |
+| 全流程峰值（perf 口径：scan/index 连续，不插 GC） | 1,921–1,935 MiB | 1,935.5 MiB | scan 修复不改变该项：峰值由 index 阶段 JSON 快照与 GC 余量叠加 |
+
+**已修复（先红后绿）**：`isKeyword` 每次调用重建 80+ 项 map，GOROOT 扫描累计分配 9.65 GB。
+改为包级 `keywordSet` 复用后，单次判定 3 次分配 → 0（
+[TestIsKeywordNoPerCallAlloc](file:///Volumes/Data/code-schema/internal/parser/adapter/treesitter/keyword_alloc_test.go)），
+scan 吞吐 1,262 → 1,725 files/s（+36.7%），隔离口径峰值 1,872.3 → 1,382.2 MiB（-26.2%）。
+但 perf 全流程峰值仍为 1,935.5 MiB：瓶颈已转移到 index 阶段的整索引 JSON 序列化。
+
+**未改的上限位置**：`PersistentFTS.save` 与 `PersistentStore.save` 在构建结束时把整个索引
+`MarshalIndent` 成单个 `[]byte` 再落盘，单轮构建累计分配约 2.4 GB，最大单次缓冲区决定了
+峰值下界的一部分。该行为是**线性**的（不随构建次数增长），不属于缺陷；改成流式编码/原子
+重命名会改变落盘路径与故障恢复语义，本轮不做无依据的优化。生产大仓应优先 sqlite/pg/redis。
+
+`GOGC=20` 对照（同一修复后代码）：峰值 1,382.2 → 1,108.1 MiB（-19.8%），常驻 362.4 MiB
+不变，说明峰值中约 274 MiB 来自 GC 余量，其余约 1.1 GiB 是构建期临时对象（整索引 JSON
+快照、文档文本、向量中间值），与数据驻留规模无关。
+
+### 8.5 未验证边界
 
 - 未连真实 Redis（见 §7）；未验证 PG/redis 后端的并发性能。
 - 未做并发查询吞吐上限测试（查询循环带 1 ms sleep，只用于争用与错误率观测）。
@@ -249,9 +308,15 @@ CODESCHEMA_PERF_BASELINE=1 go test -run '^TestPerfBaseline' -count=1 -timeout 18
 ```bash
 CODESCHEMA_PERF_BASELINE=1 go test -run '^TestPerfBaseline_IndexAndQuery$' -count=1 -v -timeout 1800s ./internal/scalebench
 CODESCHEMA_PERF_BASELINE=1 go test -run '^TestPerfBaseline_MultiTenantConcurrency$' -count=1 -v -timeout 1800s ./internal/scalebench
+CODESCHEMA_MEM_ATTRIBUTION=1 go test -run '^TestMemoryAttribution_FileBackend$' -count=1 -v -timeout 1800s ./internal/scalebench
 ```
 
-默认不参与 `make test`（未设置门控变量时 `t.Skip`）。
+默认不参与 `make test`（未设置门控变量时 `t.Skip`）。内存归因的 `GOGC=20` 对照：
+
+```bash
+GOGC=20 MEM_ATTRIBUTION_TAG=gogc20 CODESCHEMA_MEM_ATTRIBUTION=1 \
+  go test -run '^TestMemoryAttribution_FileBackend$' -count=1 -v -timeout 1800s ./internal/scalebench
+```
 
 ### 9.2 语料准备
 
@@ -279,6 +344,7 @@ make bench-perf
 | `perf-go.json` / `perf-java.json` / `perf-ts.json` | 单租户：语料规模、scan/index 吞吐、内存、三端点 P50/P95/P99/max/mean |
 | `perf-large.json` | 同上，Go 标准库 `src` |
 | `perf-multitenant.json` | 顺序/并发墙钟、争用比、goroutine 峰值、查询次数与错误、逐租户明细、隔离断言 |
+| `mem-attribution-large*.json` | file 后端分阶段 live heap、构建峰值、调用图驻留增量（`before-keyword-fix` / `keyword-fix` / `gogc20`） |
 
 ### 9.4 复跑注意事项
 
@@ -293,5 +359,9 @@ make bench-perf
 - [perf-ts.json](./perf-ts.json)
 - [perf-large.json](./perf-large.json)
 - [perf-multitenant.json](./perf-multitenant.json)
+- [mem-attribution-large-before-keyword-fix.json](./mem-attribution-large-before-keyword-fix.json)
+- [mem-attribution-large-keyword-fix.json](./mem-attribution-large-keyword-fix.json)
+- [mem-attribution-large-gogc20.json](./mem-attribution-large-gogc20.json)
 
-基准代码：`internal/scalebench/perf_baseline_test.go`；门控变量 `CODESCHEMA_PERF_BASELINE=1`。
+基准代码：`internal/scalebench/perf_baseline_test.go`、`internal/scalebench/memory_attribution_test.go`；
+门控变量 `CODESCHEMA_PERF_BASELINE=1` / `CODESCHEMA_MEM_ATTRIBUTION=1`。

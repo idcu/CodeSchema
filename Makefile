@@ -118,6 +118,12 @@ bench-perf:
 	@echo "==> Running real-repo performance baseline (gated) ..."
 	CODESCHEMA_PERF_BASELINE=1 $(GO) test -run '^TestPerfBaseline' -count=1 -timeout 1800s -v ./internal/scalebench
 
+# file 后端内存归因（分阶段 live heap / 构建峰值 / 堆快照；see docs/bench/2026-11-14 §8.4）
+.PHONY: bench-mem
+bench-mem:
+	@echo "==> Running file-backend memory attribution (gated) ..."
+	CODESCHEMA_MEM_ATTRIBUTION=1 $(GO) test -run '^TestMemoryAttribution' -count=1 -timeout 1800s -v ./internal/scalebench
+
 # 调用图精度基准（正则 + 真语法树两路径；产出 build/treesitter-callgraph-bench.json 与历史 JSONL）
 .PHONY: bench-callgraph
 bench-callgraph:

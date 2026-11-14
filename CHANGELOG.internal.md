@@ -6,6 +6,22 @@
 
 ## 提交记录
 
+### 结构性问题 2（2026-11-14）：file 后端内存归因 + 关键字 map 分配放大修复
+
+- 归因（`internal/scalebench/memory_attribution_test.go`，门控 `CODESCHEMA_MEM_ATTRIBUTION=1`）：
+  GOROOT `src` 常驻 live heap 363.8 MiB = IR 131.1 + 文档 ≈50 + 向量 94.1 + FTS 90.7；
+  缓存调用图 +59.3 MiB，查询期常驻 421.7 MiB。1,935.5 MiB 峰值是**构建期瞬态**：
+  scan 分配 12.46 GB + index 分配 3.53 GB（`json.MarshalIndent` 占 69%）在 GOGC=100 下的
+  GC 余量，不是数据驻留；`GOGC=20` 对照峰值降至 1,108.1 MiB，常驻不变。
+- 上限位置：`PersistentFTS.save` / `PersistentStore.save` 的整索引 `MarshalIndent`。行为线性、
+  非泄漏，改动需重写落盘路径，本轮不改（报告已注明）。
+- fix(parser)：`treesitter.isKeyword` 每次调用重建 80+ 项 map，GOROOT 扫描累计分配 9.65 GB
+  （占 scan 分配 77%）。改为包级 `keywordSet` 复用；先红后绿
+  `TestIsKeywordNoPerCallAlloc`（3 allocs/call → 0）。scan 吞吐 1,262 → 1,725 files/s（+36.7%），
+  隔离口径峰值 1,872.3 → 1,382.2 MiB（-26.2%）。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.4、`docs/01-开发者/存储后端.md` 内存画像；
+  原始数据 `mem-attribution-large*.json`。
+
 ### 结构性问题 1（2026-11-14）：调用图按索引代次缓存
 
 - fix(analyzer)：`BuildCallGraph` 由「每次请求全量重建」改为按索引代次缓存。

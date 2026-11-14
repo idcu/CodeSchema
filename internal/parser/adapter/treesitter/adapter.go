@@ -1782,59 +1782,62 @@ func isStatementLine(trimmed string) bool {
 	return stmtLineKeywords[trimmed[:end]]
 }
 
+// keywordSet 语言关键字集合，包级复用：GOROOT 全量扫描下每次调用重建 map
+// 会产生 9.65 GiB 累计分配（占进程总分配 79%），直接推高 GC 峰值。
+var keywordSet = map[string]bool{
+	"if": true, "for": true, "while": true, "switch": true,
+	"return": true, "catch": true, "throw": true, "new": true,
+	"delete": true, "typeof": true, "instanceof": true, "import": true,
+	"print": true, "len": true, "cap": true, "make": true,
+	"append": true, "copy": true, "close": true, "panic": true,
+	"recover": true, "range": true, "defer": true, "go": true,
+	"assert": true, "raise": true, "yield": true, "await": true,
+	"async": true, "super": true, "this": true, "self": true,
+	// TS 声明式构造器签名（constructor();）不是调用，JS 构造调用必须带 new。
+	"constructor": true,
+	// Java 控制流（带括号时会被 callPattern 误匹配）
+	"try": true, "synchronized": true, "do": true, "else": true, "finally": true,
+	// Kotlin 关键字
+	"fun": true, "val": true, "var": true, "when": true, "is": true,
+	"in": true, "suspend": true, "require": true,
+	"check": true, "error": true, "TODO": true, "println": true,
+	// Rust
+	"fn": true, "let": true, "mut": true, "match": true, "impl": true,
+	"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
+	// C/C++
+	"sizeof": true, "static_cast": true, "dynamic_cast": true,
+	"reinterpret_cast": true, "const_cast": true, "printf": true,
+	// Swift
+	"func": true, "guard": true, "repeat": true, "where": true,
+	"associatedtype": true, "fatalError": true,
+	// PHP
+	"echo": true, "print_r": true, "var_dump": true, "isset": true,
+	"empty": true, "unset": true, "die": true, "exit": true,
+	// Ruby
+	"puts": true, "require_relative": true,
+	"attr_accessor": true, "attr_reader": true, "attr_writer": true, "loop": true,
+	// Bash
+	"cd": true, "source": true, "local": true, "export": true, "eval": true,
+	// Scala（println/require/assert 已在通用段）
+	// Elixir（IO.puts/IO.inspect/Enum 等标准库函数调用为伪调用）
+	"IO.puts": true, "IO.inspect": true, "IO.gets": true,
+	"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
+	"Map.get": true, "Map.put": true, "String.length": true,
+	// OCaml（print_endline/List.map/Printf 等标准库 + 语法关键字）
+	"print_endline": true, "print_string": true, "print_int": true,
+	"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
+	"Printf.printf": true, "failwith": true, "rec": true, "done": true,
+	// Lua（标准库；print/require/assert/error/type/pairs/ipairs 已在通用段）
+	"pcall":    true,
+	"tostring": true, "tonumber": true, "rawget": true, "rawset": true,
+	"string.format": true, "string.len": true, "table.insert": true,
+	"table.remove": true, "math.floor": true, "math.max": true,
+	// Groovy（println/assert/printf 已在通用段；groovy 特有）
+	"sprintf": true, "size": true, "each": true, "collect": true,
+	"findAll": true, "inject": true,
+}
+
 // isKeyword 判断是否为语言关键字，避免误匹配。
 func isKeyword(name string) bool {
-	keywords := map[string]bool{
-		"if": true, "for": true, "while": true, "switch": true,
-		"return": true, "catch": true, "throw": true, "new": true,
-		"delete": true, "typeof": true, "instanceof": true, "import": true,
-		"print": true, "len": true, "cap": true, "make": true,
-		"append": true, "copy": true, "close": true, "panic": true,
-		"recover": true, "range": true, "defer": true, "go": true,
-		"assert": true, "raise": true, "yield": true, "await": true,
-		"async": true, "super": true, "this": true, "self": true,
-		// TS 声明式构造器签名（constructor();）不是调用，JS 构造调用必须带 new。
-		"constructor": true,
-		// Java 控制流（带括号时会被 callPattern 误匹配）
-		"try": true, "synchronized": true, "do": true, "else": true, "finally": true,
-		// Kotlin 关键字
-		"fun": true, "val": true, "var": true, "when": true, "is": true,
-		"in": true, "suspend": true, "require": true,
-		"check": true, "error": true, "TODO": true, "println": true,
-		// Rust
-		"fn": true, "let": true, "mut": true, "match": true, "impl": true,
-		"trait": true, "struct": true, "enum": true, "use": true, "mod": true,
-		// C/C++
-		"sizeof": true, "static_cast": true, "dynamic_cast": true,
-		"reinterpret_cast": true, "const_cast": true, "printf": true,
-		// Swift
-		"func": true, "guard": true, "repeat": true, "where": true,
-		"associatedtype": true, "fatalError": true,
-		// PHP
-		"echo": true, "print_r": true, "var_dump": true, "isset": true,
-		"empty": true, "unset": true, "die": true, "exit": true,
-		// Ruby
-		"puts": true, "require_relative": true,
-		"attr_accessor": true, "attr_reader": true, "attr_writer": true, "loop": true,
-		// Bash
-		"cd": true, "source": true, "local": true, "export": true, "eval": true,
-		// Scala（println/require/assert 已在通用段）
-		// Elixir（IO.puts/IO.inspect/Enum 等标准库函数调用为伪调用）
-		"IO.puts": true, "IO.inspect": true, "IO.gets": true,
-		"Enum.map": true, "Enum.filter": true, "Enum.reduce": true, "Enum.each": true,
-		"Map.get": true, "Map.put": true, "String.length": true,
-		// OCaml（print_endline/List.map/Printf 等标准库 + 语法关键字）
-		"print_endline": true, "print_string": true, "print_int": true,
-		"List.map": true, "List.filter": true, "List.fold_left": true, "List.iter": true,
-		"Printf.printf": true, "failwith": true, "rec": true, "done": true,
-		// Lua（标准库；print/require/assert/error/type/pairs/ipairs 已在通用段）
-		"pcall":    true,
-		"tostring": true, "tonumber": true, "rawget": true, "rawset": true,
-		"string.format": true, "string.len": true, "table.insert": true,
-		"table.remove": true, "math.floor": true, "math.max": true,
-		// Groovy（println/assert/printf 已在通用段；groovy 特有）
-		"sprintf": true, "size": true, "each": true, "collect": true,
-		"findAll": true, "inject": true,
-	}
-	return keywords[name]
+	return keywordSet[name]
 }

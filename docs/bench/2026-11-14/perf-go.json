@@ -2,14 +2,14 @@
   "corpus": "go",
   "root": "/Volumes/Data/code-schema",
   "language": "go",
-  "supported_files": 293,
-  "code_files": 239,
-  "loc": 74441,
+  "supported_files": 295,
+  "code_files": 241,
+  "loc": 74739,
   "by_lang": {
     "bash": 5,
     "c": 1,
     "cpp": 4,
-    "go": 239,
+    "go": 241,
     "html": 1,
     "markdown": 33,
     "py": 3,
@@ -17,61 +17,61 @@
     "yaml": 6
   },
   "scan": {
-    "duration_ms": 310.94,
-    "files": 293,
-    "classes": 603,
-    "methods": 2727,
-    "calls": 18560,
-    "symbols": 3330,
-    "files_per_sec": 942.302,
-    "symbols_per_sec": 10709.439
+    "duration_ms": 216.124,
+    "files": 295,
+    "classes": 607,
+    "methods": 2738,
+    "calls": 18645,
+    "symbols": 3345,
+    "files_per_sec": 1364.953,
+    "symbols_per_sec": 15477.178
   },
   "index": {
-    "duration_ms": 322.704,
-    "files": 293,
-    "classes": 603,
-    "methods": 2727,
-    "calls": 18560,
-    "symbols": 3330,
-    "files_per_sec": 907.951,
-    "symbols_per_sec": 10319.033
+    "duration_ms": 295.278,
+    "files": 295,
+    "classes": 607,
+    "methods": 2738,
+    "calls": 18645,
+    "symbols": 3345,
+    "files_per_sec": 999.057,
+    "symbols_per_sec": 11328.287
   },
   "memory": {
-    "peak_heap_alloc_bytes": 103340408,
-    "peak_heap_inuse_bytes": 109658112,
-    "peak_heap_sys_bytes": 137527296,
-    "total_alloc_bytes": 718482712,
-    "live_heap_alloc_bytes": 21930920
+    "peak_heap_alloc_bytes": 74521704,
+    "peak_heap_inuse_bytes": 82853888,
+    "peak_heap_sys_bytes": 120815616,
+    "total_alloc_bytes": 281059032,
+    "live_heap_alloc_bytes": 22001416
   },
   "memory_note": "采样口径：20ms 间隔读取 runtime.MemStats；索引结束后强制 GC 记录 live heap；非 cgroup 峰值",
-  "live_heap_after_endpoints_bytes": 24969464,
+  "live_heap_after_endpoints_bytes": 25063328,
   "endpoints": {
     "context": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 5.722,
-      "p95_ms": 7.781,
-      "p99_ms": 8.72,
-      "max_ms": 9.98,
-      "mean_ms": 6.166
+      "p50_ms": 5.691,
+      "p95_ms": 7.633,
+      "p99_ms": 8.173,
+      "max_ms": 8.669,
+      "mean_ms": 6.1
     },
     "impact": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 8.621,
-      "p95_ms": 10.877,
-      "p99_ms": 11.555,
-      "max_ms": 12.477,
-      "mean_ms": 9.091
+      "p50_ms": 8.691,
+      "p95_ms": 10.581,
+      "p99_ms": 11.174,
+      "max_ms": 13.214,
+      "mean_ms": 9.096
     },
     "search": {
       "n": 200,
       "errors": 0,
-      "p50_ms": 10.203,
-      "p95_ms": 11.767,
-      "p99_ms": 12.541,
-      "max_ms": 14.903,
-      "mean_ms": 10.402
+      "p50_ms": 10.387,
+      "p95_ms": 11.808,
+      "p99_ms": 12.605,
+      "max_ms": 13.54,
+      "mean_ms": 10.575
     }
   },
   "symbols_used": {
