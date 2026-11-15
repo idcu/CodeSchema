@@ -824,3 +824,66 @@ func TestSQLite_LegacyCallTableSelfHeals(t *testing.T) {
 		t.Errorf("confidence not persisted after self-heal: %+v", calls[0])
 	}
 }
+
+// TestSQLite_DeleteFileCascade 三后端一致性（§8.8）：删除文件必须清理
+// 类、方法、调用边与类/方法标签，否则 /context、/impact、/tests 仍会命中残留。
+func TestSQLite_DeleteFileCascade(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	fid, err := s.UpsertFile(ctx, "/repo/pkg/gone.go", "h-gone", 10, 100)
+	if err != nil {
+		t.Fatalf("UpsertFile: %v", err)
+	}
+	if err := s.UpsertClasses(ctx, fid, []parser.ClassIR{{
+		Name: "Gone", FullName: "pkg.Gone", Type: "CLASS", StartLine: 1, EndLine: 10,
+	}}); err != nil {
+		t.Fatalf("UpsertClasses: %v", err)
+	}
+	classes, err := s.GetClassesByFileID(ctx, fid)
+	if err != nil || len(classes) != 1 {
+		t.Fatalf("GetClassesByFileID: %v len=%d", err, len(classes))
+	}
+	cid := classes[0].ID
+	if err := s.UpsertMethods(ctx, cid, []parser.MethodIR{{
+		Name: "Run", ClassFQN: "pkg.Gone", StartLine: 3, EndLine: 5,
+	}}); err != nil {
+		t.Fatalf("UpsertMethods: %v", err)
+	}
+	methods, err := s.GetMethodsByClassID(ctx, cid)
+	if err != nil || len(methods) != 1 {
+		t.Fatalf("GetMethodsByClassID: %v len=%d", err, len(methods))
+	}
+	if err := s.UpsertCalls(ctx, fid, []parser.CallIR{{
+		CallerFQN: "pkg.Gone.Run", CalleeFQN: "pkg.Target", CallType: "direct",
+		Source: parser.CallSourceRegex, Confidence: parser.ConfidenceRegex,
+	}}); err != nil {
+		t.Fatalf("UpsertCalls: %v", err)
+	}
+	if err := s.UpsertTags(ctx, cid, []string{"unit"}); err != nil {
+		t.Fatalf("UpsertTags: %v", err)
+	}
+	if err := s.UpsertMethodTags(ctx, methods[0].ID, []string{"unit"}); err != nil {
+		t.Fatalf("UpsertMethodTags: %v", err)
+	}
+
+	if err := s.DeleteFile(ctx, fid); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+
+	if f, _ := s.GetFileByPath(ctx, "/repo/pkg/gone.go"); f != nil {
+		t.Errorf("文件行残留：%+v", f)
+	}
+	if cls, _ := s.GetClassesByFileID(ctx, fid); len(cls) != 0 {
+		t.Errorf("类残留 %d 条", len(cls))
+	}
+	if calls, _ := s.GetCallsByFileID(ctx, fid); len(calls) != 0 {
+		t.Errorf("调用边残留 %d 条", len(calls))
+	}
+	// 标签通过 JOIN class/method 反查，父行删除后不应再命中。
+	if classIDs, methodIDs, err := s.SearchByTags(ctx, []string{"unit"}); err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	} else if len(classIDs) != 0 || len(methodIDs) != 0 {
+		t.Errorf("标签残留：classes=%v methods=%v", classIDs, methodIDs)
+	}
+}

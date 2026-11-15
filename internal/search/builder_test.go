@@ -672,3 +672,101 @@ func TestBuildFromStore_SkipIDFWhenLoaded(t *testing.T) {
 		t.Errorf("expected 1 doc in FTS, got %d", fts.Size())
 	}
 }
+
+// TestIndexBuilder_BuildAndRemove_ClearsStoreAndDocs 负控（§8.8 缺口）：
+// 文件删除后 BuildAndRemove 只删检索文档、不删 Store 行，会让 /context、/impact、
+// /tests 继续把已删除代码当成存在。本用例要求同时清理：
+// 检索文档（FTS/向量）、文件行、类、方法、调用边与标签。
+func TestIndexBuilder_BuildAndRemove_ClearsStoreAndDocs(t *testing.T) {
+	ctx := context.Background()
+	fts := NewMemoryFTS()
+	vs := vector.NewMemoryStore()
+	em := vector.NewLocalEmbedder(128)
+	idx := vector.NewIndexer(vs, em, 2)
+	b := NewIndexBuilder(fts, idx, em)
+
+	st := store.NewStore("file")
+	if err := st.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+
+	filePath := "/repo/pkg/gone.go"
+	fileID, err := st.UpsertFile(ctx, filePath, "hash-gone", 10, 100)
+	if err != nil {
+		t.Fatalf("upsert file: %v", err)
+	}
+	classes := []parser.ClassIR{
+		{Name: "Gone", FullName: "pkg.Gone", Type: "CLASS", StartLine: 1, EndLine: 10},
+	}
+	if err := st.UpsertClasses(ctx, fileID, classes); err != nil {
+		t.Fatalf("upsert classes: %v", err)
+	}
+	recs, err := st.GetClassesByFileID(ctx, fileID)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("classes: %v, %d", err, len(recs))
+	}
+	classID := recs[0].ID
+	methods := []parser.MethodIR{
+		{Name: "Run", ClassFQN: "pkg.Gone", StartLine: 3, EndLine: 5},
+	}
+	if err := st.UpsertMethods(ctx, classID, methods); err != nil {
+		t.Fatalf("upsert methods: %v", err)
+	}
+	mrecs, err := st.GetMethodsByClassID(ctx, classID)
+	if err != nil || len(mrecs) != 1 {
+		t.Fatalf("methods: %v, %d", err, len(mrecs))
+	}
+	methodID := mrecs[0].ID
+	if err := st.UpsertCalls(ctx, fileID, []parser.CallIR{
+		{CallerFQN: "pkg.Gone.Run", CalleeFQN: "pkg.Target", CallType: "direct", LineNumber: 4},
+	}); err != nil {
+		t.Fatalf("upsert calls: %v", err)
+	}
+	if err := st.UpsertTags(ctx, classID, []string{"unit"}); err != nil {
+		t.Fatalf("upsert class tags: %v", err)
+	}
+	if err := st.UpsertMethodTags(ctx, methodID, []string{"unit"}); err != nil {
+		t.Fatalf("upsert method tags: %v", err)
+	}
+
+	if err := b.BuildAndIndex(ctx, st, filePath); err != nil {
+		t.Fatalf("BuildAndIndex: %v", err)
+	}
+	if fts.Size() != 2 || vs.Size() != 2 {
+		t.Fatalf("索引文档未建立：fts=%d vec=%d", fts.Size(), vs.Size())
+	}
+
+	if err := b.BuildAndRemove(ctx, st, filePath); err != nil {
+		t.Fatalf("BuildAndRemove: %v", err)
+	}
+
+	// 检索文档清理。
+	if fts.Size() != 0 {
+		t.Errorf("FTS 文档残留 %d 条", fts.Size())
+	}
+	if vs.Size() != 0 {
+		t.Errorf("向量文档残留 %d 条", vs.Size())
+	}
+	// Store 实体清理：文件行、类、方法。
+	if f, _ := st.GetFileByPath(ctx, filePath); f != nil {
+		t.Errorf("文件行残留：%+v", f)
+	}
+	if f, _ := st.GetFileByID(ctx, fileID); f != nil {
+		t.Errorf("按 ID 仍可读到文件行：%+v", f)
+	}
+	if cls, _ := st.GetClassesByFileID(ctx, fileID); len(cls) != 0 {
+		t.Errorf("类残留 %d 条", len(cls))
+	}
+	if calls, _ := st.GetCallsByFileID(ctx, fileID); len(calls) != 0 {
+		t.Errorf("调用边残留 %d 条", len(calls))
+	}
+	// 标签清理：按标签反查不应再命中。
+	classIDs, methodIDs, err := st.SearchByTags(ctx, []string{"unit"})
+	if err != nil {
+		t.Fatalf("SearchByTags: %v", err)
+	}
+	if len(classIDs) != 0 || len(methodIDs) != 0 {
+		t.Errorf("标签残留：classes=%v methods=%v", classIDs, methodIDs)
+	}
+}

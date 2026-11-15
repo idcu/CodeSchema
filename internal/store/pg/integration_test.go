@@ -250,6 +250,22 @@ func TestPGStore_FKConstraints(t *testing.T) {
 	if err != nil || file == nil {
 		t.Fatalf("GetFileByPath: %v (file=%v)", err, file)
 	}
+	// 标签也挂在被删文件上：DeleteFile 后必须随 class/method 级联清空。
+	tag := fmt.Sprintf("unit-%d", time.Now().UnixNano())
+	clsRecs, err := s.GetClassesByFileID(ctx, file.ID)
+	if err != nil || len(clsRecs) != 1 {
+		t.Fatalf("GetClassesByFileID: %v len=%d", err, len(clsRecs))
+	}
+	if err := s.UpsertTags(ctx, clsRecs[0].ID, []string{tag}); err != nil {
+		t.Fatalf("UpsertTags: %v", err)
+	}
+	methRecs, err := s.GetMethodsByClassID(ctx, clsRecs[0].ID)
+	if err != nil || len(methRecs) != 1 {
+		t.Fatalf("GetMethodsByClassID: %v len=%d", err, len(methRecs))
+	}
+	if err := s.UpsertMethodTags(ctx, methRecs[0].ID, []string{tag}); err != nil {
+		t.Fatalf("UpsertMethodTags: %v", err)
+	}
 	if err := s.DeleteFile(ctx, file.ID); err != nil {
 		t.Fatalf("DeleteFile: %v", err)
 	}
@@ -270,6 +286,11 @@ func TestPGStore_FKConstraints(t *testing.T) {
 	}
 	if len(calls) != 0 {
 		t.Fatalf("expected calls cascaded to empty, got %d", len(calls))
+	}
+	if cids, mids, err := s.SearchByTags(ctx, []string{tag}); err != nil {
+		t.Fatalf("SearchByTags after delete: %v", err)
+	} else if len(cids) != 0 || len(mids) != 0 {
+		t.Fatalf("expected tags cascaded to empty, got classes=%v methods=%v", cids, mids)
 	}
 	t.Log("FK constraints + ON DELETE CASCADE OK")
 }

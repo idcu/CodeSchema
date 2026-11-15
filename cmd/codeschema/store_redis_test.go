@@ -113,3 +113,74 @@ func TestRedisCacheStore_ReindexInvalidatesRemovedEntities(t *testing.T) {
 		t.Error("当前类未写入缓存")
 	}
 }
+
+// TestRedisCacheStore_DeleteFileInvalidatesFileKeys 活实例负控（§8.8）：
+// 文件删除后包装层必须失效该文件在 Redis 的类/方法/路径/文件→类键，
+// 否则 service 读路径会继续命中已删除代码的缓存（/context 假存在）。
+func TestRedisCacheStore_DeleteFileInvalidatesFileKeys(t *testing.T) {
+	addr := os.Getenv("CODESCHEMA_REDIS_ADDR")
+	if addr == "" {
+		t.Skip("set CODESCHEMA_REDIS_ADDR (e.g. 127.0.0.1:6379) to run the live Redis test")
+	}
+	ns := fmt.Sprintf("it-delete-%d", time.Now().UnixNano())
+	var cache *redis.RedisCache
+	var err error
+	if strings.Contains(addr, "://") {
+		cache, err = redis.NewRedisCacheFromURLWithNamespace(addr, ns)
+	} else {
+		cache, err = redis.NewRedisCacheWithNamespace(addr, ns)
+	}
+	if err != nil {
+		t.Fatalf("connect redis %s: %v", addr, err)
+	}
+	defer cache.Close()
+	ctx := context.Background()
+	defer func() { _ = cache.Flush(ctx) }()
+
+	base := store.NewStore("file")
+	if err := base.Open(ctx, t.TempDir()); err != nil {
+		t.Fatalf("open file store: %v", err)
+	}
+	defer base.Close()
+	wrapped := &redisCacheStore{Store: base, cache: cache}
+	path := "/repo/gone.go"
+
+	ir := &parser.IRDocument{
+		Source: "redis-it", Language: "go", FilePath: path, FileHash: "h-del",
+		Classes: []parser.ClassIR{{Name: "Gone", FullName: "pkg.Gone", Type: "CLASS"}},
+		Methods: []parser.MethodIR{{Name: "Run", ClassFQN: "pkg.Gone"}},
+		Calls:   []parser.CallIR{{CallerFQN: "pkg.Gone.Run", CalleeFQN: "pkg.Target"}},
+	}
+	if err := wrapped.UpsertIR(ctx, ir); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	file, err := base.GetFileByPath(ctx, path)
+	if err != nil || file == nil {
+		t.Fatalf("GetFileByPath: %v %+v", err, file)
+	}
+	if cls, _ := cache.GetClass(ctx, "pkg.Gone"); cls == nil {
+		t.Fatal("写入后缓存未命中 pkg.Gone（用例前提）")
+	}
+
+	if err := wrapped.DeleteFile(ctx, file.ID); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
+	}
+
+	if f, _ := base.GetFileByPath(ctx, path); f != nil {
+		t.Errorf("基础存储文件行残留：%+v", f)
+	}
+	if cls, _ := cache.GetClass(ctx, "pkg.Gone"); cls != nil {
+		t.Errorf("删除后旧类仍可读: %+v", cls)
+	}
+	if p, ok := cache.ClassPath(ctx, "pkg.Gone"); ok {
+		t.Errorf("删除后旧类路径仍可读: %s", p)
+	}
+	if m, _ := cache.GetMethod(ctx, "pkg.Gone.Run"); m != nil {
+		t.Errorf("删除后旧方法仍可读: %+v", m)
+	}
+	if fqns, err := cache.ClassesOfFile(ctx, path); err != nil {
+		t.Fatalf("ClassesOfFile: %v", err)
+	} else if len(fqns) != 0 {
+		t.Errorf("删除后文件→类索引仍残留: %v", fqns)
+	}
+}
