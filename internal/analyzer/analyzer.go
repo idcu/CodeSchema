@@ -53,8 +53,12 @@ type Analyzer struct {
 }
 
 // callGraphEntry 一代索引对应的不可变调用图快照。
+//
+// ver 是构建开始时的存储变更版本：即使写入方忘记调用 InvalidateCallGraph，
+// 版本不符也会让该条目失效（正确性以存储版本为准，显式失效只是提前重建）。
 type callGraphEntry struct {
 	gen   uint64
+	ver   uint64
 	graph *CallGraph
 }
 
@@ -466,10 +470,18 @@ func (a *Analyzer) InvalidateCallGraph() {
 // 若失效发生在读取代次之后，本次查询视为"失效前开始"，返回旧图仍是线性化一致的。
 func (a *Analyzer) cachedCallGraph() *CallGraph {
 	e := a.callGraphCache.Load()
-	if e == nil || e.gen != a.callGraphGen.Load() {
+	if e == nil || e.gen != a.callGraphGen.Load() || e.ver != a.storeVersion() {
 		return nil
 	}
 	return e.graph
+}
+
+// storeVersion 返回存储变更版本；未注入存储时恒为 0（仅测试场景）。
+func (a *Analyzer) storeVersion() uint64 {
+	if a.store == nil {
+		return 0
+	}
+	return a.store.ChangeVersion()
 }
 
 // BuildCallGraph 构建调用图。
@@ -500,12 +512,13 @@ func (a *Analyzer) BuildCallGraph(ctx context.Context) (*CallGraph, error) {
 	// 持续写入下不再无限重试，直接返回本次结果且不写缓存（宁可不缓存，不发布脏图）。
 	for attempt := 0; ; attempt++ {
 		gen := a.callGraphGen.Load()
+		ver := a.storeVersion()
 		cg, err := a.buildCallGraph(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if a.callGraphGen.Load() == gen {
-			a.callGraphCache.Store(&callGraphEntry{gen: gen, graph: cg})
+		if a.callGraphGen.Load() == gen && a.storeVersion() == ver {
+			a.callGraphCache.Store(&callGraphEntry{gen: gen, ver: ver, graph: cg})
 			return cg, nil
 		}
 		if attempt >= 1 {

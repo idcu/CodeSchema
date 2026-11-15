@@ -23,6 +23,7 @@ type mockStoreWithTestData struct {
 func (m *mockStoreWithTestData) Open(_ context.Context, _ string) error { return nil }
 func (m *mockStoreWithTestData) Close() error                           { return nil }
 func (m *mockStoreWithTestData) HealthCheck(_ context.Context) error    { return nil }
+func (m *mockStoreWithTestData) ChangeVersion() uint64                  { return 0 }
 func (m *mockStoreWithTestData) UpsertFile(_ context.Context, _ string, _ string, _ int, _ int64) (int64, error) {
 	return 0, nil
 }

@@ -28,12 +28,16 @@ import (
 
 // PGStore 基于 PostgreSQL 的存储实现。
 type PGStore struct {
-	db  *sql.DB
-	dsn string
+	db    *sql.DB
+	dsn   string
+	clock store.ChangeClock // 变更版本：派生缓存按此判定是否重建
 }
 
 // DriverName 报告驱动名（store.DriverNamer 可选接口）。
 func (s *PGStore) DriverName() string { return "pg" }
+
+// ChangeVersion 返回存储的单调递增变更版本（store.Store 接口）。
+func (s *PGStore) ChangeVersion() uint64 { return s.clock.ChangeVersion() }
 
 // NewPGStore 创建 PG 存储（未打开，需 Open）。
 func NewPGStore() *PGStore { return &PGStore{} }
@@ -108,6 +112,7 @@ func (s *PGStore) InitSchema(ctx context.Context) error {
 
 // UpsertIR 对一个文件的 IR 执行增量入库（单事务）。
 func (s *PGStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -375,6 +380,7 @@ func upsertConstantsTx(ctx context.Context, tx *sql.Tx, fileID int64, constants 
 
 // UpsertFile 公开方法（接口要求）。
 func (s *PGStore) UpsertFile(ctx context.Context, filePath, contentHash string, lineCount int, byteSize int64) (int64, error) {
+	s.clock.Touch()
 	const q = `INSERT INTO file (absolute_path, relative_path, content_hash, line_count, byte_size, parse_status)
 		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (absolute_path) DO UPDATE SET content_hash=EXCLUDED.content_hash, line_count=EXCLUDED.line_count, byte_size=EXCLUDED.byte_size, updated_at=now() RETURNING id`
 	var id int64
@@ -390,6 +396,7 @@ func (s *PGStore) GetFileByPath(ctx context.Context, path string) (*store.FileRe
 
 // MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
 func (s *PGStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	s.clock.Touch()
 	const q = `INSERT INTO file (absolute_path, relative_path, content_hash, line_count, byte_size, parse_status)
 		VALUES ($1,$2,'', $3,$4,'parse_skipped')
 		ON CONFLICT (absolute_path) DO UPDATE SET content_hash='', line_count=EXCLUDED.line_count,
@@ -442,6 +449,7 @@ func (s *PGStore) GetAllFiles(ctx context.Context) ([]*store.FileRecord, error) 
 }
 
 func (s *PGStore) DeleteFile(ctx context.Context, fileID int64) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -490,6 +498,7 @@ func (s *PGStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]store.C
 // —— 以下为标签与批量接口（生产实现可直接复用上面的事务模式） ——
 
 func (s *PGStore) UpsertClasses(ctx context.Context, fileID int64, classes []parser.ClassIR) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -502,6 +511,7 @@ func (s *PGStore) UpsertClasses(ctx context.Context, fileID int64, classes []par
 }
 
 func (s *PGStore) UpsertMethods(ctx context.Context, classID int64, methods []parser.MethodIR) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -526,6 +536,7 @@ func (s *PGStore) UpsertMethods(ctx context.Context, classID int64, methods []pa
 }
 
 func (s *PGStore) UpsertCalls(ctx context.Context, fileID int64, calls []parser.CallIR) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -538,9 +549,11 @@ func (s *PGStore) UpsertCalls(ctx context.Context, fileID int64, calls []parser.
 }
 
 func (s *PGStore) UpsertTags(ctx context.Context, classID int64, tags []string) error {
+	s.clock.Touch()
 	return upsertTagsTx(ctx, s.db, "class_tag", "class_id", classID, tags)
 }
 func (s *PGStore) UpsertMethodTags(ctx context.Context, methodID int64, tags []string) error {
+	s.clock.Touch()
 	return upsertTagsTx(ctx, s.db, "method_tag", "method_id", methodID, tags)
 }
 func (s *PGStore) GetTagsByClassID(ctx context.Context, classID int64) ([]string, error) {
@@ -863,6 +876,7 @@ const qFieldInsert = `INSERT INTO field (class_id, method_id, name, type, is_sta
 	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 
 func (s *PGStore) UpsertClassFields(ctx context.Context, classID int64, fields []store.FieldRecord) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -882,6 +896,7 @@ func (s *PGStore) UpsertClassFields(ctx context.Context, classID int64, fields [
 }
 
 func (s *PGStore) UpsertMethodFields(ctx context.Context, methodID int64, fields []store.FieldRecord) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -945,6 +960,7 @@ const qConstantInsert = `INSERT INTO constant (file_id, class_id, name, type, va
 	VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
 
 func (s *PGStore) UpsertFileConstants(ctx context.Context, fileID int64, constants []store.ConstantRecord) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -962,6 +978,7 @@ func (s *PGStore) UpsertFileConstants(ctx context.Context, fileID int64, constan
 }
 
 func (s *PGStore) UpsertClassConstants(ctx context.Context, classID int64, constants []store.ConstantRecord) error {
+	s.clock.Touch()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1020,6 +1037,7 @@ func scanConstants(ctx context.Context, db *sql.DB, q string, arg int64) ([]stor
 // prepared statement + RETURNING id 维护 classID 映射，消除逐文件事务提交放大）。
 // 注意：相对 UpsertIR 额外补全了 methods 入库（UpsertIR 骨架当时未覆盖 methods）。
 func (s *PGStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error {
+	s.clock.Touch()
 	if len(irs) == 0 {
 		return nil
 	}

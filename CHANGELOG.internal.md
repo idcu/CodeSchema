@@ -6,6 +6,31 @@
 
 ## 提交记录
 
+### 派生缓存正确性下沉到存储版本（2026-11-15）：漏调失效不再产生陈旧结果
+
+- refactor(store)：`Store` 接口新增 `ChangeVersion() uint64`，`ChangeClock` 嵌入
+  file / sqlite / pg 三后端，每个写方法入口推进版本（含失败路径已落库部分）。
+- fix(analyzer/service/search)：派生缓存改为「按存储版本取用」——调用图缓存条目、
+  查询缓存 key、测试关联快照记录构建起始版本，版本不符即重建；
+  `IndexBuilder.EnsureFresh` 在检索查询前对齐版本，落后即全量重建；
+  `Searcher.SetFreshnessHook` 由运行时装配绑定。显式失效降级为提前重建优化。
+- 先红证据（临时移除版本比对/自愈）：
+  `TestDerivedCachesSurviveIncrementalIndexFailure`——主存储已切到 helperB、
+  增量索引回调失败后，`/search` 仍命中已删除的 helperA、调用图仍返回旧边（红）；
+  恢复版本判定后两路均绿。
+  `TestDerivedCachesDropSymbolsOnParseSkipped`——`SetLimits(1,0)` 触发 markSkipped、
+  主存储类记录为 0 后，`/search` 与调用图仍返回 helperA（红）；修复后绿。
+- fix(search)：`BuildFromStore` 读类/方法失败不再被当成「文件已删除」，该文件沿用
+  上一代追踪，不把仍存在的检索文档当差集摘除；
+  `BuildAndIndex` / `BuildAndRemove` 改为「先读追踪、成功后覆盖/清理」，失败与提前
+  return 不再丢失追踪项。对应用例先红后绿（`builder_failure_test.go`）。
+- test(runtime)：守卫按真实 import path 匹配（覆盖别名导入）、扫描包级 var 初始化，
+  扫描范围补 `internal/releasebench`；`releasebench` 改经
+  `runtime.BuildReadOnlyService` 装配。自证用例先红（旧守卫漏掉 var/别名、
+  releasebench 自建 Service），修复后绿。
+- 文档：`docs/01-开发者/架构与模块.md` 新增「存储变更版本与派生缓存自愈」；
+  非 vendor LoC 74,114 → 74,825（74.8k），`make counts-update` 同步基线。
+
 ### 运行时单点所有权（2026-11-15）：watcher 增量不再写到副本检索器
 
 - refactor(runtime)：`Runtime` 成为 `Service / Searcher / IndexBuilder` 的唯一所有者与

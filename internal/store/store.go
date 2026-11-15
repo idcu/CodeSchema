@@ -84,6 +84,11 @@ type Store interface {
 
 	// HealthCheck 返回存储层健康状态。
 	HealthCheck(ctx context.Context) error
+
+	// ChangeVersion 返回存储的单调递增变更版本：任何写入（含失败路径中已落库的
+	// 部分、parse_skipped 清 IR、删除/改名）都必须推进。派生缓存以该版本为
+	// 正确性依据——版本不符即重建，不再依赖写入方调用失效钩子。
+	ChangeVersion() uint64
 }
 
 // FileRecord 对应 file 表的一行记录。

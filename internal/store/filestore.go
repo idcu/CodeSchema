@@ -28,10 +28,14 @@ type FileStore struct {
 	methodTags    map[int64][]string       // methodID -> tags
 	tagCategories map[string]string        // tag name -> category
 	nextID        int64
+	clock         ChangeClock // 变更版本：派生缓存按此判定是否重建
 }
 
 // DriverName 报告驱动名（store.DriverNamer 可选接口）。
 func (fs *FileStore) DriverName() string { return "file" }
+
+// ChangeVersion 返回存储的单调递增变更版本（store.Store 接口）。
+func (fs *FileStore) ChangeVersion() uint64 { return fs.clock.ChangeVersion() }
 
 // ClassRecord 对应解析后的类信息。
 type ClassRecord struct {
@@ -130,6 +134,7 @@ func (fs *FileStore) Close() error {
 
 // UpsertFile 插入或更新文件记录。
 func (fs *FileStore) UpsertFile(ctx context.Context, filePath string, contentHash string, lineCount int, byteSize int64) (int64, error) {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -157,6 +162,7 @@ func (fs *FileStore) UpsertFile(ctx context.Context, filePath string, contentHas
 
 // MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
 func (fs *FileStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -210,6 +216,7 @@ func (fs *FileStore) GetFileByID(ctx context.Context, id int64) (*FileRecord, er
 
 // DeleteFile 删除文件及其级联数据。
 func (fs *FileStore) DeleteFile(ctx context.Context, fileID int64) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -240,6 +247,7 @@ func (fs *FileStore) clearIRLocked(fileID int64) {
 
 // UpsertClasses 批量更新类记录。
 func (fs *FileStore) UpsertClasses(ctx context.Context, fileID int64, classes []parser.ClassIR) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -282,6 +290,7 @@ func (fs *FileStore) purgeClassArtifactsLocked(fileID int64) {
 
 // UpsertMethods 批量更新方法记录。
 func (fs *FileStore) UpsertMethods(ctx context.Context, classID int64, methods []parser.MethodIR) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -308,6 +317,7 @@ func (fs *FileStore) UpsertMethods(ctx context.Context, classID int64, methods [
 
 // UpsertCalls 批量更新调用关系。
 func (fs *FileStore) UpsertCalls(ctx context.Context, fileID int64, calls []parser.CallIR) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -447,6 +457,7 @@ func (fs *FileStore) GetCallsByFileID(ctx context.Context, fileID int64) ([]Call
 
 // UpsertTags 设置类标签（全量替换）。
 func (fs *FileStore) UpsertTags(ctx context.Context, classID int64, tags []string) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -470,6 +481,7 @@ func (fs *FileStore) UpsertTags(ctx context.Context, classID int64, tags []strin
 
 // UpsertMethodTags 设置方法标签（全量替换）。
 func (fs *FileStore) UpsertMethodTags(ctx context.Context, methodID int64, tags []string) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -515,6 +527,7 @@ func (fs *FileStore) GetTagsByMethodID(ctx context.Context, methodID int64) ([]s
 
 // UpdateClassDoc 更新类文档注释（可选接口 docUpdater：供 AI 增强层写回补全文档）。
 func (fs *FileStore) UpdateClassDoc(ctx context.Context, classID int64, doc string) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -532,6 +545,7 @@ func (fs *FileStore) UpdateClassDoc(ctx context.Context, classID int64, doc stri
 
 // UpdateMethodDoc 更新方法文档注释（可选接口 docUpdater：供 AI 增强层写回补全文档）。
 func (fs *FileStore) UpdateMethodDoc(ctx context.Context, methodID int64, doc string) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -746,6 +760,7 @@ func (fs *FileStore) loadFromDisk() error {
 // BulkUpsert 批量入库（持有外层锁，避免逐文件重复加锁）。语义同逐文件 UpsertIR：
 // 内存填充 file/class/method/call 映射，Close 时一次性全量落盘（O(n)）。
 func (fs *FileStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error {
+	fs.clock.Touch()
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	for _, ir := range irs {

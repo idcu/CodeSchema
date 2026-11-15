@@ -23,12 +23,16 @@ import (
 
 // SQLiteStore 是基于 SQLite 的存储实现。
 type SQLiteStore struct {
-	mu sync.RWMutex
-	db *sql.DB
+	mu    sync.RWMutex
+	db    *sql.DB
+	clock store.ChangeClock // 变更版本：派生缓存按此判定是否重建
 }
 
 // DriverName 报告驱动名（store.DriverNamer 可选接口）。
 func (s *SQLiteStore) DriverName() string { return "sqlite" }
+
+// ChangeVersion 返回存储的单调递增变更版本（store.Store 接口）。
+func (s *SQLiteStore) ChangeVersion() uint64 { return s.clock.ChangeVersion() }
 
 // schema 初始化 SQL（幂等）。
 const schema = `
@@ -244,6 +248,7 @@ func (s *SQLiteStore) HealthCheck(ctx context.Context) error {
 
 // UpsertFile 插入或更新文件记录，返回文件 ID。
 func (s *SQLiteStore) UpsertFile(ctx context.Context, filePath, contentHash string, lineCount int, byteSize int64) (int64, error) {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -267,6 +272,7 @@ func (s *SQLiteStore) UpsertFile(ctx context.Context, filePath, contentHash stri
 
 // MarkParseSkipped 记录一个被旁路的文件（超限未解析），parse_status 置为 parse_skipped。
 func (s *SQLiteStore) MarkParseSkipped(ctx context.Context, filePath string, byteSize int64, lineCount int) (int64, error) {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -345,6 +351,7 @@ func (s *SQLiteStore) queryFile(where string, arg any) (*store.FileRecord, error
 
 // DeleteFile 删除文件及其级联数据。
 func (s *SQLiteStore) DeleteFile(ctx context.Context, fileID int64) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -377,6 +384,7 @@ func (s *SQLiteStore) DeleteFile(ctx context.Context, fileID int64) error {
 
 // UpsertClasses 按文件全量替换类记录。
 func (s *SQLiteStore) UpsertClasses(ctx context.Context, fileID int64, classes []parser.ClassIR) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -421,6 +429,7 @@ func (s *SQLiteStore) UpsertClasses(ctx context.Context, fileID int64, classes [
 
 // UpsertMethods 按类全量替换方法记录。
 func (s *SQLiteStore) UpsertMethods(ctx context.Context, classID int64, methods []parser.MethodIR) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -448,6 +457,7 @@ func (s *SQLiteStore) UpsertMethods(ctx context.Context, classID int64, methods 
 
 // UpsertCalls 按文件全量替换调用关系。
 func (s *SQLiteStore) UpsertCalls(ctx context.Context, fileID int64, calls []parser.CallIR) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -473,6 +483,7 @@ func (s *SQLiteStore) UpsertCalls(ctx context.Context, fileID int64, calls []par
 
 // UpsertIR 对一个文件的 IR 执行增量入库（语义对齐 FileStore）。
 func (s *SQLiteStore) UpsertIR(ctx context.Context, ir *parser.IRDocument) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -615,6 +626,7 @@ func (s *SQLiteStore) UpsertMethodTags(ctx context.Context, methodID int64, tags
 }
 
 func (s *SQLiteStore) upsertTagsLocked(ctx context.Context, kind string, ownerID int64, tags []string) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -980,6 +992,7 @@ func ensureDir(dir string) error {
 // 实测（N=100k，约 700k 行）：相比逐文件 UpsertIR（每文件拆 4~5 事务、100k 文件≈70万次
 // 提交，180~237s），单事务批量 + 预编译语句可将落库压到秒级~十几秒，提速约 1~2 个数量级。
 func (s *SQLiteStore) BulkUpsert(ctx context.Context, irs []*parser.IRDocument) error {
+	s.clock.Touch()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(irs) == 0 {

@@ -187,7 +187,7 @@ func RunTagAll(ctx context.Context, st store.Store, cfg *config.Config) error {
 // 唯一构造点固定为 BuildRuntime；外部只能从 *Runtime 取组件。
 //
 // 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
-func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
+func newSearcherWithStore(cfg *config.Config, st store.Store) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
 	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
 	var fts search.FTSEngine
 	pfts, err := search.NewPersistentFTS(ftsFile)
@@ -276,6 +276,10 @@ func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	adapter := search.NewVectorAdapter(indexer)
 	searcher := search.NewSearcher(fts, adapter, nil)
 	builder := search.NewIndexBuilder(fts, indexer, em)
+	// 检索索引是 Store 的派生视图：绑定存储后，查询前会按变更版本自愈，
+	// 不再依赖扫描/监听路径逐点调用 InvalidateDerivedCaches。
+	builder.BindStore(st)
+	searcher.SetFreshnessHook(builder.EnsureFresh)
 	return searcher, builder, store
 }
 
@@ -343,7 +347,7 @@ func ApplyContextConfig(svc *service.Service, cfg *config.Config) {
 // 所有使用方（HTTP handler、watcher、tenant、cmd）都从返回的 Runtime 取实例，
 // 不得再自行 new 同类型组件；否则增量会落到无人读取的副本上。
 func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Runtime, error) {
-	searcher, builder, vecStore := newSearcherWithStore(cfg)
+	searcher, builder, vecStore := newSearcherWithStore(cfg, st)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	an := analyzer.NewAnalyzer(st)

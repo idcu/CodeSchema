@@ -174,9 +174,20 @@ func (s *Service) QueryCacheStats() ttlcache.Stats {
 // queryCacheKey 构造缓存 key：世代号 + 符号 + 全部影响输出的裁剪参数。
 // IncludeTrace 必须入 key：否则先 false 后 true 会命中无 _trace 的缓存条目。
 func (s *Service) queryCacheKey(symbol string, o ContextOptions) string {
-	return fmt.Sprintf("e%d|%s|%s|%d|%d|%d|%d|%.4g|%s|%t",
-		s.cacheEpoch.Load(), symbol, o.Mode, o.ContextLines,
+	return fmt.Sprintf("e%d|v%d|%s|%s|%d|%d|%d|%d|%.4g|%s|%t",
+		s.cacheEpoch.Load(), s.storeVersion(), symbol, o.Mode, o.ContextLines,
 		o.MaxBytes, o.MaxTokens, o.MaxLineChars, o.charsPerToken(), o.PathStyle, o.IncludeTrace)
+}
+
+// storeVersion 返回存储变更版本；未注入存储时恒为 0（仅测试场景）。
+//
+// 查询缓存 key 带版本：写入方即使忘记调用 InvalidateDerivedCaches，旧 key
+// 也再也拼不出来，不会命中上一代索引的裁剪结果。
+func (s *Service) storeVersion() uint64 {
+	if s.store == nil {
+		return 0
+	}
+	return s.store.ChangeVersion()
 }
 
 // cloneSymbolContext 深拷贝缓存条目，隔离调用方对返回对象的修改。

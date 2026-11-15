@@ -148,7 +148,7 @@ func TestNewParserRegistry_SCIPBeforeCodeGraph(t *testing.T) {
 
 func TestSearcherWithStore_NonNil(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
-	s, b, v := newSearcherWithStore(cfg)
+	s, b, v := newSearcherWithStore(cfg, nil)
 	if s == nil || b == nil || v == nil {
 		t.Fatal("newSearcherWithStore returned nil component")
 	}
@@ -160,7 +160,7 @@ func TestSearcherWithStore_ChromemDriver(t *testing.T) {
 	cfg.Storage.Vector.Driver = "chromem"
 	cfg.Storage.Vector.DSN = filepath.Join(t.TempDir(), "chromem.db")
 	// 默认 EmbeddingModel 已被 noNetConfig 置空 → 回退 LocalEmbedder，无网络依赖
-	_, _, v := newSearcherWithStore(cfg)
+	_, _, v := newSearcherWithStore(cfg, nil)
 	if v == nil {
 		t.Fatal("newSearcherWithStore returned nil vector store")
 	}
@@ -172,7 +172,7 @@ func TestSearcherWithStore_ChromemDriver(t *testing.T) {
 // TestSearcherWithStore_DefaultFileBackend 验证：未配置 driver（默认）走文件 PersistentStore。
 func TestSearcherWithStore_DefaultFileBackend(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
-	_, _, v := newSearcherWithStore(cfg)
+	_, _, v := newSearcherWithStore(cfg, nil)
 	if _, ok := v.(*vector.PersistentStore); !ok {
 		t.Fatalf("expected *vector.PersistentStore, got %T", v)
 	}

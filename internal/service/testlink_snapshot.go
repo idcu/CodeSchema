@@ -381,8 +381,12 @@ func (snap *testLinkSnapshot) buildDependencyIndexes() {
 }
 
 // testLinkEntry 一代索引 + 文件指纹对应的快照。
+//
+// ver 是构建开始时的存储变更版本：指纹只能感知文件行元数据变化，
+// 存储版本能覆盖标签/IR 等未反映到 FileRecord 的写入。
 type testLinkEntry struct {
 	gen  uint64
+	ver  uint64
 	fp   uint64
 	snap *testLinkSnapshot
 }
@@ -393,24 +397,27 @@ type testLinkEntry struct {
 // 递增代次并清空指针，保证重索引后立即失效。
 func (s *Service) cachedTestLinkSnapshot(ctx context.Context, files []*store.FileRecord) *testLinkSnapshot {
 	fp := testLinkFingerprint(files)
-	if e := s.testLinkCache.Load(); e != nil && e.gen == s.testLinkGen.Load() && e.fp == fp {
+	ver := s.storeVersion()
+	if e := s.testLinkCache.Load(); e != nil && e.gen == s.testLinkGen.Load() && e.ver == ver && e.fp == fp {
 		return e.snap
 	}
 
 	s.testLinkBuildMu.Lock()
 	defer s.testLinkBuildMu.Unlock()
 	gen := s.testLinkGen.Load()
-	if e := s.testLinkCache.Load(); e != nil && e.gen == gen && e.fp == fp {
+	ver = s.storeVersion()
+	if e := s.testLinkCache.Load(); e != nil && e.gen == gen && e.ver == ver && e.fp == fp {
 		return e.snap
 	}
 
-	// 构建期间若发生失效，本次结果可能混合两代数据：重试一次；
+	// 构建期间若发生失效/写入，本次结果可能混合两代数据：重试一次；
 	// 持续写入下不再无限重试，直接返回本次结果且不写缓存。
 	for attempt := 0; ; attempt++ {
 		g := s.testLinkGen.Load()
+		v := s.storeVersion()
 		snap := s.buildTestLinkSnapshot(ctx, files)
-		if s.testLinkGen.Load() == g {
-			s.testLinkCache.Store(&testLinkEntry{gen: g, fp: fp, snap: snap})
+		if s.testLinkGen.Load() == g && s.storeVersion() == v {
+			s.testLinkCache.Store(&testLinkEntry{gen: g, ver: v, fp: fp, snap: snap})
 			return snap
 		}
 		if attempt >= 1 {

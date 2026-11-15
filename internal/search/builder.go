@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "gitee.com/idcu-go/log"
@@ -51,6 +52,13 @@ type IndexBuilder struct {
 	// 旧符号的 FTS/向量文档会永久残留，/search 与 /viz 会命中已不存在的代码。
 	docsMu   sync.Mutex
 	fileDocs map[string][]string
+
+	// 存储版本：索引是 Store 的派生视图，indexedVersion 记录已对齐到的变更版本。
+	// 查询入口经 EnsureFresh 比对，版本落后即全量重建——写入方即使忘记调用
+	// InvalidateDerivedCaches，也不会让 /search、/viz 永久陈旧。
+	st             store.Store
+	indexedVersion atomic.Uint64
+	freshMu        sync.Mutex // 串行化全量/增量构建，避免跨代互相覆盖
 }
 
 type asyncJob struct {
@@ -82,6 +90,42 @@ type BuildResult struct {
 	Duration    time.Duration `json:"duration"`
 }
 
+// BindStore 绑定索引服务的存储：EnsureFresh 据此判断索引是否落后于存储版本。
+//
+// 只应由运行时唯一装配点调用（见 runtime.newSearcherWithStore）；未绑定时
+// EnsureFresh 是空操作（仅测试场景会构造无存储的构建器）。
+func (b *IndexBuilder) BindStore(st store.Store) { b.st = st }
+
+// versionOf 返回存储变更版本；nil 存储恒为 0。
+func versionOf(st store.Store) uint64 {
+	if st == nil {
+		return 0
+	}
+	return st.ChangeVersion()
+}
+
+// EnsureFresh 保证检索索引与存储版本一致：版本落后时全量重建。
+//
+// 正确性不再依赖写入方调用失效钩子：BuildAndIndex 失败、markSkipped 清 IR、
+// 删除/改名等任何已落库的变更都推进存储版本，查询入口据此自愈。
+func (b *IndexBuilder) EnsureFresh(ctx context.Context) error {
+	if b.st == nil {
+		return nil
+	}
+	if b.indexedVersion.Load() == b.st.ChangeVersion() {
+		return nil
+	}
+	b.freshMu.Lock()
+	defer b.freshMu.Unlock()
+	if b.indexedVersion.Load() == b.st.ChangeVersion() {
+		return nil
+	}
+	if _, err := b.buildFromStore(ctx, b.st); err != nil {
+		return fmt.Errorf("refresh index: %w", err)
+	}
+	return nil
+}
+
 // BuildFromStore 从 Store 读取所有数据，构建 FTS 和向量索引。
 //
 // 流程：
@@ -90,6 +134,16 @@ type BuildResult struct {
 //  3. 先 Observe 所有文档建立 IDF 词典
 //  4. 再批量写入 FTS 和向量索引
 func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*BuildResult, error) {
+	b.freshMu.Lock()
+	defer b.freshMu.Unlock()
+	return b.buildFromStore(ctx, st)
+}
+
+// buildFromStore 执行一次全量构建（调用方须持有 freshMu）。
+func (b *IndexBuilder) buildFromStore(ctx context.Context, st store.Store) (*BuildResult, error) {
+	// 版本在读取前捕获：构建期间发生的写入不会被本次快照覆盖，
+	// 构建结束后版本仍落后，下一次查询会再次对齐（宁可多重建，不可陈旧）。
+	ver := versionOf(st)
 	start := time.Now()
 
 	files, err := st.GetAllFiles(ctx)
@@ -118,7 +172,10 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 		classes, err := st.GetClassesByFileID(ctx, f.ID)
 		if err != nil {
+			// 读失败 ≠ 文件已删除：沿用上一代追踪，避免 swap 把仍存在的
+			// 检索文档当成「本代消失」而摘除（检索文档被删、Store 仍在）。
 			result.Errors++
+			nextFileDocs[f.AbsolutePath] = b.fileDocsFor(f.AbsolutePath)
 			continue
 		}
 		if len(classes) == 0 {
@@ -130,28 +187,37 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 			continue
 		}
 
+		// 单文件先收集到局部切片：任一读失败则整文件沿用上一代追踪，
+		// 不把半代文档混进本代索引（否则旧文档会被误判为过期）。
+		var fileDocs []doc
 		fileIDs := make([]string, 0, len(classes))
+		readFailed := false
 		for _, c := range classes {
-			result.TotalDocs++
 			classID := "class:" + formatClassID(c.ID)
 			classText := buildClassIndexText(c, f.AbsolutePath)
-			docs = append(docs, doc{id: classID, text: classText})
+			fileDocs = append(fileDocs, doc{id: classID, text: classText})
 			fileIDs = append(fileIDs, classID)
 
 			// 索引方法
 			methods, err := st.GetMethodsByClassID(ctx, c.ID)
 			if err != nil {
 				result.Errors++
-				continue
+				readFailed = true
+				break
 			}
 			for _, m := range methods {
-				result.TotalDocs++
 				methodID := "method:" + formatClassID(m.ID)
 				methodText := buildMethodIndexText(c, m, f.AbsolutePath)
-				docs = append(docs, doc{id: methodID, text: methodText})
+				fileDocs = append(fileDocs, doc{id: methodID, text: methodText})
 				fileIDs = append(fileIDs, methodID)
 			}
 		}
+		if readFailed {
+			nextFileDocs[f.AbsolutePath] = b.fileDocsFor(f.AbsolutePath)
+			continue
+		}
+		docs = append(docs, fileDocs...)
+		result.TotalDocs += len(fileDocs)
 		nextFileDocs[f.AbsolutePath] = fileIDs
 	}
 	fmt.Fprintln(os.Stderr) // 换行结束文件扫描进度
@@ -165,6 +231,7 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 	if len(docs) == 0 {
 		result.Duration = time.Since(start)
+		b.indexedVersion.Store(ver)
 		return result, nil
 	}
 
@@ -226,6 +293,7 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 
 	result.IndexedDocs = len(docs)
 	result.Duration = time.Since(start)
+	b.indexedVersion.Store(ver)
 	fmt.Fprintf(os.Stderr, "  index build complete: %d docs in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
 	return result, nil
 }
@@ -258,6 +326,9 @@ func (b *IndexBuilder) IndexDocument(ctx context.Context, id, text string) error
 // 用于扫描后的增量更新，避免重复全量扫描。
 // filePath 用于生成文档 ID 前缀。
 func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePath string) error {
+	b.freshMu.Lock()
+	defer b.freshMu.Unlock()
+	ver := versionOf(st)
 	file, err := st.GetFileByPath(ctx, filePath)
 	if err != nil || file == nil {
 		return fmt.Errorf("get file %s: %w", filePath, err)
@@ -268,9 +339,10 @@ func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePa
 		return fmt.Errorf("get classes for file %d: %w", file.ID, err)
 	}
 
-	// 先摘除该文件上一代检索文档：重扫后类/方法会拿到新 ID，只新增不删除会
-	// 让旧符号永久残留在 FTS/向量索引里（/search、/viz 命中已删除代码）。
-	oldIDs := b.takeFileDocs(file.AbsolutePath)
+	// 先读取（不摘除）该文件上一代检索文档：重扫后类/方法会拿到新 ID，
+	// 只新增不删除会让旧符号永久残留在 FTS/向量索引里。追踪表只在
+	// 全部删除+重建成功后才覆盖，失败时旧值仍在，下一次可继续摘除。
+	oldIDs := b.fileDocsFor(file.AbsolutePath)
 
 	if len(classes) == 0 {
 		// 没有类，索引文件路径
@@ -284,6 +356,7 @@ func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePa
 			return err
 		}
 		b.setFileDocs(file.AbsolutePath, []string{fileDocID})
+		b.indexedVersion.Store(ver)
 		return nil
 	}
 
@@ -325,6 +398,7 @@ func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePa
 	}
 
 	b.setFileDocs(file.AbsolutePath, fileIDs)
+	b.indexedVersion.Store(ver)
 	return nil
 }
 
@@ -506,12 +580,15 @@ func (b *IndexBuilder) StopAutoSaveIDF() {
 // 调用边、标签）必须同时清理：只删检索文档会让 /context、/impact、/tests
 // 继续把已删除的代码当成存在（§8.8 缺口）。
 func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, filePath string) error {
+	b.freshMu.Lock()
+	defer b.freshMu.Unlock()
+	ver := versionOf(st)
 	// 先按追踪表摘除该文件上一代检索文档。重扫/改名后类与方法 ID 已变化，
-	// 仅按当前 Store 行删除会漏掉旧 ID 的文档。
-	tracked := b.takeFileDocs(filePath)
+	// 仅按当前 Store 行删除会漏掉旧 ID 的文档。追踪表只在全部成功后清理。
+	tracked := b.fileDocsFor(filePath)
 	file, err := st.GetFileByPath(ctx, filePath)
 	if err == nil && file != nil && file.AbsolutePath != filePath {
-		tracked = append(tracked, b.takeFileDocs(file.AbsolutePath)...)
+		tracked = append(tracked, b.fileDocsFor(file.AbsolutePath)...)
 	}
 
 	if err != nil || file == nil {
@@ -521,7 +598,12 @@ func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, fileP
 			}
 		}
 		// 文件不存在，删除文件本身（如果索引过）
-		return b.RemoveDocument(ctx, "file:"+filePath)
+		if err := b.RemoveDocument(ctx, "file:"+filePath); err != nil {
+			return err
+		}
+		b.clearFileDocs(filePath)
+		b.indexedVersion.Store(ver)
+		return nil
 	}
 
 	for _, id := range tracked {
@@ -564,6 +646,11 @@ func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, fileP
 	if err := st.DeleteFile(ctx, file.ID); err != nil {
 		return fmt.Errorf("delete file %d (%s): %w", file.ID, filePath, err)
 	}
+	b.clearFileDocs(filePath)
+	if file.AbsolutePath != filePath {
+		b.clearFileDocs(file.AbsolutePath)
+	}
+	b.indexedVersion.Store(ver)
 	return nil
 }
 
@@ -599,13 +686,21 @@ func (b *IndexBuilder) swapFileDocs(next map[string][]string) []string {
 	return stale
 }
 
-// takeFileDocs 取出并移除指定文件的文档 ID 追踪记录。
-func (b *IndexBuilder) takeFileDocs(filePath string) []string {
+// fileDocsFor 返回指定文件当前追踪的文档 ID（只读，不摘除）。
+//
+// 增量构建失败时追踪必须保持旧值，下一次构建才能继续摘除旧文档；
+// 先前 takeFileDocs 的「先摘再删」在任一失败分支都会永久丢失追踪项。
+func (b *IndexBuilder) fileDocsFor(filePath string) []string {
 	b.docsMu.Lock()
 	defer b.docsMu.Unlock()
-	ids := b.fileDocs[filePath]
+	return append([]string(nil), b.fileDocs[filePath]...)
+}
+
+// clearFileDocs 删除指定文件的追踪记录（仅在文档已全部摘除后调用）。
+func (b *IndexBuilder) clearFileDocs(filePath string) {
+	b.docsMu.Lock()
+	defer b.docsMu.Unlock()
 	delete(b.fileDocs, filePath)
-	return ids
 }
 
 // setFileDocs 覆盖指定文件的文档 ID 追踪记录。
