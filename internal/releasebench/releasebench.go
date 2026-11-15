@@ -23,6 +23,7 @@ import (
 
 	"github.com/idcu/codeschema/internal/parser"
 	adapter "github.com/idcu/codeschema/internal/parser/adapter/treesitter"
+	"github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
 	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
@@ -535,7 +536,9 @@ func newService(ctx context.Context, root string, workers int) (*service.Service
 		cleanup()
 		return nil, nil, err
 	}
-	return service.NewService(st), cleanup, nil
+	// 只读基准无增量写入路径：经 runtime 只读装配入口取 Service，
+	// 不在本包自建运行时组件（见 internal/runtime/ownership_test.go 守卫）。
+	return runtime.BuildReadOnlyService(st), cleanup, nil
 }
 
 func gitHead(repo string) string {
