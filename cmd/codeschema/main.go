@@ -21,14 +21,11 @@ import (
 	"github.com/idcu/codeschema/internal/fsperm"
 	rt "github.com/idcu/codeschema/internal/runtime"
 	"github.com/idcu/codeschema/internal/scanner"
-	"github.com/idcu/codeschema/internal/scheduler"
 	"github.com/idcu/codeschema/internal/search"
 	"github.com/idcu/codeschema/internal/server"
-	"github.com/idcu/codeschema/internal/service"
 	"github.com/idcu/codeschema/internal/store"
 	"github.com/idcu/codeschema/internal/tenant"
 	"github.com/idcu/codeschema/internal/vector"
-	"github.com/idcu/codeschema/internal/watcher"
 )
 
 // withImpactAnalyzer / newAIEnhancer / withAIEnhancer / runTagAll 等运行期装配函数
@@ -233,21 +230,17 @@ func scanCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	elapsed := time.Since(start)
 	fmt.Printf("scan completed in %s\n", elapsed.Round(time.Millisecond))
 
-	// 扫描完成后构建搜索索引
-	searcher, builder := rt.NewSearcher(cfg)
-	svc := service.NewService(st)
-	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	rt.WithImpactAnalyzer(svc, st)
-	if result, err := svc.BuildIndex(ctx); err != nil {
-		fmt.Printf("WARN: build index: %v\n", err)
-	} else {
-		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
+	// 扫描完成后由 BuildRuntime 统一装配组件并构建首轮索引（唯一装配入口）。
+	run, err := rt.BuildRuntime(ctx, st, cfg)
+	if err != nil {
+		return fmt.Errorf("build runtime: %w", err)
 	}
+	fmt.Println("index built")
 
 	// 持久化 IDF 词典
 	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
 	if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
-		if err := builder.SaveIDF(idfFile); err != nil {
+		if err := run.Builder.SaveIDF(idfFile); err != nil {
 			fmt.Printf("WARN: save IDF dictionary: %v\n", err)
 		}
 	}
@@ -286,82 +279,27 @@ func watchCmd(ctx context.Context, cfg *config.Config, args []string) error {
 	}
 	defer st.Close()
 
-	// 初始化解析适配器注册中心（tree-sitter 兜底 + 可选 LSP/SCIP/CodeGraph 高精度优先）
-	reg := rt.NewParserRegistry(ctx, cfg, repoPath)
+	// 命令行覆盖写回配置：BuildRuntime 与 watcher 都从同一份配置装配。
+	cfg.Scanner.Workers = *workers
+	cfg.Watcher.DebounceMs = *debounceMs
+	cfg.Watcher.UseFsnotify = *useFsnotify
 
-	// 创建 Scanner
-	s := scanner.NewScanner(st, reg, *workers)
-
-	// 创建调度器
-	sched := scheduler.NewScheduler[string](*debounceMs, 1000)
-
-	// 创建搜索组件
-	searcher, builder := rt.NewSearcher(cfg)
-	svc := service.NewService(st)
-	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	rt.WithImpactAnalyzer(svc, st)
-
-	// 启动异步索引队列（2 个 worker，64 缓冲区）
-	builder.StartAsync(ctx, 64, 2)
-	defer builder.StopAsync()
-
-	// 启动 IDF 自动持久化（60 秒间隔，仅 watch/mcp/serve 长时运行命令）
-	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	stopAutoSave := builder.AutoSaveIDF(idfFile, 60*time.Second)
-	defer stopAutoSave()
-
-	// 启动时全量构建索引（如果持久化索引存在则跳过）
-	if result, err := svc.BuildIndex(ctx); err != nil {
-		fmt.Printf("WARN: build index: %v\n", err)
-	} else {
-		fmt.Printf("index built: %d docs indexed in %s\n", result.IndexedDocs, result.Duration.Round(time.Millisecond))
-		// 持久化 IDF 词典（全量构建后立即保存一次）
-		if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
-			if err := builder.SaveIDF(idfFile); err != nil {
-				fmt.Printf("WARN: save IDF dictionary: %v\n", err)
-			}
-		}
+	// 唯一装配入口：Searcher / IndexBuilder / Service 由 Runtime 持有，
+	// watcher 增量与查询侧共用同一实例（否则增量会落到无人读取的副本）。
+	run, err := rt.BuildRuntime(ctx, st, cfg)
+	if err != nil {
+		return fmt.Errorf("build runtime: %w", err)
 	}
-
-	// 设置增量索引回调（异步，非阻塞）
-	s.SetOnIndex(func(ctx context.Context, filePath string) error {
-		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
-			return err
-		}
-		// 索引变了：查询缓存与调用图缓存立即失效，避免返回上一代结果。
-		svc.InvalidateDerivedCaches()
-		return nil
-	})
-
-	// 设置删除回调，文件被删除时自动清理索引
-	s.SetOnDelete(func(ctx context.Context, filePath string) error {
-		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
-			return err
-		}
-		svc.InvalidateDerivedCaches()
-		return nil
-	})
-
-	// 创建监听器
-	var w watcher.Watcher
-	if *useFsnotify {
-		fw, err := watcher.NewFsWatcher(repoPath, s, sched, cfg.Watcher.IgnoreDirs)
-		if err != nil {
-			return fmt.Errorf("new fsnotify watcher: %w", err)
-		}
-		w = fw
-	} else {
-		w = watcher.NewPollWatcher(repoPath, s, sched, 1*time.Second, cfg.Watcher.IgnoreDirs)
+	stop, err := run.StartWatchBackground(ctx, cfg, repoPath)
+	if err != nil {
+		return fmt.Errorf("start watch: %w", err)
 	}
+	defer run.Builder.StopAsync()
+	defer stop()
 
-	// 启动调度器
-	go sched.Start(ctx, func(ctx context.Context, path string) error {
-		return s.ProcessFile(ctx, path)
-	})
-
-	// 启动监听器（阻塞）
 	fmt.Println("watcher started, press Ctrl+C to stop")
-	return w.Start(ctx)
+	<-ctx.Done()
+	return nil
 }
 
 func mcpCmd(ctx context.Context, cfg *config.Config, cfgWatcher *config.ConfigWatcher, args []string) error {

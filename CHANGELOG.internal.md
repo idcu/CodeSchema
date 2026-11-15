@@ -6,6 +6,40 @@
 
 ## 提交记录
 
+### 运行时单点所有权（2026-11-15）：watcher 增量不再写到副本检索器
+
+- refactor(runtime)：`Runtime` 成为 `Service / Searcher / IndexBuilder` 的唯一所有者与
+  唯一构造点。原 `StartWatchBackground` 又调用 `NewSearcher(cfg)` 构造了第二套实例，
+  FTS 与向量存储均为构造时载入的内存索引，watcher 的 `BuildAndIndex` / `BuildAndRemove`
+  写在副本上，`/search`、`/viz` 永远停在启动快照。现在 watcher 直接使用
+  `r.Store / r.Builder / r.Svc`（与上一轮失效打错实例同根：多处各自 new）。
+- fix(search)：`IndexBuilder` 增加「文件 → 文档 ID」追踪。重扫后 `UpsertClasses` 会分配
+  新 ID，原增量只新增不摘除，旧符号文档永久残留；现在 `BuildAndIndex` /
+  `BuildAndRemove` 先摘除该文件上一代文档，`BuildFromStore` 对差集文档做摘除。
+- refactor(cmd)：`scan` / `watch` 改为经 `rt.BuildRuntime` 取组件；`watch` 使用
+  `run.StartWatchBackground`，不再自建 scanner/scheduler/searcher/service 装配链。
+  `ScanRepository` 删除未使用的 Searcher/Service/Analyzer 构造。
+- 破坏点（均为 `internal` API，仓外无消费者）：移除 `runtime.NewSearcher`；
+  `NewSearcherWithStore` 改为非导出 `newSearcherWithStore`；
+  `(*Runtime).StartWatchBackground(ctx, st, cfg, root)` → `(ctx, cfg, root)`。
+- 守卫：`internal/runtime/ownership_test.go` 以 AST 静态断言三类组件的唯一构造点
+  （`service.NewService` → `BuildRuntime`；`search.NewSearcher` / `search.NewIndexBuilder`
+  → `newSearcherWithStore`），并禁止 cmd 层直接构造、禁止再出现导出构造函数。
+- 先红：`TestWatchIncrementalUpdateVisibleToSearchAndViz` 在改文件、主存储已出现
+  `BetaProbe` 后，查询侧 `/search` 10 s 内仍看不到新内容（11.29 s 失败）；
+  `TestRuntimeSingleConstructionPoint` 报 `service.NewService` 3 处
+  （`BuildRuntime` / `ScanRepository` / `StartWatchBackground`），
+  `search.NewSearcher` / `search.NewIndexBuilder` 虽各 1 处却落在错误的
+  `NewSearcherWithStore`，且仍声明两个导出构造函数；
+  `TestCmdDoesNotConstructRuntimeComponents` 报 cmd 4 处直接构造。
+  修复后三个用例全绿（端到端 4.37 s）。
+- 覆盖：改文件（新内容可见 + 旧符号消失，`/search` 与 `/viz` 双路）、删除文件、
+  改名（旧路径从 `/viz` 文档消失、新路径出现且 `/search` 结果指向新路径）。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.8、`docs/01-开发者/架构与模块.md`、
+  `docs/仓库结构.md`、`docs/01-开发者/存储后端.md`、`DEV_PROGRESS.md`。
+- 计数：非 vendor LoC 73,706 → 74,114（74.1k），`make counts-update` 同步基线，
+  `docs/README.md` 与 `docs/01-开发者/架构与模块.md` 口径同次刷新。
+
 ### poll 删除清理（2026-11-15）：删除/改名后 /context、/impact、/tests 不再命中残留
 
 - fix(search)：`IndexBuilder.BuildAndRemove` 由「只删检索文档」改为同时经

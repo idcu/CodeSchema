@@ -44,6 +44,13 @@ type IndexBuilder struct {
 	// IDF 自动持久化
 	autoSaveIDFPath string
 	autoSaveStopCh  chan struct{}
+
+	// docsMu/fileDocs 记录每个文件产出的检索文档 ID（绝对路径 → 文档 ID）。
+	//
+	// FileStore 每次重扫都会给类/方法分配新 ID；增量更新若只新增不摘除，
+	// 旧符号的 FTS/向量文档会永久残留，/search 与 /viz 会命中已不存在的代码。
+	docsMu   sync.Mutex
+	fileDocs map[string][]string
 }
 
 type asyncJob struct {
@@ -58,6 +65,7 @@ func NewIndexBuilder(fts FTSEngine, idx *vector.Indexer, emb vector.Embedder) *I
 		fts:      fts,
 		indexer:  idx,
 		embedder: emb,
+		fileDocs: make(map[string][]string),
 	}
 	// 如果 embedder 是 LocalEmbedder，保存引用用于 IDF 操作
 	if le, ok := emb.(*vector.LocalEmbedder); ok {
@@ -98,6 +106,8 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 	}
 
 	var docs []doc
+	// nextFileDocs 记录本次构建每个文件产出的文档 ID，用于摘除上一代残留。
+	nextFileDocs := make(map[string][]string, len(files))
 	totalFiles := len(files)
 
 	for fi, f := range files {
@@ -113,19 +123,20 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 		}
 		if len(classes) == 0 {
 			// 文件没有类，用文件路径作为文档
-			docs = append(docs, doc{
-				id:   "file:" + f.AbsolutePath,
-				text: f.AbsolutePath,
-			})
+			fileDocID := "file:" + f.AbsolutePath
+			docs = append(docs, doc{id: fileDocID, text: f.AbsolutePath})
+			nextFileDocs[f.AbsolutePath] = []string{fileDocID}
 			result.TotalDocs++
 			continue
 		}
 
+		fileIDs := make([]string, 0, len(classes))
 		for _, c := range classes {
 			result.TotalDocs++
 			classID := "class:" + formatClassID(c.ID)
 			classText := buildClassIndexText(c, f.AbsolutePath)
 			docs = append(docs, doc{id: classID, text: classText})
+			fileIDs = append(fileIDs, classID)
 
 			// 索引方法
 			methods, err := st.GetMethodsByClassID(ctx, c.ID)
@@ -138,10 +149,19 @@ func (b *IndexBuilder) BuildFromStore(ctx context.Context, st store.Store) (*Bui
 				methodID := "method:" + formatClassID(m.ID)
 				methodText := buildMethodIndexText(c, m, f.AbsolutePath)
 				docs = append(docs, doc{id: methodID, text: methodText})
+				fileIDs = append(fileIDs, methodID)
 			}
 		}
+		nextFileDocs[f.AbsolutePath] = fileIDs
 	}
 	fmt.Fprintln(os.Stderr) // 换行结束文件扫描进度
+
+	// 全量重建也要摘除上一代独有的检索文档（例如重扫后 ID 变化或文件已被删除）。
+	for _, id := range b.swapFileDocs(nextFileDocs) {
+		if err := b.RemoveDocument(ctx, id); err != nil {
+			log.WithModule("search.index_builder").Warn("remove stale doc", "id", id, "error", err.Error())
+		}
+	}
 
 	if len(docs) == 0 {
 		result.Duration = time.Since(start)
@@ -248,31 +268,63 @@ func (b *IndexBuilder) BuildAndIndex(ctx context.Context, st store.Store, filePa
 		return fmt.Errorf("get classes for file %d: %w", file.ID, err)
 	}
 
+	// 先摘除该文件上一代检索文档：重扫后类/方法会拿到新 ID，只新增不删除会
+	// 让旧符号永久残留在 FTS/向量索引里（/search、/viz 命中已删除代码）。
+	oldIDs := b.takeFileDocs(file.AbsolutePath)
+
 	if len(classes) == 0 {
 		// 没有类，索引文件路径
-		return b.IndexDocument(ctx, "file:"+file.AbsolutePath, file.AbsolutePath)
-	}
-
-	for _, c := range classes {
-		classID := "class:" + formatClassID(c.ID)
-		classText := buildClassIndexText(c, file.AbsolutePath)
-		if err := b.IndexDocument(ctx, classID, classText); err != nil {
+		for _, id := range oldIDs {
+			if err := b.RemoveDocument(ctx, id); err != nil {
+				return err
+			}
+		}
+		fileDocID := "file:" + file.AbsolutePath
+		if err := b.IndexDocument(ctx, fileDocID, file.AbsolutePath); err != nil {
 			return err
 		}
+		b.setFileDocs(file.AbsolutePath, []string{fileDocID})
+		return nil
+	}
+
+	type pendingDoc struct {
+		id   string
+		text string
+	}
+	var pending []pendingDoc
+	for _, c := range classes {
+		pending = append(pending, pendingDoc{
+			id:   "class:" + formatClassID(c.ID),
+			text: buildClassIndexText(c, file.AbsolutePath),
+		})
 
 		methods, err := st.GetMethodsByClassID(ctx, c.ID)
 		if err != nil {
 			return fmt.Errorf("get methods for class %d: %w", c.ID, err)
 		}
 		for _, m := range methods {
-			methodID := "method:" + formatClassID(m.ID)
-			methodText := buildMethodIndexText(c, m, file.AbsolutePath)
-			if err := b.IndexDocument(ctx, methodID, methodText); err != nil {
-				return err
-			}
+			pending = append(pending, pendingDoc{
+				id:   "method:" + formatClassID(m.ID),
+				text: buildMethodIndexText(c, m, file.AbsolutePath),
+			})
 		}
 	}
 
+	for _, id := range oldIDs {
+		if err := b.RemoveDocument(ctx, id); err != nil {
+			return err
+		}
+	}
+
+	fileIDs := make([]string, 0, len(pending))
+	for _, d := range pending {
+		if err := b.IndexDocument(ctx, d.id, d.text); err != nil {
+			return err
+		}
+		fileIDs = append(fileIDs, d.id)
+	}
+
+	b.setFileDocs(file.AbsolutePath, fileIDs)
 	return nil
 }
 
@@ -454,10 +506,28 @@ func (b *IndexBuilder) StopAutoSaveIDF() {
 // 调用边、标签）必须同时清理：只删检索文档会让 /context、/impact、/tests
 // 继续把已删除的代码当成存在（§8.8 缺口）。
 func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, filePath string) error {
+	// 先按追踪表摘除该文件上一代检索文档。重扫/改名后类与方法 ID 已变化，
+	// 仅按当前 Store 行删除会漏掉旧 ID 的文档。
+	tracked := b.takeFileDocs(filePath)
 	file, err := st.GetFileByPath(ctx, filePath)
+	if err == nil && file != nil && file.AbsolutePath != filePath {
+		tracked = append(tracked, b.takeFileDocs(file.AbsolutePath)...)
+	}
+
 	if err != nil || file == nil {
+		for _, id := range tracked {
+			if err := b.RemoveDocument(ctx, id); err != nil {
+				return err
+			}
+		}
 		// 文件不存在，删除文件本身（如果索引过）
 		return b.RemoveDocument(ctx, "file:"+filePath)
+	}
+
+	for _, id := range tracked {
+		if err := b.RemoveDocument(ctx, id); err != nil {
+			return err
+		}
 	}
 
 	// 删除所有类和方法
@@ -495,6 +565,57 @@ func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, fileP
 		return fmt.Errorf("delete file %d (%s): %w", file.ID, filePath, err)
 	}
 	return nil
+}
+
+// swapFileDocs 用 next 替换文件→文档 ID 追踪表，返回上一代有、next 中已消失的文档 ID。
+//
+// 用于全量重建：重扫后类/方法 ID 会变化，必须摘除旧 ID 的检索文档，
+// 否则 /search 与 /viz 会继续命中已不存在的符号。
+func (b *IndexBuilder) swapFileDocs(next map[string][]string) []string {
+	b.docsMu.Lock()
+	defer b.docsMu.Unlock()
+
+	prev := b.fileDocs
+	b.fileDocs = next
+	if len(prev) == 0 {
+		return nil
+	}
+
+	keep := make(map[string]struct{}, len(next)*2)
+	for _, ids := range next {
+		for _, id := range ids {
+			keep[id] = struct{}{}
+		}
+	}
+
+	var stale []string
+	for _, ids := range prev {
+		for _, id := range ids {
+			if _, ok := keep[id]; !ok {
+				stale = append(stale, id)
+			}
+		}
+	}
+	return stale
+}
+
+// takeFileDocs 取出并移除指定文件的文档 ID 追踪记录。
+func (b *IndexBuilder) takeFileDocs(filePath string) []string {
+	b.docsMu.Lock()
+	defer b.docsMu.Unlock()
+	ids := b.fileDocs[filePath]
+	delete(b.fileDocs, filePath)
+	return ids
+}
+
+// setFileDocs 覆盖指定文件的文档 ID 追踪记录。
+func (b *IndexBuilder) setFileDocs(filePath string, ids []string) {
+	b.docsMu.Lock()
+	defer b.docsMu.Unlock()
+	if b.fileDocs == nil {
+		b.fileDocs = make(map[string][]string)
+	}
+	b.fileDocs[filePath] = ids
 }
 
 // buildClassIndexText 构建类的索引文本。

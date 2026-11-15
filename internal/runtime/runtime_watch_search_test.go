@@ -143,7 +143,7 @@ func TestWatchIncrementalUpdateVisibleToSearchAndViz(t *testing.T) {
 		t.Fatalf("用例前提不成立：初始 /viz 文档看不到 AlphaProbe")
 	}
 
-	stop, err := run.StartWatchBackground(ctx, st, cfg, repoDir)
+	stop, err := run.StartWatchBackground(ctx, cfg, repoDir)
 	if err != nil {
 		t.Fatalf("StartWatchBackground: %v", err)
 	}

@@ -180,10 +180,14 @@ func RunTagAll(ctx context.Context, st store.Store, cfg *config.Config) error {
 	return nil
 }
 
-// NewSearcherWithStore 创建双路检索器 + 索引构建器，并返回底层向量存储。
+// newSearcherWithStore 创建双路检索器 + 索引构建器，并返回底层向量存储。
+//
+// 非导出：Searcher 与 IndexBuilder 共享构造时载入的内存索引（FTS + 向量），
+// 同类型一旦出现第二个实例，增量会写进没人读的副本（/search、/viz 永远陈旧）。
+// 唯一构造点固定为 BuildRuntime；外部只能从 *Runtime 取组件。
 //
 // 优先使用 ONNX 模型（bge-small-zh-v1.5），模型文件不存在时降级到 LocalEmbedder。
-func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
+func newSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBuilder, vector.VectorStore) {
 	ftsFile := filepath.Join(cfg.Storage.Search.FTSDir, "fts.json")
 	var fts search.FTSEngine
 	pfts, err := search.NewPersistentFTS(ftsFile)
@@ -275,12 +279,6 @@ func NewSearcherWithStore(cfg *config.Config) (*search.Searcher, *search.IndexBu
 	return searcher, builder, store
 }
 
-// NewSearcher 兼容旧签名的委托：仅返回 searcher 与 indexBuilder。
-func NewSearcher(cfg *config.Config) (*search.Searcher, *search.IndexBuilder) {
-	s, b, _ := NewSearcherWithStore(cfg)
-	return s, b
-}
-
 // Runtime 汇聚单个项目运行期所需的全部组件。
 type Runtime struct {
 	Store    store.Store
@@ -340,13 +338,17 @@ func ApplyContextConfig(svc *service.Service, cfg *config.Config) {
 	svc.WithPathRoot(root)
 }
 
+// BuildRuntime 是 Service / Searcher / IndexBuilder 的唯一所有者与构造点。
+//
+// 所有使用方（HTTP handler、watcher、tenant、cmd）都从返回的 Runtime 取实例，
+// 不得再自行 new 同类型组件；否则增量会落到无人读取的副本上。
 func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Runtime, error) {
-	searcher, builder, vecStore := NewSearcherWithStore(cfg)
+	searcher, builder, vecStore := newSearcherWithStore(cfg)
 	svc := service.NewService(st)
 	svc.WithSearcher(searcher).WithIndexBuilder(builder)
 	an := analyzer.NewAnalyzer(st)
 	svc.WithImpactAnalyzer(an)
-	WithAIEnhancer(svc, cfg)
+	enhancer := WithAIEnhancer(svc, cfg)
 	ApplyContextConfig(svc, cfg)
 	if _, err := svc.BuildIndex(ctx); err != nil {
 		return nil, err
@@ -358,7 +360,7 @@ func BuildRuntime(ctx context.Context, st store.Store, cfg *config.Config) (*Run
 		Builder:  builder,
 		VecStore: vecStore,
 		Analyzer: an,
-		Enhancer: NewAIEnhancer(cfg),
+		Enhancer: enhancer,
 	}, nil
 }
 
@@ -372,16 +374,8 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 	if err := s.ScanAll(ctx, root); err != nil {
 		return err
 	}
-	searcher, builder := NewSearcher(cfg)
-	svc := service.NewService(st)
-	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	WithImpactAnalyzer(svc, st)
-	idfFile := filepath.Join(cfg.Storage.Search.IDFDir, "idf.json")
-	if err := fsperm.MkdirAll(filepath.Dir(idfFile)); err == nil {
-		if err := builder.SaveIDF(idfFile); err != nil {
-			log.Printf("WARN: save IDF dictionary: %v", err)
-		}
-	}
+	// 本函数只负责灌库与标签；索引由随后的 BuildRuntime 统一构建，
+	// 此处不得再构造第二套 Searcher/Service（装配唯一入口见 BuildRuntime）。
 	if err := RunTagAll(ctx, st, cfg); err != nil {
 		log.Printf("WARN: tag all: %v", err)
 	}
@@ -390,30 +384,21 @@ func ScanRepository(ctx context.Context, st store.Store, cfg *config.Config, roo
 
 // StartWatchBackground 后台启动该仓库的增量监听；返回的 stop 函数用于优雅停止。
 //
-// 必须是 Runtime 的方法：增量更新后要失效的是**查询侧** Runtime.Svc 的派生缓存
-// （调用图 / 测试关联快照 / 查询缓存）。早期实现自建 service.Service 并在其上
-// 调用 InvalidateDerivedCaches，多租户下失效落在另一个实例上，run.Svc 会一直
-// 返回上一代调用图（见 runtime_watch_cache_test.go）。
-func (r *Runtime) StartWatchBackground(ctx context.Context, st store.Store, cfg *config.Config, root string) (func(), error) {
+// 必须使用 Runtime 自有的 Builder / Svc：检索器与索引构建器共享同一份内存索引，
+// 若此处自建第二套实例，增量会写进没人读的副本（/search、/viz 永远陈旧）。
+// 增量更新后失效的也必须查询侧的 r.Svc 派生缓存（调用图 / 测试关联 / 查询缓存）。
+func (r *Runtime) StartWatchBackground(ctx context.Context, cfg *config.Config, root string) (func(), error) {
 	reg := NewParserRegistry(ctx, cfg, root)
-	s := scanner.NewScanner(st, reg, cfg.Scanner.Workers)
+	s := scanner.NewScanner(r.Store, reg, cfg.Scanner.Workers)
 	s.SetLimits(int64(cfg.Scanner.FileSizeLimitMB)*1024*1024, cfg.Scanner.LineCountLimit)
-	searcher, builder := NewSearcher(cfg)
-	svc := service.NewService(st)
-	svc.WithSearcher(searcher).WithIndexBuilder(builder)
-	WithImpactAnalyzer(svc, st)
-	ApplyContextConfig(svc, cfg)
 
 	sched := scheduler.NewScheduler[string](cfg.Watcher.DebounceMs, 1000)
 
-	builder.StartAsync(ctx, 64, 2)
-	stopAutoSave := builder.AutoSaveIDF(filepath.Join(cfg.Storage.Search.IDFDir, "idf.json"), 60*time.Second)
+	r.Builder.StartAsync(ctx, 64, 2)
+	stopAutoSave := r.Builder.AutoSaveIDF(filepath.Join(cfg.Storage.Search.IDFDir, "idf.json"), 60*time.Second)
 
-	if _, err := svc.BuildIndex(ctx); err != nil {
-		log.Printf("WARN: build index: %v", err)
-	}
 	s.SetOnIndex(func(ctx context.Context, filePath string) error {
-		if err := builder.BuildAndIndex(ctx, st, filePath); err != nil {
+		if err := r.Builder.BuildAndIndex(ctx, r.Store, filePath); err != nil {
 			return err
 		}
 		// 索引变了，查询侧的查询缓存、调用图缓存与测试关联快照必须立即失效
@@ -422,7 +407,7 @@ func (r *Runtime) StartWatchBackground(ctx context.Context, st store.Store, cfg 
 		return nil
 	})
 	s.SetOnDelete(func(ctx context.Context, filePath string) error {
-		if err := builder.BuildAndRemove(ctx, st, filePath); err != nil {
+		if err := r.Builder.BuildAndRemove(ctx, r.Store, filePath); err != nil {
 			return err
 		}
 		r.Svc.InvalidateDerivedCaches()

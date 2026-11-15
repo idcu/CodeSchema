@@ -146,33 +146,33 @@ func TestNewParserRegistry_SCIPBeforeCodeGraph(t *testing.T) {
 	}
 }
 
-func TestNewSearcherWithStore_NonNil(t *testing.T) {
+func TestSearcherWithStore_NonNil(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
-	s, b, v := NewSearcherWithStore(cfg)
+	s, b, v := newSearcherWithStore(cfg)
 	if s == nil || b == nil || v == nil {
-		t.Fatal("NewSearcherWithStore returned nil component")
+		t.Fatal("newSearcherWithStore returned nil component")
 	}
 }
 
-// TestNewSearcherWithStore_ChromemDriver 验证：显式 driver=chromem 时启用持久化 ChromemStore。
-func TestNewSearcherWithStore_ChromemDriver(t *testing.T) {
+// TestSearcherWithStore_ChromemDriver 验证：显式 driver=chromem 时启用持久化 ChromemStore。
+func TestSearcherWithStore_ChromemDriver(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
 	cfg.Storage.Vector.Driver = "chromem"
 	cfg.Storage.Vector.DSN = filepath.Join(t.TempDir(), "chromem.db")
 	// 默认 EmbeddingModel 已被 noNetConfig 置空 → 回退 LocalEmbedder，无网络依赖
-	_, _, v := NewSearcherWithStore(cfg)
+	_, _, v := newSearcherWithStore(cfg)
 	if v == nil {
-		t.Fatal("NewSearcherWithStore returned nil vector store")
+		t.Fatal("newSearcherWithStore returned nil vector store")
 	}
 	if _, ok := v.(*vector.ChromemStore); !ok {
 		t.Fatalf("expected *vector.ChromemStore, got %T", v)
 	}
 }
 
-// TestNewSearcherWithStore_DefaultFileBackend 验证：未配置 driver（默认）走文件 PersistentStore。
-func TestNewSearcherWithStore_DefaultFileBackend(t *testing.T) {
+// TestSearcherWithStore_DefaultFileBackend 验证：未配置 driver（默认）走文件 PersistentStore。
+func TestSearcherWithStore_DefaultFileBackend(t *testing.T) {
 	cfg := noNetConfig(t, t.TempDir())
-	_, _, v := NewSearcherWithStore(cfg)
+	_, _, v := newSearcherWithStore(cfg)
 	if _, ok := v.(*vector.PersistentStore); !ok {
 		t.Fatalf("expected *vector.PersistentStore, got %T", v)
 	}

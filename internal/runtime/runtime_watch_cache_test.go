@@ -106,7 +106,7 @@ func TestWatchIncrementalUpdateInvalidatesRuntimeCaches(t *testing.T) {
 		t.Fatalf("初始调用图缺少 helperA，用例前提不成立")
 	}
 
-	stop, err := run.StartWatchBackground(ctx, st, cfg, repoDir)
+	stop, err := run.StartWatchBackground(ctx, cfg, repoDir)
 	if err != nil {
 		t.Fatalf("StartWatchBackground: %v", err)
 	}

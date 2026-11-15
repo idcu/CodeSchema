@@ -161,7 +161,7 @@ func TestWatchPollDeletionRemovesIndexedFile(t *testing.T) {
 		t.Fatalf("用例前提不成立：删除前未关联 TestTarget，实际 %+v", beforeTests)
 	}
 
-	stop, err := run.StartWatchBackground(ctx, st, cfg, repoDir)
+	stop, err := run.StartWatchBackground(ctx, cfg, repoDir)
 	if err != nil {
 		t.Fatalf("StartWatchBackground: %v", err)
 	}

@@ -569,6 +569,37 @@ CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after-opt \
 门禁（串行）：`go build ./...`、`go vet ./...`、`go vet -tags 'pg redis' ./...`、
 `make fmt-check`、`make verify-tags`、`make counts-check`、`make test`、`make test-pg-redis` 全绿。
 
+**第二例同根缺陷（2026-11-15 已修复）：watcher 增量写到副本检索器。**
+
+删除清理修好之后，复审发现同一根因的另一处：`StartWatchBackground` 自建
+`NewSearcher(cfg)` 的 Searcher / IndexBuilder / Service，而 HTTP 查询侧用的是
+`BuildRuntime` 那一套。FTS 与向量存储都在构造时载入内存，watcher 的
+`BuildAndIndex` / `BuildAndRemove` 写在副本上，`/search`、`/viz` 永远停在启动快照；
+且增量只新增不摘除，重扫后类/方法拿到新 ID，旧符号文档永久残留。
+
+处理方式不是再打补丁，而是结构性收敛：
+
+- `Runtime` 成为 `Service / Searcher / IndexBuilder` 的唯一所有者；`BuildRuntime`
+  是唯一构造点；`NewSearcher` 删除、`NewSearcherWithStore` 改为非导出
+  `newSearcherWithStore`；`StartWatchBackground` 去掉 `st` 参数并直接使用
+  `r.Store / r.Builder / r.Svc`；`cmd watch/scan` 改为经 `BuildRuntime` 取组件。
+- `IndexBuilder` 增加「文件 → 文档 ID」追踪：增量更新先摘除该文件上一代文档，
+  删除/改名按追踪表清理；全量重建对差集文档做摘除。
+- 守卫：`ownership_test.go` 用 AST 静态断言 `service.NewService` 仅出现在
+  `BuildRuntime`、`search.NewSearcher`/`search.NewIndexBuilder` 仅出现在
+  `newSearcherWithStore`，且 cmd 层不得直接构造；三类组件全覆盖。
+
+用例与实测：
+
+| 用例 | 修复前（先红） | 修复后 |
+|---|---|---|
+| `TestWatchIncrementalUpdateVisibleToSearchAndViz`（runtime） | 改文件后主存储已有 `BetaProbe`，`/search` 10 s 内仍看不到新内容（11.29 s 失败）；删除/改名同样覆盖 | 4.37 s 通过：改文件新内容可见、旧符号消失；删除后不再命中；改名后 `/viz` 旧路径消失、新路径出现 |
+| `TestRuntimeSingleConstructionPoint`（runtime） | `service.NewService` 3 处、`search.NewSearcher`/`NewIndexBuilder` 各 2 处，且仍存在导出构造函数 | 通过：三类构造点各 1 处 |
+| `TestCmdDoesNotConstructRuntimeComponents`（runtime） | cmd 4 处直接构造 | 通过：0 处 |
+
+破坏点（均为 `internal` API，仓外无消费者）：移除 `runtime.NewSearcher`；
+`NewSearcherWithStore` 改为非导出；`(*Runtime).StartWatchBackground` 去掉 `st` 参数。
+
 ## 9. 复现
 
 ### 9.1 一条命令
