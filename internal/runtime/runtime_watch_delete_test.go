@@ -178,30 +178,31 @@ func TestWatchPollDeletionRemovesIndexedFile(t *testing.T) {
 	}
 
 	// 主存储行必须先消失——这是后续所有查询清理的前提。
-	waitUntil(t, 10*time.Second, func() bool {
+	// 并行门禁下 poll 扫描与解析会被 CPU 争抢延后，窗口留足 20s。
+	waitUntil(t, 20*time.Second, func() bool {
 		return storeFileGone(ctx, st, callerPath) && storeFileGone(ctx, st, testPath)
 	})
 
 	// /context：已删除文件中的符号必须 not found（不能返回缓存或残留 IR）。
-	waitUntil(t, 5*time.Second, func() bool {
+	waitUntil(t, 8*time.Second, func() bool {
 		_, err := run.Svc.GetContextMode(ctx, callerFQN, service.ContextOptions{Mode: service.ModeMinimal})
 		return serviceErrorCode(err) == "ERR_SYMBOL_NOT_FOUND"
 	})
 
 	// /impact：不得再有已删除文件的调用边。
-	waitUntil(t, 5*time.Second, func() bool {
+	waitUntil(t, 8*time.Second, func() bool {
 		imp, err := run.Svc.GetImpact(ctx, targetFQN, 2)
 		return err == nil && !impactHasMethodSuffix(imp, "Caller")
 	})
 
 	// /tests：不得再关联已删除的测试文件。
-	waitUntil(t, 5*time.Second, func() bool {
+	waitUntil(t, 8*time.Second, func() bool {
 		links, err := run.Svc.GetTests(ctx, targetFQN, 60)
 		return err == nil && !testResultsContain(links, "TestTarget")
 	})
 
 	// 标签：已删除符号的标签查询必须 not found（标签表无残留）。
-	waitUntil(t, 5*time.Second, func() bool {
+	waitUntil(t, 8*time.Second, func() bool {
 		_, err := run.Svc.GetTags(ctx, callerFQN)
 		return serviceErrorCode(err) == "ERR_SYMBOL_NOT_FOUND"
 	})
@@ -211,10 +212,10 @@ func TestWatchPollDeletionRemovesIndexedFile(t *testing.T) {
 	if err := os.Rename(targetPath, renamedPath); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, 10*time.Second, func() bool {
+	waitUntil(t, 20*time.Second, func() bool {
 		return storeFileGone(ctx, st, targetPath) && !storeFileGone(ctx, st, renamedPath)
 	})
-	waitUntil(t, 5*time.Second, func() bool {
+	waitUntil(t, 8*time.Second, func() bool {
 		got, err := run.Svc.GetContextMode(ctx, targetFQN, service.ContextOptions{Mode: service.ModeMinimal})
 		return err == nil && got != nil && got.FilePath == renamedPath
 	})

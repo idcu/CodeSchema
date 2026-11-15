@@ -448,9 +448,11 @@ func (b *IndexBuilder) StopAutoSaveIDF() {
 	}
 }
 
-// BuildAndRemove 从 Store 读取单个文件信息，删除该文件所有类和方法的索引文档。
+// BuildAndRemove 从 Store 读取单个文件信息，删除该文件的检索文档与主存储记录。
 //
-// 用于文件被删除后的增量同步。
+// 用于文件被删除后的增量同步。检索文档（FTS/向量）与主存储（文件行、类、方法、
+// 调用边、标签）必须同时清理：只删检索文档会让 /context、/impact、/tests
+// 继续把已删除的代码当成存在（§8.8 缺口）。
 func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, filePath string) error {
 	file, err := st.GetFileByPath(ctx, filePath)
 	if err != nil || file == nil {
@@ -483,7 +485,16 @@ func (b *IndexBuilder) BuildAndRemove(ctx context.Context, st store.Store, fileP
 	}
 
 	// 删除文件文档本身（如果存在）
-	return b.RemoveDocument(ctx, "file:"+filePath)
+	if err := b.RemoveDocument(ctx, "file:"+file.AbsolutePath); err != nil {
+		return err
+	}
+
+	// 清理主存储：文件行、类、方法、调用边与标签。
+	// 放在检索文档之后：RemoveDocument 依赖类/方法 ID，必须先读后删。
+	if err := st.DeleteFile(ctx, file.ID); err != nil {
+		return fmt.Errorf("delete file %d (%s): %w", file.ID, filePath, err)
+	}
+	return nil
 }
 
 // buildClassIndexText 构建类的索引文本。

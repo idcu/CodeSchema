@@ -125,7 +125,9 @@ func TestWatchIncrementalUpdateInvalidatesRuntimeCaches(t *testing.T) {
 	})
 
 	// 主存储已更新，watcher 回调随即失效派生缓存；查询侧必须能读到新图。
-	waitUntil(t, 3*time.Second, func() bool {
+	// 窗口放宽到 10s：并行门禁下 CPU 争抢会让轮询/解析/失效链路整体后移，
+	// 3s 窗口曾偶发误报（条件本身是「最终一致」，不是性能断言）。
+	waitUntil(t, 10*time.Second, func() bool {
 		cg, err := run.Analyzer.BuildCallGraph(ctx)
 		return err == nil && callGraphHasSuffix(cg, "helperB")
 	})
@@ -138,7 +140,7 @@ func TestWatchIncrementalUpdateInvalidatesRuntimeCaches(t *testing.T) {
 	waitUntil(t, 15*time.Second, func() bool {
 		return storeHasCalleeSuffix(t, ctx, st, "helperA") && !storeHasCalleeSuffix(t, ctx, st, "helperB")
 	})
-	waitUntil(t, 3*time.Second, func() bool {
+	waitUntil(t, 10*time.Second, func() bool {
 		cg, err := run.Analyzer.BuildCallGraph(ctx)
 		return err == nil && callGraphHasSuffix(cg, "helperA") && !callGraphHasSuffix(cg, "helperB")
 	})

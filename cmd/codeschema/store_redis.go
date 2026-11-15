@@ -102,6 +102,26 @@ func (c *redisCacheStore) MarkParseSkipped(ctx context.Context, path string, byt
 	return id, nil
 }
 
+// DeleteFile 转发基础存储删除文件记录，并失效该文件在 Redis 的派生键
+// （类、方法、路径索引、出边）。包装器不覆写时调用会经嵌入接口直达基础存储，
+// Redis 中的旧键会继续被读路径命中，把已删除代码当成存在。
+func (c *redisCacheStore) DeleteFile(ctx context.Context, fileID int64) error {
+	file, err := c.Store.GetFileByID(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	if err := c.Store.DeleteFile(ctx, fileID); err != nil {
+		return err
+	}
+	if c.cache == nil || file == nil {
+		return nil
+	}
+	if ferr := c.cache.InvalidateFile(ctx, file.AbsolutePath); ferr != nil {
+		log.Printf("[warn] redis 失效文件缓存 %s 失败：%v", file.AbsolutePath, ferr)
+	}
+	return nil
+}
+
 // populate 把当前文件 IR best-effort 同步进 Redis：先失效旧版本键，再写当前
 // 类/方法/调用与文件→类索引。任一错误仅记录，不影响主路径。
 func (c *redisCacheStore) populate(ctx context.Context, ir *parser.IRDocument) {

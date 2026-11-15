@@ -6,6 +6,25 @@
 
 ## 提交记录
 
+### poll 删除清理（2026-11-15）：删除/改名后 /context、/impact、/tests 不再命中残留
+
+- fix(search)：`IndexBuilder.BuildAndRemove` 由「只删检索文档」改为同时经
+  `store.DeleteFile` 清理主存储——文件行、类、方法、调用边与类/方法标签。
+  原实现删除文件后 IR 仍在，三个查询接口继续把已删除代码当成存在（§8.8 相邻缺口）。
+- fix(cmd)：`redisCacheStore` 新增 `DeleteFile` 覆写，基础存储删除后按路径
+  `InvalidateFile`，清理类/方法/路径索引与出边键；此前嵌入接口直达基础存储，Redis 旧键保留。
+- 先红：`TestWatchPollDeletionRemovesIndexedFile`（runtime，poll 端到端删除 + 改名）、
+  `TestIndexBuilder_BuildAndRemove_ClearsStoreAndDocs`（search）。修复前二者分别卡在
+  Store 行未删除、类/调用边/标签残留；修复后绿，改名后旧路径零残留。
+- 三后端一致性：`TestSQLite_DeleteFileCascade`（类/方法/调用边/标签）、
+  `TestPGStore_FKConstraints` 扩展标签级联断言、`TestRedisCacheStore_DeleteFileInvalidatesFileKeys`
+  （活实例，无 `CODESCHEMA_REDIS_ADDR` 时 Skip）；FileStore 既有标签/方法清理用例保持绿。
+- poll watcher 本身已在 `poll()` 中对比 `fileStates` 上报消失路径（上一轮记录有误），
+  本轮无需改监听逻辑；`onDelete` → `InvalidateDerivedCaches` 接线沿用既有实现。
+- 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.8。
+- 计数：非 vendor LoC 73,188 → 73,706（73.7k），`make counts-update` 同步基线，
+  `docs/README.md` 与 `docs/01-开发者/架构与模块.md` 口径同次刷新。
+
 ### 三处缓存对抗性验证（2026-11-15）：多租户 watcher 失效打错实例已修复
 
 - fix(runtime)：`StartWatchBackground` 由包级函数改为 `(*Runtime)` 方法。原实现自建
@@ -18,8 +37,10 @@
   全部通过，未发现缺陷。
 - 场景 4：Redis 读失败时 `/context` 回退主存储且结果逐条一致；装配期不可达回退基础存储；
   写失败时 `SyncIR` 返回聚合错误，但旧键保留到 TTL 过期（既有设计取舍，未改）。
-- 相邻缺口（未改，非缓存范围）：poll watcher 不检测删除，`BuildAndRemove` 只删检索文档
-  不删 Store 行，`onDelete` 在 poll 模式不可达。
+- 相邻缺口（该轮未改，非缓存范围）：`BuildAndRemove` 只删检索文档、不删 Store 行。
+  当时记录的「poll watcher 不检测删除、`onDelete` 在 poll 模式不可达」有误——
+  `PollWatcher.poll` 已会上报消失路径；真正断点是 Store 行与 Redis 键未清理
+  （2026-11-15 修复，见下一条）。
 - 文档：`docs/bench/2026-11-14/perf-baseline.md` §8.8。
 - 计数：非 vendor LoC 72,421 → 73,188（73.2k），`make counts-update` 同步基线。
 

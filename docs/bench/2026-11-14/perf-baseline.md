@@ -3,7 +3,7 @@
 > 最后更新：2026-11-15（2026-11-14：追加 PG/Redis 活实例补测见 §7.1；索引快照流式原子落盘实测见 §8.5；
 > `/tests` `/affected` 规模修复前后对比见 §8.7；2026-11-15 补记人工真值闭合缺口，
 > 并完成 GOROOT `/affected` 的 same_tag 预计算修复，见 §8.7 末；
-> 三处缓存的对抗性验证与 watcher 失效接线修复见 §8.8）
+> 三处缓存的对抗性验证、watcher 失效接线修复与 poll 删除清理见 §8.8）
 >
 > **这是基线，不是优化结论。** 数值用于后续回归对比，不构成容量承诺或调优承诺。
 > 本轮修复了两处有明确证据的结构性成本：O(n²) 写放大（见 §8.1）与调用图逐请求全量重建
@@ -540,10 +540,31 @@ CODESCHEMA_TESTLINK_SCALE=1 CODESCHEMA_BENCH_TAG=after-opt \
 - 写失败 → `SyncIR` 返回聚合错误（不静默），但**旧键会保留到 TTL 过期**；
   这是包注释已声明的陈旧窗口，未做版本化改造。
 
-**相邻缺口（不在三处缓存范围，本轮未改）**：默认 poll watcher 不检测文件删除
-（`internal/fswatch/watcher.go` 只在 fsnotify 分支移除监听），且
-`IndexBuilder.BuildAndRemove` 只删检索文档、不删 Store 行，`scanner` 的 `onDelete`
-在 poll 模式下不可达；删除文件后 IR 与调用边仍留在索引里。
+**相邻缺口（2026-11-15 已修复）：poll 模式的文件删除清理。**
+
+上一轮记录的判断需要修正：`PollWatcher.poll` 实际已对 `fileStates` 中消失的路径回调
+`onChange`，`scanner.ProcessFile` 对不存在文件也会触发 `onDelete`；真正断点在
+`IndexBuilder.BuildAndRemove` 只删检索文档、不删 Store 行，以及 `redisCacheStore`
+未覆写 `DeleteFile`，导致类/方法/调用边/标签与 Redis 键继续被查询路径命中。
+
+修复后删除与改名的清理范围：
+
+- `BuildAndRemove`：先按类/方法 ID 删除 FTS 与向量文档，再经 `store.DeleteFile`
+  删除文件行、类、方法、调用边与类/方法标签（file/SQLite/PG 语义一致）；
+- `redisCacheStore.DeleteFile`：删除基础存储后按文件路径 `InvalidateFile`，
+  清理类、方法、路径索引与出边键；
+- `onDelete` 之后的 `InvalidateDerivedCaches`（`(*Runtime).StartWatchBackground`
+  与 `cmd/codeschema watch` 两条路径）失效调用图代次、测试关联快照与查询缓存。
+
+用例（先红后绿）：
+
+| 后端/层级 | 用例 | 修复前 |
+|---|---|---|
+| file + poll 端到端 | `TestWatchPollDeletionRemovesIndexedFile`（runtime） | 删除后 Store 行仍在，`/context` 返回上下文、`/impact` 仍有边、`/tests` 仍关联；改名后旧路径残留 |
+| 检索 + 主存储 | `TestIndexBuilder_BuildAndRemove_ClearsStoreAndDocs`（search） | 文件行/类/调用边/标签全部残留 |
+| SQLite | `TestSQLite_DeleteFileCascade` | 覆盖类/方法/调用边/标签级联 |
+| PG | `TestPGStore_FKConstraints`（扩展标签断言） | 覆盖标签随 class/method 级联清空 |
+| Redis 活实例 | `TestRedisCacheStore_DeleteFileInvalidatesFileKeys`（cmd，未设置 `CODESCHEMA_REDIS_ADDR` 时 Skip） | 删除后类/方法/路径/文件→类键仍可读 |
 
 门禁（串行）：`go build ./...`、`go vet ./...`、`go vet -tags 'pg redis' ./...`、
 `make fmt-check`、`make verify-tags`、`make counts-check`、`make test`、`make test-pg-redis` 全绿。
